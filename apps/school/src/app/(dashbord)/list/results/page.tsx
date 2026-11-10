@@ -26,11 +26,15 @@ type Result = {
   date: string;
   type: string;
   score: number;
+
+
 };
+
 
 const columns = [
   {
     header: "Subject Name",
+    accessor: "name",
     className: "hidden md:table-cell",
   },
   {

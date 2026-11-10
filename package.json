@@ -1,0 +1,15 @@
+{
+  "name": "smw",
+  "private": true,
+  "packageManager": "pnpm@12.16.1",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10"
+  }
+}

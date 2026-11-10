@@ -1,26 +1,44 @@
-# Lama Dev School Management Dashboard
+# SMW: school management platform
 
-## Getting Started
+One codebase that many schools rent. Each school gets its own dashboard and public website, and you control every school from the platform console.
 
-First, run the development server:
+Design: [docs/superpowers/specs/2026-11-05-school-saas-platform-design.md](docs/superpowers/specs/2026-11-05-school-saas-platform-design.md)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Structure
+
+```
+apps/              routes and wiring only
+  marketing/       yourbrand.com: landing, pricing, signup and onboarding       :3001
+  console/         console.yourbrand.com: you manage every school               :3002
+  school/          <slug>.yourbrand.com: school website and /app dashboard     :3000
+  worker/          background jobs
+features/          one package per school feature, switched on per school
+packages/
+  db/              Drizzle client, platform tables, migrations, row-level security
+  feature-kit/     feature declaration, registry, per-school on/off resolver
+  auth/            sessions, password hashing, role checks
+  themes/          theme tokens, presets, CSS variables
+  onboarding/      signup and setup wizard
+  site-templates/  school website templates and sections
+  ui/              shared React components
+  integrations/    email, payments, storage, DNS behind interfaces
+  config/          TypeScript presets, ESLint, environment settings
+infra/             Docker, Caddy, backups, deploy
+tickets/           local ticket system
+docs/              specs and decisions
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Each folder has a README saying what goes there and when it is built.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Commands
 
-## Learn More
+Run from the repository root. Requires Node 24 and pnpm.
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Lama Dev Youtube Channel](https://youtube.com/lamadev) 
-- [Next.js](https://nextjs.org/learn)
+| Command | What it does |
+|---|---|
+| `pnpm install` | Install everything |
+| `pnpm dev` | Start every app |
+| `pnpm --filter @smw/school dev` | Start one app |
+| `pnpm build` | Build every app |
+| `pnpm typecheck` | Type-check every app and package |
+| `node tickets/tools/tickets.mjs next` | List tickets that are ready to start |

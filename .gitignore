@@ -1,20 +1,25 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Patterns have no leading slash so they match in every app and package of the monorepo.
 
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+.pnp
 .pnp.js
 .yarn/install-state.gz
 
 # testing
-/coverage
+coverage/
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build/
+dist/
+
+# turborepo
+.turbo/
 
 # misc
 .DS_Store
