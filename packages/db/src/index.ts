@@ -1,7 +1,10 @@
 /**
- * Database access: the Drizzle client, platform tables, the one ordered migration history, row-level security helpers, and `withSchool()`, the client scoped to one school.
- *
- * Empty for now. Built in: Phase 0, tickets P0-10 to P0-12.
+ * Database access: Drizzle client, platform tables, RLS helpers and `withSchool()`.
  * @module @smw/db
  */
-export {};
+export * from "./client";
+export * from "./columns";
+export * from "./uuid";
+export * from "./schema/platform";
+export * from "./sequence";
+export { sql, and, or, eq, ne, gt, gte, lt, lte, isNull, isNotNull, inArray, notInArray, desc, asc, ilike, count, sum, exists, between } from "drizzle-orm";

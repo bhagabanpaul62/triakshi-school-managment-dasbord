@@ -3,15 +3,27 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev --webpack -p 4101",
     "build": "next build",
-    "start": "next start -p 3001",
-    "typecheck": "tsc --noEmit"
+    "start": "next start -p 4101",
+    "typecheck": "tsgo --noEmit",
+    "lint": "eslint src"
   },
   "dependencies": {
-    "next": "16.2.10",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "@tailwindcss/postcss": "^4.3.5",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.5",
+    "zod": "^4.6.7",
+    "@smw/ui": "workspace:*",
+    "@smw/onboarding": "workspace:*",
+    "@smw/db": "workspace:*",
+    "@smw/billing": "workspace:*",
+    "@smw/config": "workspace:*",
+    "@smw/themes": "workspace:*",
+    "@tabler/icons-react": "^3.52.0",
+    "framer-motion": "^14.14.0"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",

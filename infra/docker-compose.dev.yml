@@ -1,0 +1,36 @@
+# Local stack: Postgres 17 with the three roles, RustFS (S3 stand-in), Mailpit (email inbox).
+#   pnpm db:up   /   pnpm db:down
+name: smw-dev
+services:
+  postgres:
+    image: postgres:17-alpine
+    # Many parallel test suites each open pools; the default 100 connections is too low for them.
+    command: ["postgres", "-c", "max_connections=400", "-c", "shared_buffers=256MB"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: smw
+    ports: ["5433:5432"]
+    volumes:
+      - smw-pg:/var/lib/postgresql/data
+      - ./postgres/init-roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+      - ./postgres/local-test.sql:/docker-entrypoint-initdb.d/02-local-test.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      retries: 30
+  s3:
+    # S3-compatible stand-in for AWS S3 (MinIO stopped publishing images). Bucket is created by `pnpm db:seed`.
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ACCESS_KEY: smwlocal
+      RUSTFS_SECRET_KEY: smwlocalsecret
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [smw-s3:/data]
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+volumes:
+  smw-pg:
+  smw-s3:

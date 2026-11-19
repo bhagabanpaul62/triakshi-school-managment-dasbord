@@ -1,7 +1,11 @@
 /**
- * The feature system: how a feature is declared, the registry of every feature, and the resolver that answers "is this feature on for this school?"
- *
- * Empty for now. Built in: Phase 0.
+ * The feature system: declaring a feature, resolving which features a school has, the request context,
+ * typed errors, and the service base classes (SchoolService, CrudService, PlatformService).
  * @module @smw/feature-kit
  */
-export {};
+export * from "./feature";
+export * from "./errors";
+export * from "./resolver";
+export * from "./context";
+export * from "./service";
+export * from "./fields";

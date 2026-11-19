@@ -7,10 +7,18 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
-    "@smw/config": "workspace:*",
+    "@types/nodemailer": "^8.0.2",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1170.0",
+    "@aws-sdk/s3-request-presigner": "^3.1170.0",
+    "nodemailer": "^10.6.0",
+    "pdf-lib": "^1.17.1",
+    "@smw/config": "workspace:*"
   }
 }

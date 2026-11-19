@@ -1,0 +1,49 @@
+name: CI
+on:
+  push:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: smw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      ROOT_DOMAIN: localhost
+      APP_PROTOCOL: http
+      DATABASE_URL_MIGRATE: postgres://app_migrate:app_migrate@127.0.0.1:5432/smw
+      DATABASE_URL_SCHOOL: postgres://app_school:app_school@127.0.0.1:5432/smw
+      DATABASE_URL_CONSOLE: postgres://app_console:app_console@127.0.0.1:5432/smw
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26 # crypto.argon2 needs Node 26
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+      - run: pnpm install --frozen-lockfile
+      - name: Create database roles
+        run: |
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d smw -v ON_ERROR_STOP=1 -f infra/postgres/init-roles.sql -f infra/postgres/local-test.sql
+      - run: pnpm gen
+      - name: Generated files are committed
+        run: git diff --exit-code -- apps/*/src/generated || (echo "Run pnpm gen and commit the result" && exit 1)
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build

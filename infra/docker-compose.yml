@@ -1,0 +1,126 @@
+# Production stack for ONE EC2 VM. Always pass the env file so ${VARS} resolve:
+#   docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml <command>
+# Only caddy publishes ports. Everything else talks over the internal bridge network.
+name: triakshi
+
+x-app: &app
+  restart: unless-stopped
+  env_file: ${ENV_FILE:-/opt/triakshi/.env}
+  networks: [internal]
+  logging: &logging
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+x-node-health: &node-health
+  # Any HTTP answer counts as alive (the school app may 404 for an unknown host).
+  test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(()=>process.exit(0),()=>process.exit(1))"]
+  interval: 20s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+services:
+  caddy:
+    build: { context: ./caddy }
+    image: ${IMAGE_PREFIX}-caddy:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      ROOT_DOMAIN: ${ROOT_DOMAIN:?}
+      ACME_EMAIL: ${ACME_EMAIL:?}
+      CF_API_TOKEN: ${CF_API_TOKEN:?}
+      CONSOLE_ALLOW_CIDRS: ${CONSOLE_ALLOW_CIDRS:-0.0.0.0/0 ::/0}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [internal]
+    logging: *logging
+    depends_on:
+      school: { condition: service_healthy }
+      marketing: { condition: service_healthy }
+      console: { condition: service_healthy }
+
+  marketing:
+    <<: *app
+    build: { context: .., args: { APP: marketing }, target: app }
+    image: ${IMAGE_PREFIX}-marketing:${IMAGE_TAG:-latest}
+    healthcheck: *node-health
+
+  console:
+    <<: *app
+    build: { context: .., args: { APP: console }, target: app }
+    image: ${IMAGE_PREFIX}-console:${IMAGE_TAG:-latest}
+    healthcheck: *node-health
+    depends_on: { postgres: { condition: service_healthy } }
+
+  school:
+    <<: *app
+    build: { context: .., args: { APP: school }, target: app }
+    image: ${IMAGE_PREFIX}-school:${IMAGE_TAG:-latest}
+    healthcheck: *node-health
+    depends_on: { postgres: { condition: service_healthy } }
+
+  worker:
+    <<: *app
+    build: { context: .., target: worker }
+    image: ${IMAGE_PREFIX}-worker:${IMAGE_TAG:-latest}
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'src/index.ts' >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on: { postgres: { condition: service_healthy } }
+
+  # One-off: docker compose ... run --rm migrate. Also the place to run ops scripts (see infra/README.md).
+  migrate:
+    <<: *app
+    restart: "no"
+    profiles: [tools]
+    image: ${IMAGE_PREFIX}-worker:${IMAGE_TAG:-latest}
+    command: ["pnpm", "--filter", "@smw/db", "migrate"]
+    depends_on: { postgres: { condition: service_healthy } }
+
+  postgres:
+    build: { context: ./postgres }
+    image: ${IMAGE_PREFIX}-postgres:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    shm_size: 512mb
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: smw
+      APP_MIGRATE_PASSWORD: ${APP_MIGRATE_PASSWORD:?}
+      APP_SCHOOL_PASSWORD: ${APP_SCHOOL_PASSWORD:?}
+      APP_CONSOLE_PASSWORD: ${APP_CONSOLE_PASSWORD:?}
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX:?}
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      WALG_COMPRESSION_METHOD: zstd
+      PGHOST: /var/run/postgresql
+      PGUSER: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./backup/backup.conf:/etc/postgresql/backup.conf:ro
+      - ./postgres/init-roles.sql:/docker-entrypoint-initdb.d/01-roles.sql:ro
+      - ./scripts/set-db-passwords.sh:/docker-entrypoint-initdb.d/02-passwords.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d smw"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [internal]
+    logging: *logging
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata:
+  caddy-data:
+  caddy-config:

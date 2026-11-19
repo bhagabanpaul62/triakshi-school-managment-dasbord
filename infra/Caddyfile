@@ -1,0 +1,78 @@
+# Production edge. Variables come from /opt/triakshi/.env: ROOT_DOMAIN, ACME_EMAIL, CF_API_TOKEN,
+# optional CONSOLE_ALLOW_CIDRS (space separated, default: everyone).
+{
+	email {$ACME_EMAIL}
+	# Custom school domains get a certificate on first visit, but only when the school app says the host is verified.
+	on_demand_tls {
+		ask http://school:3000/api/internal/tls-allowed
+	}
+}
+
+(security) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+# Internal endpoints are for the Docker network only, never the public internet.
+(no_internal) {
+	@internal path /api/internal/*
+	respond @internal 404
+}
+
+(cloudflare_tls) {
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+	}
+}
+
+# Marketing site: yourbrand.com and www
+{$ROOT_DOMAIN}, www.{$ROOT_DOMAIN} {
+	import cloudflare_tls
+	import security
+	import no_internal
+	reverse_proxy marketing:3000
+}
+
+# Operator console. Optional IP allowlist; payment webhooks must always get through.
+console.{$ROOT_DOMAIN} {
+	import cloudflare_tls
+	import security
+	import no_internal
+	@blocked {
+		not remote_ip {$CONSOLE_ALLOW_CIDRS:0.0.0.0/0 ::/0}
+		not path /api/webhooks/*
+	}
+	respond @blocked 403
+	reverse_proxy console:3000
+}
+
+# CNAME target for school custom domains (schools point www.theirschool.in here). Nobody browses it.
+sites.{$ROOT_DOMAIN} {
+	import cloudflare_tls
+	redir https://{$ROOT_DOMAIN} 302
+}
+
+# School panels and websites: slug.yourbrand.com, one wildcard certificate.
+*.{$ROOT_DOMAIN} {
+	import cloudflare_tls
+	import security
+	import no_internal
+	reverse_proxy school:3000
+}
+
+# Any other host (a school's own domain): on-demand certificate, gated by the ask URL above.
+https:// {
+	tls {
+		on_demand
+	}
+	import security
+	import no_internal
+	reverse_proxy school:3000
+}

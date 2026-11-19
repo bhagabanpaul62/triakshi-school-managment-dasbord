@@ -7,10 +7,28 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "pg-boss": "^12.38.2",
+    "pino": "^10.4.0",
+    "@smw/db": "workspace:*",
+    "@smw/config": "workspace:*",
+    "@smw/feature-kit": "workspace:*",
+    "@smw/integrations": "workspace:*",
+    "@smw/billing": "workspace:*",
+    "@smw/platform": "workspace:*",
+    "tsx": "^4.23.15",
+    "@smw/feature-billing": "workspace:*",
+    "@smw/feature-domains": "workspace:*",
+    "@smw/feature-notifications": "workspace:*",
+    "@smw/feature-fees": "workspace:*"
   }
 }

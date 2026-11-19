@@ -7,10 +7,16 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@smw/db": "workspace:*",
+    "otpauth": "^9.6.0",
+    "zod": "^4.6.7"
   }
 }
