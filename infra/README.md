@@ -152,6 +152,7 @@ cd /opt/triakshi/repo
 alias dc='docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml'
 dc pull && dc up -d postgres        # first boot creates the roles and applies passwords
 dc run --rm migrate                  # applies migrations + post SQL
+dc run --rm worker pnpm --filter @smw/school bootstrap   # module catalogue from code + default plans (only if none); safe every deploy
 dc up -d
 dc ps                                # everything healthy
 ```

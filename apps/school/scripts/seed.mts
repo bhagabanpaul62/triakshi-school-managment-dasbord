@@ -2,23 +2,17 @@
 // Run with `pnpm db:fresh` (rebuilds the local database first). Refuses non-local databases.
 import { env } from "@smw/config";
 import { Passwords } from "@smw/auth";
-import { closeDb, modules, planModules, plans, platformStaff, schoolDomains, schools, users, withConsole, type SchoolRole } from "@smw/db";
+import { closeDb, platformStaff, schoolDomains, schools, users, withConsole, type SchoolRole } from "@smw/db";
 import type { Ctx } from "@smw/feature-kit";
 import { FEATURES } from "../src/generated/features";
 import { SEEDS } from "../src/generated/seeds";
+import { PLAN_DEFS, syncCatalog } from "./catalog.mjs";
 
 if (!/127\.0\.0\.1|localhost/.test(env().DATABASE_URL_CONSOLE)) throw new Error("seed refuses a non-local database");
 
 export const DEMO_PASSWORD = "demo12345";
 /** Fixed TOTP secret for the local console owner, so tests can compute codes. Local only. */
 export const DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
-
-const PLAN_DEFS = [
-  { key: "starter", name: "Starter", studentCap: 300, annual: 30_000_00, monthly: 3_000_00, exclude: ["domains", "transport", "library", "api"] },
-  { key: "growth", name: "Growth", studentCap: 1000, annual: 75_000_00, monthly: 7_500_00, exclude: ["api"] },
-  { key: "pro", name: "Pro", studentCap: 3000, annual: 1_80_000_00, monthly: 18_000_00, exclude: [] },
-  { key: "enterprise", name: "Enterprise", studentCap: 100000, annual: 0, monthly: 0, exclude: [], isPublic: false },
-];
 
 const SCHOOLS = [
   { slug: "greenvalley", name: "Green Valley Public School", status: "active" as const, plan: "growth", board: "CBSE", state: "Karnataka", city: "Bengaluru", preset: "ocean" },
@@ -34,18 +28,7 @@ const ROLE_USERS: { role: SchoolRole; loginId: string; name: string }[] = [
 async function main() {
   const hash = await Passwords.hash(DEMO_PASSWORD);
   const ids = await withConsole(async (tx) => {
-    for (const f of FEATURES) {
-      const row = { key: f.key, name: f.name, stage: f.stage, requires: [...(f.requires ?? [])], core: !!f.core, description: f.description };
-      await tx.insert(modules).values(row).onConflictDoUpdate({ target: modules.key, set: row });
-    }
-    const planIds: Record<string, string> = {};
-    for (const [i, p] of PLAN_DEFS.entries()) {
-      const [plan] = await tx.insert(plans).values({ key: p.key, name: p.name, studentCap: p.studentCap, priceAnnualPaise: p.annual, priceMonthlyPaise: p.monthly,
-        isPublic: p.isPublic ?? true, sortOrder: i, limits: { websitePages: p.key === "starter" ? 5 : 20, fullThemeEditor: p.key !== "starter", customDomain: p.key !== "starter" } }).returning();
-      planIds[p.key] = plan!.id;
-      const keys = FEATURES.filter((f) => !f.core && !p.exclude.includes(f.key)).map((f) => f.key);
-      if (keys.length) await tx.insert(planModules).values(keys.map((moduleKey) => ({ planId: plan!.id, moduleKey })));
-    }
+    const planIds = await syncCatalog(tx);
     await tx.insert(platformStaff).values({ email: "owner@triakshi.test", name: "Platform Owner", role: "owner", passwordHash: hash, totpSecret: DEV_TOTP_SECRET, totpEnabled: true });
     await tx.insert(platformStaff).values({ email: "support@triakshi.test", name: "Support Desk", role: "support", passwordHash: hash });
 
