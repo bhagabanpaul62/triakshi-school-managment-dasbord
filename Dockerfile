@@ -26,7 +26,8 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL_SCHOOL=postgres://build:build@localhost:5432/build \
     DATABASE_URL_CONSOLE=postgres://build:build@localhost:5432/build
 RUN test -n "$APP" || (echo "pass --build-arg APP=marketing|console|school" && exit 1)
-RUN node scripts/gen-features.mjs && pnpm exec turbo run build --filter="@smw/${APP}" && mkdir -p apps/${APP}/public
+# --env-mode=loose: turbo's strict mode drops the placeholder DATABASE_URL_* above, and env() then fails while Next prerenders.
+RUN node scripts/gen-features.mjs && pnpm exec turbo run build --filter="@smw/${APP}" --env-mode=loose && mkdir -p apps/${APP}/public
 
 # ---- app: Next.js standalone server (tracing root is the repo, so server.js sits at apps/<app>/server.js) ----
 FROM node:${NODE_VERSION}-alpine AS app
