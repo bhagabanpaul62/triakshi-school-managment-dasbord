@@ -35,6 +35,8 @@ const schema = z.object({
   MAIL_FROM: z.string().default("Triakshi <no-reply@yourbrand.com>"),
 
   CASHFREE_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
+  /** "true" turns on the test checkout off localhost (a temporary demo server). Anyone can "pay" with it: never on a real launch. */
+  FAKE_PAYMENTS: z.enum(["true", "false"]).default("false"),
   CASHFREE_APP_ID: z.string().optional(),
   CASHFREE_SECRET_KEY: z.string().optional(),
 
@@ -98,6 +100,9 @@ export const isProd = () => env().NODE_ENV === "production";
  * production build can be tested end to end and a real domain can never reach them.
  */
 export const isLocal = () => /(^|\.)(localhost|test)$/.test(env().ROOT_DOMAIN);
+
+/** The test checkout (no Cashfree keys): always on localhost, elsewhere only when FAKE_PAYMENTS=true. */
+export const fakePayments = () => isLocal() || env().FAKE_PAYMENTS === "true";
 
 /** Cookies get `secure` when the site is served over https, which is what the flag is about. */
 export const secureCookies = () => env().APP_PROTOCOL === "https";

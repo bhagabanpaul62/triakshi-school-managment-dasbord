@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { DevCheckout } from "@smw/billing";
-import { isLocal } from "@smw/config";
+import { fakePayments } from "@smw/config";
 import { Panel } from "@smw/ui/kit/Panel";
 import { Button } from "@smw/ui/ui/button";
 import { paise } from "@smw/ui/format";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 /** Stand-in for Cashfree's hosted checkout when no keys are set. Never exists in production. */
 export default async function FakeCheckoutPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  if (!isLocal()) notFound();
+  if (!fakePayments()) notFound();
   const sp = await searchParams;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
   const order = one(sp.order), back = one(sp.return);

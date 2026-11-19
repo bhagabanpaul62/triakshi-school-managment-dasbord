@@ -1,12 +1,12 @@
 import { DevCheckout } from "@smw/billing";
-import { env, isLocal } from "@smw/config";
+import { env, fakePayments } from "@smw/config";
 import { AppError } from "@smw/feature-kit";
 
 export const dynamic = "force-dynamic";
 
 /** Marks a fake order paid or failed, runs the same confirm path as the real return URL, then sends the browser back to the school. */
 export async function POST(req: Request) {
-  if (!isLocal()) return new Response("Not found", { status: 404 });
+  if (!fakePayments()) return new Response("Not found", { status: 404 });
   const fd = await req.formData();
   const order = String(fd.get("order") ?? ""), back = String(fd.get("return") ?? "");
   const outcome = fd.get("outcome") === "fail" ? "fail" : "pay";

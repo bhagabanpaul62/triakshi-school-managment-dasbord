@@ -1,4 +1,4 @@
-import { env, isLocal } from "@smw/config";
+import { env, fakePayments } from "@smw/config";
 import { eq, payments, withConsole } from "@smw/db";
 import { FakePaymentGateway, registerPaymentGateway, type OrderStatus } from "@smw/integrations";
 import { registerCashfree } from "@smw/integrations";
@@ -31,7 +31,7 @@ export function ensureGateway() {
   done = true;
   if (registerCashfree()) return;
   registerPaymentGateway(() => {
-    if (!isLocal()) throw new Error("Payments are not configured: set CASHFREE_APP_ID and CASHFREE_SECRET_KEY.");
+    if (!fakePayments()) throw new Error("Payments are not configured: set CASHFREE_APP_ID and CASHFREE_SECRET_KEY.");
     return new DbFakeGateway();
   });
 }
