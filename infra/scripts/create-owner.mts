@@ -1,6 +1,7 @@
 // Creates the first console owner. Run once after the first deploy (see infra/README.md):
 //   docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml run --rm worker \
-//     pnpm exec tsx infra/scripts/create-owner.ts you@yourbrand.com "Your Name"
+//     pnpm exec tsx infra/scripts/create-owner.mts you@yourbrand.com "Your Name"
+// .mts, not .ts: the root package is CommonJS, and tsx rejects top-level await in a .ts file there.
 // Prints a one-time password and the TOTP secret (also as an otpauth:// URL). Add it to your authenticator app, then log in at console.<ROOT_DOMAIN>.
 // Relative imports because infra/ is not a workspace package.
 import { randomBytes } from "node:crypto";
@@ -8,7 +9,7 @@ import { closeDb, platformStaff, withConsole } from "../../packages/db/src/index
 import { Passwords, StaffAuth } from "../../packages/auth/src/index";
 
 const [email, name] = process.argv.slice(2);
-if (!email || !name) { console.error('usage: create-owner.ts <email> "<name>"'); process.exit(1); }
+if (!email || !name) { console.error('usage: create-owner.mts <email> "<name>"'); process.exit(1); }
 
 const password = process.env.OWNER_PASSWORD ?? randomBytes(15).toString("base64url");
 const secret = StaffAuth.newTotpSecret();

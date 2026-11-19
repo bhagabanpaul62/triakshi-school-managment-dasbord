@@ -10,7 +10,7 @@ Production runs on one EC2 VM with Docker Compose. Spec section 21 has the desig
 | `../Dockerfile` | One Dockerfile for every app (`--build-arg APP=school --target app`) and the worker (`--target worker`) |
 | `postgres/` | `init-roles.sql` (roles, safe for production), `local-test.sql` (local and CI only: test DB and CREATEDB), `postgresql.conf`, wal-g `Dockerfile` |
 | `backup/` | `backup.conf` (WAL archiving), `base-backup.sh` (nightly), `walg.env.example` |
-| `scripts/` | `set-db-passwords.sh`, `create-owner.ts`, `restore-test.sh` |
+| `scripts/` | `set-db-passwords.sh`, `create-owner.mts`, `restore-test.sh` |
 | `../.github/workflows/` | `ci.yml` (every push), `deploy.yml` (main, needs approval) |
 
 Names below such as `yourbrand.com` are placeholders. Nothing here invents AWS resource IDs: you create them and paste yours in.
@@ -164,7 +164,7 @@ Check `https://yourbrand.com`, `https://console.yourbrand.com`, `https://anythin
 ### The first console owner
 
 ```bash
-dc run --rm worker pnpm exec tsx infra/scripts/create-owner.ts you@yourbrand.com "Your Name"
+dc run --rm worker pnpm exec tsx infra/scripts/create-owner.mts you@yourbrand.com "Your Name"
 ```
 
 It prints a one-time password and a TOTP secret (plus an `otpauth://` URL). Add the secret to your authenticator app, log in at `console.yourbrand.com`, then change the password. Set `OWNER_PASSWORD=...` in the command environment if you want to choose it. The script is baked into the worker image (it lives in `infra/scripts/`).

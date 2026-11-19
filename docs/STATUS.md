@@ -40,6 +40,27 @@ Re-run against 4110 (cut off at 500 s, so partial):
 4. Run `pnpm db:fresh` before a clean demo; test runs leave data behind ("Asha Rao" teachers, paid sunrise invoices).
 5. Generate the production migration: `pnpm --filter @smw/db generate`.
 
+## Temporary deployment on free-vm (until EC2 + S3)
+- URLs:
+  - marketing: `https://161-118-163-201.sslip.io`
+  - console: `https://console.161-118-163-201.sslip.io`
+  - schools: `https://<slug>.161-118-163-201.sslip.io` (a certificate is issued on first visit, only for real schools)
+- Everything runs locally on the VM: Postgres, RustFS (in place of S3), Mailpit in place of SES (inbox `http://100.74.65.66:8025`, tailnet only), and the test checkout (`FAKE_PAYMENTS=true`: anyone can "pay", so never on a real launch). WAL archiving is off.
+- Files on the VM:
+  - `/opt/triakshi/repo`: the fork's `feat/school-platform` branch
+  - `/opt/triakshi/.env`: secrets, mode 600
+  - `/opt/triakshi/compose.freevm.yml`: no stack Caddy, apps on 127.0.0.1:4310-4312, RustFS, Mailpit
+  - `/opt/triakshi/build.sh` + `mem-guard.sh`: sequential build that stops if free memory drops under 1.5 GB
+  - `/opt/triakshi/superadmin.txt`: the console owner's one-time password and TOTP secret, mode 600
+- The host Caddy (systemd) serves other sites too. The Triakshi part is `/etc/caddy/triakshi.caddy`, imported at the end of `/etc/caddy/Caddyfile`, plus an `on_demand_tls { ask … }` global block at the top. A backup is `Caddyfile.bak-triakshi-*`.
+- Deploy an update:
+  `cd /opt/triakshi/repo && git pull && /opt/triakshi/build.sh` (run it with the guard, as before)
+  then `docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml -f /opt/triakshi/compose.freevm.yml` with `run --rm migrate`, `run --rm worker pnpm --filter @smw/school bootstrap` and `up -d`.
+- Remove it completely:
+  1. Run `down -v` with the same compose command.
+  2. Delete the `triakshi-*` images and `rm -rf /opt/triakshi`.
+  3. Restore `/etc/caddy/Caddyfile` from `Caddyfile.bak-triakshi-*`, delete `triakshi.caddy`, then `sudo systemctl reload caddy`.
+
 ## Local environment notes
 - The local hr-app (Kaamsetu) Supabase containers were stopped to free Colima RAM (production Kaamsetu is untouched).
   Bring them back with `supabase start` in `~/supabase-local`.
