@@ -7,10 +7,20 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
-    "@smw/config": "workspace:*",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@smw/auth": "workspace:*",
+    "@smw/config": "workspace:*",
+    "@smw/db": "workspace:*",
+    "@smw/feature-kit": "workspace:*",
+    "@smw/integrations": "workspace:*",
+    "@smw/themes": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
   }
 }

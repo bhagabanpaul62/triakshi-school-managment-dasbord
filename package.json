@@ -3,13 +3,36 @@
   "private": true,
   "packageManager": "pnpm@12.16.1",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "pnpm gen && turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint",
-    "test": "turbo run test"
+    "lint": "eslint .",
+    "test": "turbo run test --concurrency=1",
+    "gen": "node scripts/gen-features.mjs",
+    "db:up": "docker compose -f infra/docker-compose.dev.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.dev.yml down",
+    "db:reset": "pnpm --filter @smw/db reset",
+    "db:seed": "pnpm --filter @smw/school seed",
+    "db:fresh": "pnpm db:reset && pnpm db:seed",
+    "check": "pnpm gen && pnpm lint && pnpm typecheck && pnpm test",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "turbo": "^2.11.10"
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^16.4.6",
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "otpauth": "^9.6.0",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.0"
   }
 }

@@ -1,4 +1,3 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {};
+import { withSmw } from "@smw/config/next";
 
-export default nextConfig;
+export default withSmw({ images: { unoptimized: true } });

@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import { Inter } from "next/font/google";
+import { Toaster } from "@smw/ui/shell/toast";
+import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "Platform console",
-};
+const inter = Inter({ subsets: ["latin"], display: "swap" });
 
-/**
- * Root layout for the Platform console app.
- * @param props.children The page being rendered.
- * @returns The html and body wrapper.
- */
-export default function RootLayout({ children }: { children: ReactNode }) {
+export const metadata: Metadata = { title: { default: "Triakshi Console", template: "%s · Console" }, description: "Platform console", robots: { index: false } };
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en-IN">
+      <body className={inter.className}>
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }

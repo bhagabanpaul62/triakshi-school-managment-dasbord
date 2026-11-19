@@ -1,0 +1,10 @@
+{
+  "name": "@smw/platform",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./*": "./src/*.ts" },
+  "scripts": { "typecheck": "tsgo --noEmit", "test": "vitest run --passWithNoTests" },
+  "dependencies": { "@smw/auth": "workspace:*", "@smw/config": "workspace:*", "@smw/db": "workspace:*", "@smw/feature-kit": "workspace:*", "@smw/integrations": "workspace:*", "@smw/themes": "workspace:*", "@smw/billing": "workspace:*", "@smw/onboarding": "workspace:*", "drizzle-orm": "^0.45.4", "zod": "^4.6.7" },
+  "devDependencies": { "typescript": "^5.9.3" }
+}

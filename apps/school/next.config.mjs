@@ -1,8 +1,3 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  images: {
-    remotePatterns: [{ hostname: "images.pexels.com" }],
-  },
-};
+import { withSmw } from "@smw/config/next";
 
-export default nextConfig;
+export default withSmw({ images: { unoptimized: true } });

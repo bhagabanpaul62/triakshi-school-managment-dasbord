@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "school", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@smw/school", "dev"], "port": 4100, "url": "http://greenvalley.localhost:4100" },
+    { "name": "console", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@smw/console", "dev"], "port": 4102 },
+    { "name": "marketing", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@smw/marketing", "dev"], "port": 4101 },
+    { "name": "school-prod", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@smw/school", "start"], "port": 4100, "url": "http://greenvalley.localhost:4100" },
+    { "name": "console-prod", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@smw/console", "start"], "port": 4102 },
+    { "name": "marketing-prod", "runtimeExecutable": "pnpm", "runtimeArgs": ["--filter", "@smw/marketing", "start"], "port": 4101 },
+    { "name": "school-prod-4110", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "cd apps/school && SCHOOL_PORT=4110 npx next start -p 4110"], "port": 4110, "url": "http://greenvalley.localhost:4110" },
+    { "name": "console-prod-4110", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "cd apps/console && SCHOOL_PORT=4110 npx next start -p 4102"], "port": 4102 },
+    { "name": "marketing-prod-4110", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "cd apps/marketing && SCHOOL_PORT=4110 npx next start -p 4101"], "port": 4101 }
+  ]
+}

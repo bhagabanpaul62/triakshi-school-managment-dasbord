@@ -4,13 +4,21 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@smw/db": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7",
+    "@smw/auth": "workspace:*"
   }
 }

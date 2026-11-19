@@ -1,0 +1,1 @@
+{ "extends": "@smw/config/tsconfig/react-library.json", "include": ["**/*.ts", "**/*.tsx"], "exclude": ["node_modules"] }

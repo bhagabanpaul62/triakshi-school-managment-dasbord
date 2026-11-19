@@ -1,0 +1,100 @@
+name: Deploy
+# Runs on every push to main. The "production" environment (Settings > Environments) must have required reviewers
+# so a human approves each deploy. Secrets: EC2_HOST, EC2_SSH_KEY. Optional variable: EC2_USER (default ubuntu).
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    needs: verify
+    # t4g (Graviton) is arm64. Private repos: GitHub's free arm runners are for public repos, so use a larger arm runner or QEMU.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: marketing, context: ., file: Dockerfile, target: app, args: "APP=marketing" }
+          - { name: console, context: ., file: Dockerfile, target: app, args: "APP=console" }
+          - { name: school, context: ., file: Dockerfile, target: app, args: "APP=school" }
+          - { name: worker, context: ., file: Dockerfile, target: worker, args: "" }
+          - { name: postgres, context: infra/postgres, file: infra/postgres/Dockerfile, target: "", args: "" }
+          - { name: caddy, context: infra/caddy, file: infra/caddy/Dockerfile, target: "", args: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name
+        id: img
+        run: echo "ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/triakshi-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          target: ${{ matrix.target }}
+          build-args: ${{ matrix.args }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.img.outputs.ref }}:${{ github.sha }}
+            ${{ steps.img.outputs.ref }}:latest
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  deploy:
+    needs: images
+    runs-on: ubuntu-24.04
+    environment: production # manual approval lives on this environment
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          # shortcut: trusts the host key on first sight; pin it with a known_hosts secret if you want stricter checking.
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+      - name: Ship infra files, pull images, migrate, restart
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ vars.EC2_USER || 'ubuntu' }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+        run: |
+          SSH="ssh -i $HOME/.ssh/deploy_key $EC2_USER@$EC2_HOST"
+          OWNER="${GITHUB_REPOSITORY_OWNER,,}"
+          tar czf - infra | $SSH 'mkdir -p /opt/triakshi/repo && tar xzf - -C /opt/triakshi/repo'
+          printf '%s' "$GHCR_TOKEN" | $SSH "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          $SSH "bash -s" <<REMOTE
+          set -euo pipefail
+          cd /opt/triakshi/repo
+          sed -i '/^IMAGE_PREFIX=/d;/^IMAGE_TAG=/d' /opt/triakshi/.env
+          printf 'IMAGE_PREFIX=ghcr.io/$OWNER/triakshi\nIMAGE_TAG=$SHA\n' >> /opt/triakshi/.env
+          dc() { docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml "\$@"; }
+          dc pull
+          dc up -d postgres
+          dc run --rm migrate
+          dc up -d --remove-orphans
+          dc ps
+          docker image prune -f
+          REMOTE

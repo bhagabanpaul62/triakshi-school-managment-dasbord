@@ -1,0 +1,47 @@
+{
+  "name": "@smw/feature-website",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./feature": "./feature.ts",
+    "./schema": "./schema.ts",
+    "./service": "./service.ts",
+    "./seed": "./seed.ts",
+    "./jobs": "./jobs.ts",
+    "./ui/*": "./ui/*.tsx",
+    "./*": "./*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@smw/db": "workspace:*",
+    "@smw/feature-kit": "workspace:*",
+    "@smw/runtime": "workspace:*",
+    "@smw/ui": "workspace:*",
+    "@smw/integrations": "workspace:*",
+    "@smw/feature-announcements": "workspace:*",
+    "@smw/feature-events": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7",
+    "@smw/billing": "workspace:*",
+    "@smw/onboarding": "workspace:*",
+    "@smw/themes": "workspace:*",
+    "@smw/site-templates": "workspace:*",
+    "@smw/auth": "workspace:*",
+    "@smw/config": "workspace:*",
+    "@tabler/icons-react": "^3.52.0"
+  },
+  "peerDependencies": {
+    "next": "^16.4.6",
+    "react": "^19.3.1"
+  },
+  "devDependencies": {
+    "@smw/config": "workspace:*",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "typescript": "^5.9.3"
+  }
+}

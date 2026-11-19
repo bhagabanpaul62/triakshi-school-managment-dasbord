@@ -1,6 +1,4 @@
 {
-  "extends": "@smw/config/tsconfig/base.json",
-  "include": [
-    "src"
-  ]
+  "extends": "@smw/config/tsconfig/react-library.json",
+  "include": ["src"]
 }
