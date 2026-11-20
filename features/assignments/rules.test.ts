@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dueHint, isLate, parseDue, selfState, sortSelf, tally, toIstInput, turnedIn } from "./rules";
+import { dueHint, isLate, parseDue, selfState, sortSelf, tally, toIstInput, turnedIn, withinCommentWindow } from "./rules";
 
 describe("due dates", () => {
   it("reads a form value as India time and round-trips it", () => {
@@ -41,8 +41,12 @@ describe("what a student sees", () => {
 
 describe("progress", () => {
   it("missing is the class minus everyone who handed in, never negative", () => {
-    expect(tally(30, { submitted: 10, late: 4, graded: 6 })).toEqual({ total: 30, submitted: 10, late: 4, graded: 6, returned: 0, missing: 10 });
+    expect(tally(30, { submitted: 10, late: 4, graded: 6 })).toEqual({ total: 30, submitted: 10, late: 4, graded: 6, returned: 0, missing: 10, pending: 0 });
     expect(tally(2, { submitted: 3 }).missing).toBe(0);
+    expect(tally(10, { submitted: 4 }, 2)).toMatchObject({ missing: 4, pending: 2 });
+    expect(tally(3, { submitted: 3 }, 2)).toMatchObject({ missing: 0, pending: 0 });
+    expect(withinCommentWindow(new Date(0), new Date(15 * 60_000))).toBe(true);
+    expect(withinCommentWindow(new Date(0), new Date(15 * 60_000 + 1))).toBe(false);
   });
   it("turned in is a rounded percentage", () => {
     expect(turnedIn(tally(30, { submitted: 10, late: 4, graded: 6 }))).toBe(67);

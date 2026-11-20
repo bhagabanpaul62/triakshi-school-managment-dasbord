@@ -10,7 +10,7 @@ const ROWS: { k: string; v: [string, string, string] }[] = [
   { k: "Fee receipts", v: ["Hand-written, and the carbon copy gets lost.", "Typed each time. Numbers can skip or repeat.", "Numbered in order, as a PDF in one tap."] },
   { k: "Attendance", v: ["Paper register, totals added up at month end.", "One sheet per class, no alerts.", "Marked in a minute, parents told the same morning."] },
   { k: "Report cards", v: ["Written out by hand for every child.", "A mail-merge that breaks on the last day.", "Marks go in once, the PDF comes out."] },
-  { k: "Parent updates", v: ["Quick, but easy to miss in a busy group.", "Not a way to reach parents.", "A notice to the right class, in the parent's own login."] },
+  { k: "Parent updates", v: ["Quick, but easy to miss in a busy group.", "Not a way to reach parents.", "A notice to the right class, on the family's login."] },
   { k: "School website", v: ["A social media page, if someone has time.", "Not what it is for.", "A template site on your own domain, with enquiries."] },
   { k: "Data safety", v: ["One copy, in a cupboard.", "On one laptop or a shared drive.", "Kept apart per school, backed up daily."] },
   { k: "Cost", v: ["Cheap in rupees, costly in staff hours.", "Free to start, slow to keep up.", "A plan by student count. 30 days free to try."] },

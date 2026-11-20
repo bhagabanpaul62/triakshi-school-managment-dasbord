@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { SCHOOL, expectHealthy, login } from "./helpers";
+import { SCHOOL, expectHealthy, login, loginStudent } from "./helpers";
 
 const SHOTS = "test-results/ux-attendance";
 const SLUG = "greenvalley";
@@ -18,6 +18,7 @@ async function shot(page: Page, name: string) {
 
 async function noHorizontalScroll(page: Page) {
   await page.setViewportSize(SIZES.phone);
+  await page.waitForTimeout(300); // let charts and tables re-measure at the new width
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over).toBeLessThanOrEqual(1);
   await page.setViewportSize(SIZES.desktop);
@@ -47,7 +48,9 @@ test.describe("attendance journeys", () => {
     await expect(page.locator("[role=status][aria-live=polite]")).toContainText("2 absent");
     await shot(page, "teacher-marked");
 
-    await page.getByRole("button", { name: "Save attendance" }).click();
+    // A rerun on the same day finds these marks already saved: the button then reads "Saved".
+    const save = page.getByRole("button", { name: /^(Save attendance|Saved)$/ });
+    if ((await save.textContent())?.trim() === "Save attendance") await save.click();
     await expect(page.getByRole("button", { name: "Saved" })).toBeVisible({ timeout: 30_000 });
     await expect(page.locator("[role=status][aria-live=polite]")).toContainText("Saved");
 
@@ -97,7 +100,7 @@ test.describe("attendance journeys", () => {
   });
 
   test("student: gauge, month calendar and recent absences", async ({ page }) => {
-    await login(page, SLUG, "GR0001", process.env.UX_STUDENT_PASSWORD ?? "01012023");
+    await loginStudent(page, SLUG, "GR0001", process.env.UX_STUDENT_PASSWORD ?? "01012023");
     await open(page, "/app/attendance");
     await expect(page.getByRole("group", { name: /Attendance in/ })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByRole("button", { name: "Previous month" }).or(page.getByRole("link", { name: "Previous month" }))).toBeVisible();

@@ -17,15 +17,16 @@ export function Trust() {
   const reduce = useReducedMotion();
   return (
     <Section id="trust" labelledBy="trust-title">
-      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:gap-16">
-        <SectionHeading id="trust-title" kicker="Trust & security" title="Student records are children's data. We treat them that way." sub="Five things we do for every school, on every plan." className="lg:sticky lg:top-28 lg:self-start" />
-        <ul className="overflow-hidden rounded-[28px] bg-white">
+      {/* The heading takes the first cell, the five promises fill a 3 x 2 grid: two short rows instead of a tall list. */}
+      <div className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <SectionHeading id="trust-title" kicker="Trust & security" title="Children's data, treated that way." sub="Five things we do for every school, on every plan." className="mb-7 sm:col-span-2 lg:col-span-1 lg:mb-0 lg:pr-4" />
+        <ul role="list" className="contents">
           {ITEMS.map((it, i) => (
-            <motion.li key={it.t} {...rise(reduce, i * 0.06, 12)} className="flex gap-4 border-b border-line p-5 last:border-b-0 md:gap-5 md:px-7 md:py-6">
+            <motion.li key={it.t} {...rise(reduce, i * 0.06, 12)} className="flex gap-4 rounded-[24px] bg-white p-5 md:p-6">
               <span aria-hidden className={`grid size-12 shrink-0 place-items-center rounded-2xl text-green ${TINT[it.tint]}`}><it.icon size={24} stroke={1.8} /></span>
               <div>
                 <h3 className="text-[18px] font-semibold leading-snug">{it.t}</h3>
-                <p className="text-pretty mt-1 text-[16px] leading-relaxed text-mute">{it.d}</p>
+                <p className="text-pretty mt-1 text-[15.5px] leading-relaxed text-mute">{it.d}</p>
               </div>
             </motion.li>
           ))}

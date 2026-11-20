@@ -43,6 +43,37 @@ export async function removeAttachment(fd: FormData) {
 export async function gradeSubmission(fd: FormData) {
   return serviceAction(SubmissionService, (s) => s.grade(String(fd.get("id")), formToObject(fd)), "Saved");
 }
+export async function bulkGradeSubmissions(fd: FormData) {
+  const ids = fd.getAll("submissionId").map(String);
+  return serviceAction(SubmissionService, (s) => s.bulkGrade(String(fd.get("assignmentId")), ids, formToObject(fd)), "Graded");
+}
+export async function grantExtension(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.grantExtension(String(fd.get("assignmentId")), String(fd.get("studentId")), formToObject(fd)), "Extension granted");
+}
+export async function revokeExtension(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.revokeExtension(String(fd.get("assignmentId")), String(fd.get("studentId"))), "Extension removed");
+}
+export async function editComment(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.editComment(String(fd.get("commentId")), formToObject(fd)), "Comment updated");
+}
+export async function deleteComment(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.deleteComment(String(fd.get("commentId"))), "Comment deleted");
+}
+export async function withdrawSubmission(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.withdraw(String(fd.get("assignmentId"))), "Hand-in withdrawn");
+}
+export async function removeSubmissionFile(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.removeFile(String(fd.get("id"))), "File removed");
+}
+export async function addComment(fd: FormData) {
+  return serviceAction(SubmissionService, (s) => s.comment(String(fd.get("submissionId")), formToObject(fd)), "Comment posted");
+}
+export async function publishAssignment(fd: FormData) {
+  return serviceAction(AssignmentService, (s) => s.setStatus(String(fd.get("id")), "published"), "Published to the section");
+}
+export async function closeAssignment(fd: FormData) {
+  return serviceAction(AssignmentService, (s) => s.setStatus(String(fd.get("id")), "closed"), "Assignment closed");
+}
 export async function submitAssignment(fd: FormData) {
   return serviceAction(SubmissionService, async (s) => s.submit(formToObject(fd), await uploadsFrom(fd, "files")), "Handed in");
 }

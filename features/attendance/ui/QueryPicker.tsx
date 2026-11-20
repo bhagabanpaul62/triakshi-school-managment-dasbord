@@ -43,7 +43,7 @@ export function QueryPicker({ fields }: { fields: PickerField[] }) {
             <div className="flex items-center gap-1">
               <button type="button" aria-label="Previous day" title="Previous day" onClick={() => change(f.name, addDays(values[f.name]!, -1))}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[0.05] text-[var(--ds-on-surface-variant)] hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]"><IconChevronLeft className="h-4 w-4" aria-hidden /></button>
-              <input id={`${uid}${f.name}`} type="date" className={INPUT} value={values[f.name]} max={f.max} onChange={(e) => e.target.value && change(f.name, e.target.value)} />
+              <input id={`${uid}${f.name}`} type="date" className={`${INPUT} min-w-0`} value={values[f.name]} max={f.max} onChange={(e) => e.target.value && change(f.name, e.target.value)} />
               <button type="button" aria-label="Next day" title="Next day" disabled={!!f.max && values[f.name]! >= f.max} onClick={() => change(f.name, addDays(values[f.name]!, 1))}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[0.05] text-[var(--ds-on-surface-variant)] hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)] disabled:opacity-30"><IconChevronRight className="h-4 w-4" aria-hidden /></button>
               {f.max && values[f.name] !== f.max ? <button type="button" onClick={() => change(f.name, f.max!)} className="h-10 shrink-0 rounded-full px-3 text-sm text-[var(--ds-color-primary-300)] hover:bg-white/[0.05] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Today</button> : null}

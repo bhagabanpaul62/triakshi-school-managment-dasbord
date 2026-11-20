@@ -167,7 +167,29 @@ describe("accountant home", () => {
   });
 });
 
-describe("student and parent home", () => {
+describe("staff home", () => {
+  const staff = (grants: string[]) => ({ ...a.as.accountant, role: "staff" as const, name: "Sita Rao", grants: new Set(grants) });
+
+  it("greets and links only to the modules the custom role allows", async () => {
+    const home = await new HomeService(staff(["home:view", "students:read", "fees:read"])).forRole();
+    expect(home.role).toBe("staff");
+    if (home.role !== "staff") return;
+    expect(home.data.header.greeting).toContain("Sita");
+    const hrefs = home.data.links.map((l) => l.href);
+    expect(hrefs).toContain("/app/students");
+    expect(hrefs).toContain("/app/fees");
+    expect(hrefs).not.toContain("/app/exams");
+    expect(hrefs).not.toContain("/app/attendance");
+  });
+
+  it("a role with no module grants gets an empty link list, not a crash", async () => {
+    const home = await new HomeService(staff(["home:view"])).forRole();
+    if (home.role !== "staff") throw new Error("expected staff home");
+    expect(home.data.links).toEqual([]);
+  });
+});
+
+describe("student home", () => {
   it("a student sees their own attendance this month", async () => {
     const today = todayIST();
     await mark(new StudentAttendanceService(a.as.admin), today, fx.own, [fx.studentUserKid], []);
@@ -179,12 +201,8 @@ describe("student and parent home", () => {
     expect(ok(home.fees)).toBeNull();
   });
 
-  it("a parent sees their child, and an unknown ?child falls back to a child of theirs", async () => {
-    const home = await new HomeService(a.as.parent).parent("not-my-child");
-    expect(home.children.map((c) => c.id)).toEqual([fx.parentKid]);
-    expect(home.child?.id).toBe(fx.parentKid);
-    expect(ok(home.recentAbsences)).toEqual([]);
-    expect(ok(home.events)).toEqual([]);
+  it("a legacy parent login has no home", async () => {
+    await expect(new HomeService(a.as.parent).forRole()).rejects.toMatchObject({ status: 403 });
   });
 
   it("a login with no linked student gets an empty home, not a crash", async () => {

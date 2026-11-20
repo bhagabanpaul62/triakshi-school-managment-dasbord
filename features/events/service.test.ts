@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, withSchool } from "@smw/db";
 import { classes } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import { ForbiddenError, NotFoundError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { istDay, toInputValue } from "./dates";
@@ -16,22 +16,20 @@ const future = (days: number) => new Date(Date.now() + days * 86_400_000);
 const stamp = (d: Date) => toInputValue(d);
 
 describe("EventService", () => {
-  it("staff write; students and parents cannot", async () => {
+  it("staff write; students and legacy parent logins cannot", async () => {
     await expect(new EventService(a.as.teacher).create({ title: "Quiz", startsAt: stamp(future(3)) })).resolves.toMatchObject({ title: "Quiz" });
     await expect(new EventService(a.as.student).create({ title: "Hello", startsAt: stamp(future(1)) })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new EventService(a.as.parent).create({ title: "Hello", startsAt: stamp(future(1)) })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("students and parents see their audience and every holiday, not staff-only events", async () => {
+  it("students see their audience (families included) and every holiday, not staff-only events", async () => {
     await admin().create({ title: "Staff retreat", startsAt: stamp(future(5)), audience: "staff" });
     await admin().create({ title: "Parents evening", startsAt: stamp(future(5)), audience: "parents" });
     await admin().create({ title: "Staff-only holiday", startsAt: stamp(future(6)), audience: "staff", isHoliday: "true" });
     const student = (await new EventService(a.as.student).list({ pageSize: 100 })).rows.map((r) => r.title);
     expect(student).not.toContain("Staff retreat");
-    expect(student).not.toContain("Parents evening");
+    expect(student).toContain("Parents evening");
     expect(student).toContain("Staff-only holiday");
-    const parent = (await new EventService(a.as.parent).list({ pageSize: 100 })).rows.map((r) => r.title);
-    expect(parent).toContain("Parents evening");
   });
 
   it("validates class audience and end before start", async () => {
@@ -99,21 +97,17 @@ describe("EventService", () => {
 });
 
 describe("class events", () => {
-  it("reach only that class's students and guardians", async () => {
+  it("reach only that class's students", async () => {
     const [c5, c6] = await withSchool(a.id, async (tx) => {
       const cs = await tx.insert(classes).values([{ schoolId: a.id, name: "Class 5", grade: 5 }, { schoolId: a.id, name: "Class 6", grade: 6 }]).returning();
-      const [kid] = await tx.insert(students).values({ schoolId: a.id, admissionNo: "E1", name: "Aarav", classId: cs[0]!.id, userId: a.users.student }).returning();
-      const [g] = await tx.insert(guardians).values({ schoolId: a.id, name: "Parent", userId: a.users.parent }).returning();
-      await tx.insert(studentGuardians).values({ schoolId: a.id, studentId: kid!.id, guardianId: g!.id });
+      await tx.insert(students).values({ schoolId: a.id, admissionNo: "E1", name: "Aarav", classId: cs[0]!.id, userId: a.users.student });
       return cs.map((c) => c.id);
     });
     await admin().create({ title: "Class 5 picnic", startsAt: stamp(future(4)), audience: "class", classId: c5 });
     await admin().create({ title: "Class 6 picnic", startsAt: stamp(future(4)), audience: "class", classId: c6 });
-    for (const who of [a.as.student, a.as.parent]) {
-      const seen = (await new EventService(who).list({ pageSize: 100 })).rows.map((r) => r.title);
-      expect(seen).toContain("Class 5 picnic");
-      expect(seen).not.toContain("Class 6 picnic");
-    }
+    const seen = (await new EventService(a.as.student).list({ pageSize: 100 })).rows.map((r) => r.title);
+    expect(seen).toContain("Class 5 picnic");
+    expect(seen).not.toContain("Class 6 picnic");
     expect((await new EventService(a.as.teacher).list({ pageSize: 100 })).rows.map((r) => r.title)).toEqual(expect.arrayContaining(["Class 5 picnic", "Class 6 picnic"]));
   });
 

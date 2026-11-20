@@ -20,7 +20,7 @@ beforeAll(async () => {
     const rows = await tx.insert(students).values(Array.from({ length: 20 }, (_, i) => ({ schoolId: a.id, admissionNo: `S${i}`, name: `Student ${i}`, classId: cls[i % 3]!.id }))).returning();
     state.yearId = y!.id;
     state.classes = cls.map((c) => ({ id: c.id, name: c.name, grade: c.grade }));
-    state.students = rows.map((s, i) => ({ id: s.id, name: s.name, classId: s.classId, guardianUserId: i < 6 ? `family-${i % 3}` : null }));
+    state.students = rows.map((s) => ({ id: s.id, name: s.name, classId: s.classId }));
   });
   await seed(a.as.admin, state);
 });

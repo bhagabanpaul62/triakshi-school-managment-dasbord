@@ -8,13 +8,15 @@ import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { ClassService } from "../service";
 import { addClassPresets, createClass, deleteClass, updateClass } from "./actions";
-import { classFields } from "./fields";
+import { STAGE_LABELS, classFields } from "./fields";
+import { stageOf } from "../presets";
 import { RowActions } from "./row-actions";
 
 export const metadata = { title: "Classes" };
 
 const columns: Column[] = [
   { key: "name", label: "Class" },
+  { key: "stageLabel", label: "Stage", hideOnMobile: true },
   { key: "sections", label: "Sections", type: "number", hideOnMobile: true },
   { key: "seats", label: "Students", hideOnMobile: true },
   { key: "subjects", label: "Subjects", type: "number", hideOnMobile: true },
@@ -26,13 +28,13 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export default async function ClassesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const svc = new ClassService(ctx);
-  const page = await svc.list({ ...listQueryFrom(await searchParams), sort: "grade", dir: "asc" });
+  const page = await svc.list({ ...listQueryFrom(await searchParams), sort: "displayOrder", dir: "asc" });
   const stats = await svc.stats(page.rows.map((c) => c.id));
   const canWrite = svc.can("manage");
   const rows = page.rows.map((c) => {
     const st = stats[c.id]!;
     const setup = !st.sections ? "empty" : st.noClassTeacher || st.unstaffed ? "gaps" : "ready";
-    return { ...c, ...st, setup, seats: st.sections ? `${st.students} of ${st.capacity}` : null };
+    return { ...c, ...st, setup, stageLabel: [STAGE_LABELS[c.stage ?? stageOf(c.grade)], c.boardOverride].filter(Boolean).join(" · "), seats: st.sections ? `${st.students} of ${st.capacity}` : null };
   });
   const total = rows.reduce((t, r) => ({ sections: t.sections + r.sections, capacity: t.capacity + r.capacity, students: t.students + r.students, noClassTeacher: t.noClassTeacher + r.noClassTeacher, unstaffed: t.unstaffed + r.unstaffed }), { sections: 0, capacity: 0, students: 0, noClassTeacher: 0, unstaffed: 0 });
   const gaps = total.noClassTeacher + total.unstaffed;
@@ -42,7 +44,10 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader eyebrow="Academics" title="Classes" description="Open a class to see its sections, subjects and who teaches what."
-        actions={canWrite ? <>{presets}{add}</> : null} />
+        actions={canWrite ? <>
+          <a href="/app/academics/classes/export" download className="inline-flex h-10 items-center rounded-full bg-white/[0.06] px-4 text-sm text-[var(--ds-on-surface)] hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Export CSV</a>
+          <a href="/app/academics/classes/allocation" target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-full bg-white/[0.06] px-4 text-sm text-[var(--ds-on-surface)] hover:bg-white/[0.1] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Print allocation</a>
+          {presets}{add}</> : null} />
       {page.total > 0 ? (
         <KpiRow>
           <StatCard label="Classes" value={String(page.total)} icon={<MenuIconView name="class" />} meta={`${rows[0]!.name} to ${rows[rows.length - 1]!.name}`} />
@@ -55,10 +60,11 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
       <DataTable
         columns={columns} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount}
         rowHref="/app/academics/classes/{id}" searchPlaceholder="Search classes"
+        filters={[{ key: "stage", label: "Stage", options: Object.entries(STAGE_LABELS).map(([value, label]) => ({ value, label })) }]}
         empty={{ title: "No classes yet.", description: "Add Nursery to Class 12 in one click, or create your own.", action: canWrite ? <div className="flex gap-2">{presets}{add}</div> : undefined }}
         rowActions={canWrite ? Object.fromEntries(rows.map((r) => [r.id,
           <RowActions key={r.id} what="class" icon="class" fields={classFields} values={r} id={r.id} update={updateClass} remove={deleteClass}
-            consequence={`${r.name} and its sections, subjects and subject teachers will be removed, and so will anything that hangs off its sections.`} />])) : undefined}
+            consequence={`${r.name} will be removed with its subject list. A class that still has sections, students or exam papers can't be deleted.`} />])) : undefined}
       />
     </>
   );

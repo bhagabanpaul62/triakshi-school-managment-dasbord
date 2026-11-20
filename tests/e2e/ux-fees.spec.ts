@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { SCHOOL, expectHealthy, login } from "./helpers";
+import { SCHOOL, expectHealthy, login, loginStudent } from "./helpers";
 
 const SHOTS = "test-results/ux-fees";
 const SLUG = "greenvalley";
@@ -18,6 +18,7 @@ async function shot(page: Page, name: string) {
 
 async function noHorizontalScroll(page: Page) {
   await page.setViewportSize(SIZES.phone);
+  await page.waitForTimeout(300); // let charts and tables re-measure at the new width
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   const wide = over > 1 ? await page.evaluate(() => [...document.querySelectorAll("body *")].filter((e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1 && !e.closest(".overflow-x-auto")).slice(0, 6).map((e) => `${e.tagName}.${String(e.className).slice(0, 60)} "${(e.textContent ?? "").slice(0, 40)}" ${Math.round(e.getBoundingClientRect().right)}`)) : [];
   expect(over, `page is ${over}px too wide: ${wide.join(" | ")}`).toBeLessThanOrEqual(1);
@@ -114,20 +115,17 @@ test.describe("fees journeys", () => {
     await expect(dialog.getByRole("button", { name: /save fees/i })).toBeEnabled();
   });
 
-  test("parent: what is due, by when, receipts", async ({ page }) => {
-    await login(page, SLUG, "9820131071", "131071");
+  // No parent logins: the student login is the family login, and one child goes straight to their fees page.
+  test("student: what is due, by when, receipts", async ({ page }) => {
+    await loginStudent(page, SLUG, "GR0001", "01012023");
     await expect(page).toHaveURL(/\/app/);
     await open(page, "/app/fees");
-    // Two children: pick one from the list with what each owes.
-    await expect(page.getByText("Your children")).toBeVisible({ timeout: 240_000 });
-    await shot(page, "parent-children");
-    await page.getByRole("link", { name: /Aarav Sharma/ }).click();
     await expect(page).toHaveURL(/\/app\/fees\/students\//, { timeout: 240_000 });
     await expect(page.getByText(/What to pay next|All paid/)).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText(/Pay at the school fee counter|Every installment is paid/)).toBeVisible();
     await expect(page.getByRole("button", { name: /record payment/i })).toHaveCount(0);
     await expectHealthy(page);
-    await shot(page, "parent");
+    await shot(page, "student");
     await noHorizontalScroll(page);
   });
 });

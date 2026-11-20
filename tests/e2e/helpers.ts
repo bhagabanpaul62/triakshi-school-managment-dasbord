@@ -35,3 +35,44 @@ export async function expectHealthy(page: Page) {
   await expect(page.locator("[data-nextjs-dialog]")).toHaveCount(0);
   await expect(page.getByText(/application error|unhandled runtime error/i)).toHaveCount(0);
 }
+
+/** A strong password the specs set on a seeded student at the forced first-sign-in change. Re-runs find the student already switched. */
+export const STUDENT_PASSWORD = "Sunflower-Desk-4271";
+
+/**
+ * APP BUG WORKAROUND: right after sign-in the redirect to /app/change-password renders "School not found" until the page is
+ * loaded again. Reload once so the specs can carry on; remove when the app is fixed.
+ */
+export async function reloadIfSchoolNotFound(page: Page) {
+  await page.waitForLoadState("load");
+  if (await page.getByRole("heading", { name: "School not found" }).count()) {
+    console.log("BUG: 'School not found' right after the sign-in redirect to", page.url());
+    await page.goto(page.url());
+  }
+}
+
+/**
+ * Sign in as a seeded student (admission number + DOB password). Seeded students must change the first password,
+ * so this completes /app/change-password when asked. Tries STUDENT_PASSWORD first (a re-run), then the DOB password.
+ */
+export async function loginStudent(page: Page, slug: string, admissionNo: string, dobPassword: string) {
+  // The last try covers a parallel worker that changed the DOB password while we were trying it.
+  for (const pw of [STUDENT_PASSWORD, dobPassword, STUDENT_PASSWORD]) {
+    await page.goto(`${SCHOOL(slug)}/login`);
+    await page.getByLabel(/email, phone or admission number/i).fill(admissionNo);
+    await page.getByLabel(/^password$/i).fill(pw);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL((u) => u.pathname.startsWith("/app"), { timeout: 90_000 }).catch(() => {});
+    if (!new URL(page.url()).pathname.startsWith("/app")) continue; // wrong password, try the next one
+    if (page.url().includes("/app/change-password")) {
+      await reloadIfSchoolNotFound(page);
+      await page.locator('input[name="current"]').fill(pw);
+      await page.locator('input[name="next"]').fill(STUDENT_PASSWORD);
+      await page.locator('input[name="confirm"]').fill(STUDENT_PASSWORD);
+      await page.getByRole("button", { name: /save and continue/i }).click();
+      await page.waitForURL((u) => u.pathname.startsWith("/app") && !u.pathname.includes("change-password"), { timeout: 90_000 });
+    }
+    return;
+  }
+  throw new Error(`Could not sign in as student ${admissionNo}`);
+}

@@ -58,5 +58,4 @@ export const compact = (p: number) => formatMoneyCompact(p / 100);
 /** Whole rupees for lists where paise only add noise ("₹31,667", not "₹31,666.67"). */
 export const whole = (p: number) => paise(Math.round(p / 100) * 100);
 
-/** Money for a tile: full below a lakh ("₹86,500"), compact above ("₹1.2L"). */
-export const tile = (p: number) => (p >= 10_000_000 ? compact(p) : whole(p));
+export { tilePaise as tile } from "@smw/ui/format";

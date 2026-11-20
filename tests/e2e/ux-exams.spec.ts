@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { PASSWORD, SCHOOL, expectHealthy } from "./helpers";
+import { PASSWORD, SCHOOL, expectHealthy, loginStudent } from "./helpers";
 
 const SHOTS = "test-results/ux-exams";
 const SIZES = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } } as const;
@@ -18,6 +18,7 @@ async function shot(page: Page, name: string) {
 
 async function noHorizontalScroll(page: Page) {
   await page.setViewportSize(SIZES.phone);
+  await page.waitForTimeout(300); // let charts and tables re-measure at the new width
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over).toBeLessThanOrEqual(1);
   await page.setViewportSize(SIZES.desktop);
@@ -150,7 +151,7 @@ test.describe("exams and results journeys", () => {
   });
 
   test("student: published results with per-subject grades and report card", async ({ page }) => {
-    await login(page, "greenvalley", "GR0001", process.env.UX_STUDENT_PW ?? "01012023");
+    await loginStudent(page, "greenvalley", "GR0001", process.env.UX_STUDENT_PW ?? "01012023");
     await open(page, "greenvalley", "/app/results");
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible({ timeout: 90_000 });
     await expect(page.getByText(/Half-Yearly Exam/).first()).toBeVisible();

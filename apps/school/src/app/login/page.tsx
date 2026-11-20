@@ -16,7 +16,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <section className="w-full max-w-sm rounded-3xl bg-[var(--ds-surface-container-low)] p-8">
         <p className="font-mono text-[11px] uppercase tracking-[0.05em] text-[var(--ds-on-surface-muted)]">Sign in</p>
         <h1 className="mt-1 text-2xl font-medium tracking-tight">{school.name}</h1>
-        <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">Staff, students and parents use the login their school gave them.</p>
+        <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">Staff and students use the login their school gave them.</p>
         <LoginForm next={next} />
       </section>
     </main>

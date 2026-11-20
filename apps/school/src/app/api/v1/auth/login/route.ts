@@ -9,12 +9,13 @@ export const POST = apiHandler(async (req) => {
   const school = await schoolFromRequest(req);
   const auth = new SchoolAuth(school.id);
   try {
-    const { token, expiresAt } = await auth.login(body.identifier, body.password, {
+    const { token, expiresAt, mustChangePassword } = await auth.login(body.identifier, body.password, {
       ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined,
       userAgent: req.headers.get("user-agent") ?? "mobile-api",
     });
     const session = await auth.validate(token);
-    return { token, expiresAt: expiresAt.toISOString(), user: session && { id: session.user.id, name: session.user.name, role: session.user.role, email: session.user.email, avatarUrl: session.user.avatarUrl } };
+    // When true, every other route answers 403 password_change_required until POST /api/v1/auth/change-password.
+    return { token, expiresAt: expiresAt.toISOString(), mustChangePassword, user: session && { id: session.user.id, name: session.user.name, role: session.user.role, email: session.user.email, avatarUrl: session.user.avatarUrl } };
   } catch (e) {
     if (e instanceof LoginError) {
       if (e.reason === "rate_limited") throw new AppError("Too many attempts. Wait 15 minutes and try again.", "rate_limited", 429);

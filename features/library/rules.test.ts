@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { FINE_PER_DAY_PAISE, LOAN_DAYS, LOAN_LIMITS, accession, addDays, daysBetween, daysLate, fineFor, loanStatus, payable, todayIST } from "./rules";
+import { DEFAULT_SETTINGS, accession, limitFor, parseAccession, addDays, daysBetween, daysLate, fineFor, loanStatus, payable, todayIST } from "./rules";
 
 describe("library rules", () => {
   it("constants match the policy", () => {
-    expect(LOAN_DAYS).toBe(14);
-    expect(FINE_PER_DAY_PAISE).toBe(200);
-    expect(LOAN_LIMITS).toEqual({ student: 2, staff: 5 });
+    expect(DEFAULT_SETTINGS).toEqual({ loanDays: 14, studentLimit: 2, staffLimit: 5, finePerDayPaise: 200, renewalsAllowed: 1 });
+    expect(limitFor(DEFAULT_SETTINGS, "student")).toBe(2);
+    expect(limitFor(DEFAULT_SETTINGS, "staff")).toBe(5);
   });
 
   it("date maths crosses months, years and leap days", () => {
@@ -42,6 +42,19 @@ describe("library rules", () => {
     expect(loanStatus({ dueOn: "2026-11-18", returnedOn: null }, "2026-11-18")).toBe("open");
     expect(loanStatus({ dueOn: "2026-11-18", returnedOn: null }, "2026-11-19")).toBe("overdue");
     expect(loanStatus({ dueOn: "2026-11-01", returnedOn: "2026-11-20" }, "2026-11-30")).toBe("returned");
+  });
+
+  it("the fine rate is a setting", () => {
+    expect(fineFor("2026-11-18", "2026-11-21", 500)).toBe(1500);
+    expect(payable({ dueOn: "2026-11-01", returnedOn: null, finePaise: 0, fineWaived: false }, "2026-11-03", 300)).toBe(600);
+  });
+
+  it("parses scanned or typed accession numbers", () => {
+    expect(parseAccession("ACC-00012")).toBe(12);
+    expect(parseAccession(" acc-12 ")).toBe(12);
+    expect(parseAccession("12")).toBe(12);
+    expect(parseAccession("Wings of Fire")).toBeNull();
+    expect(parseAccession("")).toBeNull();
   });
 
   it("accession label", () => {

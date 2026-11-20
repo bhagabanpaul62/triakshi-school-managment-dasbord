@@ -11,15 +11,14 @@ const QA = [
   ["Will it work with our academic year and board?", "The year runs April to March. Classes, sections, subjects and grading are set up by you, so CBSE, ICSE and state-board schools can all use it."],
   ["How do we sign in after approval?", "Each school gets its own web address, like yourschool plus our domain. The link to it comes in your approval email, and every teacher, parent and student signs in there."],
   ["Where is our data stored?", "On servers in India. Each school's data is isolated from every other school's at the database level, not just in the app."],
-  ["Can parents and students log in?", "Yes. Teachers, accountants, students and parents each get their own login and see only what their role allows. It runs in the phone's browser, with nothing to install."],
+  ["Can parents and students log in?", "Yes. Each student gets one login, and the family uses it to see homework, attendance, results and fees, and to message the school office. Teachers and office staff get their own logins and see only what their role allows. It runs in the phone's browser, with nothing to install."],
   ["Can we bring our existing student list?", "Yes. The setup wizard imports students from a spreadsheet, and you can invite staff by email."],
-  ["Can we take our data out?", "Yes, at any time, including during the read-only period after a trial ends."],
   ["Do you issue GST invoices?", "Yes. Every payment gets a GST invoice with our GSTIN, and yours if you give it to us. Prices on this site exclude 18% GST."],
 ] as const;
 
 export function Faq() {
   const reduce = useReducedMotion();
-  const [open, setOpen] = useState<number | null>(0);
+  const [open, setOpen] = useState<number | null>(null);
   return (
     <div className="divide-y divide-line overflow-hidden rounded-3xl border border-line bg-white">
       {QA.map(([q, a], i) => {

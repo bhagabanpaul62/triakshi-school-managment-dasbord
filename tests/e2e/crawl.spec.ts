@@ -2,7 +2,7 @@
 // Screenshots land in test-results/crawl/<role>/ for visual review.
 import { execSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
-import { login, SCHOOL } from "./helpers";
+import { login, loginStudent, SCHOOL } from "./helpers";
 
 const sql = (q: string) =>
   execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
@@ -61,13 +61,13 @@ const ROLES: { role: string; id: () => string; pw?: () => string }[] = [
   { role: "accountant", id: () => "accounts" },
   { role: "teacher", id: () => one(`select login_id from users where school_id='${sid()}' and role='teacher' and login_id<>'teacher' limit 1`) },
   { role: "student", id: () => "GR0001", pw: () => one(`select to_char(dob,'DDMMYYYY') from students where school_id='${sid()}' and admission_no='GR0001'`) },
-  { role: "parent", id: () => one(`select login_id from users where school_id='${sid()}' and role='parent' order by login_id limit 1`), pw: () => one(`select right(login_id, 6) from users where school_id='${sid()}' and role='parent' order by login_id limit 1`) },
 ];
 
 for (const r of ROLES) {
   test(`crawl as ${r.role}`, async ({ page }) => {
     test.setTimeout(600_000);
-    await login(page, school, r.id(), r.pw?.());
+    if (r.role === "student") await loginStudent(page, school, r.id(), r.pw!());
+    else await login(page, school, r.id(), r.pw?.());
     const problems: string[] = [];
     for (const path of routes()) await visit(page, r.role, path, problems);
     expect(problems, problems.join("\n")).toEqual([]);

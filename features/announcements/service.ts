@@ -9,7 +9,7 @@ import { announcements } from "./schema";
 type Perm = keyof typeof announcementsFeature.permissions;
 export type Announcement = typeof announcements.$inferSelect;
 
-/** Announcements. Staff see everything; students and parents see what is addressed to them. */
+/** Announcements. Staff see everything; students (the family login) see what is addressed to them. */
 export class AnnouncementService extends CrudService<typeof announcements, Perm> {
   protected feature = announcementsFeature;
   protected table = announcements;
@@ -30,30 +30,22 @@ export class AnnouncementService extends CrudService<typeof announcements, Perm>
   protected describe(r: Announcement) { return r.title; }
 
   protected async scopeClause(_tx: Tx): Promise<SQL | undefined> {
-    const audiences = { student: ["all", "students"], parent: ["all", "parents"] } as const;
-    const mine = audiences[this.ctx.role as keyof typeof audiences];
-    if (!mine) return undefined;
-    // A class announcement reaches only that class's students, and the guardians of its students.
+    if (this.ctx.role !== "student") return undefined;
+    // "parents" means families, who sign in as the student. A class announcement reaches only that class's students.
     // Raw SQL on purpose: this feature does not require students, so it never imports its tables.
-    const me = this.ctx.userId;
-    const myClasses = this.ctx.role === "student"
-      ? sql`select class_id from students where user_id = ${me}`
-      : sql`select s.class_id from students s join student_guardians sg on sg.student_id = s.id join guardians g on g.id = sg.guardian_id where g.user_id = ${me}`;
-    return or(inArray(announcements.audience, [...mine]), and(eq(announcements.audience, "class"), sql`${announcements.classId} in (${myClasses})`));
+    const myClasses = sql`select class_id from students where user_id = ${this.ctx.userId}`;
+    return or(inArray(announcements.audience, ["all", "students", "parents"]), and(eq(announcements.audience, "class"), sql`${announcements.classId} in (${myClasses})`));
   }
 
-  /** Everyone an announcement is addressed to (never the author), by role or, for a class, its students and their guardians. */
+  /** Everyone an announcement is addressed to (never the author), by role or, for a class, its students. */
   private async recipients(tx: Tx, a: Announcement): Promise<string[]> {
     if (a.audience === "class") {
       if (!a.classId) return [];
       const rows = await tx.execute<{ uid: string }>(sql`
-        select user_id as uid from students where class_id = ${a.classId} and status = 'active' and user_id is not null
-        union
-        select g.user_id from student_guardians sg join students s on s.id = sg.student_id join guardians g on g.id = sg.guardian_id
-        where s.class_id = ${a.classId} and s.status = 'active' and g.user_id is not null`);
+        select user_id as uid from students where class_id = ${a.classId} and status = 'active' and user_id is not null`);
       return [...rows].map((r) => r.uid);
     }
-    const roles = { staff: ["admin", "accountant", "teacher"], students: ["student"], parents: ["parent"] } as const;
+    const roles = { staff: ["admin", "accountant", "teacher", "staff"], students: ["student"], parents: ["student"] } as const;
     const byRole = a.audience === "all" ? undefined : inArray(users.role, [...roles[a.audience]]);
     return (await tx.select({ id: users.id }).from(users).where(and(eq(users.status, "active"), byRole))).map((u) => u.id);
   }

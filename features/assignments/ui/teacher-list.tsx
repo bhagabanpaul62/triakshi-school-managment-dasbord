@@ -9,8 +9,8 @@ import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { shortDate } from "@smw/ui/format";
 import { AssignmentService } from "../service";
-import { toIstInput, turnedIn } from "../rules";
-import { createAssignment, deleteAssignment, updateAssignment } from "./actions";
+import { handedIn, toIstInput, turnedIn } from "../rules";
+import { closeAssignment, createAssignment, deleteAssignment, publishAssignment, updateAssignment } from "./actions";
 import { assignmentFields } from "./fields";
 import { STATE_LABEL, STATE_TONE } from "./shared";
 
@@ -36,9 +36,9 @@ export async function TeacherList({ ctx, searchParams }: { ctx: Ctx; searchParam
   const create = <FormModal title="New assignment" icon="assignment" fields={assignmentFields(options, true)} action={createAssignment} submitLabel="Post assignment" values={defaults}
     summary="Students see it as soon as it is posted" />;
 
-  const rows = page.rows.map((r) => ({ ...r, where: `${r.sectionLabel} · ${r.subjectName}`, handedIn: r.progress.total ? `${r.progress.total - r.progress.missing}/${r.progress.total}` : null }));
+  const rows = page.rows.map((r) => ({ ...r, where: `${r.sectionLabel} · ${r.subjectName}`, handedIn: r.progress.total ? `${handedIn(r.progress)}/${r.progress.total}` : null }));
   const progress = page.rows.map((r) => {
-    const done = r.progress.total - r.progress.missing;
+    const done = handedIn(r.progress);
     const overdueWithGaps = r.dueAt.getTime() < now && r.progress.missing > 0;
     return {
       id: r.id, label: r.title, meta: `${r.sectionLabel} · ${r.subjectName} · due ${shortDate(r.dueAt)}`,
@@ -80,7 +80,10 @@ export async function TeacherList({ ctx, searchParams }: { ctx: Ctx; searchParam
               empty={{ title: "No assignments yet.", description: canCreate ? "Create one to give homework to a section." : "You are not assigned to a class and subject yet. Ask an admin to add you in Classes, then you can post homework here.", action: canCreate ? create : undefined }}
               rowActions={canCreate ? Object.fromEntries(rows.map((r) => [r.id, (
                 <span key={r.id} className="inline-flex items-center gap-1">
-                  <FormModal title="Edit assignment" icon="assignment" fields={fields} values={{ ...r, dueAt: toIstInput(r.dueAt), maxMarks: r.maxMarks ?? "" }} hidden={{ id: r.id }} action={updateAssignment}
+                  {r.status === "draft" ? <ActionButton variant="ghost" label={`Publish ${r.title}`} action={publishAssignment} values={{ id: r.id }}>Publish</ActionButton> : null}
+                  {r.status === "published" ? <ActionButton variant="ghost" label={`Close ${r.title}`} action={closeAssignment} values={{ id: r.id }}
+                    confirm={{ title: "Close this assignment?", body: `Students can no longer hand in "${r.title}". You can publish it again later.`, confirmLabel: "Close" }}>Close</ActionButton> : null}
+                  <FormModal title="Edit assignment" icon="assignment" fields={fields} values={{ ...r, dueAt: toIstInput(r.dueAt), publishAt: toIstInput(r.publishAt), maxMarks: r.maxMarks ?? "" }} hidden={{ id: r.id }} action={updateAssignment}
                     trigger={{ label: "Edit", variant: "ghost", size: "sm" }} />
                   <ActionButton variant="icon-delete" label={`Delete ${r.title}`} action={deleteAssignment} values={{ id: r.id }}
                     confirm={{ title: "Delete this assignment?", body: `"${r.title}", its files and every submission will be removed. This cannot be undone.`, confirmLabel: "Delete", danger: true }} />

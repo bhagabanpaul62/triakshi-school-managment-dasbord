@@ -7,12 +7,12 @@ import { financialYear, nextSequence, schools, type Tx } from "@smw/db";
 import { PdfBuilder } from "@smw/integrations";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
 import { FeeCalculator, rupees, type CalcInput, type Statement } from "./calculator";
 import { cancelPaymentInput, concessionInput, copyStructureInput, feeHeadInput, paymentInput, structureInput, type StructureInput } from "./inputs";
 import {
-  feeHeads, feePaymentAllocations, feePayments, feeStructureItems, feeStructures, installments, lateFeeRules, studentConcessions,
+  feeCharges, feeHeads, feePaymentAllocations, feePayments, feeStructureItems, feeStructures, installments, lateFeeRules, studentConcessions,
 } from "./schema";
 
 type Perm = keyof typeof feesFeature.permissions;
@@ -31,36 +31,28 @@ interface Book { structure: { id: string; name: string } | null; input: CalcInpu
 /**
  * What every fee service shares: who may see which student, the current year, and loading a student's
  * fee book (structure, concessions, payments) into the pure FeeCalculator input. Staff see everyone;
- * a student sees themself, a parent their children.
+ * a student sees themself.
  */
 export abstract class FeesService extends SchoolService<Perm> {
   protected readonly feature = feesFeature;
 
   constructor(ctx: Ctx) { super(ctx); }
 
-  /** Run a read as staff (all students) or as a student/parent (`own` = their student ids). */
+  /** Run a read as staff (all students) or as a student (`own` = their student ids). */
   protected viewer<T>(fn: (tx: Tx, own: string[] | null) => Promise<T>): Promise<T> {
     const staff = this.can("read");
     return this.read(staff ? "read" : "self", async (tx) => fn(tx, staff ? null : await this.ownStudentIds(tx)));
   }
 
   protected async ownStudentIds(tx: Tx): Promise<string[]> {
-    if (this.ctx.role === "student") {
-      return (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
-    }
-    const rows = await tx.select({ id: studentGuardians.studentId }).from(studentGuardians)
-      .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(eq(guardians.userId, this.ctx.userId));
-    return rows.map((r) => r.id);
+    return (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
   }
 
-  /** Login ids of the guardians of these students (those with a parent login), per student. */
-  protected async guardianUsers(tx: Tx, studentIds: string[]): Promise<Map<string, string[]>> {
-    const out = new Map<string, string[]>();
-    if (!studentIds.length) return out;
-    const rows = await tx.select({ studentId: studentGuardians.studentId, userId: guardians.userId }).from(studentGuardians)
-      .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(inArray(studentGuardians.studentId, studentIds));
-    for (const r of rows) if (r.userId) out.set(r.studentId, [...(out.get(r.studentId) ?? []), r.userId]);
-    return out;
+  /** The login of each of these students. The student login is the family login, so fee notices go there. */
+  protected async studentUsers(tx: Tx, studentIds: string[]): Promise<Map<string, string>> {
+    if (!studentIds.length) return new Map();
+    const rows = await tx.select({ id: students.id, userId: students.userId }).from(students).where(inArray(students.id, studentIds));
+    return new Map(rows.flatMap((r) => (r.userId ? [[r.id, r.userId] as const] : [])));
   }
 
   protected assertVisible(own: string[] | null, studentId: string, what = "Student") {
@@ -97,16 +89,17 @@ export abstract class FeesService extends SchoolService<Perm> {
     const ids = rows.map((r) => r.id);
     // A handful of students: filter in SQL. A whole school: read the year and group in memory.
     const few = ids.length <= 100;
-    const [items, insts, rules, concs, pays, allocs] = await Promise.all([
+    const [items, insts, rules, concs, pays, allocs, charges] = await Promise.all([
       sids.length ? tx.select().from(feeStructureItems).where(inArray(feeStructureItems.structureId, sids)) : [],
       sids.length ? tx.select().from(installments).where(inArray(installments.structureId, sids)) : [],
       sids.length ? tx.select().from(lateFeeRules).where(inArray(lateFeeRules.structureId, sids)) : [],
       tx.select().from(studentConcessions).where(and(eq(studentConcessions.yearId, yearId), few && ids.length ? inArray(studentConcessions.studentId, ids) : undefined)),
       tx.select({ id: feePayments.id, studentId: feePayments.studentId, paidOn: feePayments.paidOn, status: feePayments.status }).from(feePayments)
         .where(and(eq(feePayments.yearId, yearId), eq(feePayments.status, "valid"), few && ids.length ? inArray(feePayments.studentId, ids) : undefined)),
-      tx.select({ paymentId: feePaymentAllocations.paymentId, installmentId: feePaymentAllocations.installmentId, amountPaise: feePaymentAllocations.amountPaise, lateFeePaise: feePaymentAllocations.lateFeePaise })
+      tx.select({ paymentId: feePaymentAllocations.paymentId, installmentId: feePaymentAllocations.installmentId, chargeId: feePaymentAllocations.chargeId, amountPaise: feePaymentAllocations.amountPaise, lateFeePaise: feePaymentAllocations.lateFeePaise })
         .from(feePaymentAllocations).innerJoin(feePayments, eq(feePayments.id, feePaymentAllocations.paymentId))
         .where(and(eq(feePayments.yearId, yearId), eq(feePayments.status, "valid"), few && ids.length ? inArray(feePayments.studentId, ids) : undefined)),
+      tx.select().from(feeCharges).where(and(eq(feeCharges.yearId, yearId), eq(feeCharges.status, "active"), few && ids.length ? inArray(feeCharges.studentId, ids) : undefined)),
     ]);
 
     const structByClass = new Map(structs.map((s) => [s.classId, s]));
@@ -117,12 +110,16 @@ export abstract class FeesService extends SchoolService<Perm> {
       const input: CalcInput = {
         today,
         items: items.filter((i) => i.structureId === sid).map((i) => ({ headId: i.headId, amountPaise: i.amountPaise })),
-        installments: insts.filter((i) => i.structureId === sid).map((i) => ({ id: i.id, name: i.name, dueDate: i.dueDate, amountPaise: i.amountPaise })),
+        installments: [
+          ...insts.filter((i) => i.structureId === sid).map((i) => ({ id: i.id, name: i.name, dueDate: i.dueDate, amountPaise: i.amountPaise })),
+          ...charges.filter((c) => c.studentId === r.id).map((c) => ({ id: c.id, name: c.label, dueDate: c.dueDate, amountPaise: c.amountPaise, charge: true })),
+        ],
         lateRules: rules.filter((l) => l.structureId === sid).map((l) => ({ installmentId: l.installmentId, kind: l.kind, amountPaise: l.amountPaise, graceDays: l.graceDays, maxPaise: l.maxPaise })),
         concessions: concs.filter((c) => c.studentId === r.id).map((c) => ({ headId: c.headId, kind: c.kind, value: c.value })),
         payments: pays.filter((p) => p.studentId === r.id).map((p) => ({
           id: p.id, paidOn: p.paidOn, status: p.status,
-          allocations: allocs.filter((a) => a.paymentId === p.id && instIds.get(a.installmentId) === sid),
+          allocations: allocs.filter((a) => a.paymentId === p.id && (a.chargeId || instIds.get(a.installmentId!) === sid))
+            .map((a) => ({ installmentId: a.installmentId ?? a.chargeId!, amountPaise: a.amountPaise, lateFeePaise: a.lateFeePaise })),
         })),
       };
       return [r.id, { structure: st ? { id: st.id, name: st.name } : null, input }];
@@ -134,9 +131,9 @@ export abstract class FeesService extends SchoolService<Perm> {
     const pays = await tx.select().from(feePayments).where(and(eq(feePayments.studentId, studentId), yearId ? eq(feePayments.yearId, yearId) : undefined))
       .orderBy(desc(feePayments.paidOn), desc(feePayments.createdAt));
     const allocs = pays.length
-      ? await tx.select({ paymentId: feePaymentAllocations.paymentId, name: installments.name, amountPaise: feePaymentAllocations.amountPaise, lateFeePaise: feePaymentAllocations.lateFeePaise })
-        .from(feePaymentAllocations).innerJoin(installments, eq(installments.id, feePaymentAllocations.installmentId))
-        .where(inArray(feePaymentAllocations.paymentId, pays.map((p) => p.id))).orderBy(asc(installments.dueDate))
+      ? await tx.select({ paymentId: feePaymentAllocations.paymentId, name: sql<string>`coalesce(${installments.name}, ${feeCharges.label})`, amountPaise: feePaymentAllocations.amountPaise, lateFeePaise: feePaymentAllocations.lateFeePaise })
+        .from(feePaymentAllocations).leftJoin(installments, eq(installments.id, feePaymentAllocations.installmentId)).leftJoin(feeCharges, eq(feeCharges.id, feePaymentAllocations.chargeId))
+        .where(inArray(feePaymentAllocations.paymentId, pays.map((p) => p.id))).orderBy(sql`coalesce(${installments.dueDate}, ${feeCharges.dueDate})`)
       : [];
     return pays.map((p) => ({ ...p, allocations: allocs.filter((a) => a.paymentId === p.id) }));
   }
@@ -412,7 +409,7 @@ export class PaymentService extends FeesService {
       const student = await this.oneStudent(tx, data.studentId);
       const year = await this.currentYear(tx);
       const book = (await this.loadBooks(tx, [student], year.id, paidOn)).get(student.id)!;
-      if (!book.structure) throw new ConflictError(`${student.className ?? "This class"} has no fee structure for ${year.name}. Set it up first.`);
+      if (!book.structure && !book.input.installments.length) throw new ConflictError(`${student.className ?? "This class"} has no fee structure for ${year.name}. Set it up first.`);
 
       const plan = new FeeCalculator(book.input).allocate(data.amountPaise, paidOn);
       if (!plan.allocations.length) throw new ConflictError("This student has nothing due.");
@@ -425,10 +422,10 @@ export class PaymentService extends FeesService {
         reference: data.reference ?? null, paidOn, collectedBy: this.ctx.userId,
       }).returning().catch((e) => rethrowUnique(e, "That receipt number is already used. Try again."));
       await tx.insert(feePaymentAllocations).values(plan.allocations.map((a) => ({
-        schoolId: this.ctx.schoolId, paymentId: payment!.id, installmentId: a.installmentId, amountPaise: a.amountPaise, lateFeePaise: a.lateFeePaise,
+        schoolId: this.ctx.schoolId, paymentId: payment!.id, installmentId: a.charge ? null : a.installmentId, chargeId: a.charge ? a.installmentId : null, amountPaise: a.amountPaise, lateFeePaise: a.lateFeePaise,
       })));
-      const parents = (await this.guardianUsers(tx, [student.id])).get(student.id) ?? [];
-      await NotificationWriter.insert(tx, this.ctx.schoolId, parents.filter((userId) => userId !== this.ctx.userId).map((userId) => ({
+      const family = (await this.studentUsers(tx, [student.id])).get(student.id);
+      await NotificationWriter.insert(tx, this.ctx.schoolId, [family].filter((userId): userId is string => !!userId && userId !== this.ctx.userId).map((userId) => ({
         userId, kind: "fee_due" as const, title: `Payment of ${rupees(data.amountPaise)} received`,
         body: `${student.name}, receipt ${receiptNo}`, href: `/app/fees/students/${student.id}`,
       })));
@@ -462,7 +459,7 @@ export class PaymentService extends FeesService {
     });
   }
 
-  /** The receipt as a PDF plus the name to save it under. Students and parents get only their own. */
+  /** The receipt as a PDF plus the name to save it under. Students get only their own. */
   async receiptFile(paymentId: string): Promise<{ filename: string; bytes: Uint8Array }> {
     return this.viewer(async (tx, own) => {
       const [p] = await tx.select().from(feePayments).where(eq(feePayments.id, paymentId)).limit(1);
@@ -471,9 +468,9 @@ export class PaymentService extends FeesService {
       const [student, [school], allocs] = await Promise.all([
         this.oneStudent(tx, p.studentId),
         tx.select().from(schools).limit(1),
-        tx.select({ name: installments.name, amountPaise: feePaymentAllocations.amountPaise, lateFeePaise: feePaymentAllocations.lateFeePaise })
-          .from(feePaymentAllocations).innerJoin(installments, eq(installments.id, feePaymentAllocations.installmentId))
-          .where(eq(feePaymentAllocations.paymentId, p.id)).orderBy(asc(installments.dueDate)),
+        tx.select({ name: sql<string>`coalesce(${installments.name}, ${feeCharges.label})`, amountPaise: feePaymentAllocations.amountPaise, lateFeePaise: feePaymentAllocations.lateFeePaise })
+          .from(feePaymentAllocations).leftJoin(installments, eq(installments.id, feePaymentAllocations.installmentId)).leftJoin(feeCharges, eq(feeCharges.id, feePaymentAllocations.chargeId))
+          .where(eq(feePaymentAllocations.paymentId, p.id)).orderBy(sql`coalesce(${installments.dueDate}, ${feeCharges.dueDate})`),
       ]);
       const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
       const money = PdfBuilder.money;
@@ -541,7 +538,7 @@ export class DuesService extends FeesService {
     const books = await this.loadBooks(tx, rows, year.id, today);
     return rows.flatMap((r): DueRow[] => {
       const book = books.get(r.id)!;
-      if (!book.structure) return [];
+      if (!book.structure && !book.input.installments.length) return [];
       const st: Statement = new FeeCalculator(book.input).statement();
       const t = st.totals;
       return [{
@@ -650,7 +647,7 @@ export class DuesService extends FeesService {
     return this.read("read", (tx) => tx.select({ id: classes.id, name: classes.name }).from(classes).orderBy(asc(classes.grade)));
   }
 
-  /** For a student or parent: their children's dues. */
+  /** For a student login: their own dues. */
   async mine() {
     return this.viewer(async (tx, own) => (own?.length ? this.dueRows(tx, undefined, own) : []));
   }

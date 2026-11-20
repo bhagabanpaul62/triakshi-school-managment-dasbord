@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { closeDb, eq, withSchool } from "@smw/db";
+import { closeDb, eq, users, withSchool } from "@smw/db";
 import { notifications } from "@smw/feature-notifications/schema";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import { FeeReminderJob, FeeReminders } from "./reminders";
 import { ConcessionService, DuesService, FeeHeadService, FeeStructureService, PaymentService } from "./service";
 
@@ -44,8 +44,6 @@ beforeAll(async () => {
       { ...base, admissionNo: "A3", name: "Meera Iyer" },
     ]).returning();
     studentId = s1!.id; siblingId = s2!.id; strangerId = s3!.id;
-    const [g] = await tx.insert(guardians).values({ schoolId: a.id, name: "Anil Sharma", userId: a.users.parent }).returning();
-    await tx.insert(studentGuardians).values([{ schoolId: a.id, studentId, guardianId: g!.id }, { schoolId: a.id, studentId: siblingId, guardianId: g!.id }]);
   });
   const heads = new FeeHeadService(a.as.admin);
   tuitionId = (await heads.create({ name: "Tuition", kind: "tuition" })).id;
@@ -211,19 +209,18 @@ describe("dues", () => {
   });
 });
 
-describe("students and parents", () => {
-  it("a parent sees their own children's ledger and receipts, not anyone else's", async () => {
-    const dues = new DuesService(a.as.parent);
-    expect((await dues.mine()).map((r) => r.name).sort()).toEqual(["Kabir Sharma", "Riya Sharma"]);
-    expect((await dues.studentLedger(studentId)).student.name).toBe("Riya Sharma");
-    await expect(dues.studentLedger(strangerId)).rejects.toBeInstanceOf(NotFoundError);
-    const [p] = await new PaymentService(a.as.parent).forStudent(studentId);
-    expect((await new PaymentService(a.as.parent).receiptPdf(p!.id)).length).toBeGreaterThan(500);
-  });
-  it("a student sees only themself", async () => {
+describe("students", () => {
+  it("a student sees only themself: ledger and receipts, not a sibling's or a stranger's", async () => {
     const dues = new DuesService(a.as.student);
     expect((await dues.mine()).map((r) => r.name)).toEqual(["Riya Sharma"]);
+    expect((await dues.studentLedger(studentId)).student.name).toBe("Riya Sharma");
     await expect(dues.studentLedger(siblingId)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(dues.studentLedger(strangerId)).rejects.toBeInstanceOf(NotFoundError);
+    const [p] = await new PaymentService(a.as.student).forStudent(studentId);
+    expect((await new PaymentService(a.as.student).receiptPdf(p!.id)).length).toBeGreaterThan(500);
+  });
+  it("a legacy parent login sees nothing", async () => {
+    await expect(new DuesService(a.as.parent).mine()).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 
@@ -283,29 +280,37 @@ describe("isolation", () => {
 const notesOf = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, userId)));
 
 describe("fee notifications", () => {
-  it("recording a payment tells the guardian once, with the receipt, and not the cashier", async () => {
-    const before = (await notesOf(a, a.users.parent)).length;
-    const r = await new PaymentService(a.as.accountant).record({ studentId: siblingId, amountPaise: 100_000, method: "cash", paidOn: REAL_DAY });
-    const parent = (await notesOf(a, a.users.parent)).slice(before);
-    expect(parent).toHaveLength(1);
-    expect(parent[0]).toMatchObject({ kind: "fee_due", title: expect.stringContaining("₹1,000"), body: expect.stringContaining(r.payment.receiptNo), href: `/app/fees/students/${siblingId}` });
+  it("recording a payment tells the student login once, with the receipt, and not the cashier or a parent login", async () => {
+    const before = (await notesOf(a, a.users.student)).length;
+    const r = await new PaymentService(a.as.accountant).record({ studentId, amountPaise: 100_000, method: "cash", paidOn: REAL_DAY });
+    const note = (await notesOf(a, a.users.student)).slice(before);
+    expect(note).toHaveLength(1);
+    expect(note[0]).toMatchObject({ kind: "fee_due", title: expect.stringContaining("₹1,000"), body: expect.stringContaining(r.payment.receiptNo), href: `/app/fees/students/${studentId}` });
     expect(await notesOf(a, a.users.accountant)).toHaveLength(0);
-    expect(await notesOf(b, b.users.parent)).toHaveLength(0);
+    expect(await notesOf(a, a.users.parent)).toHaveLength(0);
+    expect(await notesOf(b, b.users.student)).toHaveLength(0);
   });
 });
 
 describe("overdue reminders", () => {
-  it("remind each guardian once per overdue installment, however often the job runs", async () => {
-    const before = (await notesOf(a, a.users.parent)).length;
-    // Term 1 fell due on 2026-04-10: the day after, it is overdue for everyone who has not paid it (the sibling paid only part).
+  it("remind each student login once per overdue installment, however often the job runs", async () => {
+    // Kabir (the sibling) paid only part of Term 1; give him a login so there is someone to tell.
+    const kabir = await withSchool(a.id, async (tx) => {
+      const [u] = await tx.insert(users).values({ schoolId: a.id, role: "student", loginId: "kabir-fees", name: "Kabir Sharma", passwordHash: "x" }).returning();
+      await tx.update(students).set({ userId: u!.id }).where(eq(students.id, siblingId));
+      return u!;
+    });
+    const before = (await notesOf(a, kabir.id)).length;
+    // Term 1 fell due on 2026-04-10: the day after, it is overdue for everyone who has not paid it. Only students with a login are told.
     const sent = await new FeeReminders(a.as.admin).run("2026-04-11");
     expect(sent).toBeGreaterThan(0);
-    const fresh = (await notesOf(a, a.users.parent)).slice(before);
-    expect(fresh.length).toBe(sent);
+    const fresh = (await notesOf(a, kabir.id)).slice(before);
+    expect(fresh.length).toBeGreaterThan(0);
     expect(fresh.every((n) => n.title === "Fee overdue: Term 1" && n.href?.startsWith("/app/fees/students/"))).toBe(true);
     expect(await new FeeReminders(a.as.admin).run("2026-04-11")).toBe(0);
     expect(await new FeeReminders(a.as.admin).run("2026-04-12")).toBe(0);
-    expect((await notesOf(a, a.users.parent)).length).toBe(before + sent);
+    expect((await notesOf(a, kabir.id)).length).toBe(before + fresh.length);
+    expect(await notesOf(a, a.users.parent)).toHaveLength(0);
   });
 
   it("a school with nobody to remind is fine, and the job reports every school", async () => {

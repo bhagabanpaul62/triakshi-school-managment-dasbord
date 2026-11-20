@@ -31,11 +31,11 @@ function Tower() {
 export function ClosingCta() {
   const reduce = useReducedMotion();
   return (
-    <section aria-labelledby="cta-title" className="pb-16 md:pb-24">
+    <section aria-labelledby="cta-title" className="pb-14 md:pb-16">
       <Container>
         <motion.div initial={reduce ? false : { opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "0px 0px -10% 0px" }} transition={{ duration: 0.55, ease: EASE }}
           className="relative overflow-hidden rounded-[32px] bg-gold md:rounded-[44px]">
-          <div className="relative z-10 px-6 pb-4 pt-10 sm:px-12 sm:pt-14 md:max-w-[64%] md:pb-14 lg:px-16 lg:py-16">
+          <div className="relative z-10 px-6 pb-4 pt-10 sm:px-12 sm:pt-14 md:max-w-[64%] md:pb-12 lg:px-16 lg:py-12">
             <h2 id="cta-title" className="h-display text-[clamp(2.2rem,4.8vw,3.9rem)] text-ink">Open your school&rsquo;s dashboard this week.</h2>
             <p className="text-pretty mt-5 max-w-lg text-[17px] leading-relaxed text-ink/80 md:text-[19px]">Two minutes to sign up, a quick check by our team, then 30 days to try it with real classes. No card.</p>
             <div className="mt-8 flex flex-col gap-3 min-[420px]:flex-row">

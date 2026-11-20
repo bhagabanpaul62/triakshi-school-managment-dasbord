@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { CUSTOM_ROLE_BASES } from "@smw/db";
 import { f } from "@smw/feature-kit";
 
-/** Staff logins can move between these. Student and parent logins keep theirs. */
-export const STAFF_ROLES = ["admin", "accountant", "teacher"] as const;
+/** Base kinds of a staff login (a custom role is "staff" or "teacher"). Student logins keep theirs. */
+export const STAFF_ROLES = ["admin", "accountant", "teacher", "staff"] as const;
 
 /** Optional text that must match a pattern ("" → undefined). */
 const optPattern = (re: RegExp, msg: string, upper = false) =>
@@ -40,6 +41,23 @@ export const passwordInput = z.object({
 }).refine((v) => v.next === v.confirm, { message: "The passwords do not match", path: ["confirm"] })
   .refine((v) => v.next !== v.current, { message: "Choose a password you have not used here", path: ["next"] });
 
-export const roleInput = z.object({ role: z.enum(STAFF_ROLES) });
+/** A login's role: a built-in one by key, or a custom role by id. */
+export const roleInput = z.object({ role: z.string().min(1, "Pick a role") });
+
+export const resetInput = z.object({ mode: z.enum(["email", "temporary"]).default("email") });
+
+/** The role form sends one checkbox group per module (`g.fees`, `g.library`...); fold them into one `grants` list. */
+const foldGrants = (v: unknown) => {
+  if (!v || typeof v !== "object") return v;
+  const o = v as Record<string, unknown>;
+  const grants = Object.entries(o).filter(([k]) => k.startsWith("g.")).flatMap(([, x]) => (Array.isArray(x) ? x : [x])).filter(Boolean);
+  return { ...o, grants: o.grants ?? grants };
+};
+export const customRoleInput = z.preprocess(foldGrants, z.object({
+  name: f.text(2, 60, "Enter a role name"),
+  base: z.enum(CUSTOM_ROLE_BASES, { error: "Choose how this role works" }),
+  description: f.optText(200),
+  grants: z.array(z.string()),
+}));
 
 export const exportStudentInput = z.object({ studentId: f.id("Choose a student") });

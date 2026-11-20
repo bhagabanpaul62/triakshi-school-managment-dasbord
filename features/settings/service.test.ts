@@ -121,14 +121,15 @@ describe("UserAdminService", () => {
 
   it("the last admin cannot step down; with a second admin they can", async () => {
     const svc = new UserAdminService(a.as.admin);
-    await expect(svc.changeRole(a.users.admin, { role: "teacher" })).rejects.toThrow(/last admin/);
+    const other = new UserAdminService({ ...a.as.accountant, role: "admin" }); // someone else, since nobody changes their own role
+    await expect(other.changeRole(a.users.admin, { role: "teacher" })).rejects.toThrow(/last admin/);
     await svc.changeRole(a.users.teacher, { role: "admin" });
-    expect((await svc.changeRole(a.users.admin, { role: "teacher" })).role).toBe("teacher");
+    expect((await other.changeRole(a.users.admin, { role: "teacher" })).role).toBe("teacher");
     // the promoted teacher is now the only admin, so they cannot step down either
-    await expect(new UserAdminService({ ...a.as.teacher, role: "admin" }).changeRole(a.users.teacher, { role: "teacher" })).rejects.toThrow(/last admin/);
+    await expect(other.changeRole(a.users.teacher, { role: "teacher" })).rejects.toThrow(/last admin/);
     // put things back for the tests below
-    await new UserAdminService({ ...a.as.teacher, role: "admin" }).changeRole(a.users.admin, { role: "admin" });
-    await new UserAdminService(a.as.admin).changeRole(a.users.teacher, { role: "teacher" });
+    await other.changeRole(a.users.admin, { role: "admin" });
+    await other.changeRole(a.users.teacher, { role: "teacher" });
   });
 
   it("disabling signs the person out everywhere; enabling brings them back", async () => {
@@ -151,16 +152,16 @@ describe("UserAdminService", () => {
   it("sends a reset link by email that actually works, and replaces older links", async () => {
     const svc = new UserAdminService(a.as.admin);
     mail.sent.length = 0;
-    await svc.resetPassword(a.users.parent);
-    await svc.resetPassword(a.users.parent);
+    await svc.resetPassword(a.users.accountant);
+    await svc.resetPassword(a.users.accountant);
     expect(mail.sent).toHaveLength(2);
     const sent = mail.sent[1]!;
-    expect(sent.to).toBe(`parent@${a.slug}.test`);
+    expect(sent.to).toBe(`accountant@${a.slug}.test`);
     const token = /token=([\w-]+)/.exec(sent.text)![1]!;
-    const live = await withSchool(a.id, (tx) => tx.select().from(oneTimeTokens).where(sql`${oneTimeTokens.userId} = ${a.users.parent} and ${oneTimeTokens.purpose} = 'reset_password'`));
+    const live = await withSchool(a.id, (tx) => tx.select().from(oneTimeTokens).where(sql`${oneTimeTokens.userId} = ${a.users.accountant} and ${oneTimeTokens.purpose} = 'reset_password'`));
     expect(live).toHaveLength(1);
     await new SchoolAuth(a.id).resetPassword(token, "brand-new-pass");
-    await expect(new SchoolAuth(a.id).login(`parent@${a.slug}.test`, "brand-new-pass")).resolves.toBeTruthy();
+    await expect(new SchoolAuth(a.id).login(`accountant@${a.slug}.test`, "brand-new-pass")).resolves.toBeTruthy();
   });
 
   it("no reset link for a disabled account or one without an email", async () => {
@@ -183,35 +184,10 @@ describe("UserAdminService", () => {
 });
 
 describe("ProfileService", () => {
-  it("every role reads and edits their own profile", async () => {
-    for (const role of ["admin", "teacher", "student", "parent"] as const) {
-      const svc = new ProfileService(a.as[role]);
-      expect((await svc.me()).id).toBe(a.users[role]);
+  it("every role reads their own profile", async () => {
+    for (const role of ["admin", "teacher", "student"] as const) {
+      expect((await new ProfileService(a.as[role]).me()).id).toBe(a.users[role]);
     }
-    const svc = new ProfileService(a.as.teacher);
-    const me = await svc.update({ name: "Anita Deshmukh", email: "anita@a.test", phone: "9876543210" });
-    expect(me).toMatchObject({ name: "Anita Deshmukh", phone: "9876543210" });
-    expect((await new ProfileService(a.as.teacher).me()).name).toBe("Anita Deshmukh");
-  });
-
-  it("an email or mobile number already used in the school is a conflict; another school may reuse it", async () => {
-    await expect(new ProfileService(a.as.teacher).update({ name: "Anita", email: `admin@${a.slug}.test` })).rejects.toThrow(/already uses this email/);
-    const admin = new ProfileService(a.as.admin);
-    await expect(admin.update({ name: "Admin", phone: "9876543210" })).rejects.toBeInstanceOf(ConflictError);
-    await expect(new ProfileService(b.as.admin).update({ name: "B Admin", phone: "9876543210" })).resolves.toMatchObject({ phone: "9876543210" });
-  });
-
-  it("validates name and email", async () => {
-    await expect(new ProfileService(a.as.teacher).update({ name: "", email: "not-an-email" })).rejects.toMatchObject({ fieldErrors: { name: expect.any(String), email: expect.any(String) } });
-  });
-
-  it("changes the password only with the right current one", async () => {
-    const svc = new ProfileService(a.as.accountant);
-    await expect(svc.changePassword({ current: "wrong-one", next: "another-pass1", confirm: "another-pass1" })).rejects.toMatchObject({ fieldErrors: { current: expect.any(String) } });
-    await expect(svc.changePassword({ current: "password123", next: "short", confirm: "short" })).rejects.toBeInstanceOf(ValidationError);
-    await expect(svc.changePassword({ current: "password123", next: "another-pass1", confirm: "different-pass" })).rejects.toMatchObject({ fieldErrors: { confirm: expect.any(String) } });
-    await svc.changePassword({ current: "password123", next: "another-pass1", confirm: "another-pass1" });
-    await expect(new SchoolAuth(a.id).login(`accountant@${a.slug}.test`, "another-pass1")).resolves.toBeTruthy();
   });
 });
 

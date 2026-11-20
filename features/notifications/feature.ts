@@ -7,7 +7,7 @@ export default defineFeature({
   stage: "ga",
   core: true,
   permissions: {
-    read: ["admin", "accountant", "teacher", "student", "parent"],
+    read: ["admin", "accountant", "teacher", "student"],
     /** Create notifications for other users (other features normally use NotificationWriter inside their own transaction). */
     send: ["admin", "accountant", "teacher"],
   },

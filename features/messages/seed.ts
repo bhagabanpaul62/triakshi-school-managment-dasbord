@@ -2,7 +2,7 @@ import type { Ctx, FeatureSeed } from "@smw/feature-kit";
 import { MessageService } from "./service";
 
 type Teacher = { userId: string; name: string };
-type Student = { name: string; guardianUserId?: string | null };
+type Student = { name: string; userId?: string | null };
 
 /** One side of a demo conversation: who speaks and what they say. */
 type Turn = [who: Ctx, text: string];
@@ -14,15 +14,15 @@ async function converse(subject: string, opener: Turn, replies: Turn[], recipien
   for (const [who, text] of replies) await new MessageService(who).send(id, text);
 }
 
-/** A few threads between the admin, teachers and parents. Skips what the demo school does not have. */
+/** A few threads between the admin, teachers and students. Skips what the demo school does not have. */
 const seed: FeatureSeed = async (admin, state) => {
   const teachers = (state.teachers as Teacher[] | undefined) ?? [];
   const students = (state.students as Student[] | undefined) ?? [];
   const as = (userId: string, name: string, role: Ctx["role"]): Ctx => ({ ...admin, userId, name, role });
   const teacher = (i: number) => (teachers[i] ? as(teachers[i].userId, teachers[i].name, "teacher") : null);
-  const parentOf = (i: number) => {
-    const s = students.filter((x) => x.guardianUserId)[i];
-    return s?.guardianUserId ? { ctx: as(s.guardianUserId, `Parent of ${s.name}`, "parent"), child: s.name } : null;
+  const studentAt = (i: number) => {
+    const s = students.filter((x) => x.userId)[i];
+    return s?.userId ? { ctx: as(s.userId, s.name, "student"), child: s.name } : null;
   };
 
   const [t1, t2] = [teacher(0), teacher(1)];
@@ -32,14 +32,15 @@ const seed: FeatureSeed = async (admin, state) => {
       [t1.userId, t2.userId]);
   }
 
-  const p1 = parentOf(0);
+  // Families use the student login, so the office writes to the student and the family answers from it.
+  const p1 = studentAt(0);
   if (p1) {
-    await converse("Fee installment query", [p1.ctx, `Good morning. Can we pay ${p1.child}'s second installment in two parts?`],
-      [[admin, "Good morning. Yes, you can pay half now and the rest before the 25th. Please visit the office with the fee card."], [p1.ctx, "Thank you, we will come on Saturday."]],
-      [admin.userId]);
+    await converse("Fee installment", [admin, `Good morning. The second installment for ${p1.child} can be paid in two parts: half now and the rest before the 25th. Please visit the office with the fee card.`],
+      [[p1.ctx, "Thank you, we will come on Saturday."]],
+      [p1.ctx.userId]);
   }
 
-  const p2 = parentOf(1);
+  const p2 = studentAt(1);
   if (p2 && t1) {
     const reachable = await new MessageService(p2.ctx).contacts();
     const to = reachable.find((c) => c.role === "teacher");

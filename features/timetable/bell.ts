@@ -19,6 +19,9 @@ export function schoolDay(now: Date): number | null {
   return d === 0 ? null : d;
 }
 
+/** Calendar date in India for an instant, "YYYY-MM-DD". */
+export const istDate = (now: Date) => new Date(now.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+
 const toMinutes = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 const toHhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 

@@ -1,4 +1,4 @@
-import { bigint, boolean, date, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { schoolColumns, tenant, users } from "@smw/db";
 import { students } from "@smw/feature-students/schema";
@@ -44,6 +44,12 @@ export const loans = pgTable("loans", {
   finePaise: bigint("fine_paise", { mode: "number" }).notNull().default(0),
   fineWaived: boolean("fine_waived").notNull().default(false),
   issuedBy: uuid("issued_by"),
+  /** How many times this loan was renewed. */
+  renewals: integer("renewals").notNull().default(0),
+  /** Set when the fine is posted to the fee ledger (a later stream does the posting). Null until then. */
+  finePostedAt: timestamp("fine_posted_at", { withTimezone: true }),
+  /** The last day an overdue reminder went out; one a week. */
+  lastReminderOn: date("last_reminder_on"),
 }, (t) => [
   ...tenant(t, "loans"),
   // a copy can be out on one loan at a time
@@ -51,4 +57,33 @@ export const loans = pgTable("loans", {
   index("loans_student").on(t.schoolId, t.studentId),
   index("loans_user").on(t.schoolId, t.userId),
   index("loans_due").on(t.schoolId, t.returnedOn, t.dueOn),
+]);
+
+/** One row per school; no row means the defaults in rules.ts. */
+export const librarySettings = pgTable("library_settings", {
+  ...schoolColumns(),
+  loanDays: integer("loan_days").notNull().default(14),
+  studentLimit: integer("student_limit").notNull().default(2),
+  staffLimit: integer("staff_limit").notNull().default(5),
+  finePerDayPaise: integer("fine_per_day_paise").notNull().default(200),
+  renewalsAllowed: integer("renewals_allowed").notNull().default(1),
+}, (t) => [...tenant(t, "library_settings"), uniqueIndex("library_settings_school").on(t.schoolId)]);
+
+export const HOLD_STATUSES = ["waiting", "ready", "fulfilled", "cancelled"] as const;
+
+/** A reservation on a title. The first waiting hold becomes "ready" when a copy comes back, for 3 days. */
+export const bookHolds = pgTable("book_holds", {
+  ...schoolColumns(),
+  bookId: uuid("book_id").notNull().references(() => books.id, { onDelete: "cascade" }),
+  studentId: uuid("student_id").references(() => students.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  status: text("status").$type<(typeof HOLD_STATUSES)[number]>().notNull().default("waiting"),
+  /** Last day the held copy is kept aside (set when ready). */
+  readyUntil: date("ready_until"),
+}, (t) => [
+  ...tenant(t, "book_holds"),
+  index("book_holds_book").on(t.schoolId, t.bookId, t.status),
+  // one live hold per member per title
+  uniqueIndex("book_holds_student_live").on(t.bookId, t.studentId).where(sql`${t.status} in ('waiting','ready') and ${t.studentId} is not null`),
+  uniqueIndex("book_holds_user_live").on(t.bookId, t.userId).where(sql`${t.status} in ('waiting','ready') and ${t.userId} is not null`),
 ]);

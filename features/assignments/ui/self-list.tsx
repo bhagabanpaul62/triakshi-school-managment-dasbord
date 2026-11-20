@@ -11,12 +11,11 @@ import { STATE_LABEL, STATE_TONE } from "./shared";
 
 const icon = (name: string) => <MenuIconView name={name} className="h-4 w-4" />;
 
-/** Student home (their own work) and parent home (one row per child): open work first, then missed, then handed in. */
+/** The student's own work: open work first, then missed, then handed in. */
 export async function SelfList({ ctx }: { ctx: Ctx }) {
   const rows = await new SelfService(ctx).mine();
   const now = new Date();
   const count = (...s: string[]) => rows.filter((r) => s.includes(r.state)).length;
-  const parent = ctx.role === "parent";
 
   const items = rows.map((r) => {
     const soon = r.state === "todo" && r.dueAt.getTime() - now.getTime() < 2 * 86_400_000;
@@ -26,7 +25,7 @@ export async function SelfList({ ctx }: { ctx: Ctx }) {
       id: `${r.assignmentId}-${r.studentId}`,
       open: r.state === "todo" || r.state === "returned" || r.state === "overdue",
       title: r.title,
-      subtitle: [r.subjectName, r.sectionLabel, parent ? r.studentName : null].filter(Boolean).join(" · "),
+      subtitle: [r.subjectName, r.sectionLabel].filter(Boolean).join(" · "),
       badge: <ToneBadge label={label} tone={soon ? "warning" : STATE_TONE[r.state]} />,
       meta: `Due ${shortDate(r.dueAt)}`,
       href: `/app/assignments/${r.assignmentId}`,
@@ -35,7 +34,7 @@ export async function SelfList({ ctx }: { ctx: Ctx }) {
 
   return (
     <>
-      <PageHeader eyebrow="Academics" title="Assignments" description={parent ? "Homework for your children, and how it is going." : "Your homework, nearest deadline first."} />
+      <PageHeader eyebrow="Academics" title="Assignments" description="Your homework, nearest deadline first." />
       <KpiRow>
         <StatCard label="To do" value={String(count("todo", "returned"))} icon={icon("assignment")} meta="open or sent back" />
         <StatCard label="Overdue" value={String(count("overdue"))} icon={icon("clock")} meta="nothing handed in" />
@@ -46,8 +45,8 @@ export async function SelfList({ ctx }: { ctx: Ctx }) {
         <Panel title="Assignments"><EntityList items={[]} empty={{ title: "No assignments yet.", description: "Homework from your teachers will show up here." }} /></Panel>
       ) : (
         <>
-          <Panel title={parent ? "Needs attention" : "To hand in"}>
-            <EntityList items={items.filter((i) => i.open)} maxItems={200} empty={{ title: "All caught up.", description: parent ? "Nothing is waiting on your children." : "Nothing is waiting on you right now." }} />
+          <Panel title="To hand in">
+            <EntityList items={items.filter((i) => i.open)} maxItems={200} empty={{ title: "All caught up.", description: "Nothing is waiting on you right now." }} />
           </Panel>
           {items.some((i) => !i.open) ? (
             <Panel title="Handed in and graded">

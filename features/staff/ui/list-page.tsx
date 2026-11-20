@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { Button } from "@smw/ui/ui/button";
 import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import { StatCard } from "@smw/ui/kit/StatCard";
@@ -14,9 +16,9 @@ import { ROLE_LABELS, ROLE_TONES, STATE_LABELS, STATE_TONES } from "./labels";
 
 export const metadata = { title: "Staff" };
 
-const columns: Column[] = [
+const columns = (roleLabels: Record<string, string>): Column[] => [
   { key: "name", label: "Staff", type: "person", metaKey: "employeeId" },
-  { key: "role", label: "Role", type: "badge", labels: ROLE_LABELS, tones: ROLE_TONES },
+  { key: "roleKey", label: "Role", type: "badge", labels: roleLabels, tones: ROLE_TONES },
   { key: "designation", label: "Designation", hideOnMobile: true },
   { key: "teaches", label: "Teaches", hideOnMobile: true },
   { key: "state", label: "Status", type: "badge", labels: STATE_LABELS, tones: STATE_TONES },
@@ -26,15 +28,17 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
   const ctx = await requireCtx();
   const svc = new StaffService(ctx);
   const canWrite = svc.can("write");
-  const [page, departments, counts, suggestedId] = await Promise.all([
-    svc.list(listQueryFrom(await searchParams)), svc.departments(), svc.counts(), canWrite ? svc.nextEmployeeId() : "",
+  const [page, departments, counts, suggestedId, roleOptions] = await Promise.all([
+    svc.list(listQueryFrom(await searchParams)), svc.departments(), svc.counts(), canWrite ? svc.nextEmployeeId() : "", svc.roleOptions(),
   ]);
-  const rows = page.rows.map((r) => ({ ...r, teaches: r.role === "teacher" ? r.subjects.join(", ") : "" }));
-  const create = <AddStaffModal suggestedId={suggestedId} />;
+  const roleLabels = { ...ROLE_LABELS, ...Object.fromEntries(roleOptions.map((o) => [o.value, o.label])) };
+  const rows = page.rows.map((r) => ({ ...r, roleKey: r.roleId ?? r.role, teaches: r.role === "teacher" ? r.subjects.join(", ") : "" }));
+  const create = <AddStaffModal suggestedId={suggestedId} roleOptions={roleOptions} />;
+  const header = <><Button asChild variant="secondary" className="rounded-full"><Link href="/app/staff/import">Import staff</Link></Button>{create}</>;
 
   return (
     <>
-      <PageHeader eyebrow="People" title="Staff" description="Teachers, accountants and admins of your school." actions={canWrite ? create : null} />
+      <PageHeader eyebrow="People" title="Staff" description="Teachers, accountants and admins of your school." actions={canWrite ? header : null} />
       <KpiRow>
         <StatCard label="Staff" value={String(counts.total)} href="/app/staff" icon={<MenuIconView name="teacher" className="h-4 w-4" />} meta="Active or invited" />
         <StatCard label="Teachers" value={String(counts.teachers)} href="/app/staff?role=teacher" icon={<MenuIconView name="class" className="h-4 w-4" />} />
@@ -42,7 +46,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         <StatCard label="Deactivated" value={String(counts.left)} href="/app/staff?status=left" icon={<MenuIconView name="shield" className="h-4 w-4" />} />
       </KpiRow>
       <DataTable
-        columns={columns}
+        columns={columns(roleLabels)}
         rows={rows}
         total={page.total}
         page={page.page}
@@ -50,7 +54,7 @@ export default async function StaffPage({ searchParams }: { searchParams: Promis
         rowHref="/app/staff/{id}"
         searchPlaceholder="Search name, ID, email or designation"
         filters={[
-          { key: "role", label: "Role", options: Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label })) },
+          { key: "role", label: "Role", options: roleOptions },
           ...(departments.length ? [{ key: "department", label: "Department", options: departments.map((d) => ({ value: d, label: d })) }] : []),
           { key: "status", label: "Status", options: Object.entries(STATE_LABELS).map(([value, label]) => ({ value, label })) },
         ]}

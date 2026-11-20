@@ -1,23 +1,24 @@
-import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { and, eq, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@smw/db";
 import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { services, UploadError, uploadKey } from "@smw/integrations";
+import { sections, sectionTeachers } from "@smw/feature-academics/schema";
 import studentsFeature from "./feature";
-import { guardians, studentGuardians, students } from "./schema";
+import { students } from "./schema";
 import type { UploadFile } from "./util";
 
 export type Perm = keyof typeof studentsFeature.permissions;
 export type Student = typeof students.$inferSelect;
 
 /**
- * Who may see which students. Staff (read) see all; a student sees only themselves and a parent only
- * their children (the "self" permission). Every service in this feature asks this one class.
+ * Who may see which students. Staff (read) see all; a student sees only themselves (the "self" permission).
+ * Every service in this feature asks this one class.
  */
 export class StudentAccess {
   constructor(private readonly ctx: Ctx) {}
 
-  /** A student or parent: limited to their own records. */
+  /** A student login: limited to its own record. */
   get isSelf() {
     const p = studentsFeature.permissions;
     return p.self.includes(this.ctx.role) && !p.read.includes(this.ctx.role);
@@ -29,13 +30,29 @@ export class StudentAccess {
   }
 
   /** WHERE clause on `students` that hides everyone the caller may not see (undefined = no limit). */
-  async scope(tx: Tx): Promise<SQL | undefined> {
+  async scope(_tx: Tx): Promise<SQL | undefined> {
     if (!this.isSelf) return undefined;
-    if (this.ctx.role === "student") return eq(students.userId, this.ctx.userId);
-    const mine = tx.select({ id: studentGuardians.studentId }).from(studentGuardians)
-      .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
-      .where(eq(guardians.userId, this.ctx.userId));
-    return inArray(students.id, mine);
+    return eq(students.userId, this.ctx.userId);
+  }
+
+  /**
+   * Sections whose medical notes and emergency contact the caller may read: a teacher's own (class teacher or subject teacher).
+   * `null` means no limit (admins, accountants and the student themselves keep their normal view).
+   */
+  async sensitiveSections(tx: Tx): Promise<Set<string> | null> {
+    if (this.ctx.role !== "teacher") return null;
+    const me = this.ctx.userId;
+    const [own, taught] = await Promise.all([
+      tx.select({ id: sections.id }).from(sections).where(eq(sections.classTeacherId, me)),
+      tx.select({ id: sectionTeachers.sectionId }).from(sectionTeachers).where(eq(sectionTeachers.teacherId, me)),
+    ]);
+    return new Set([...own, ...taught].map((r) => r.id));
+  }
+
+  /** Blank the private fields of students outside `allowed` (see sensitiveSections). */
+  static redact<T extends Student>(row: T, allowed: Set<string> | null): T {
+    if (!allowed || (row.sectionId && allowed.has(row.sectionId))) return row;
+    return { ...row, medicalNotes: null, emergencyName: null, emergencyPhone: null };
   }
 
   requireStaff() {

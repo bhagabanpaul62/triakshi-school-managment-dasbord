@@ -4,7 +4,8 @@ import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { Panel } from "@smw/ui/kit/Panel";
 import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { TimetableService } from "../service";
-import { autoFillSection, clearSlot, setSlot } from "./actions";
+import { FormModal } from "@smw/ui/shell/FormModal";
+import { autoFillSection, clearSlot, copyWeek, setBlock, setSlot } from "./actions";
 import { LinkButton } from "./LinkButton";
 import { NavSelect } from "./NavSelect";
 import { orNotFound } from "./guard";
@@ -16,7 +17,7 @@ export const metadata = { title: "Timetable" };
 const HOME = "/app/timetable";
 const sectionHref = (id: string) => `${HOME}?section=${id}`;
 
-/** /app/timetable: teachers open on "My timetable"; the admin picks a section and edits; students and parents see their section. */
+/** /app/timetable: teachers open on "My timetable"; the admin picks a section and edits; students see their section. */
 export default async function TimetablePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const svc = new TimetableService(ctx);
@@ -58,6 +59,19 @@ export default async function TimetablePage({ searchParams }: { searchParams: Pr
           {choices.length > 1 ? <NavSelect label="Show timetable of" value={mine ? HOME : sectionHref(sectionId!)} options={choices} /> : null}
           {canManage ? <NavSelect label="Teacher timetable" value="" placeholder="Teacher timetable" options={teachers.map((t) => ({ href: `${HOME}/teachers/${t.id}`, label: t.name }))} /> : null}
           {canManage ? <LinkButton href={`${HOME}/periods`}>Bell schedule</LinkButton> : null}
+          {canManage ? <LinkButton href={`${HOME}/generator`}>Generator</LinkButton> : null}
+          {canManage ? <LinkButton href={`${HOME}/substitutions`}>Substitutions</LinkButton> : null}
+          {canManage ? <LinkButton href={`${HOME}/special-days`}>Special days</LinkButton> : null}
+          {!mine && sectionId && timetable.periods.length ? <LinkButton file href={`${HOME}/sections/${sectionId}/print`}>Print</LinkButton> : null}
+          {mine && timetable.periods.length ? <LinkButton file href={`${HOME}/teachers/${ctx.userId}/print`}>Print</LinkButton> : null}
+          {canManage && sectionId && sections.length > 1 && timetable.periods.length ? (
+            <FormModal title="Copy this week to another section" icon="clock" action={copyWeek} submitLabel="Copy" hidden={{ fromSectionId: sectionId }}
+              trigger={{ label: "Copy week", variant: "secondary" }}
+              fields={[
+                { name: "toSectionId", label: "Copy to", type: "select", required: true, hint: "Only sections of the same class can be copied to", options: sections.filter((s) => s.id !== sectionId).map((s) => ({ value: s.id, label: s.label })) },
+                { name: "replace", label: "Existing periods", type: "checkbox", placeholder: "Replace the target's periods (pinned ones stay)" },
+              ]} />
+          ) : null}
           {canManage && sectionId && timetable.periods.length ? <ActionButton action={autoFillSection} values={{ sectionId }} label="Auto-fill empty periods" successMessage="Empty periods filled"
             confirm={{ title: "Auto-fill empty periods?", body: "Fills every empty period from this section's subject teachers, skipping teachers who are busy. Periods you already planned stay as they are.", confirmLabel: "Auto-fill" }} /> : null}
         </>} />
@@ -69,7 +83,7 @@ export default async function TimetablePage({ searchParams }: { searchParams: Pr
           </Panel>
         ) : undefined}
         after={load ? <TeacherLoadPanel load={load} /> : undefined}
-        editor={options && sectionId ? { sectionId, options, setSlot, clearSlot } : undefined} />
+        editor={options && sectionId ? { sectionId, options, setSlot, clearSlot, setBlock } : undefined} />
     </>
   );
 }

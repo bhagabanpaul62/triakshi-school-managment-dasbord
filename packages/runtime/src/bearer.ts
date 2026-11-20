@@ -45,14 +45,18 @@ export async function schoolFromRequest(req: Request): Promise<ApiSchool> {
 }
 
 /** Ctx plus the school and session behind a valid bearer token. A token from another school never validates on this host. */
-export async function bearerSession(req: Request): Promise<ApiSession> {
+export async function bearerSession(req: Request, opts: { allowMustChange?: boolean } = {}): Promise<ApiSession> {
   const token = bearerToken(req);
   if (!token) throw new UnauthenticatedError();
   const school = await schoolFromRequest(req);
   const session = await new SchoolAuth(school.id).validate(token);
   if (!session || session.user.schoolId !== school.id) throw new UnauthenticatedError();
+  // Same gate as the panel: a default or temporary password must be replaced first (POST /api/v1/auth/change-password).
+  if (session.user.mustChangePassword && !session.supportStaffId && !opts.allowMustChange) {
+    throw new AppError("Choose a new password first.", "password_change_required", 403);
+  }
   const ctx: Ctx = {
-    schoolId: school.id, userId: session.user.id, role: session.user.role, name: session.user.name,
+    schoolId: school.id, userId: session.user.id, role: session.user.role, name: session.user.name, grants: session.user.grants,
     features: school.features, readOnly: school.readOnly || session.readOnly,
     requestId: req.headers.get(REQUEST_ID_HEADER) ?? undefined, ip: clientIp(req), supportStaffId: session.supportStaffId,
   };

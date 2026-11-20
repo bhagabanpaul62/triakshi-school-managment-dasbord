@@ -1,0 +1,1 @@
+ALTER TABLE "tt_versions" ADD COLUMN "publish_on" date;

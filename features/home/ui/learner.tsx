@@ -5,7 +5,7 @@ import { paise } from "@smw/ui/format";
 import type { LearnerPanels } from "../home-service";
 import { plural } from "../rules";
 
-/** KPI cards both the student and the parent home show, in the order a family checks them. Each drops out with its module. */
+/** KPI cards of the student home, in the order a family checks them. Each drops out with its module. */
 export function learnerKpis(p: LearnerPanels, studentId: string | null): ReactNode[] {
   const out: ReactNode[] = [];
   if (p.attendance.state === "ok") {

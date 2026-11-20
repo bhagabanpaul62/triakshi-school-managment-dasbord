@@ -1,20 +1,23 @@
+import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { LeaveService } from "../leave-service";
+import { ApplyLeave } from "./apply-leave";
 import { PageHeader, KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { Panel, ArrowButton } from "@smw/ui/kit/Panel";
 import { StatCard } from "@smw/ui/kit/StatCard";
-import { TrendArea } from "@smw/ui/kit/TrendArea";
+import { AttendanceTrend } from "./attendance-trend";
 import { TickBar } from "@smw/ui/kit/TickBar";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { shortDate } from "@smw/ui/format";
 import { ATTENDANCE_STATUSES } from "../constants";
-import { StaffAttendanceService, StudentAttendanceService } from "../service";
+import { PeriodAttendanceService } from "../period-service";
 import { addDays, isDate, isSunday, todayIST } from "../stats";
 import { markStudentAttendance } from "./actions";
 import { AttendanceGrid } from "./AttendanceGrid";
 import { AttendanceNav } from "./nav";
 import { QueryPicker } from "./QueryPicker";
 import { SelfView } from "./self-view";
-import { attendanceNav } from "./pages";
+import { attendanceNavFor } from "./pages";
 
 export const metadata = { title: "Attendance" };
 
@@ -23,17 +26,18 @@ const pctText = (p: number | null) => (p === null ? "-" : `${p}%`);
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const dayName = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", timeZone: "UTC" });
 
-/** /app/attendance: staff mark a section for a day; students and parents see their own record. */
+/** /app/attendance: staff mark a section for a day; students see their own record. */
 export default async function AttendancePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
-  const svc = new StudentAttendanceService(ctx);
+  const svc = new PeriodAttendanceService(ctx);
   const sp = await searchParams;
 
   if (svc.can("self")) {
     const month = [one(sp.month)].find((m): m is string => !!m && MONTH.test(m) && m <= todayIST().slice(0, 7));
     return (
       <>
-        <PageHeader eyebrow="Academics" title="Attendance" description="Your attendance this school year." />
+        <PageHeader eyebrow="Academics" title="Attendance" description="Your attendance this school year."
+          actions={svc.can("leave") ? <span className="inline-flex items-center gap-3"><Link href="/app/attendance/my-leave" className="text-sm text-[var(--ds-primary)] underline">My leave</Link><ApplyLeave kids={await new LeaveService(ctx).applicants()} /></span> : undefined} />
         <SelfView ctx={ctx} month={month ?? todayIST().slice(0, 7)} />
       </>
     );
@@ -44,12 +48,24 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   const asked = one(sp.date);
   const date = asked && isDate(asked) && asked <= today ? asked : today;
   const clamped = !!asked && isDate(asked) && asked > today;
+  // In period mode a teacher marks from My classes; the daily sheet stays with the office.
+  if (isTeacher && (await svc.mode()) === "period") {
+    return (
+      <>
+        <PageHeader eyebrow="Academics" title="Attendance" description="Attendance here is taken period by period." actions={<AttendanceNav items={attendanceNavFor(ctx)} active="/app/attendance" />} />
+        <Panel>
+          <WidgetEmptyState title="Mark from My classes." description="Open My classes to mark the periods you teach or cover today. The day's attendance is worked out from them." />
+          <p className="mt-3 text-center"><Link href="/app/attendance/periods" className="text-sm text-[var(--ds-primary)] underline">Open My classes</Link></p>
+        </Panel>
+      </>
+    );
+  }
   const sections = await svc.sectionOptions();
   const progress = isTeacher ? [] : await svc.sectionProgress(date);
   // Default: a teacher's own class; for the office, the first section that is still unmarked.
   const fallback = sections.find((s) => s.own)?.id ?? progress.find((p) => p.marked < p.students)?.id ?? sections[0]?.id;
   const sectionId = sections.find((s) => s.id === one(sp.sectionId))?.id ?? fallback;
-  const nav = attendanceNav(svc.can("read"), new StaffAttendanceService(ctx).can("manage"));
+  const nav = attendanceNavFor(ctx);
   const pending = progress.filter((p) => p.marked < p.students);
 
   const [summary, trend, sheet] = await Promise.all([
@@ -126,7 +142,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
               <Panel title="Attendance, last 30 days">
                 {trend.length < 2
                   ? <WidgetEmptyState title="Not enough days yet." description="The trend appears after two marked days." />
-                  : <TrendArea data={trend.map((p) => ({ label: shortDate(p.date), pct: p.pct }))} xKey="label" series={[{ key: "pct", label: "Present %", accent: true }]} format={(v) => `${v}%`} />}
+                  : <AttendanceTrend data={trend.map((p) => ({ label: shortDate(p.date), pct: p.pct }))} />}
               </Panel>
             </div>
           </PanelGrid>

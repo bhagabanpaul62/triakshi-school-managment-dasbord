@@ -33,7 +33,12 @@ export default async function StudentResultPage({ params }: { params: Promise<{ 
         title={r.student.name}
         chips={<><ToneBadge label={RESULT_LABEL[r.result]} tone={RESULT_TONE[r.result]} />{r.grade ? <ToneBadge label={`Grade ${r.grade}`} /> : null}</>}
         meta={[exam.name, `${r.student.className}-${r.student.sectionName}`, `Admission no ${r.student.admissionNo}`]}
-        actions={<Button asChild className="rounded-full"><a href={`/app/results/${exam.id}/${r.student.id}/report-card`} download>Download report card</a></Button>}
+        actions={(
+          <>
+            <Button asChild className="rounded-full"><a href={`/app/results/${exam.id}/${r.student.id}/report-card`} download>Download report card</a></Button>
+            {exam.termId ? <Button asChild variant="secondary" className="rounded-full"><a href={`/app/results/term/${exam.termId}/${r.student.id}/report-card`} download>Download term report card</a></Button> : null}
+          </>
+        )}
         className="pb-8"
       />
       <KpiRow>

@@ -44,6 +44,26 @@ export class PdfBuilder {
     return this;
   }
 
+  /** Current flow position (PDF coordinates, distance from the page bottom). */
+  get cursor() { return this.y; }
+
+  /** Draw a PNG or JPEG with its top edge at `top` (PDF coordinates). Does not move the cursor. False if the bytes are not a readable image; never throws. */
+  async image(bytes: Uint8Array, r: { x: number; top: number; w: number; h: number }) {
+    try {
+      const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+      const img = await (png ? this.doc.embedPng(bytes) : this.doc.embedJpg(bytes));
+      this.page.drawImage(img, { x: r.x, y: r.top - r.h, width: r.w, height: r.h });
+      return true;
+    } catch { return false; }
+  }
+
+  /** An outlined box with an optional small centred label; top edge at `top`. */
+  box(r: { x: number; top: number; w: number; h: number }, label?: string) {
+    this.page.drawRectangle({ x: r.x, y: r.top - r.h, width: r.w, height: r.h, borderColor: rgb(0.7, 0.7, 0.74), borderWidth: 0.5 });
+    if (label) { const w = this.font.widthOfTextAtSize(this.clean(label), 7); this.page.drawText(this.clean(label), { x: r.x + (r.w - w) / 2, y: r.top - r.h / 2, size: 7, font: this.font, color: rgb(0.5, 0.5, 0.55) }); }
+    return this;
+  }
+
   space(h = 10) { this.y -= h; return this; }
 
   rule() {

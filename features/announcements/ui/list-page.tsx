@@ -13,7 +13,7 @@ import { announcementFields } from "./fields";
 
 export const metadata = { title: "Announcements" };
 
-const AUDIENCE: Record<string, string> = { all: "Everyone", staff: "Staff", students: "Students", parents: "Parents", class: "One class" };
+const AUDIENCE: Record<string, string> = { all: "Everyone", staff: "Staff", students: "Students", parents: "Families", class: "One class" };
 
 const columns: Column[] = [
   { key: "title", label: "Title" },
@@ -37,7 +37,7 @@ export default async function AnnouncementsPage({ searchParams }: { searchParams
 
   const header = <PageHeader eyebrow="Communication" title="Announcements" description={canWrite ? "Notices for your school, a group or one class." : "Notices from your school."} actions={canWrite ? compose : null} />;
 
-  // Students and parents read a feed (pinned first); staff manage a table.
+  // Students read a feed (pinned first); staff manage a table.
   if (!canWrite) {
     const rows = [...page.rows].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.publishedAt.getTime() - a.publishedAt.getTime());
     return (
@@ -77,7 +77,7 @@ export default async function AnnouncementsPage({ searchParams }: { searchParams
           pageCount={page.pageCount}
           searchPlaceholder="Search announcements"
           filters={[{ key: "audience", label: "Sent to", options: Object.entries(AUDIENCE).map(([value, label]) => ({ value, label })) }]}
-          empty={{ title: "No announcements yet.", description: "Post one to reach parents, students or staff.", action: compose }}
+          empty={{ title: "No announcements yet.", description: "Post one to reach families, students or staff.", action: compose }}
           rowActions={Object.fromEntries(rows.map((r) => [r.id, (
             <span key={r.id} className="inline-flex items-center gap-1">
               <FormModal title="Edit announcement" icon="megaphone" fields={fields} values={r} hidden={{ id: r.id }} action={updateAnnouncement}

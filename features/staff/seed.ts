@@ -2,6 +2,7 @@ import { Passwords } from "@smw/auth";
 import { eq, schools, users, withSchool } from "@smw/db";
 import type { FeatureSeed } from "@smw/feature-kit";
 import { sections, sectionTeachers, subjects as subjectsTable, classSubjects } from "@smw/feature-academics/schema";
+import { staffProfiles } from "./schema";
 import { StaffService } from "./service";
 
 /** [name, designation, department, qualification, gender, joined] */
@@ -46,7 +47,11 @@ const seed: FeatureSeed = async (ctx, state) => {
   // The documented demo login `teacher` (created by the app seed) must own a class, or the first thing a demo
   // teacher opens, Attendance, says "No sections to mark". Put it first so it gets section 1 and subject turns.
   const [demo] = await withSchool(ctx.schoolId, (tx) => tx.select({ id: users.id, name: users.name }).from(users).where(eq(users.loginId, "teacher")).limit(1));
-  if (demo) teachers.unshift({ userId: demo.id, name: demo.name });
+  if (demo) {
+    teachers.unshift({ userId: demo.id, name: demo.name });
+    // ...and appear in the Staff directory with a record of their own, like every other teacher.
+    await withSchool(ctx.schoolId, (tx) => tx.insert(staffProfiles).values({ schoolId: ctx.schoolId, userId: demo.id, employeeId: "T000", designation: "TGT", department: "English" }).onConflictDoNothing());
+  }
   state.teachers = teachers;
 
   const secs = (state.sections ?? []) as { id: string; classId: string; name: string }[];

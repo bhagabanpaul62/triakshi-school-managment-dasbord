@@ -1,6 +1,8 @@
 import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import Link from "next/link";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
+import { Button } from "@smw/ui/ui/button";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
@@ -37,7 +39,11 @@ export default async function ExamsPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHeader eyebrow="Academics" title="Exams" description="Create an exam, collect marks paper by paper, then publish results." actions={create} />
+      <PageHeader eyebrow="Academics" title="Exams" description="Create an exam, collect marks paper by paper, then publish results." actions={<>
+        {canManage ? <Button asChild variant="secondary" className="rounded-full"><Link href="/app/exams/weights">Term weights</Link></Button> : null}
+        {canManage ? <Button asChild variant="secondary" className="rounded-full"><Link href="/app/exams/scales">Report setup</Link></Button> : null}
+        {create}
+      </>} />
       <DataTable
         columns={columns}
         rows={page.rows}

@@ -3,7 +3,7 @@ import { apiHandler, bearerSession, bearerToken } from "@smw/runtime/bearer";
 
 /** POST /api/v1/auth/logout: ends the session behind the bearer token. */
 export const POST = apiHandler(async (req) => {
-  const { school } = await bearerSession(req);
+  const { school } = await bearerSession(req, { allowMustChange: true });
   await new SchoolAuth(school.id).logout(bearerToken(req));
   return { ok: true };
 });

@@ -9,9 +9,9 @@ import { notFound, redirect } from "next/navigation";
 import { SchoolAuth, type ValidSession } from "@smw/auth";
 import { secureCookies } from "@smw/config";
 import { eq, modules, planModules, schoolModuleOverrides, schools, withSchool } from "@smw/db";
-import { resolveEntitlements, UnauthenticatedError, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, resolveEntitlements, UnauthenticatedError, type Ctx } from "@smw/feature-kit";
 import { themeOf, type Theme } from "@smw/themes";
-import { REQUEST_ID_HEADER, resolveSchoolByHost } from "./host";
+import { REQUEST_ID_HEADER, requestHost, resolveSchoolByHost } from "./host";
 import { runAction } from "./action";
 
 export const SESSION_COOKIE = "smw_session";
@@ -33,7 +33,8 @@ export interface CurrentSchool {
 
 /** The school for this request's Host (subdomain or verified custom domain), with theme and modules. 404 when no school uses the host. */
 export const getSchool = cache(async (): Promise<CurrentSchool> => {
-  const hit = await resolveSchoolByHost((await headers()).get("host") ?? "");
+  const h = await headers();
+  const hit = await resolveSchoolByHost(requestHost(h));
   if (!hit) notFound();
   const id = hit.id;
   return withSchool(id, async (tx) => {
@@ -66,29 +67,38 @@ export const getSession = cache(async (): Promise<ValidSession | null> => {
   return s && s.user.schoolId === school.id ? s : null;
 });
 
-async function buildCtx(): Promise<Ctx | null> {
+async function buildCtx(): Promise<{ ctx: Ctx; mustChange: boolean } | null> {
   const [school, session, h] = await Promise.all([getSchool(), getSession(), headers()]);
   if (!session) return null;
   return {
-    schoolId: school.id, userId: session.user.id, role: session.user.role, name: session.user.name,
-    features: school.features, readOnly: school.readOnly || session.readOnly,
-    requestId: h.get(REQUEST_ID_HEADER) ?? undefined, ip: h.get("x-forwarded-for")?.split(",")[0]?.trim(),
-    supportStaffId: session.supportStaffId,
+    // Support sessions never get stuck behind the school user's password change.
+    mustChange: session.user.mustChangePassword && !session.supportStaffId,
+    ctx: {
+      schoolId: school.id, userId: session.user.id, role: session.user.role, name: session.user.name, grants: session.user.grants,
+      features: school.features, readOnly: school.readOnly || session.readOnly,
+      requestId: h.get(REQUEST_ID_HEADER) ?? undefined, ip: h.get("x-forwarded-for")?.split(",")[0]?.trim(),
+      supportStaffId: session.supportStaffId,
+    },
   };
 }
 
-/** Ctx for pages: redirects to /login when signed out. */
+/** Ctx for pages: redirects to /login when signed out, and to /app/change-password while a default or temporary password is in use. */
 export const requireCtx = cache(async (): Promise<Ctx> => {
-  const ctx = await buildCtx();
-  if (!ctx) redirect("/login");
-  return ctx;
+  const r = await buildCtx();
+  if (!r) redirect("/login");
+  if (r.mustChange) redirect("/app/change-password");
+  return r.ctx;
 });
 
-/** Ctx for server actions and API routes: throws UnauthenticatedError instead of redirecting. */
+/**
+ * Ctx for server actions and API routes: throws instead of redirecting. Layouts do not run for action POSTs, so the
+ * must-change gate lives here too. The change-password and logout actions read the session directly and stay usable.
+ */
 export async function actionCtx(): Promise<Ctx> {
-  const ctx = await buildCtx();
-  if (!ctx) throw new UnauthenticatedError();
-  return ctx;
+  const r = await buildCtx();
+  if (!r) throw new UnauthenticatedError();
+  if (r.mustChange) throw new ForbiddenError("Choose a new password first.");
+  return r.ctx;
 }
 
 /** Host-only cookie: never sets Domain, so a session cannot leak to another school's subdomain. */

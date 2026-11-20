@@ -7,5 +7,5 @@ export default defineFeature({
   description: "A home page for each role that answers what is happening today and what to do next.",
   stage: "ga",
   core: true,
-  permissions: { view: ["admin", "accountant", "teacher", "student", "parent"] },
+  permissions: { view: ["admin", "accountant", "teacher", "student", "staff"] },
 });

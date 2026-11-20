@@ -38,7 +38,7 @@ export function buildOpenApi(origin: string) {
       "/me": get("Who am I", "Me", ref("Me")),
       "/announcements": get("Announcements for my role", "School", page("Announcement"), { parameters: listParams }),
       "/timetable/today": get("Today's periods", "School", { type: "object", properties: { day: { type: ["integer", "null"], description: "1 = Monday ... 6 = Saturday; null on Sunday" }, rows: { type: "array", items: loose } } }),
-      "/attendance/summary": get("Attendance summary per child (students, parents) or today's school summary (staff)", "School", loose, {
+      "/attendance/summary": get("Attendance summary of the signed-in student, or today's school summary (staff)", "School", loose, {
         parameters: [{ name: "from", in: "query", schema: { type: "string", format: "date" } }, { name: "to", in: "query", schema: { type: "string", format: "date" } }], codes: [422] }),
       "/fees/dues": get("Fee dues in paise", "School", loose, { parameters: listParams }),
       "/results": get("Published exam results", "School", { type: "object", properties: { results: { type: "array", items: loose } } }),
@@ -49,7 +49,7 @@ export function buildOpenApi(origin: string) {
       securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", description: "The `token` from POST /auth/login" } },
       schemas: {
         Error: { type: "object", required: ["error"], properties: { error: { type: "object", required: ["code", "message"], properties: { code: { type: "string" }, message: { type: "string" }, fieldErrors: { type: "object", additionalProperties: { type: "string" } } } } } },
-        User: { type: "object", properties: { id: { type: "string", format: "uuid" }, name: { type: "string" }, role: { enum: ["admin", "accountant", "teacher", "student", "parent"] }, email: { type: ["string", "null"] }, avatarUrl: { type: ["string", "null"] } } },
+        User: { type: "object", properties: { id: { type: "string", format: "uuid" }, name: { type: "string" }, role: { enum: ["admin", "accountant", "teacher", "student", "staff"] }, email: { type: ["string", "null"] }, avatarUrl: { type: ["string", "null"] } } },
         LoginResponse: { type: "object", required: ["token", "expiresAt", "user"], properties: { token: { type: "string" }, expiresAt: { type: "string", format: "date-time" }, user: ref("User") } },
         Me: { type: "object", properties: { user: ref("User"), school: { type: "object", properties: { id: { type: "string" }, slug: { type: "string" }, name: { type: "string" } } }, features: { type: "array", items: { type: "string" } }, readOnly: { type: "boolean" }, expiresAt: { type: "string", format: "date-time" } } },
         Announcement: { type: "object", properties: { id: { type: "string" }, title: { type: "string" }, body: { type: "string" }, audience: { enum: ["all", "staff", "students", "parents", "class"] }, pinned: { type: "boolean" }, publishedAt: { type: "string", format: "date-time" } } },

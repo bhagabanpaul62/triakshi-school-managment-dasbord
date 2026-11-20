@@ -556,6 +556,12 @@ importers:
       '@smw/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@smw/feature-assignments':
+        specifier: workspace:*
+        version: link:../../features/assignments
+      '@smw/feature-attendance':
+        specifier: workspace:*
+        version: link:../../features/attendance
       '@smw/feature-billing':
         specifier: workspace:*
         version: link:../../features/billing
@@ -568,9 +574,18 @@ importers:
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-library':
+        specifier: workspace:*
+        version: link:../../features/library
       '@smw/feature-notifications':
         specifier: workspace:*
         version: link:../../features/notifications
+      '@smw/feature-timetable':
+        specifier: workspace:*
+        version: link:../../features/timetable
+      '@smw/feature-transport':
+        specifier: workspace:*
+        version: link:../../features/transport
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -731,9 +746,15 @@ importers:
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/feature-students':
         specifier: workspace:*
         version: link:../students
+      '@smw/feature-timetable':
+        specifier: workspace:*
+        version: link:../timetable
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -749,6 +770,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(pg@8.23.1)(postgres@4.1.1)
+      pdf-lib:
+        specifier: ^1.17.1
+        version: 1.17.1
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -1131,9 +1155,15 @@ importers:
       '@smw/feature-academics':
         specifier: workspace:*
         version: link:../academics
+      '@smw/feature-fees':
+        specifier: workspace:*
+        version: link:../fees
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/feature-students':
         specifier: workspace:*
         version: link:../students
@@ -1596,9 +1626,15 @@ importers:
       '@smw/feature-academics':
         specifier: workspace:*
         version: link:../academics
+      '@smw/feature-fees':
+        specifier: workspace:*
+        version: link:../fees
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/feature-students':
         specifier: workspace:*
         version: link:../students
@@ -1816,13 +1852,22 @@ importers:
       nodemailer:
         specifier: ^10.6.0
         version: 10.6.0
+      papaparse:
+        specifier: 5.7.1
+        version: 5.7.1
       pdf-lib:
         specifier: ^1.17.1
         version: 1.17.1
+      read-excel-file:
+        specifier: 9.3.14
+        version: 9.3.14
     devDependencies:
       '@types/nodemailer':
         specifier: ^8.0.2
         version: 8.0.2
+      '@types/papaparse':
+        specifier: 5.3.16
+        version: 5.3.16
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -3507,6 +3552,9 @@ packages:
   '@types/nodemailer@8.0.2':
     resolution: {integrity: sha512-c7M5ox8p0nEOfbJ2E9Qcmt8/QCu/VzsiAhzBiZbvky2PhKZDHpKB3sQHBM5MEZNkCfBOaS6S9//AGPRTNB7IaA==}
 
+  '@types/papaparse@5.3.16':
+    resolution: {integrity: sha512-T3VuKMC2H0lgsjI9buTB3uuKj3EMD2eap1MOuEQuBQ44EnDx/IkGhU6EwiTf9zG3za4SKlmwKAImdDKdNnCsXg==}
+
   '@types/papaparse@5.5.2':
     resolution: {integrity: sha512-gFnFp/JMzLHCwRf7tQHrNnfhN4eYBVYYI897CGX4MY1tzY9l2aLkVyx2IlKZ/SAqDbB3I1AOZW5gTMGGsqWliA==}
 
@@ -4024,6 +4072,9 @@ packages:
       picomatch:
         optional: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   file-entry-cache@11.1.5:
     resolution: {integrity: sha512-+PFTHITI08JIGhnNpGNI8T8inUpgZfk3GNEqfT9R2zZV2iFXg3CvqzSl/uEhs7TSGujYRELEANyDvS8Fj7+S7Q==}
 
@@ -4318,6 +4369,9 @@ packages:
       sass:
         optional: true
 
+  node-int64@0.4.0:
+    resolution: {integrity: sha512-O5lz91xSOeoXP6DulyHfllpq+Eg00MWitZIbtPfoSEvqIHdl5gfcY6hYzDWnj0qD5tz52PI08u9qUvSVeUBeHw==}
+
   node-releases@2.0.51:
     resolution: {integrity: sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ==}
     engines: {node: '>=18'}
@@ -4549,6 +4603,10 @@ packages:
     resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
     engines: {node: '>=0.10.0'}
 
+  read-excel-file@9.3.14:
+    resolution: {integrity: sha512-rfEpNMthm/REIpSCLnGTrQD5aW+U9rrhFuGYF+XRO8Soz+7b+rAOW1z2vJbNiEINbFPbjRW16vz0KnX41Si9qw==}
+    engines: {node: '>=18'}
+
   real-require@1.0.0:
     resolution: {integrity: sha512-P4nbQYQfePJxRSmY+v/KINxVucm4NF3p3s7pJveMTtom52FR4YGltUQLB8idDXwDDWW+eYrWDFbuzUnjoWHF7g==}
 
@@ -4596,6 +4654,10 @@ packages:
   safe-stable-stringify@2.5.0:
     resolution: {integrity: sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA==}
     engines: {node: '>=10'}
+
+  saxen@11.2.0:
+    resolution: {integrity: sha512-2bG564AAJcm/3vyZC0Uhs/mACrH+4AHMaKHKAB2M5xMqomUZa27FQ7MYaQGFKVcJk/MVzSEQ34A8QZWW+eiWEw==}
+    engines: {node: '>= 20.12'}
 
   scheduler@0.28.0:
     resolution: {integrity: sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw==}
@@ -4755,6 +4817,10 @@ packages:
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
+  unzipper-esm@0.13.3:
+    resolution: {integrity: sha512-LUO6VZ6fCzkDbdMev0/fOhoIeVGKaOkTIOoYxVLE0SQjfvmAHK+oywl7lfhloSZIsdGJ25mJ18Mtd9CyTASjrA==}
+    engines: {node: '>=8.0.0'}
+
   update-browserslist-db@1.2.3:
     resolution: {integrity: sha512-Js0m9cx+qOgDxo0eMiFGEueWztz+d4+M3rGlmKPT+T4IS/jP4ylw3Nwpu6cpTTP8R1MAC1kF4VbdLt3ARf209w==}
     hasBin: true
@@ -4889,6 +4955,10 @@ packages:
   word-wrap@1.2.5:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
+
+  worker-f@0.1.25:
+    resolution: {integrity: sha512-H0JI9LVt7/5He3fR81CrPAOPqKcL/++Ah0C64C9/E9vyj2cLgUta7KT/fidjyGbKm5lqhESt+KCglLlcqNDW9Q==}
+    engines: {node: '>=12'}
 
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
@@ -6121,6 +6191,10 @@ snapshots:
     dependencies:
       '@types/node': 26.6.6
 
+  '@types/papaparse@5.3.16':
+    dependencies:
+      '@types/node': 26.6.6
+
   '@types/papaparse@5.5.2':
     dependencies:
       '@types/node': 26.1.1
@@ -6627,6 +6701,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.7
 
+  fflate@0.8.3: {}
+
   file-entry-cache@11.1.5:
     dependencies:
       flat-cache: 6.1.23
@@ -6884,6 +6960,8 @@ snapshots:
       - '@types/node'
       - babel-plugin-macros
 
+  node-int64@0.4.0: {}
+
   node-releases@2.0.51: {}
 
   nodemailer@10.6.0: {}
@@ -7096,6 +7174,13 @@ snapshots:
 
   react@19.3.1: {}
 
+  read-excel-file@9.3.14:
+    dependencies:
+      fflate: 0.8.3
+      saxen: 11.2.0
+      unzipper-esm: 0.13.3
+      worker-f: 0.1.25
+
   real-require@1.0.0: {}
 
   recharts@3.11.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react-is@16.13.1)(react@19.3.1)(redux@5.0.1):
@@ -7162,6 +7247,8 @@ snapshots:
       queue-microtask: 1.2.3
 
   safe-stable-stringify@2.5.0: {}
+
+  saxen@11.2.0: {}
 
   scheduler@0.28.0: {}
 
@@ -7352,6 +7439,11 @@ snapshots:
 
   undici-types@8.9.0: {}
 
+  unzipper-esm@0.13.3:
+    dependencies:
+      graceful-fs: 4.2.12
+      node-int64: 0.4.0
+
   update-browserslist-db@1.2.3(browserslist@4.28.5):
     dependencies:
       browserslist: 4.28.5
@@ -7441,6 +7533,8 @@ snapshots:
   why-is-node-running@3.2.1: {}
 
   word-wrap@1.2.5: {}
+
+  worker-f@0.1.25: {}
 
   xtend@4.0.2: {}
 

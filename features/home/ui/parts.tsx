@@ -11,7 +11,7 @@ import type { Announcement } from "@smw/feature-announcements/service";
 import type { SchoolEvent } from "@smw/feature-events/service";
 import type { DueRow } from "@smw/feature-fees/service";
 import { attendanceTone, clock12 } from "../rules";
-import type { Absence, AssignmentsDue, AttendanceMonth, LatestResult, TodayTimetable } from "../home-service";
+import type { AssignmentsDue, AttendanceMonth, LatestResult, TodayTimetable } from "../home-service";
 
 const LINK = "text-sm text-[var(--ds-color-primary-300)] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]";
 
@@ -90,28 +90,6 @@ export function MonthGauge({ a }: { a: AttendanceMonth }) {
         <Fact label="On leave">{String(a.leave)}</Fact>
       </FactList>
     </>
-  );
-}
-
-const ABSENCE: Record<Absence["status"], { label: string; tone: "danger" | "warning" | "info" }> = {
-  absent: { label: "Absent", tone: "danger" }, late: { label: "Late", tone: "warning" }, leave: { label: "On leave", tone: "info" },
-  half_day: { label: "Half day", tone: "warning" }, present: { label: "Present", tone: "info" },
-};
-
-export function AbsencesList({ rows }: { rows: Absence[] }) {
-  if (rows.length === 0) return null;
-  return (
-    <div className="mt-4">
-      <p className="mb-1 text-xs text-[var(--ds-on-surface-muted)]">Recent absences and late days</p>
-      <ul className="flex flex-col">
-        {rows.map((r) => (
-          <li key={r.date} className="flex items-center justify-between gap-3 rounded-xl px-2 py-2 hover:bg-white/[0.03]">
-            <span className="text-sm">{shortDate(r.date)}</span>
-            <ToneBadge label={ABSENCE[r.status].label} tone={ABSENCE[r.status].tone} />
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

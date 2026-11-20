@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SchoolAuth, LoginError } from "@smw/auth";
-import { closeDb, eq, sessions, users, withSchool } from "@smw/db";
+import { closeDb, eq, schoolRoles, sessions, users, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sections, sectionTeachers, subjects } from "@smw/feature-academics/schema";
@@ -118,12 +118,16 @@ describe("StaffService", () => {
     expect(u).toMatchObject({ name: "Renamed Person", phone: "9876500002", department: "Maths", address: "12 MG Road, Pune", designation: null });
   });
 
-  it("changing the email moves the login with it", async () => {
+  it("changing the email moves the login with it and clears the verified mark", async () => {
     const svc = new StaffService(a.as.admin);
     const s = await svc.create(person({ email: "old.mail@a.test" }));
+    await withSchool(a.id, (tx) => tx.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, s.id)));
+    // same email (different case) keeps the verified mark; a new email drops it
+    await svc.update(s.id, { name: "Same Mail", employeeId: s.employeeId, email: "Old.Mail@a.test" });
+    expect((await withSchool(a.id, (tx) => tx.select().from(users).where(eq(users.id, s.id))))[0]!.emailVerifiedAt).toBeInstanceOf(Date);
     await svc.update(s.id, { name: s.name, employeeId: s.employeeId, email: "new.mail@a.test" });
     const [u] = await withSchool(a.id, (tx) => tx.select().from(users).where(eq(users.id, s.id)));
-    expect(u).toMatchObject({ email: "new.mail@a.test", loginId: "new.mail@a.test" });
+    expect(u).toMatchObject({ email: "new.mail@a.test", loginId: "new.mail@a.test", emailVerifiedAt: null });
   });
 
   it("lists with search, role, department and status filters", async () => {
@@ -217,5 +221,63 @@ describe("StaffService", () => {
     await expect(bSvc.resendInvite(x.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(bSvc.deactivate(x.id)).rejects.toBeInstanceOf(NotFoundError);
     expect((await new StaffService(a.as.admin).get(x.id)).name).toBe("A Only Person");
+  });
+});
+
+describe("StaffService custom roles", () => {
+  it("adds staff with a custom role, and gives a one-time access link when there is no email", async () => {
+    const [role] = await withSchool(a.id, (tx) => tx.insert(schoolRoles).values({ schoolId: a.id, name: "Librarian", base: "staff", grants: ["library:read"] }).returning());
+    const svc = new StaffService(a.as.admin);
+    expect((await svc.roleOptions()).map((o) => o.value)).toContain(role!.id);
+    const before = mail.sent.length;
+    const s = await svc.create(person({ email: undefined, employeeId: "LIB1", role: role!.id }));
+    expect(s).toMatchObject({ role: "staff", roleId: role!.id, roleName: "Librarian", emailed: false });
+    expect(mail.sent.length).toBe(before);
+    const auth = new SchoolAuth(a.id);
+    await auth.resetPassword(tokenIn({ text: s.accessLink! }), "library-pass-1");
+    await expect(auth.resetPassword(tokenIn({ text: s.accessLink! }), "library-pass-2")).rejects.toBeInstanceOf(LoginError);
+  });
+
+  it("a role change ends the person's sessions", async () => {
+    const svc = new StaffService(a.as.admin);
+    const t = await svc.create(person({ employeeId: "SES1" }));
+    await new SchoolAuth(a.id).resetPassword(tokenIn(mail.sent.at(-1)!), "session-pass-1");
+    const { token } = await new SchoolAuth(a.id).login(t.email!, "session-pass-1");
+    await svc.changeRole(t.id, { role: "accountant" });
+    expect(await new SchoolAuth(a.id).validate(token)).toBeNull();
+  });
+});
+
+describe("StaffService admin guard", () => {
+  // A custom role that holds staff:write (e.g. an older role, or a crafted one) must still not touch an admin.
+  const custom = (s: TestSchool) => new StaffService({ ...s.as.admin, role: "staff", userId: s.users.teacher, grants: new Set(["staff:read", "staff:write"]) });
+
+  it("a custom role with staff:write cannot edit, deactivate, reactivate or resend for an admin", async () => {
+    const adminSvc = new StaffService(a.as.admin);
+    const target = await adminSvc.create(person({ role: "admin", employeeId: "ADM1", email: "adm1@a.test" }));
+    await expect(custom(a).update(target.id, person({ role: undefined, email: "me@a.test", employeeId: "ADM1" }))).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(custom(a).resendInvite(target.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(custom(a).deactivate(target.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await adminSvc.deactivate(target.id);
+    await expect(custom(a).reactivate(target.id)).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await adminSvc.get(target.id)).email).toBe("adm1@a.test");
+  });
+
+  it("the same role can do all of it for a teacher", async () => {
+    const t = await new StaffService(a.as.admin).create(person({ employeeId: "GUARD1", email: "guard1@a.test" }));
+    const svc = custom(a);
+    await expect(svc.update(t.id, person({ name: "Renamed", employeeId: "GUARD1", email: "guard1@a.test" }))).resolves.toMatchObject({ name: "Renamed" });
+    await expect(svc.resendInvite(t.id)).resolves.toMatchObject({ emailed: true });
+    await expect(svc.deactivate(t.id)).resolves.toMatchObject({ state: "left" });
+    await expect(svc.reactivate(t.id)).resolves.toMatchObject({ id: t.id });
+  });
+
+  it("deactivate keeps at least one active admin", async () => {
+    const { a: s } = await createSchoolPair(["academics", "staff"], "lastadm");
+    const svc = new StaffService(s.as.admin);
+    const x = await svc.create(person({ role: "admin", employeeId: "LAST1", email: "last1@lastadm.test" }));
+    await new SchoolAuth(s.id).resetPassword(tokenIn(mail.sent.at(-1)!), "brand-new-pass");
+    await withSchool(s.id, (tx) => tx.update(users).set({ status: "disabled" }).where(eq(users.id, s.users.admin)));
+    await expect(new StaffService({ ...s.as.admin, userId: s.users.teacher }).deactivate(x.id)).rejects.toBeInstanceOf(ConflictError);
   });
 });

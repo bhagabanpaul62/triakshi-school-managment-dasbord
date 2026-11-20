@@ -52,8 +52,9 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader eyebrow="People" title="Students"
-        description={ctx.role === "parent" ? "Your children at this school." : ctx.role === "student" ? "Your student record." : "Everyone enrolled, by class and section."}
+        description={ctx.role === "student" ? "Your student record." : "Everyone enrolled, by class and section."}
         actions={canWrite ? (<>
+          <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/credentials">Login slips</Link></Button>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/import">Import CSV</Link></Button>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/promote">Promote</Link></Button>
           <OpenOnLoad when={!!values}>{admit}</OpenOnLoad>

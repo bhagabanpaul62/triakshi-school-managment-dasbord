@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
-import { SCHOOL, expectHealthy, login } from "./helpers";
+import { SCHOOL, expectHealthy, login, loginStudent } from "./helpers";
 
 const SHOTS = "test-results/ux-academics-timetable";
 /** Parallel runs clear test-results, so a second copy of each screenshot goes here when UX_SHOTS_COPY is set. */
@@ -116,7 +116,7 @@ test.describe("timetable", () => {
   test("student: their section's week on a phone, with day tabs", async ({ page }) => {
     const dob = sql("select to_char(dob,'DDMMYYYY') from students where admission_no='GR0001'");
     test.skip(!dob, "local database not reachable to read the demo student's date of birth");
-    await login(page, SLUG, "GR0001", dob!);
+    await loginStudent(page, SLUG, "GR0001", dob!);
     await page.setViewportSize(SIZES.phone);
     await open(page, "/app/timetable");
     await expect(page.getByRole("heading", { name: "Timetable", exact: true })).toBeVisible({ timeout: 90_000 });

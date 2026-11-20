@@ -1,4 +1,5 @@
 import type { Field } from "@smw/ui/shell/FormModal";
+import type { LibrarySettings } from "../rules";
 
 export const CATEGORIES = ["Fiction", "Classics", "Children", "Textbook", "Reference", "Science", "Mathematics", "History", "Biography", "Poetry", "Language", "General"];
 export const LANGUAGES = ["English", "Hindi", "Kannada", "Marathi", "Bengali", "Tamil", "Telugu", "Sanskrit", "Urdu"];
@@ -24,5 +25,15 @@ export const copiesFields: Field[] = [
 
 export const issueFields = (staff: { id: string; name: string; role: string }[]): Field[] => [
   { name: "admissionNo", label: "Student admission number", wide: true, placeholder: "e.g. GV0001" },
-  { name: "userId", label: "Or a staff member", type: "select", wide: true, hint: "Students may hold 2 books, staff 5. Due in 14 days.", options: staff.map((s) => ({ value: s.id, label: `${s.name} (${s.role})` })) },
+  { name: "userId", label: "Or a staff member", type: "select", wide: true, hint: "The library rules decide the limits and the due date.", options: staff.map((s) => ({ value: s.id, label: `${s.name} (${s.role})` })) },
 ];
+
+export const settingsFields: Field[] = [
+  { name: "loanDays", label: "Loan days", type: "number", required: true, min: 1, max: 90, hint: "How long a book can stay out." },
+  { name: "finePerDay", label: "Fine per late day (Rs.)", type: "number", required: true, min: 0, max: 1000, step: 0.5 },
+  { name: "studentLimit", label: "Books per student", type: "number", required: true, min: 1, max: 20 },
+  { name: "staffLimit", label: "Books per staff member", type: "number", required: true, min: 1, max: 50 },
+  { name: "renewalsAllowed", label: "Renewals allowed", type: "number", required: true, min: 0, max: 5, hint: "0 turns renewals off." },
+];
+
+export const settingsValues = (s: LibrarySettings) => ({ ...s, finePerDay: s.finePerDayPaise / 100 });

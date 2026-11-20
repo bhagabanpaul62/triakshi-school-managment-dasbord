@@ -192,7 +192,7 @@ describe("TimetableService", () => {
     expect((await new TimetableService(a.as.admin).today(tue)).rows).toEqual([]);
   });
 
-  it("students and parents see only their own section and cannot browse teachers", async () => {
+  it("a student sees only their own section and cannot browse teachers; a legacy parent sees nothing", async () => {
     const student = new TimetableService(a.as.student);
     expect((await student.sections()).map((s) => s.id)).toEqual([fa.s1]);
     await expect(student.sectionGrid(fa.s1)).resolves.toBeDefined();
@@ -200,8 +200,7 @@ describe("TimetableService", () => {
     await expect(student.teacherGrid(fa.t1)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(student.teachers()).rejects.toBeInstanceOf(ForbiddenError);
     const parent = new TimetableService(a.as.parent);
-    expect((await parent.sections()).map((s) => s.id)).toEqual([fa.s1]);
-    await expect(parent.sectionGrid(fa.s2)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(parent.sections()).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("only the admin edits: teacher, student and parent get ForbiddenError", async () => {

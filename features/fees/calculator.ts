@@ -2,7 +2,8 @@
 // the seed and the record-payment dialog all compute exactly the same numbers. Money is integer paise.
 
 export interface CalcItem { headId: string; amountPaise: number }
-export interface CalcInstallment { id: string; name: string; dueDate: string; amountPaise: number }
+/** `charge`: a line from fee_charges (a month of transport, a library fine). It takes no concession and no late fee. */
+export interface CalcInstallment { id: string; name: string; dueDate: string; amountPaise: number; charge?: boolean }
 /** value: paise for "amount", basis points (1000 = 10%) for "percent". headId null = the whole fee. */
 export interface CalcConcession { headId: string | null; kind: "amount" | "percent"; value: number }
 export interface CalcLateRule { installmentId: string | null; kind: "flat" | "per_day"; amountPaise: number; graceDays: number; maxPaise: number | null }
@@ -28,6 +29,8 @@ export interface StatementLine {
   installmentId: string;
   name: string;
   dueDate: string;
+  /** True for a charge line rather than a structure installment. */
+  charge: boolean;
   gross: number;
   concession: number;
   /** gross - concession */
@@ -49,7 +52,7 @@ export interface Statement {
   totals: { gross: number; concession: number; net: number; late: number; paid: number; due: number; overdue: number; credit: number };
 }
 
-export interface Allocation { installmentId: string; name: string; amountPaise: number; lateFeePaise: number }
+export interface Allocation { installmentId: string; charge: boolean; name: string; amountPaise: number; lateFeePaise: number }
 export interface AllocationPlan { allocations: Allocation[]; allocated: number; principal: number; lateFee: number; unallocated: number }
 
 const DAY = 86_400_000;
@@ -97,7 +100,7 @@ export class FeeCalculator {
   }
 
   get grossTotal(): number {
-    return this.input.installments.reduce((s, i) => s + i.amountPaise, 0);
+    return this.input.installments.reduce((s, i) => s + (i.charge ? 0 : i.amountPaise), 0);
   }
 
   /** Total concession, after capping. */
@@ -123,6 +126,7 @@ export class FeeCalculator {
   /** Late fee of one installment if its principal were still open until `until`. */
   lateFeeFor(inst: CalcInstallment, until: string): number {
     const { lateRules } = this.input;
+    if (inst.charge) return 0;
     const rule = lateRules.find((r) => r.installmentId === inst.id) ?? lateRules.find((r) => r.installmentId === null);
     if (!rule) return 0;
     const days = Math.max(0, FeeCalculator.daysBetween(inst.dueDate, until) - rule.graceDays);
@@ -134,7 +138,7 @@ export class FeeCalculator {
   statement(): Statement {
     const { installments, payments, today } = this.input;
     const sorted = [...installments].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-    const concessions = FeeCalculator.apportion(this.concessionTotal(), sorted.map((i) => i.amountPaise));
+    const concessions = FeeCalculator.apportion(this.concessionTotal(), sorted.map((i) => (i.charge ? 0 : i.amountPaise)));
     const valid = payments.filter((p) => p.status === "valid").sort((a, b) => a.paidOn.localeCompare(b.paidOn) || a.id.localeCompare(b.id));
 
     const lines = sorted.map((inst, k): StatementLine => {
@@ -157,7 +161,7 @@ export class FeeCalculator {
       const overdue = due > 0 && inst.dueDate < today;
       const paid = principalPaid + latePaid;
       const status: LineStatus = due === 0 ? "paid" : overdue ? "overdue" : paid > 0 ? "partial" : "pending";
-      return { installmentId: inst.id, name: inst.name, dueDate: inst.dueDate, gross: inst.amountPaise, concession: concessions[k]!, net, lateFee: late, principalPaid, latePaid, paid, principalDue, lateDue, due, overdue, status };
+      return { installmentId: inst.id, name: inst.name, dueDate: inst.dueDate, charge: !!inst.charge, gross: inst.amountPaise, concession: concessions[k]!, net, lateFee: late, principalPaid, latePaid, paid, principalDue, lateDue, due, overdue, status };
     });
 
     const sum = (f: (l: StatementLine) => number) => lines.reduce((s, l) => s + f(l), 0);
@@ -186,7 +190,7 @@ export class FeeCalculator {
       left -= late;
       const principal = Math.min(left, l.principalDue);
       left -= principal;
-      if (late + principal > 0) allocations.push({ installmentId: l.installmentId, name: l.name, amountPaise: principal, lateFeePaise: late });
+      if (late + principal > 0) allocations.push({ installmentId: l.installmentId, charge: l.charge, name: l.name, amountPaise: principal, lateFeePaise: late });
     }
     const lateFee = allocations.reduce((s, a) => s + a.lateFeePaise, 0);
     const principal = allocations.reduce((s, a) => s + a.amountPaise, 0);

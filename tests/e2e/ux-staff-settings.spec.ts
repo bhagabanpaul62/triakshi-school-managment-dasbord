@@ -62,7 +62,7 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
     await shot(page, "staff-list", true);
     await page.getByRole("button", { name: "Add staff" }).first().click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("No email yet, so no invite is sent")).toBeVisible();
+    await expect(dialog.getByText("No email, so you get a link to share by hand")).toBeVisible();
     await expect(dialog.getByLabel(/employee id/i)).toHaveValue(/^T\d+$/); // smart default
     await dialog.getByLabel(/full name/i).fill(NAME);
     await dialog.getByLabel(/^email/i).fill(EMAIL);
@@ -110,7 +110,8 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
     const link = await inviteLink(request, EMAIL, 1);
     expect(link).not.toBe(firstLink);
     await p.goto(link);
-    await expect(p.getByRole("heading", { name: /Welcome, Asha/ })).toBeVisible();
+    await expect(p.getByRole("heading", { name: "Set up your account" })).toBeVisible();
+    await expect(p.getByText(/Welcome, Asha\./)).toBeVisible();
     await p.getByLabel("New password").fill("short");
     await expect(p.getByText("3 more characters needed")).toBeVisible();
     await p.getByLabel("New password").fill(PASSWORD);

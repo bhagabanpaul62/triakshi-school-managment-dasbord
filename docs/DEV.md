@@ -29,7 +29,6 @@ Every seeded account uses the password `demo12345`.
 | either school | `accounts` | Accountant |
 | either school | `teacher` | Teacher (more teachers come from the staff seed) |
 | either school | admission number, e.g. `GR0001` (password: date of birth as DDMMYYYY) | Student (created by the students seed) |
-| either school | parent's phone | Parent (password: last 6 digits of the phone) |
 
 Console: `owner@triakshi.test` (TOTP secret `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP`, add it to any authenticator app), `support@triakshi.test` (enrols 2FA on first login).
 
@@ -48,3 +47,17 @@ TypeScript 7 (`tsgo`, from `@typescript/native-preview`) runs every `typecheck` 
 | `pnpm db:reset` | Drop and rebuild the local schema from the schema files |
 | `pnpm --filter @smw/db generate` | Generate the SQL migration for production |
 | `node scripts/new-feature.mjs <key> <requires>` | Scaffold a feature package |
+
+## Email
+
+Mail goes out over SMTP, set only by env values. Locally it is Mailpit (`SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, no login); read it at http://localhost:8025. The demo server and early production use a free SMTP account:
+
+| Provider | Settings | Free limit |
+|---|---|---|
+| Gmail | `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER=<the Gmail address>`, `SMTP_PASS=<an app password>` | about 500 a day |
+| Brevo | `SMTP_HOST=smtp-relay.brevo.com`, `SMTP_PORT=587`, `SMTP_USER=<SMTP login>`, `SMTP_PASS=<SMTP key>` | 300 a day |
+
+- A Gmail app password needs 2-step verification on the account (Google account, Security, App passwords). Use the app password, not the real one.
+- Set `MAIL_FROM` to the same address (Gmail) or to a sender you verified in Brevo, or the provider rewrites or rejects it.
+- `SMTP_SECURE` is optional. Empty means implicit TLS on port 465 and STARTTLS on 587, which is right for both providers above.
+- A failed send never fails the action. The person sees "We couldn't email it" and asks the school office for a link.

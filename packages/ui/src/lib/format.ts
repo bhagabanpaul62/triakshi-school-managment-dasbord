@@ -1,4 +1,5 @@
 // Human formats used across every app. Dates show as "Sep 29", never ISO.
+import { formatMoneyCompact } from "./hooks/useCurrency";
 const IST = "Asia/Kolkata";
 
 type DateLike = Date | string | number | null | undefined;
@@ -40,3 +41,6 @@ export function paise(p: number | bigint | null | undefined): string {
 
 export const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("");
+
+/** Money for a tile, from paise: whole rupees below a lakh ("₹86,500"), compact above ("₹1.2L") so it fits a phone. */
+export const tilePaise = (p: number) => (Math.abs(p) >= 10_000_000 ? formatMoneyCompact(p / 100) : paise(Math.round(p / 100) * 100));

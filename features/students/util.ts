@@ -15,6 +15,9 @@ export function normalizePhone(raw: string): string {
 /** "2014-03-09" -> "09032014" (the student's first password). */
 export const ddmmyyyy = (iso: string) => `${iso.slice(8, 10)}${iso.slice(5, 7)}${iso.slice(0, 4)}`;
 
+/** A student's day-one password: date of birth as DDMMYYYY, or the admission number when there is none. */
+export const firstPassword = (dob: string | null | undefined, admissionNo: string) => (dob ? ddmmyyyy(dob) : admissionNo);
+
 /** Whole years between an ISO date and today. */
 export function ageOn(dob: string | null | undefined, on = today()): number | null {
   if (!dob) return null;

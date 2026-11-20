@@ -5,9 +5,9 @@ import { buttonVariants } from "@smw/ui/ui/button";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
-import { FINE_PER_DAY_PAISE } from "../rules";
-import { LoanService } from "../service";
-import { returnLoan, waiveFine } from "./actions";
+import { LibrarySettingsService, LoanService } from "../service";
+import { renewLoan, returnLoan, waiveFine } from "./actions";
+import { ScanBox } from "./scan-box";
 import { returnConfirm } from "./return-confirm";
 
 export const metadata = { title: "Loans" };
@@ -25,13 +25,14 @@ const columns: Column[] = [
 export default async function LoansPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const svc = new LoanService(ctx);
-  const page = await svc.list(listQueryFrom(await searchParams));
+  const [page, rules] = await Promise.all([svc.list(listQueryFrom(await searchParams)), new LibrarySettingsService(ctx).get()]);
   const canManage = svc.can("manage");
   const rows = page.rows.map((r) => ({ ...r, fine: r.finePaise || null, borrowerMeta: [r.classLabel ?? r.borrowerMeta, r.status === "overdue" ? r.chasePhone : null].filter(Boolean).join(" · ") }));
 
   return (
     <>
-      <PageHeader eyebrow="Library" title="Loans" description={`Every book lent, with due dates and late fines (₹${FINE_PER_DAY_PAISE / 100} a day). Overdue rows show the parent's number.`} />
+      <PageHeader eyebrow="Library" title="Loans" description={`Every book lent, with due dates and late fines (₹${rules.finePerDayPaise / 100} a day). Overdue rows show the parent's number.`} />
+      {canManage ? <div className="pb-4"><ScanBox /></div> : null}
       <DataTable
         columns={columns} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount}
         searchPlaceholder="Search book or borrower"
@@ -40,13 +41,17 @@ export default async function LoansPage({ searchParams }: { searchParams: Promis
           { key: "kind", label: "Borrower", options: [{ value: "student", label: "Students" }, { value: "staff", label: "Staff" }] },
         ]}
         empty={{ title: "No loans match.", description: "Issue a book from the Library page and it shows up here.", action: <Link href="/app/library" className={buttonVariants({ className: "rounded-full" })}>Go to the issue desk</Link> }}
-        rowActions={canManage ? Object.fromEntries(rows.map((r) => [r.id, (
+        rowActions={Object.fromEntries(rows.map((r) => [r.id, (
           <span key={r.id} className="inline-flex items-center gap-1">
+            <Link href={`/app/library/members/${r.borrowerKind}/${r.studentId ?? r.userId}`} className={buttonVariants({ variant: "ghost", className: "rounded-full" })}>History</Link>
+            {canManage ? <>
             {r.finePaise > 0 ? <ActionButton label="Waive fine" variant="ghost" action={waiveFine} values={{ id: r.id }}
               confirm={{ title: "Waive this fine?", body: `${r.borrowerName} will not be charged for ${r.title}.`, confirmLabel: "Waive fine" }} /> : null}
+            {!r.returnedOn && r.renewals < rules.renewalsAllowed ? <ActionButton label="Renew" variant="ghost" action={renewLoan} values={{ id: r.id }} /> : null}
             {!r.returnedOn ? <ActionButton label="Return" variant="secondary" action={returnLoan} values={{ id: r.id }} confirm={returnConfirm(r)} /> : null}
+            </> : null}
           </span>
-        )])) : undefined}
+        )]))}
       />
     </>
   );

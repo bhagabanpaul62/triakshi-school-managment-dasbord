@@ -57,7 +57,7 @@ describe("BookService", () => {
     expect(row).toMatchObject({ copies: 2, available: 2, copiesLabel: "2 of 2 in" });
   });
 
-  it("admin and teacher manage; students and parents cannot read the catalogue", async () => {
+  it("admin and teacher manage; students and legacy parent logins cannot read the catalogue", async () => {
     await expect(new BookService(a.as.teacher).create({ title: "Teacher Added", author: "Anon", category: "General" })).resolves.toBeTruthy();
     await expect(new BookService(a.as.accountant).list()).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new BookService(a.as.student).list()).rejects.toBeInstanceOf(ForbiddenError);
@@ -245,7 +245,7 @@ describe("overdue, history, stats and self views", () => {
     await expect(new LibraryStats(c.as.student).summary()).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("students and parents see only their own loans and fines", async () => {
+  it("a student sees only their own loans and fines", async () => {
     const mine = await makeStudent(a, a.users.student);
     const other = await makeStudent(a);
     const [x, y] = [await makeBook(a), await makeBook(a)];
@@ -255,11 +255,7 @@ describe("overdue, history, stats and self views", () => {
     const seen = await new LoanService(a.as.student).mine();
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ studentId: mine.id, status: "overdue", finePaise: 1200 });
-    await withSchool(a.id, async (tx) => {
-      const [g] = await tx.insert(guardians).values({ schoolId: a.id, name: "Parent", userId: a.users.parent }).returning();
-      await tx.insert(studentGuardians).values({ schoolId: a.id, studentId: other.id, guardianId: g!.id, isPrimary: true });
-    });
-    expect((await new LoanService(a.as.parent).mine()).map((r) => r.studentId)).toEqual([other.id]);
+    await expect(new LoanService(a.as.parent).mine()).rejects.toBeInstanceOf(ForbiddenError); // legacy parent logins are disabled
     await expect(new LoanService(a.as.student).list()).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new LoanService(a.as.teacher).mine()).rejects.toBeInstanceOf(ForbiddenError);
   });
