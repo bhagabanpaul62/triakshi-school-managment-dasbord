@@ -7,7 +7,7 @@ export default defineFeature({
   stage: "ga",
   requires: ["academics"],
   permissions: {
-    read: ["admin", "accountant", "teacher", "student", "parent"],
+    read: ["admin", "accountant", "teacher", "student"],
     manage: ["admin"],
   },
   menu: [{ label: "Timetable", href: "/app/timetable", icon: "clock", permission: "read", group: "academics", order: 20 }],

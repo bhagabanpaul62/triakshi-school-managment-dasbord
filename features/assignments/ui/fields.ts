@@ -14,6 +14,7 @@ export const assignmentFields = (o: { sections: Option[]; subjects: Option[] }, 
   { name: "status", label: "Status", type: "select", required: true, hint: "Students see it once it is published", options: [
     { value: "published", label: "Published" }, { value: "draft", label: "Draft" }, { value: "closed", label: "Closed" },
   ] },
+  { name: "publishAt", label: "Publish on", type: "datetime-local", hint: "Drafts only: goes live by itself at this time" },
   { name: "instructions", label: "Instructions", type: "textarea", required: true, wide: true, placeholder: "What should students do? Pages, questions, how to hand in." },
   ...(withFile ? [{ name: "file", label: "Worksheet or reference (optional)", type: "file" as const, wide: true, accept: ACCEPT, hint: ATTACH_HINT }] : []),
 ];
@@ -22,8 +23,16 @@ export const attachmentFields: Field[] = [
   { name: "file", label: "File", type: "file", required: true, wide: true, accept: ACCEPT, hint: ATTACH_HINT },
 ];
 
+export const extensionFields: Field[] = [
+  { name: "dueAt", label: "New due date", type: "datetime-local", required: true, wide: true, hint: "Must be later than the assignment's due time" },
+];
+
+export const commentFields: Field[] = [
+  { name: "body", label: "Message", type: "textarea", required: true, wide: true },
+];
+
 export const gradeFields = (maxMarks: number | null): Field[] => [
   ...(maxMarks == null ? [] : [{ name: "marks", label: `Marks out of ${maxMarks}`, type: "number" as const, min: 0, max: maxMarks, wide: true }]),
-  { name: "feedback", label: "Feedback", type: "textarea", hint: "The student and parents can read this" },
+  { name: "feedback", label: "Feedback", type: "textarea", hint: "The student (and family) can read this" },
   { name: "returnForRework", label: "Send back", type: "checkbox", placeholder: "Ask the student to redo it (feedback required)" },
 ];

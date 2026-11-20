@@ -2,7 +2,7 @@
 
 import { ValidationError } from "@smw/feature-kit";
 import { formToObject, serviceAction } from "@smw/runtime";
-import { ExportService, ProfileService, SchoolProfileService, UserAdminService, type UploadFile } from "../service";
+import { ExportService, SchoolProfileService, UserAdminService, type UploadFile } from "../service";
 
 /** The one place a browser `File` becomes plain data, so services never see it. */
 async function uploadFrom(fd: FormData, field: string): Promise<UploadFile> {
@@ -31,16 +31,15 @@ export async function disableUser(fd: FormData) {
 export async function enableUser(fd: FormData) {
   return serviceAction(UserAdminService, (s) => s.enable(idOf(fd)), "Account enabled");
 }
+/** `mode` rides in the form: "email" (default) mails a link, "temporary" returns a one-time password. */
 export async function sendPasswordReset(fd: FormData) {
-  return serviceAction(UserAdminService, (s) => s.resetPassword(idOf(fd)), "Reset link sent by email");
+  return serviceAction(UserAdminService, (s) => s.resetPassword(idOf(fd), formToObject(fd)), "Reset link sent by email");
 }
-
-// My profile
-export async function updateMyProfile(fd: FormData) {
-  return serviceAction(ProfileService, (s) => s.update(formToObject(fd)), "Profile saved");
+export async function makeAccessLink(fd: FormData) {
+  return serviceAction(UserAdminService, (s) => s.accessLink(idOf(fd)));
 }
-export async function changeMyPassword(fd: FormData) {
-  return serviceAction(ProfileService, (s) => s.changePassword(formToObject(fd)), "Password changed");
+export async function signOutUser(fd: FormData) {
+  return serviceAction(UserAdminService, (s) => s.signOutEverywhere(idOf(fd)), "Signed out everywhere");
 }
 
 // Data export

@@ -2,7 +2,9 @@ import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
-import { FormModal } from "@smw/ui/shell/FormModal";
+import { FormModal, INPUT } from "@smw/ui/shell/FormModal";
+import { Panel } from "@smw/ui/kit/Panel";
+import { Button } from "@smw/ui/ui/button";
 import { BookService } from "../service";
 import { createBook } from "./actions";
 import { CATEGORIES, bookFields } from "./fields";
@@ -27,6 +29,24 @@ export default async function BooksPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader eyebrow="Library" title="Books" description="Every title with its copies. Open a book to issue or return a copy." actions={add} />
+      {canManage ? (
+        <div className="pb-4">
+          <Panel title="Print accession labels">
+            <form method="get" action="/app/library/labels" target="_blank" className="flex flex-wrap items-end gap-3">
+              <div className="flex w-32 flex-col gap-1">
+                <label htmlFor="lbl-from" className="text-sm text-[var(--ds-on-surface-variant)]">From accession</label>
+                <input id="lbl-from" name="from" placeholder="ACC-00001" required className={INPUT} />
+              </div>
+              <div className="flex w-32 flex-col gap-1">
+                <label htmlFor="lbl-to" className="text-sm text-[var(--ds-on-surface-variant)]">To (optional)</label>
+                <input id="lbl-to" name="to" placeholder="ACC-00024" className={INPUT} />
+              </div>
+              <Button type="submit" variant="secondary" className="rounded-full">Open label sheet</Button>
+              <p className="basis-full text-xs text-[var(--ds-on-surface-muted)]">24 labels per A4 sheet, each with the title and a Code 128 barcode. To print every copy of one book, open the book.</p>
+            </form>
+          </Panel>
+        </div>
+      ) : null}
       <DataTable
         columns={columns} rows={page.rows} total={page.total} page={page.page} pageCount={page.pageCount} rowHref="/app/library/books/{id}"
         searchPlaceholder="Search title, author or ISBN"

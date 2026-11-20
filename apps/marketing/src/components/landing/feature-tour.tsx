@@ -50,7 +50,7 @@ export function FeatureTour() {
   return (
     <Section id="tour" tone="white" labelledBy="tour-title">
       <SectionHeading id="tour-title" kicker="The product" title="One school, five different screens." sub="Each person signs in and sees only what their job needs. Pick a role." />
-      <div ref={box} className="mt-9 md:mt-12" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+      <div ref={box} className="mt-9 md:mt-10" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
         {/* phones: five equal icon tabs in a row; wider: a pill row */}
         <div role="tablist" aria-label="Roles" onKeyDown={onKey} className="grid grid-cols-5 gap-1 rounded-[22px] bg-paper p-1 sm:inline-flex sm:rounded-full">
           {TABS.map((t, n) => (

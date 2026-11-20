@@ -27,6 +27,7 @@ export default async function StudentLedgerPage({ params, searchParams }: { para
   const dues = new DuesService(ctx);
   const ledger = await dues.studentLedger(studentId).catch((e) => { if (e instanceof NotFoundError || e instanceof ForbiddenError) notFound(); throw e; });
   const { student, statement, structure, payments, concessions } = ledger;
+  const hasBook = !!structure || statement.lines.length > 0;
   const t = statement.totals;
   const staff = dues.can("manage");
   const heads = staff ? await new FeeHeadService(ctx).options() : [];
@@ -41,9 +42,9 @@ export default async function StudentLedgerPage({ params, searchParams }: { para
         back={dues.can("read") ? { href: "/app/fees", label: "All dues" } : undefined}
         leading={<span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.07] text-lg" aria-hidden>{initials(student.name)}</span>}
         title={student.name}
-        chips={structure ? <ToneBadge label={badge.label} tone={badge.tone} /> : undefined}
+        chips={hasBook ? <ToneBadge label={badge.label} tone={badge.tone} /> : undefined}
         meta={[[student.className, student.sectionName].filter(Boolean).join("-"), `Admission no. ${student.admissionNo}`, ledger.year.name]}
-        actions={staff && structure ? (
+        actions={staff && hasBook ? (
           <>
             <FormModal title="Add concession" icon="receipt" fields={concessionFields(heads)} hidden={{ studentId }} values={{ kind: "percent" }} action={addConcession} submitLabel="Add" trigger={{ label: "Add concession", variant: "secondary" }} />
             <RecordPaymentModal studentId={studentId} studentName={student.name} calc={ledger.input} today={ledger.today} action={recordPayment} autoOpen={pay} />
@@ -51,7 +52,7 @@ export default async function StudentLedgerPage({ params, searchParams }: { para
         ) : undefined}
       />
       <div className="h-8" />
-      {!structure ? (
+      {!hasBook ? (
         <Panel><WidgetEmptyState title="No fees set for this class." description={staff ? "Set up the class's fee structure to start billing." : "The school has not set fees for this class yet."} /></Panel>
       ) : (
         <>
@@ -110,7 +111,7 @@ export default async function StudentLedgerPage({ params, searchParams }: { para
               <Panel title="Details" className="h-full">
                 <SegmentedGauge value={paidPct} tone={paidPct === 100 ? "success" : "info"} label="paid" caption={`${paise(t.paid)} of ${paise(t.net + t.late)}`} />
                 <FactList>
-                  <Fact label="Fee structure">{structure.name}</Fact>
+                  <Fact label="Fee structure">{structure?.name}</Fact>
                   <Fact label="Year">{ledger.year.name}</Fact>
                   <Fact label="Concession">{t.concession ? `-${paise(t.concession)}` : null}</Fact>
                   <Fact label="Credit">{t.credit ? paise(t.credit) : null}</Fact>

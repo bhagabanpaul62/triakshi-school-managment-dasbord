@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
-import { SCHOOL, expectHealthy, login } from "./helpers";
+import { SCHOOL, expectHealthy, login, loginStudent } from "./helpers";
 
 const SHOTS = "test-results/ux-dashboards";
 const SIZES = { desktop: { width: 1440, height: 900 }, phone: { width: 390, height: 844 } } as const;
@@ -22,6 +22,7 @@ async function shot(page: Page, name: string) {
 
 async function noHorizontalScroll(page: Page) {
   await page.setViewportSize(SIZES.phone);
+  await page.waitForTimeout(300); // let charts and tables re-measure at the new width
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over).toBeLessThanOrEqual(1);
   await page.setViewportSize(SIZES.desktop);
@@ -94,19 +95,18 @@ test.describe("dashboards: the home page of every role", () => {
   test("student: today, due work, attendance, results", async ({ page }) => {
     const sid = schoolId("greenvalley");
     const pw = one(`select to_char(dob,'DDMMYYYY') from students where school_id='${sid}' and admission_no='GR0001'`);
-    await login(page, "greenvalley", "GR0001", pw);
+    await loginStudent(page, "greenvalley", "GR0001", pw);
     await home(page, "student");
     await expect(page.getByText(/attendance this month/i).first()).toBeVisible();
   });
 
-  test("parent: child switcher and fees", async ({ page }) => {
+  // No parent logins: the student login is the family login, so fees show on the student home.
+  test("student: fees on the family login", async ({ page }) => {
     const sid = schoolId("greenvalley");
-    const id = one(`select login_id from users where school_id='${sid}' and role='parent' order by login_id limit 1`);
-    await login(page, "greenvalley", id, id.slice(-6));
-    await home(page, "parent");
+    const pw = one(`select to_char(dob,'DDMMYYYY') from students where school_id='${sid}' and admission_no='GR0001'`);
+    await loginStudent(page, "greenvalley", "GR0001", pw);
+    await home(page, "student-fees");
     await expect(page.getByText(/fees/i).first()).toBeVisible();
-    const sw = page.getByRole("combobox").or(page.getByRole("tablist"));
-    if (await sw.count()) await expect(sw.first()).toBeVisible();
   });
 
   test("sunrise (Starter): modules that are off leave no holes", async ({ page }) => {

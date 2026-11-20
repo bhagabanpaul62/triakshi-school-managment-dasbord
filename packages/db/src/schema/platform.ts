@@ -6,7 +6,10 @@ import {
 import { createdAt, id, schoolColumns, tenant, updatedAt } from "../columns";
 
 export const SCHOOL_STATUSES = ["pending", "rejected", "trial", "active", "past_due", "read_only", "suspended", "cancelled"] as const;
-export const SCHOOL_ROLES = ["admin", "accountant", "teacher", "student", "parent"] as const;
+/** Base kinds. `parent` is legacy (parent logins were retired 2026-11-19; rows are disabled). `staff` = non-teaching staff whose access comes from a custom role. */
+export const SCHOOL_ROLES = ["admin", "accountant", "teacher", "student", "parent", "staff"] as const;
+/** Base kinds a custom role may sit on. */
+export const CUSTOM_ROLE_BASES = ["staff", "teacher"] as const;
 export const STAFF_ROLES = ["owner", "support", "sales"] as const;
 export const MODULE_STAGES = ["alpha", "beta", "ga"] as const;
 export type SchoolStatus = (typeof SCHOOL_STATUSES)[number];
@@ -107,6 +110,16 @@ export const sequences = pgTable("sequences", {
 
 // ---------- identity ----------
 
+/** Custom roles a school admin builds: a name, a base kind (drives data scoping) and `feature:permission` grants. */
+export const schoolRoles = pgTable("school_roles", {
+  ...schoolColumns(),
+  name: text("name").notNull(),
+  base: text("base").$type<(typeof CUSTOM_ROLE_BASES)[number]>().notNull().default("staff"),
+  grants: text("grants").array().notNull().default(sql`'{}'::text[]`),
+  isTemplate: boolean("is_template").notNull().default(false),
+  description: text("description"),
+}, (t) => [...tenant(t, "school_roles"), uniqueIndex("school_roles_name").on(t.schoolId, sql`lower(${t.name})`)]);
+
 export const users = pgTable("users", {
   ...schoolColumns(),
   role: text("role").$type<SchoolRole>().notNull(),
@@ -118,6 +131,12 @@ export const users = pgTable("users", {
   status: text("status").$type<"active" | "invited" | "disabled">().notNull().default("active"),
   avatarUrl: text("avatar_url"),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  /** Custom role; null = the defaults in each feature.ts for `role`. Never set for admins. */
+  roleId: uuid("role_id").references(() => schoolRoles.id, { onDelete: "set null" }),
+  /** Set for default or temporary passwords; the app blocks everything but /app/change-password until cleared. */
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
+  /** When the person proved they own `email` (a code or link sent to it). Cleared whenever the email changes. */
+  emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
 }, (t) => [
   ...tenant(t, "users"),
   uniqueIndex("users_school_login").on(t.schoolId, sql`lower(${t.loginId})`),
@@ -141,7 +160,7 @@ export const sessions = pgTable("sessions", {
 /** One-time tokens: email verification, password reset, invites, console support login. */
 export const oneTimeTokens = pgTable("one_time_tokens", {
   ...schoolColumns(),
-  purpose: text("purpose").$type<"verify_email" | "reset_password" | "invite" | "support_login">().notNull(),
+  purpose: text("purpose").$type<"verify_email" | "reset_password" | "invite" | "support_login" | "change_email" | "email_otp">().notNull(),
   tokenHash: text("token_hash").notNull(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
   meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),

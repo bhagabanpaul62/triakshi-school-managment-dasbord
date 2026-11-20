@@ -29,7 +29,26 @@ export type Field = {
   max?: number | string;
   step?: number | string;
   accept?: string;
+  /** File fields: re-encode any image that is not JPEG or PNG (WebP, HEIC the browser can read) to JPEG before upload, so PDFs can print it. */
+  asJpeg?: boolean;
 };
+
+/** Draw the picked image on a canvas (longest side at most 1200 px) and swap the input's file for the JPEG. Leaves JPEG/PNG and unreadable files as they are. */
+async function reencodeAsJpeg(input: HTMLInputElement) {
+  const file = input.files?.[0];
+  if (!file || !file.type.startsWith("image/") || file.type === "image/jpeg" || file.type === "image/png") return;
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
+    const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(bmp.width * k), height: Math.round(bmp.height * k) });
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/jpeg", 0.9));
+    if (!blob) return;
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+    input.files = dt.files;
+  } catch { /* the browser cannot read it: upload the original, the server decides */ }
+}
 
 export const INPUT = "h-10 w-full rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)] outline-none placeholder:text-[var(--ds-on-surface-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)] aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-[var(--ds-color-danger-500)]";
 
@@ -60,7 +79,7 @@ function Control({ f, id, value, invalid }: { f: Field; id: string; value: unkno
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" id={id} name={f.name} value="true" defaultChecked={value === true || value === "true"} className="h-4 w-4 accent-[var(--ds-primary)]" />{f.placeholder ?? "Yes"}</label>
     );
     case "money": return <input {...common} type="number" step="0.01" min="0" defaultValue={value == null ? undefined : Number(value) / 100} className={INPUT} />;
-    case "file": return <input id={id} name={f.name} type="file" accept={f.accept} required={f.required} className={cn(INPUT, "py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]")} />;
+    case "file": return <input id={id} name={f.name} type="file" accept={f.accept} required={f.required} onChange={f.asJpeg ? (e) => void reencodeAsJpeg(e.currentTarget) : undefined} className={cn(INPUT, "py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]")} />;
     default: return <input {...common} type={f.type ?? "text"} min={f.min} max={f.max} step={f.step} defaultValue={v?.slice(0, f.type === "date" ? 10 : undefined)} className={INPUT} />;
   }
 }

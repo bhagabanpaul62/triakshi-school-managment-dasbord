@@ -10,8 +10,8 @@ export default defineFeature({
     read: ["admin", "teacher"],
     /** Teachers cover the librarian's desk. */
     manage: ["admin", "teacher"],
-    /** Students and parents see their own loans and fines. */
-    self: ["student", "parent"],
+    /** Students see their own loans and fines. */
+    self: ["student"],
   },
   menu: [{ label: "Library", href: "/app/library", icon: "library", permission: "read", group: "academics", order: 60 }],
 });

@@ -7,7 +7,7 @@ import { classes, sections } from "@smw/feature-academics/schema";
 import { guardians, studentGuardians, students } from "./schema";
 import { sectionLabel } from "./util";
 
-/** Guardians of a student, and the parent logins behind them. */
+/** Guardians of a student: contact records only, they have no login. */
 export class GuardianService extends StudentRecordService {
   private readonly parents = new ParentAccounts(this.ctx.schoolId);
 
@@ -23,7 +23,7 @@ export class GuardianService extends StudentRecordService {
     });
   }
 
-  /** Add a guardian to a student; creates the parent login (phone number) unless the phone is already a parent here. */
+  /** Add a guardian to a student; a phone already on file here reuses that guardian record. */
   async add(input: unknown) {
     const d = this.parse(guardianInput, input);
     return this.write("write", async (tx) => {
@@ -51,7 +51,7 @@ export class GuardianService extends StudentRecordService {
     }, (r) => ({ action: "remove_guardian", entity: "Guardian", entityId: r.guardianId, summary: "Removed a guardian from a student" }));
   }
 
-  /** Staff list of parents, each with their children. */
+  /** Staff list of guardians, each with their children. */
   async listParents(query: ListQuery = {}) {
     this.access.requireStaff();
     const q = listQuerySchema.parse(query);

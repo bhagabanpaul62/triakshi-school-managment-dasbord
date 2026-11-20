@@ -9,8 +9,8 @@ export default defineFeature({
   permissions: {
     read: ["admin", "accountant", "teacher"],
     manage: ["admin"],
-    /** Students and parents see their own route, stop and times. */
-    self: ["student", "parent"],
+    /** Students see their own route, stop and times. */
+    self: ["student"],
   },
   menu: [{ label: "Transport", href: "/app/transport", icon: "bus", permission: "read", group: "people", order: 40 }],
 });

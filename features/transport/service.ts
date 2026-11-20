@@ -6,8 +6,10 @@ import { classes, sections } from "@smw/feature-academics/schema";
 import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
 import transportFeature from "./feature";
 import { assignInput, routeInput, stopInput, vehicleInput } from "./inputs";
-import { monthlyFeeFor, occupancyPct, stopTimeProblem } from "./rules";
+import { syncTransportCharges } from "./billing";
+import { monthlyFeeFor, nextMonthStart, occupancyPct, stopTimeProblem } from "./rules";
 import { routeStops, routes, studentTransport, vehicles } from "./schema";
+import { VehicleCareService, todayIST } from "./vehicle-care";
 
 type Perm = keyof typeof transportFeature.permissions;
 export type Vehicle = typeof vehicles.$inferSelect;
@@ -46,7 +48,7 @@ export class VehicleService extends CrudService<typeof vehicles, Perm> {
     const [worst] = await tx.select({ n: count() }).from(studentTransport).innerJoin(routes, eq(routes.id, studentTransport.routeId))
       .where(eq(routes.vehicleId, existing.id)).groupBy(routes.id).orderBy(sql`count(*) desc`).limit(1);
     if (worst && Number(worst.n) > capacity) throw new ValidationError({ capacity: `${worst.n} students already ride this vehicle.` });
-    return data;
+    return { ...data, trackingUrl: data.trackingUrl ?? null };
   }
 
   protected async beforeRemove(tx: Tx, existing: Vehicle) {
@@ -59,7 +61,8 @@ export class VehicleService extends CrudService<typeof vehicles, Perm> {
     const page = await this.list(query);
     const ids = page.rows.map((v) => v.id);
     const rs = ids.length ? await this.read("read", (tx) => tx.select({ vehicleId: routes.vehicleId, name: routes.name }).from(routes).where(inArray(routes.vehicleId, ids))) : [];
-    return { ...page, rows: page.rows.map((v) => ({ ...v, routeNames: rs.filter((r) => r.vehicleId === v.id).map((r) => r.name).join(", ") || null })) };
+    const expired = await new VehicleCareService(this.ctx).expiredCounts(ids);
+    return { ...page, rows: page.rows.map((v) => ({ ...v, routeNames: rs.filter((r) => r.vehicleId === v.id).map((r) => r.name).join(", ") || null, papers: expired.get(v.id) ? "Expired" : "OK" })) };
   }
 
   /** Every vehicle, for pickers. */
@@ -223,16 +226,14 @@ export interface RosterRow {
 
 const tripLabel = (pickup: boolean, drop: boolean) => (pickup && drop ? "Both ways" : pickup ? "Pickup only" : "Drop only");
 
-/** Shared by the services that serve students and parents: who is "mine". */
+/** Shared by the services that serve student logins: who is "mine". */
 abstract class TransportBase extends SchoolService<Perm> {
   protected feature = transportFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
-  /** The caller's own children (parent) or themselves (student). */
+  /** The caller's own student record. */
   protected async ownStudentIds(tx: Tx): Promise<string[]> {
-    if (this.ctx.role === "student") return (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
-    const rows = await tx.select({ id: studentGuardians.studentId }).from(studentGuardians).innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(eq(guardians.userId, this.ctx.userId));
-    return rows.map((r) => r.id);
+    return (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
   }
 }
 
@@ -261,9 +262,12 @@ export class StudentTransportService extends TransportBase {
         }
       }
 
-      const values = { routeId: route.id, stopId: stop.id, pickup: data.pickup, drop: data.drop, startsOn: data.startsOn ?? new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) };
+      const [before] = await tx.select({ id: studentTransport.id }).from(studentTransport).where(eq(studentTransport.studentId, data.studentId)).limit(1);
+      const values = { routeId: route.id, stopId: stop.id, pickup: data.pickup, drop: data.drop, startsOn: data.startsOn ?? todayIST() };
       const [row] = await tx.insert(studentTransport).values({ schoolId: this.ctx.schoolId, studentId: data.studentId, ...values })
         .onConflictDoUpdate({ target: [studentTransport.schoolId, studentTransport.studentId], set: values }).returning();
+      // A10 fee rule: a new rider pays from the month after they start; a move changes the fee from the month after today.
+      await syncTransportCharges(tx, this.ctx.schoolId, data.studentId, monthlyFeeFor(stop.monthlyFeePaise, data.pickup, data.drop), nextMonthStart(before ? todayIST() : values.startsOn));
       return { row: row!, student, route, stop };
     }, (r) => ({ action: "assign", entity: "Transport", entityId: r.row.id, summary: `${r.student.name} rides ${r.route.name} from ${r.stop.name}` })).then((r) => r.row);
   }
@@ -273,6 +277,8 @@ export class StudentTransportService extends TransportBase {
       if (!isUuid(studentId)) throw new NotFoundError("Transport assignment");
       const [row] = await tx.delete(studentTransport).where(eq(studentTransport.studentId, studentId)).returning();
       if (!row) throw new NotFoundError("Transport assignment");
+      // Unassigning stops the fee from next month; this month stays billed.
+      await syncTransportCharges(tx, this.ctx.schoolId, studentId, 0, nextMonthStart(todayIST()));
       const [s] = await tx.select({ name: students.name }).from(students).where(eq(students.id, studentId)).limit(1);
       return { id: row.id, name: s?.name ?? "Student" };
     }, (r) => ({ action: "unassign", entity: "Transport", entityId: r.id, summary: `Removed ${r.name} from transport` }));
@@ -338,7 +344,7 @@ export class StudentTransportService extends TransportBase {
       .where(and(eq(students.status, "active"), isNull(studentTransport.id))).orderBy(asc(students.name)).limit(limit));
   }
 
-  /** Student/parent view: route, stop, times and driver for each of their children. */
+  /** Student view: route, stop, times and driver. */
   async mine() {
     return this.read("self", async (tx) => {
       const ids = await this.ownStudentIds(tx);
@@ -346,7 +352,7 @@ export class StudentTransportService extends TransportBase {
       const rows = await tx.select({
         studentId: students.id, studentName: students.name, routeName: routes.name, stopName: routeStops.name,
         morningTime: routeStops.morningTime, eveningTime: routeStops.eveningTime, pickup: studentTransport.pickup, drop: studentTransport.drop,
-        monthlyFeePaise: routeStops.monthlyFeePaise, vehicle: vehicles.registrationNo, driverName: vehicles.driverName, driverPhone: vehicles.driverPhone,
+        monthlyFeePaise: routeStops.monthlyFeePaise, vehicle: vehicles.registrationNo, trackingUrl: vehicles.trackingUrl, driverName: vehicles.driverName, driverPhone: vehicles.driverPhone,
       }).from(studentTransport)
         .innerJoin(students, eq(students.id, studentTransport.studentId))
         .innerJoin(routes, eq(routes.id, studentTransport.routeId))

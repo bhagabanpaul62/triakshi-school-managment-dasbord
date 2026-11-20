@@ -39,7 +39,7 @@ const seed: FeatureSeed = async (ctx, state) => {
     if (roster.length === 0) continue;
     const away = new Set(roster.filter((_, i) => i % 20 === 7).map((r) => r.studentId));
     for (const date of days) {
-      await students.mark({ sectionId: section.id, date, entries: roster.map((r) => ({ studentId: r.studentId, status: pick(away.has(r.studentId)) })) });
+      await students.mark({ sectionId: section.id, date, entries: roster.map((r) => ({ studentId: r.studentId, status: pick(away.has(r.studentId)) })) }, { alerts: false });
     }
   }
 

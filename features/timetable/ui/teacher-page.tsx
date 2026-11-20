@@ -8,7 +8,7 @@ import { TimetableView } from "./TimetableView";
 
 export const metadata = { title: "Teacher timetable" };
 
-/** /app/timetable/teachers/[id]: one teacher's week, read-only. Staff only; students and parents get the 404 page. */
+/** /app/timetable/teachers/[id]: one teacher's week, read-only. Staff only; students get the 404 page. */
 export default async function TeacherTimetablePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await requireCtx();
@@ -19,6 +19,7 @@ export default async function TeacherTimetablePage({ params }: { params: Promise
       <PageHeader eyebrow="Timetable" title={timetable.title} description="This teacher's week, with the section of each period."
         actions={<>
           <NavSelect label="Switch teacher" value={`/app/timetable/teachers/${id}`} options={teachers.map((t) => ({ href: `/app/timetable/teachers/${t.id}`, label: t.name }))} />
+          <LinkButton file href={`/app/timetable/teachers/${id}/print`}>Print</LinkButton>
           <LinkButton href="/app/timetable">All timetables</LinkButton>
         </>} />
       <TimetableView timetable={timetable} perspective="teacher" canSetUp={svc.can("manage")} />

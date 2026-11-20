@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Modal, ModalFooter, ModalSection } from "@smw/ui/kit/Modal";
 import { IconChip } from "@smw/ui/kit/Panel";
 import { ToneBadge, type Tone } from "@smw/ui/widgets/WidgetPrimitives";
@@ -23,6 +23,8 @@ export interface GradeDialogProps {
   /** "Grade" for new work, "Edit grade" once graded. */
   triggerLabel: string;
   action: (fd: FormData) => Promise<FormResult>;
+  /** The comment thread with the student, rendered by the server page. */
+  thread?: ReactNode;
 }
 
 /** Read what a student handed in and mark it, in one dialog: the answer sits beside the grade form. */
@@ -49,6 +51,12 @@ export function GradeDialog(p: GradeDialogProps) {
                   </li>
                 ))}
               </ul>
+            ) : null}
+            {p.thread ? (
+              <div className="flex flex-col gap-2 pt-3">
+                <span className="text-xs text-[var(--ds-on-surface-muted)]">Comments with the student</span>
+                {p.thread}
+              </div>
             ) : null}
           </ModalSection>
         }

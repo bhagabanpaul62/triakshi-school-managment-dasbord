@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { NotFoundError } from "@smw/feature-kit";
+import { allows } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import { EntityHeader } from "@smw/ui/kit/EntityHeader";
 import { Fact, FactList } from "@smw/ui/kit/FactList";
@@ -7,6 +9,7 @@ import { Inset, Panel } from "@smw/ui/kit/Panel";
 import { StatCard } from "@smw/ui/kit/StatCard";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
+import { buttonVariants } from "@smw/ui/ui/button";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { dateTime, initials, relative, shortDate } from "@smw/ui/format";
@@ -14,8 +17,11 @@ import { MenuIconView } from "@smw/ui/shell/icons";
 import { StaffService, type StaffDetail } from "../service";
 import { changeStaffRole, deactivateStaff, reactivateStaff, resendStaffInvite, updateStaff } from "./actions";
 import { editFields, roleFields, staffFormValues } from "./fields";
-import { ROLE_LABELS, ROLE_TONES, STATE_LABELS, STATE_TONES } from "./labels";
+import { EMPLOYMENT_LABELS, ROLE_LABELS, ROLE_TONES, STATE_LABELS, STATE_TONES } from "./labels";
 import { StaffTabs } from "./staff-tabs";
+
+// shortcut: mirrors the read roles in features/library/feature.ts (importing it would make the packages circular); custom roles go by their library:read grant.
+const libraryRead = (ctx: Parameters<typeof allows>[0]) => allows(ctx, { key: "library", permissions: { read: ["admin", "teacher"] } }, "read");
 
 export const metadata = { title: "Staff member" };
 
@@ -37,7 +43,11 @@ function Overview({ s }: { s: StaffDetail }) {
             <Fact label="Joined">{s.joiningDate ? shortDate(s.joiningDate) : null}</Fact>
             <Fact label="Gender">{s.gender ? GENDER[s.gender] : null}</Fact>
             <Fact label="Date of birth">{s.dob ? shortDate(s.dob) : null}</Fact>
+            <Fact label="Employment">{s.employmentType ? EMPLOYMENT_LABELS[s.employmentType] : null}</Fact>
+            <Fact label="Experience">{s.experienceYears != null ? `${s.experienceYears} years` : null}</Fact>
+            <Fact label="Blood group">{s.bloodGroup}</Fact>
             <Fact label="Address">{s.address}</Fact>
+            <Fact label="Emergency contact">{s.emergencyName ? `${s.emergencyName}${s.emergencyPhone ? `, ${s.emergencyPhone}` : ""}` : s.emergencyPhone}</Fact>
           </FactList>
         </Panel>
       </div>
@@ -108,6 +118,7 @@ export default async function StaffDetailPage({ params, searchParams }: { params
   const svc = new StaffService(ctx);
   const s = await svc.get(id).catch((e) => { if (e instanceof NotFoundError) notFound(); throw e; });
   const canWrite = svc.can("write");
+  const roleOptions = canWrite ? await svc.roleOptions() : [];
   const isTeacher = s.role === "teacher";
   const mine = s.id === ctx.userId;
   const tabs = [{ id: "overview", label: "Overview" }, ...(isTeacher ? [{ id: "classes", label: "Classes", count: s.teaches.length + s.classTeacherOf.length }] : [])];
@@ -121,19 +132,22 @@ export default async function StaffDetailPage({ params, searchParams }: { params
         back={{ href: "/app/staff", label: "Staff" }}
         leading={<span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.07] text-base" aria-hidden>{initials(s.name)}</span>}
         title={s.name}
-        chips={<><ToneBadge label={ROLE_LABELS[s.role] ?? s.role} tone={ROLE_TONES[s.role]} /><ToneBadge label={STATE_LABELS[s.state]} tone={STATE_TONES[s.state]} /></>}
+        chips={<><ToneBadge label={s.roleName ?? ROLE_LABELS[s.role] ?? s.role} tone={ROLE_TONES[s.role]} /><ToneBadge label={STATE_LABELS[s.state]} tone={STATE_TONES[s.state]} /></>}
         meta={[s.designation, s.department, s.joiningDate ? `Joined ${shortDate(s.joiningDate)}` : null]}
-        actions={canWrite ? (
+        actions={canWrite || libraryRead(ctx) ? (
           <>
+            {libraryRead(ctx) ? <Link href={`/app/library/members/staff/${s.id}`} className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Library</Link> : null}
+            {canWrite ? <>
             <FormModal title="Edit staff" icon="teacher" fields={editFields} values={staffFormValues(s)} hidden={{ id: s.id }} action={updateStaff} size="lg" trigger={{ label: "Edit", variant: "secondary" }} />
             {s.state === "invited" && s.email ? <ActionButton label="Resend invite" variant="default" action={resendStaffInvite} values={{ id: s.id }} successMessage={`Invite sent again to ${s.email}`} /> : null}
             {s.state === "left" ? <ActionButton label="Reactivate" variant="default" action={reactivateStaff} values={{ id: s.id }}
               confirm={{ title: `Reactivate ${s.name}?`, body: "They can sign in again with their old password, or get a fresh invite if they never set one.", confirmLabel: "Reactivate" }} /> : null}
-            {!mine ? <FormModal title="Change role" icon="shield" fields={roleFields} values={{ role: s.role }} hidden={{ id: s.id }} action={changeStaffRole} trigger={{ label: "Change role", variant: "secondary" }} /> : null}
+            {!mine ? <FormModal title="Change role" icon="shield" fields={roleFields(roleOptions)} values={{ role: s.roleId ?? s.role }} hidden={{ id: s.id }} action={changeStaffRole} trigger={{ label: "Change role", variant: "secondary" }} /> : null}
             {!mine && s.state !== "left" ? (
               <ActionButton label="Deactivate" action={deactivateStaff} values={{ id: s.id }}
                 confirm={{ title: `Deactivate ${s.name}?`, body: deactivateBody(s), confirmLabel: "Deactivate", danger: true }} />
             ) : null}
+            </> : null}
           </>
         ) : null}
       >

@@ -2,9 +2,9 @@
 
 import { formToObject, serviceAction } from "@smw/runtime";
 import {
-  ConsentService, DocumentService, GuardianService, ImportService, PhotoService, PromotionService, StudentService,
+  ConsentService, CredentialService, DocumentService, GuardianService, ImportService, PhotoService, PromotionService, StudentSelfService, StudentService,
 } from "../service";
-import { csvFrom, fileFrom } from "./upload";
+import { fileFrom } from "./upload";
 
 const id = (fd: FormData, key = "id") => String(fd.get(key));
 
@@ -17,6 +17,9 @@ export async function updateStudent(fd: FormData) {
 }
 export async function deleteStudent(fd: FormData) {
   return serviceAction(StudentService, (s) => s.remove(id(fd)), "Student deleted");
+}
+export async function resetStudentLogin(fd: FormData) {
+  return serviceAction(CredentialService, (s) => s.resetLogin(id(fd)), "Login reset to the first password");
 }
 export async function uploadPhoto(fd: FormData) {
   return serviceAction(PhotoService, async (s) => s.upload(id(fd, "studentId"), await fileFrom(fd)), "Photo updated");
@@ -43,12 +46,16 @@ export async function deleteDocument(fd: FormData) {
 }
 
 export async function checkImport(fd: FormData) {
-  return serviceAction(ImportService, async (s) => s.dryRun(await csvFrom(fd)));
+  return serviceAction(ImportService, async (s) => s.dryRun(await fileFrom(fd)));
 }
 export async function commitImport(fd: FormData) {
-  return serviceAction(ImportService, async (s) => s.commit(await csvFrom(fd)), "Students imported");
+  return serviceAction(ImportService, async (s) => s.commit(await fileFrom(fd)), "Students imported");
 }
 
 export async function promoteSection(fd: FormData) {
   return serviceAction(PromotionService, (s) => s.promote(formToObject(fd)), "Section promoted");
+}
+
+export async function updateMyContact(fd: FormData) {
+  return serviceAction(StudentSelfService, (s) => s.updateMyContact(formToObject(fd)), "Your details are saved");
 }

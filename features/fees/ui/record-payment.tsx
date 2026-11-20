@@ -87,7 +87,7 @@ export function RecordPaymentModal({ studentId, studentName, calc, today, action
         {done ? (
           <div className="flex flex-col gap-2 pt-2">
             <p className="text-[34px] font-medium tabular-nums tracking-tight">{rupees(done.amount)}</p>
-            <p className="text-sm text-[var(--ds-on-surface-variant)]">Receipt <span className="font-mono">{done.receiptNo}</span> is numbered and saved. Print it for the parent, or close this and keep going.</p>
+            <p className="text-sm text-[var(--ds-on-surface-variant)]">Receipt <span className="font-mono">{done.receiptNo}</span> is numbered and saved. Print it for the family, or close this and keep going.</p>
           </div>
         ) : (
         <form className="grid gap-4 pt-2 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (!blocked) submit(); }} noValidate>

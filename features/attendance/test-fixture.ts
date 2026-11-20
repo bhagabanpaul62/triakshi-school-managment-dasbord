@@ -1,9 +1,9 @@
 import { withSchool } from "@smw/db";
 import type { TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sectionTeachers, sections, subjects } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 
-export type Fixture = { own: string; other: string; taught: string; kids: string[]; studentUserKid: string; parentKid: string };
+export type Fixture = { own: string; other: string; taught: string; kids: string[]; studentUserKid: string; otherKid: string };
 
 /** One class with three sections: teacher is class teacher of "own", teaches "taught", has nothing to do with "other". */
 export async function buildSchoolData(s: TestSchool): Promise<Fixture> {
@@ -20,9 +20,7 @@ export async function buildSchoolData(s: TestSchool): Promise<Fixture> {
       userId: i === 0 ? s.users.student : null,
     }))).returning();
     await tx.insert(students).values({ schoolId: s.id, name: "Rohan Gupta", admissionNo: `ADM-${s.slug}-x`, sectionId: other, rollNo: 1 });
-    const [g] = await tx.insert(guardians).values({ schoolId: s.id, name: "Meera Patel", relation: "mother", userId: s.users.parent }).returning();
-    await tx.insert(studentGuardians).values({ schoolId: s.id, studentId: kids[1]!.id, guardianId: g!.id, isPrimary: true });
-    return { own, other, taught, kids: kids.map((k) => k.id), studentUserKid: kids[0]!.id, parentKid: kids[1]!.id };
+    return { own, other, taught, kids: kids.map((k) => k.id), studentUserKid: kids[0]!.id, otherKid: kids[1]!.id };
   });
 }
 

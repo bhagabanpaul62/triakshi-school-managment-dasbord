@@ -3,7 +3,7 @@ import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
 import { toInputValue } from "../dates";
 import type { SchoolEvent } from "../service";
 
-export const AUDIENCE_LABELS: Record<string, string> = { all: "Everyone", staff: "Staff", students: "Students", parents: "Parents", class: "One class" };
+export const AUDIENCE_LABELS: Record<string, string> = { all: "Everyone", staff: "Staff", students: "Students", parents: "Families", class: "One class" };
 export const audienceOptions = Object.entries(AUDIENCE_LABELS).map(([value, label]) => ({ value, label }));
 /** Event tones are tone names; the kit decides the colour. */
 export const TONE_LABELS: Record<string, string> = { default: "Neutral", info: "Blue", success: "Green", warning: "Amber" };
@@ -16,7 +16,7 @@ export const eventFields = (classes: { value: string; label: string }[]): Field[
   { name: "allDay", label: "All day", type: "checkbox", placeholder: "Whole days, ignore the time" },
   { name: "isHoliday", label: "Holiday", type: "checkbox", placeholder: "School is closed" },
   { name: "location", label: "Where" },
-  { name: "audience", label: "Who is invited", type: "select", required: true, options: audienceOptions },
+  { name: "audience", label: "Who is invited", type: "select", required: true, options: audienceOptions, hint: "Families see it on the student login" },
   { name: "classId", label: "Which class", type: "select", options: classes, hint: "Only used when \"One class\" is chosen" },
   { name: "tone", label: "Colour on the calendar", type: "select", required: true, options: Object.entries(TONE_LABELS).map(([value, label]) => ({ value, label })) },
   { name: "isPublic", label: "Website", type: "checkbox", placeholder: "Show on the school website" },

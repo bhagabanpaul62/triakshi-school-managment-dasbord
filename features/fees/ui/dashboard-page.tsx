@@ -147,7 +147,7 @@ export default async function FeesDashboardPage({ searchParams }: { searchParams
   );
 }
 
-/** Students and parents: straight to the ledger when there is one child, otherwise pick one. */
+/** Students: straight to their ledger. */
 async function MyFees({ dues }: { dues: DuesService }) {
   const kids = await dues.mine();
   const totalDue = kids.reduce((t, k) => t + k.due, 0);
@@ -155,7 +155,7 @@ async function MyFees({ dues }: { dues: DuesService }) {
   return (
     <>
       <PageHeader eyebrow="Finance" title="My fees" description="What is due, what is paid and your receipts." />
-      <Panel title={kids.length > 1 ? "Your children" : "Fees"} className="h-auto" action={totalDue ? <span className="text-sm tabular-nums">{paise(totalDue)} due in all</span> : undefined}>
+      <Panel title="Fees" className="h-auto" action={totalDue ? <span className="text-sm tabular-nums">{paise(totalDue)} due in all</span> : undefined}>
         {kids.length === 0 ? <WidgetEmptyState title="No fees to show yet." description="Fees appear here once the school sets them up." /> : (
           <ul className="flex flex-col">
             {kids.map((k) => (

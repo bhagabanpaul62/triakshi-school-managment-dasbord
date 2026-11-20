@@ -35,11 +35,24 @@ const studentFields = z.object({
   admissionDate: f.optDate(),
   address: f.optText(300),
   apaarId: f.optText(20),
+  /** "true"/"false" from a Yes/No select; blank keeps the old value on edit. */
+  rteQuota: z.preprocess((v) => (v === "" || v == null ? undefined : v === true || v === "true"), z.boolean().optional()),
   category: f.optText(30),
+  phone: f.optPhone(),
+  altPhone: f.optPhone(),
+  motherTongue: f.optText(40),
+  religion: f.optText(40),
+  nationality: f.optText(40),
+  previousSchool: f.optText(120),
+  medicalNotes: f.optText(500),
+  emergencyName: f.optText(120),
+  emergencyPhone: f.optPhone(),
   /** One guardian can be added together with the admission; more go on the Guardians tab. */
   guardianName: f.optText(120),
   guardianPhone: f.optPhone(),
   guardianRelation: optEnum(GUARDIAN_RELATIONS),
+  /** Import only: the guardian's email. */
+  guardianEmail: f.optEmail(),
 });
 
 export const studentInput = studentFields.refine((v) => !v.guardianName || v.guardianPhone, { message: "Enter the guardian's phone", path: ["guardianPhone"] })
@@ -48,9 +61,19 @@ export type StudentInput = z.output<typeof studentInput>;
 
 /** Editing: the admission number is the login, so it is fixed; guardians have their own tab. */
 export const studentUpdateInput = studentFields
-  .omit({ admissionNo: true, guardianName: true, guardianPhone: true, guardianRelation: true })
+  .omit({ admissionNo: true, guardianName: true, guardianPhone: true, guardianRelation: true, guardianEmail: true })
   .extend({ status: optEnum(STUDENT_STATUSES) })
   .partial();
+
+/** What a student may change about themselves. Unknown keys are dropped by zod, so name, DOB and class can never ride along. */
+export const myContactInput = z.object({
+  phone: f.optPhone(),
+  altPhone: f.optPhone(),
+  address: f.optText(300),
+  emergencyName: f.optText(120),
+  emergencyPhone: f.optPhone(),
+  medicalNotes: f.optText(500),
+});
 
 export const guardianInput = z.object({
   studentId: f.id("Choose a student"),

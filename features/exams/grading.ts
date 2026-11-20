@@ -26,6 +26,9 @@ export class GradeScale {
 
   static cbse() { return new GradeScale(CBSE_BANDS); }
 
+  /** The bands, highest first. */
+  get bands(): readonly Band[] { return this.sorted; }
+
   gradeFor(percent: number): Band {
     const p = Math.min(100, Math.max(0, Math.round(percent)));
     return this.sorted.find((b) => p >= b.minPercent && p <= b.maxPercent) ?? this.sorted[this.sorted.length - 1]!;
@@ -45,6 +48,43 @@ export class GradeScale {
     }
     return null;
   }
+}
+
+/** Class band of a grade level (nursery counts with 1-5). */
+export function classBandOf(grade: number): "1-5" | "6-8" | "9-10" | "11-12" {
+  return grade <= 5 ? "1-5" : grade <= 8 ? "6-8" : grade <= 10 ? "9-10" : "11-12";
+}
+
+/** The legend printed under a report card, built from the scale actually used. */
+export function legendFor(bands: readonly Pick<Band, "grade" | "minPercent" | "maxPercent">[]): string {
+  const list = [...bands].sort((a, b) => b.minPercent - a.minPercent).map((b) => `${b.grade} ${b.minPercent}-${b.maxPercent}`).join(", ");
+  return `Grading: ${list}. AB = absent.`;
+}
+
+/** Built-in co-scholastic scale (CBSE A-C). */
+export const CBSE_CO_GRADES: readonly { grade: string; description: string }[] = [
+  { grade: "A", description: "Outstanding" }, { grade: "B", description: "Very good" }, { grade: "C", description: "Needs improvement" },
+];
+
+/** Presets for paper components. */
+export const COMPONENT_PRESETS: Record<string, { name: string; maxMarks: number }[]> = {
+  "Theory 80 + Internal 20": [{ name: "Theory", maxMarks: 80 }, { name: "Internal", maxMarks: 20 }],
+  "Theory 70 + Practical 30": [{ name: "Theory", maxMarks: 70 }, { name: "Practical", maxMarks: 30 }],
+  "Theory 60 + Practical 20 + Internal 20": [{ name: "Theory", maxMarks: 60 }, { name: "Practical", maxMarks: 20 }, { name: "Internal", maxMarks: 20 }],
+};
+
+export interface Slot { id: string; label: string; date: string; startTime: string | null; endTime: string | null }
+
+/** Papers of ONE class that sit in the same slot. Two papers on one day clash unless both have times that do not overlap. */
+export function findClashes(papers: Slot[]): [Slot, Slot][] {
+  const out: [Slot, Slot][] = [];
+  for (let i = 0; i < papers.length; i++) for (let j = i + 1; j < papers.length; j++) {
+    const [a, b] = [papers[i]!, papers[j]!];
+    if (a.date !== b.date) continue;
+    const timed = a.startTime && a.endTime && b.startTime && b.endTime;
+    if (!timed || (a.startTime! < b.endTime! && b.startTime! < a.endTime!)) out.push([a, b]);
+  }
+  return out;
 }
 
 const DAY = 86_400_000;
@@ -129,8 +169,9 @@ export class ResultCalculator {
   }
 
   /** Results for a whole section, in roll order, each with a competition rank by percent (ties share a rank). Pending results are not ranked. */
-  section(students: StudentInfo[], papers: PaperInfo[], markOf: (studentId: string, paperId: string) => MarkInfo | undefined): StudentResult[] {
-    const results = students.map((s) => this.student(s, papers, (pid) => markOf(s.id, pid)));
+  section(students: StudentInfo[], papers: PaperInfo[], markOf: (studentId: string, paperId: string) => MarkInfo | undefined, studies?: (studentId: string, subjectId: string) => boolean): StudentResult[] {
+    // A student who does not take an elective has no paper for it (never shown absent).
+    const results = students.map((s) => this.student(s, studies ? papers.filter((p) => studies(s.id, p.subjectId)) : papers, (pid) => markOf(s.id, pid)));
     const ranked = results.filter((r) => r.percent !== null && r.result !== "pending").sort((a, b) => b.percent! - a.percent!);
     ranked.forEach((r, i) => { r.rank = i > 0 && ranked[i - 1]!.percent === r.percent ? ranked[i - 1]!.rank : i + 1; });
     for (const r of results) r.sectionSize = results.length;

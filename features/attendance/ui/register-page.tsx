@@ -5,10 +5,10 @@ import { Panel } from "@smw/ui/kit/Panel";
 import { StatCard } from "@smw/ui/kit/StatCard";
 import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { DEFAULTER_BELOW, STATUS_LABEL, STATUS_LETTER } from "../constants";
-import { StaffAttendanceService, StudentAttendanceService } from "../service";
-import { attendancePercent, todayIST } from "../stats";
+import { PeriodAttendanceService } from "../period-service";
+import { attendancePercent, monthDays, todayIST } from "../stats";
 import { AttendanceNav } from "./nav";
-import { attendanceNav } from "./pages";
+import { attendanceNavFor } from "./pages";
 import { QueryPicker } from "./QueryPicker";
 import { TEXT, statusText } from "./tones";
 
@@ -21,14 +21,19 @@ const monthName = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleDateStrin
 /** /app/attendance/register: a section's month as a matrix with % per student, plus the school's defaulters. */
 export default async function RegisterPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
-  const svc = new StudentAttendanceService(ctx);
+  const svc = new PeriodAttendanceService(ctx);
   const sp = await searchParams;
   const sections = await svc.sectionOptions();
   const sectionId = sections.find((s) => s.id === one(sp.sectionId))?.id ?? sections[0]?.id;
   const month = [one(sp.month)].find((m): m is string => !!m && MONTH.test(m)) ?? todayIST().slice(0, 7);
-  const nav = attendanceNav(true, new StaffAttendanceService(ctx).can("manage"));
+  const nav = attendanceNavFor(ctx);
+  const subjectView = one(sp.view) === "subject";
+  const days = monthDays(month);
 
-  const [register, defaulters] = await Promise.all([sectionId ? svc.monthlyRegister(sectionId, month) : null, svc.defaulters()]);
+  const [register, defaulters, bySubject] = await Promise.all([
+    sectionId ? svc.monthlyRegister(sectionId, month) : null, svc.defaulters(),
+    sectionId && subjectView ? svc.subjectReport(sectionId, days[0]!, days.at(-1)!) : null,
+  ]);
 
   const rows = register?.rows ?? [];
   const classPct = attendancePercent(rows.reduce((a, r) => ({ present: a.present + r.counts.present, late: a.late + r.counts.late, absent: a.absent + r.counts.absent, half_day: a.half_day + r.counts.half_day }), { present: 0, late: 0, absent: 0, half_day: 0 }));
@@ -37,7 +42,10 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader eyebrow="Academics" title="Attendance register" description={register ? `${register.section.label}, ${monthName(month)}` : undefined} actions={<AttendanceNav items={nav} active="/app/attendance/register" />} />
+      <PageHeader eyebrow="Academics" title="Attendance register" description={register ? `${register.section.label}, ${monthName(month)}` : undefined} actions={<span className="inline-flex flex-wrap items-center gap-3"><AttendanceNav items={nav} active="/app/attendance/register" />
+          {sectionId ? <>
+            {subjectView ? null : <a href={`/app/attendance/register/export?sectionId=${sectionId}&month=${month}&format=pdf`} className="rounded-full bg-white/[0.08] px-4 py-2 text-sm hover:bg-white/[0.12]">Print PDF</a>}
+            <a href={`/app/attendance/register/export?sectionId=${sectionId}&month=${month}&format=csv${subjectView ? "&view=subject" : ""}`} className="rounded-full bg-white/[0.08] px-4 py-2 text-sm hover:bg-white/[0.12]">CSV</a></> : null}</span>} />
       {!sectionId || !register ? (
         <Panel><WidgetEmptyState title="No sections to show." description="Set up classes and sections first." /></Panel>
       ) : (
@@ -46,6 +54,12 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
           { name: "sectionId", label: "Section", type: "select", value: sectionId, options: sections.map((s) => ({ value: s.id, label: s.label })) },
           { name: "month", label: "Month", type: "month", value: month },
         ]} />
+        <nav aria-label="Register view" className="mb-3 flex w-fit gap-1 rounded-full bg-white/[0.05] p-1">
+          {([["daily", "By day"], ["subject", "By subject"]] as const).map(([v, label]) => (
+            <Link key={v} href={`/app/attendance/register?sectionId=${sectionId}&month=${month}${v === "subject" ? "&view=subject" : ""}`} aria-current={(v === "subject") === subjectView ? "page" : undefined}
+              className={`rounded-full px-4 py-1.5 text-sm ${(v === "subject") === subjectView ? "bg-white/[0.12] text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface)]"}`}>{label}</Link>
+          ))}
+        </nav>
         <KpiRow>
           <StatCard label="Class attendance" value={classPct === null ? "-" : `${classPct}%`} meta={monthName(month)} />
           <StatCard label={`Below ${DEFAULTER_BELOW}%`} value={String(low)} meta={`of ${rows.length} students`} />
@@ -55,7 +69,37 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
         <PanelGrid>
           <div className="lg:col-span-9">
             <Panel>
-              {register.rows.length === 0 ? <WidgetEmptyState title="No students in this section." description="Admit students to see their register." /> : (
+              {register.rows.length === 0 ? <WidgetEmptyState title="No students in this section." description="Admit students to see their register." /> : bySubject ? (
+                bySubject.subjects.length === 0 ? <WidgetEmptyState title="No period marks this month." description="Subject-wise percentages come from period-by-period attendance. Turn it on in the Eligibility settings." /> : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-max border-separate border-spacing-0 text-sm">
+                        <caption className="sr-only">Subject-wise attendance for {register.section.label}, {monthName(month)}</caption>
+                        <thead>
+                          <tr className="text-[11px] text-[var(--ds-on-surface-muted)]">
+                            <th scope="col" className="sticky left-0 bg-[var(--ds-surface-container-low)] py-2 pr-4 text-left font-normal">Student</th>
+                            {bySubject.subjects.map((s) => <th key={s.id} scope="col" className="px-3 py-2 text-right font-normal">{s.name}</th>)}
+                            <th scope="col" className="py-2 pl-3 text-right font-normal">Overall</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bySubject.rows.map((r) => (
+                            <tr key={r.studentId} className="hover:bg-white/[0.03]">
+                              <th scope="row" className="sticky left-0 max-w-[14rem] truncate bg-[var(--ds-surface-container-low)] py-1.5 pr-4 text-left font-normal text-[var(--ds-on-surface)]">{r.name}</th>
+                              {bySubject.subjects.map((s) => {
+                                const c = r.bySubject[s.id];
+                                return <td key={s.id} title={c ? `${c.attended} of ${c.total} periods` : undefined} className={`px-3 py-1.5 text-right tabular-nums ${c?.pct != null && c.pct < DEFAULTER_BELOW ? TEXT.danger : "text-[var(--ds-on-surface)]"}`}>{c?.pct == null ? "-" : `${c.pct}%`}</td>;
+                              })}
+                              <td className={`py-1.5 pl-3 text-right tabular-nums ${r.overall !== null && r.overall < DEFAULTER_BELOW ? TEXT.danger : "text-[var(--ds-on-surface)]"}`}>{r.overall === null ? "-" : `${r.overall}%`}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-4 text-xs text-[var(--ds-on-surface-muted)]">Periods attended over periods held, per subject. Late counts as attended; leave is left out. Hover a cell for the count.</p>
+                  </>
+                )
+              ) : (
                 <>
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-max border-separate border-spacing-0 text-sm">
@@ -89,7 +133,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
                       </tbody>
                     </table>
                   </div>
-                  <p className="mt-4 text-xs text-[var(--ds-on-surface-muted)]">P present · A absent · L late · V on leave. Leave days are excused and left out of the %.</p>
+                  <p className="mt-4 text-xs text-[var(--ds-on-surface-muted)]">P present · A absent · L late · V on leave. Print PDF gives the A4 landscape register. Leave days are excused and left out of the %.</p>
                 </>
               )}
             </Panel>

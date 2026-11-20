@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { academicYears, classes, sectionTeachers, sections, subjects } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import { assignments } from "./schema";
 
 export type Assignment = typeof assignments.$inferSelect;
@@ -20,7 +20,8 @@ const KID = { id: students.id, name: students.name, sectionId: students.sectionI
 export class AssignmentAccess {
   constructor(private readonly ctx: Ctx) {}
 
-  private get isTeacher() { return this.ctx.role === "teacher"; }
+  /** Everyone but the admin is scoped by the sections and subjects they teach (custom staff-base roles included); a student login never reaches these paths. */
+  private get isTeacher() { return this.ctx.role !== "admin" && this.ctx.role !== "student"; }
 
   /** Teachers see only assignments for a section and subject they teach; everyone else is unrestricted here. */
   teacherScope(): SQL | undefined {
@@ -99,17 +100,10 @@ export class AssignmentAccess {
     return tx.select(KID).from(students).where(and(eq(students.sectionId, sectionId), eq(students.status, "active"))).orderBy(asc(students.rollNo), asc(students.name));
   }
 
-  /** A student login → itself; a parent login → its children; anyone else → nobody. */
+  /** A student login → itself; anyone else → nobody. */
   async myStudents(tx: Tx): Promise<Kid[]> {
-    if (this.ctx.role === "student") {
-      return tx.select(KID).from(students).where(and(eq(students.userId, this.ctx.userId), eq(students.status, "active")));
-    }
-    if (this.ctx.role === "parent") {
-      return tx.select(KID).from(students)
-        .innerJoin(studentGuardians, eq(studentGuardians.studentId, students.id)).innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
-        .where(and(eq(guardians.userId, this.ctx.userId), eq(students.status, "active"))).orderBy(asc(students.name));
-    }
-    return [];
+    if (this.ctx.role !== "student") return [];
+    return tx.select(KID).from(students).where(and(eq(students.userId, this.ctx.userId), eq(students.status, "active")));
   }
 
   async myStudent(tx: Tx): Promise<Kid> {

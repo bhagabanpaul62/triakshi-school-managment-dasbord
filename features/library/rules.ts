@@ -1,9 +1,16 @@
 // Pure library rules: no database, no framework. Unit-tested in rules.test.ts.
 
-export const LOAN_DAYS = 14;
-/** Late fine per day, in paise (Rs. 2). Change here to change it everywhere. */
-export const FINE_PER_DAY_PAISE = 200;
-export const LOAN_LIMITS = { student: 2, staff: 5 } as const;
+export interface LibrarySettings { loanDays: number; studentLimit: number; staffLimit: number; finePerDayPaise: number; renewalsAllowed: number }
+
+/** What a school gets until it saves its own settings. */
+export const DEFAULT_SETTINGS: LibrarySettings = { loanDays: 14, studentLimit: 2, staffLimit: 5, finePerDayPaise: 200, renewalsAllowed: 1 };
+
+/** How long a returned copy is kept aside for the first person waiting. */
+export const HOLD_DAYS = 3;
+/** One overdue reminder per loan per week. */
+export const REMINDER_EVERY_DAYS = 7;
+
+export const limitFor = (s: LibrarySettings, kind: "student" | "staff") => (kind === "student" ? s.studentLimit : s.staffLimit);
 
 const DAY = 86_400_000;
 const utc = (d: string) => Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, Number(d.slice(8, 10)));
@@ -23,14 +30,14 @@ export const daysBetween = (from: string, to: string) => Math.round((utc(to) - u
 export const daysLate = (dueOn: string, on: string) => Math.max(0, daysBetween(dueOn, on));
 
 /** The fine for a book due on `dueOn` and brought back on `on`, in paise. Waived fines are still computed, so history shows what was forgiven; use `payable`. */
-export const fineFor = (dueOn: string, on: string) => daysLate(dueOn, on) * FINE_PER_DAY_PAISE;
+export const fineFor = (dueOn: string, on: string, perDayPaise = DEFAULT_SETTINGS.finePerDayPaise) => daysLate(dueOn, on) * perDayPaise;
 
 export interface LoanLike { dueOn: string; returnedOn: string | null; finePaise: number; fineWaived: boolean }
 
 /** What the borrower owes for this loan: the stored fine once returned, the running fine while open, nothing when waived. */
-export function payable(loan: LoanLike, today: string): number {
+export function payable(loan: LoanLike, today: string, perDayPaise = DEFAULT_SETTINGS.finePerDayPaise): number {
   if (loan.fineWaived) return 0;
-  return loan.returnedOn ? loan.finePaise : fineFor(loan.dueOn, today);
+  return loan.returnedOn ? loan.finePaise : fineFor(loan.dueOn, today, perDayPaise);
 }
 
 export type LoanStatus = "open" | "overdue" | "returned";
@@ -40,3 +47,9 @@ export function loanStatus(loan: Pick<LoanLike, "dueOn" | "returnedOn">, today: 
 }
 
 export const accession = (n: number) => `ACC-${String(n).padStart(5, "0")}`;
+
+/** "ACC-00012", "acc-12" or "12" (a scanner or a typed number) -> 12. Null when it is not an accession number. */
+export function parseAccession(text: string): number | null {
+  const m = /^(?:acc-?)?0*(\d{1,9})$/i.exec(text.trim());
+  return m ? Number(m[1]) : null;
+}

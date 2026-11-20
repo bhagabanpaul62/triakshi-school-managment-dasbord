@@ -28,3 +28,12 @@ export const issueInput = z.object({
   userId: f.optId(),
   issuedOn: f.optDate(),
 }).refine((v) => [v.studentId, v.admissionNo, v.userId].filter(Boolean).length === 1, { message: "Enter an admission number or pick a staff member", path: ["admissionNo"] });
+
+export const settingsInput = z.object({
+  loanDays: z.coerce.number().int().min(1, "At least 1 day").max(90, "At most 90 days"),
+  studentLimit: z.coerce.number().int().min(1, "At least 1 book").max(20, "At most 20 books"),
+  staffLimit: z.coerce.number().int().min(1, "At least 1 book").max(50, "At most 50 books"),
+  /** In rupees on the form; stored as paise. */
+  finePerDay: z.coerce.number().min(0, "Cannot be negative").max(1000, "At most 1000 rupees a day"),
+  renewalsAllowed: z.coerce.number().int().min(0, "Cannot be negative").max(5, "At most 5 renewals"),
+});

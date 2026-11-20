@@ -2,9 +2,9 @@
 import { withSchool } from "@smw/db";
 import type { TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sectionTeachers, sections, subjects } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 
-/** Aarav has a student login and a parent login; the teacher teaches Mathematics to section A only. */
+/** Aarav has the student login; the teacher teaches Mathematics to section A only. */
 export async function fixture(s: TestSchool) {
   return withSchool(s.id, async (tx) => {
     const [year] = await tx.insert(academicYears).values({ schoolId: s.id, name: "2026-27", startsOn: "2026-04-01", endsOn: "2027-03-31", isCurrent: true }).returning();
@@ -21,8 +21,6 @@ export async function fixture(s: TestSchool) {
       { schoolId: s.id, admissionNo: "A3", name: "Kabir Singh", sectionId: secs[0]!.id, classId: cls!.id, rollNo: 3 },
       { schoolId: s.id, admissionNo: "B1", name: "Meera Iyer", sectionId: secs[1]!.id, classId: cls!.id, rollNo: 1 },
     ]).returning();
-    const [g] = await tx.insert(guardians).values({ schoolId: s.id, name: "Rohit Sharma", relation: "father", userId: s.users.parent }).returning();
-    await tx.insert(studentGuardians).values({ schoolId: s.id, studentId: kids[0]!.id, guardianId: g!.id, isPrimary: true });
     return { sec1: secs[0]!.id, sec2: secs[1]!.id, maths: subs[0]!.id, english: subs[1]!.id, aarav: kids[0]!.id, diya: kids[1]!.id, kabir: kids[2]!.id };
   });
 }

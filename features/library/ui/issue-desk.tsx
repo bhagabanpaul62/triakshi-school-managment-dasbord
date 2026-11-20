@@ -9,8 +9,9 @@ import { INPUT } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { shortDate } from "@smw/ui/format";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
-import { FINE_PER_DAY_PAISE, LOAN_DAYS, addDays, todayIST } from "../rules";
+import { addDays, todayIST } from "../rules";
 import { findBooks, findBorrowers, issueBook } from "./actions";
+import { ScanBox } from "./scan-box";
 
 type BookHit = { bookId: string; title: string; author: string; copyId: string; accessionLabel: string; available: number };
 type Borrower = { kind: "student" | "staff"; id: string; name: string; admissionNo: string | null; meta: string; held: number; limit: number };
@@ -88,17 +89,17 @@ function Picker<T>({ label, placeholder, hint, picked, onClear, q, onQ, search, 
 }
 
 /** The librarian's desk: find the book, find the student, issue. One panel, no page changes. */
-export function IssueDesk() {
+export function IssueDesk({ rules, initial }: { rules: { loanDays: number; finePerDayPaise: number }; initial?: BookHit }) {
   const router = useRouter();
   const [bookQ, setBookQ] = useState("");
   const [who, setWho] = useState("");
-  const [book, setBook] = useState<BookHit | null>(null);
+  const [book, setBook] = useState<BookHit | null>(initial ?? null);
   const [borrower, setBorrower] = useState<Borrower | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const books = useSearch<BookHit>(bookQ, findBooks as never, true);
   const people = useSearch<Borrower>(who, findBorrowers as never, false);
-  const due = shortDate(addDays(todayIST(), LOAN_DAYS));
+  const due = shortDate(addDays(todayIST(), rules.loanDays));
 
   const issue = () => start(async () => {
     if (!book || !borrower) return;
@@ -115,6 +116,7 @@ export function IssueDesk() {
   return (
     <Panel title="Issue a book">
       <div className="flex flex-col gap-5">
+        <ScanBox onIssue={(b) => { setBook(b); setError(null); }} />
         <div className="grid gap-5 lg:grid-cols-2">
           <Picker<BookHit> label="Book" placeholder="Search title, author or ISBN" picked={book} onClear={() => { setBook(null); setError(null); }} q={bookQ} onQ={setBookQ}
             search={books} empty="No book with a free copy matches. Check the spelling or open Books."
@@ -127,7 +129,7 @@ export function IssueDesk() {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className={`text-sm ${error ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-muted)]"}`} role={error ? "alert" : undefined}>
-            {error ?? `Due ${due} (${LOAN_DAYS} days). Late fine ₹${FINE_PER_DAY_PAISE / 100} a day.`}
+            {error ?? `Due ${due} (${rules.loanDays} days). Late fine ₹${rules.finePerDayPaise / 100} a day.`}
           </p>
           <Button type="button" className="rounded-full" disabled={!book || !borrower} isLoading={pending} onClick={issue}>
             {book && borrower ? `Issue to ${borrower.name.split(" ")[0]}` : "Issue book"}

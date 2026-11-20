@@ -18,7 +18,7 @@ export function HowItWorks() {
   return (
     <Section id="how" tone="white" labelledBy="how-title">
       <SectionHeading id="how-title" kicker="How it works" title="From sign-up to first attendance in a few days." sub="No visit and nothing to install. You set it up from the dashboard, with a checklist to follow." />
-      <ol className="relative mt-10 grid gap-0 md:mt-14 lg:grid-cols-5 lg:gap-6">
+      <ol className="relative mt-10 grid gap-0 md:mt-10 lg:grid-cols-5 lg:gap-6">
         {/* the rail: down the left on phones, across the top on desktop; it draws in once */}
         <span aria-hidden className="absolute bottom-8 left-[21px] top-2 w-0.5 bg-line lg:hidden" />
         <motion.span aria-hidden initial={reduce ? false : { scaleY: 0 }} whileInView={{ scaleY: 1 }} viewport={view} transition={{ duration: 1.2, ease: EASE }} style={{ originY: 0 }} className="absolute bottom-8 left-[21px] top-2 w-0.5 bg-green lg:hidden" />

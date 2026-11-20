@@ -20,12 +20,12 @@ export function studentFields(sections: Option[], mode: "admit" | "edit"): Field
   if (mode === "admit") {
     return [
       { name: "name", label: "Full name", required: true, wide: true, section: "Student" },
-      { name: "dob", label: "Date of birth", type: "date", section: "Student", hint: "The student's first password is this date as DDMMYYYY" },
+      { name: "dob", label: "Date of birth", type: "date", section: "Student", hint: "The first password is this date as DDMMYYYY; the student changes it at first sign-in" },
       { name: "gender", label: "Gender", type: "select", options: GENDER_OPTIONS, section: "Student" },
       { name: "sectionId", label: "Class and section", type: "select", required: true, options: sections, section: "Class", hint: "The admission number and roll number are filled in for you" },
-      { name: "guardianName", label: "Guardian name", section: "Guardian (so a parent can sign in)" },
-      { name: "guardianPhone", label: "Guardian phone", type: "tel", hint: "Becomes the parent's login ID", section: "Guardian (so a parent can sign in)" },
-      { name: "guardianRelation", label: "Relation", type: "select", options: RELATION_OPTIONS, section: "Guardian (so a parent can sign in)" },
+      { name: "guardianName", label: "Guardian name", section: "Guardian (contact only)" },
+      { name: "guardianPhone", label: "Guardian phone", type: "tel", hint: "For the office to reach the family. The student's login is the family login.", section: "Guardian (contact only)" },
+      { name: "guardianRelation", label: "Relation", type: "select", options: RELATION_OPTIONS, section: "Guardian (contact only)" },
     ];
   }
   return [
@@ -35,13 +35,28 @@ export function studentFields(sections: Option[], mode: "admit" | "edit"): Field
     { name: "bloodGroup", label: "Blood group", type: "select", options: BLOOD, section: "Student" },
     { name: "category", label: "Category", type: "select", options: CATEGORY, section: "Student" },
     { name: "apaarId", label: "APAAR ID", hint: "Optional. Never enter an Aadhaar number.", section: "Student" },
-    { name: "address", label: "Address", type: "textarea", section: "Student" },
+    { name: "rteQuota", label: "RTE quota seat", type: "select", options: [{ value: "false", label: "No" }, { value: "true", label: "Yes, under RTE 12(1)(c)" }], section: "Student" },
+    { name: "motherTongue", label: "Mother tongue", section: "Student" },
+    { name: "religion", label: "Religion", hint: "Optional", section: "Student" },
+    { name: "nationality", label: "Nationality", section: "Student" },
+    { name: "previousSchool", label: "Previous school", wide: true, section: "Student" },
     { name: "sectionId", label: "Class and section", type: "select", required: true, options: sections, section: "Class" },
     { name: "rollNo", label: "Roll number", type: "number", min: 1, section: "Class" },
     { name: "admissionDate", label: "Admission date", type: "date", section: "Class" },
     { name: "status", label: "Status", type: "select", options: STATUS_OPTIONS, section: "Class" },
+    ...myContactFields.map((x) => ({ ...x, section: x.name === "medicalNotes" ? "Medical" : "Contact and emergency" })),
   ];
 }
+
+/** What a student may change about themselves; the same fields appear on the staff edit form. */
+export const myContactFields: Field[] = [
+  { name: "phone", label: "Mobile number", type: "tel" },
+  { name: "altPhone", label: "Alternate mobile", type: "tel" },
+  { name: "address", label: "Address", type: "textarea", wide: true },
+  { name: "emergencyName", label: "Emergency contact name" },
+  { name: "emergencyPhone", label: "Emergency contact mobile", type: "tel" },
+  { name: "medicalNotes", label: "Medical notes", type: "textarea", wide: true, hint: "Allergies or conditions. Seen by the school office and your own teachers." },
+];
 
 export const guardianFields: Field[] = [
   { name: "name", label: "Full name", required: true, wide: true },
@@ -58,7 +73,7 @@ export const documentFields: Field[] = [
 ];
 
 export const photoFields: Field[] = [
-  { name: "file", label: "Photo", type: "file", required: true, accept: ".png,.jpg,.jpeg,.webp", hint: "Up to 5 MB" },
+  { name: "file", label: "Photo", type: "file", required: true, accept: ".png,.jpg,.jpeg,.webp", hint: "Up to 5 MB", asJpeg: true },
 ];
 
 export function consentFields(guardians: Option[]): Field[] {

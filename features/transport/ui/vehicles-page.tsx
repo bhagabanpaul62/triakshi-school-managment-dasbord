@@ -16,6 +16,7 @@ const columns: Column[] = [
   { key: "capacity", label: "Seats", type: "number" },
   { key: "driverName", label: "Driver", type: "person", metaKey: "driverPhone" },
   { key: "routeNames", label: "Runs on", hideOnMobile: true },
+  { key: "papers", label: "Papers", type: "badge", tones: { OK: "success", Expired: "danger" }, hideOnMobile: true },
 ];
 
 export default async function VehiclesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -29,7 +30,7 @@ export default async function VehiclesPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader eyebrow="Transport" title="Vehicles" description="Buses and vans with their drivers." actions={add} />
       <DataTable
-        columns={columns} rows={page.rows} total={page.total} page={page.page} pageCount={page.pageCount}
+        columns={columns} rowHref="/app/transport/vehicles/{id}" rows={page.rows} total={page.total} page={page.page} pageCount={page.pageCount}
         searchPlaceholder="Search by number or driver"
         filters={[{ key: "kind", label: "Type", options: [{ value: "bus", label: "Bus" }, { value: "van", label: "Van" }] }]}
         empty={{ title: "No vehicles yet.", description: "Add the buses and vans your school runs.", action: add ?? undefined }}

@@ -1,0 +1,414 @@
+// Proves the school auth flows against a real database: forgot password, one-time links, password policy, sessions, rate limits.
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { closeDb, eq, oneTimeTokens, schools, sessions, sql, users, withConsole, withSchool } from "@smw/db";
+import {
+  LoginError, OtpError, Passwords, PasswordError, RateLimiter, SchoolAuth, checkPassword, forgotAcctLimiter, forgotIpLimiter, loginIpFailLimiter, loginLimiter, otpAcctLimiter, otpMessage,
+} from "./index";
+
+let schoolId: string;
+let auth: SchoolAuth;
+let staffId: string;
+let studentId: string;
+
+async function newUser(values: Partial<typeof users.$inferInsert> & { loginId: string }) {
+  const [u] = await withConsole((tx) => tx.insert(users).values({
+    schoolId, role: "teacher", name: "Test User", passwordHash: "", ...values,
+  }).returning());
+  return u!;
+}
+
+beforeAll(async () => {
+  const [school] = await withConsole((tx) => tx.insert(schools).values({ slug: "auth-a", name: "Auth School", status: "active" }).returning());
+  schoolId = school!.id;
+  auth = new SchoolAuth(schoolId);
+  staffId = (await newUser({ loginId: "ann@auth.test", email: "ann@auth.test", name: "Ann Staff", passwordHash: await Passwords.hash("OldPass#123") })).id;
+  studentId = (await newUser({ loginId: "GR0001", role: "student", name: "Ravi Kumar", passwordHash: await Passwords.hash("01012010"), mustChangePassword: true })).id;
+  await withSchool(schoolId, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, dob, user_id) values (gen_random_uuid(), ${schoolId}, 'GR0001', 'Ravi Kumar', '2010-01-01', ${studentId})`));
+});
+afterAll(closeDb);
+beforeEach(() => {
+  forgotIpLimiter.reset("ip:?");
+  loginLimiter.reset("otp-ip:?");
+  for (const id of ["ann@auth.test", "gr0001", "nobody@auth.test"]) forgotAcctLimiter.reset(`${schoolId}:${id}`);
+});
+
+const unusedResetTokens = (userId: string) => withSchool(schoolId, async (tx) =>
+  (await tx.select().from(oneTimeTokens).where(eq(oneTimeTokens.userId, userId))).filter((t) => t.purpose === "reset_password" && !t.usedAt));
+
+describe("checkPassword", () => {
+  const who = { loginId: "GR0001", name: "Ravi Kumar", dob: "2010-01-01" };
+  it("accepts a normal password", () => expect(checkPassword("Maple-River-42", who)).toBeNull());
+  it("needs 8 characters", () => expect(checkPassword("short1", who)).toMatch(/8 characters/));
+  it("rejects the login ID, admission number and date of birth", () => {
+    expect(checkPassword("gr0001gr", { loginId: "GR0001GR" })).toMatch(/login ID/);
+    expect(checkPassword("01012010", who)).toMatch(/date of birth/);
+  });
+  it("rejects common passwords", () => {
+    for (const p of ["password", "12345678", "qwerty123", "school123", "Password123"]) expect(checkPassword(p, { loginId: "x" })).toMatch(/8 characters|common/);
+    expect(checkPassword("QWERTY123", { loginId: "x" })).toMatch(/common/);
+  });
+});
+
+describe("forgot password", () => {
+  it("answers the same for a known and an unknown login; only the known one gets a mail", async () => {
+    const known = await auth.requestPasswordReset("ann@auth.test");
+    const unknown = await auth.requestPasswordReset("nobody@auth.test");
+    expect(known.limited).toBe(false);
+    expect(unknown.limited).toBe(false);
+    expect(known.send?.to).toBe("ann@auth.test");
+    expect(unknown.send).toBeUndefined();
+  });
+  it("sends nothing for an account with no email", async () => {
+    expect((await auth.requestPasswordReset("GR0001")).send).toBeUndefined();
+  });
+  it("keeps at most 3 unused links", async () => {
+    forgotAcctLimiter.reset(`${schoolId}:ann@auth.test`);
+    const first = await auth.requestPasswordReset("ann@auth.test");
+    for (let i = 0; i < 2; i++) await auth.requestPasswordReset("ann@auth.test");
+    forgotAcctLimiter.reset(`${schoolId}:ann@auth.test`);
+    await auth.requestPasswordReset("ann@auth.test");
+    expect((await unusedResetTokens(staffId)).length).toBeLessThanOrEqual(3);
+    await expect(auth.resetPassword(first.send!.token, "Maple-River-42")).rejects.toBeInstanceOf(LoginError);
+  });
+  it("limits 3 per hour per login and 5 per hour per IP", async () => {
+    const r = [];
+    for (let i = 0; i < 4; i++) r.push((await auth.requestPasswordReset("ann@auth.test")).limited);
+    expect(r).toEqual([false, false, false, true]);
+    forgotIpLimiter.reset("ip:?");
+    const ip = [];
+    for (let i = 0; i < 6; i++) ip.push((await auth.requestPasswordReset(`someone${i}@auth.test`, "9.9.9.9")).limited);
+    expect(ip).toEqual([false, false, false, false, false, true]);
+    forgotIpLimiter.reset("ip:9.9.9.9");
+  });
+});
+
+describe("reset link", () => {
+  it("works once, then fails", async () => {
+    const { send } = await auth.requestPasswordReset("ann@auth.test");
+    expect(await auth.resetPassword(send!.token, "Maple-River-42")).toBe(staffId);
+    await expect(auth.resetPassword(send!.token, "Maple-River-43")).rejects.toBeInstanceOf(LoginError);
+    expect((await auth.login("ann@auth.test", "Maple-River-42")).token).toBeTruthy();
+  });
+  it("fails when expired", async () => {
+    const token = await withSchool(schoolId, (tx) => auth.issueToken(tx, "reset_password", { userId: staffId, minutes: -1 }));
+    await expect(auth.resetPassword(token, "Maple-River-44")).rejects.toBeInstanceOf(LoginError);
+    expect((await auth.peekToken("reset_password", token)).state).toBe("expired");
+    expect((await auth.peekToken("reset_password", "nope")).state).toBe("unknown");
+  });
+  it("clears must-change and ends every session; a weak password does not use up the link", async () => {
+    const sess = await withSchool(schoolId, (tx) => auth.createSession(tx, studentId));
+    const token = await withSchool(schoolId, (tx) => auth.issueToken(tx, "invite", { userId: studentId, minutes: 60 }));
+    await expect(auth.resetPassword(token, "GR0001")).rejects.toBeInstanceOf(PasswordError);
+    await expect(auth.resetPassword(token, "01012010")).rejects.toBeInstanceOf(PasswordError);
+    expect(await auth.validate(sess.token)).not.toBeNull();
+    await auth.resetPassword(token, "Sunrise-Lake-77");
+    expect(await auth.validate(sess.token)).toBeNull();
+    const [u] = await withSchool(schoolId, (tx) => tx.select().from(users).where(eq(users.id, studentId)));
+    expect(u!.mustChangePassword).toBe(false);
+  });
+});
+
+describe("sign in, change password, sessions", () => {
+  it("reports must-change on login", async () => {
+    const id = (await newUser({ loginId: "GR0002", role: "student", passwordHash: await Passwords.hash("02022010"), mustChangePassword: true })).id;
+    const r = await auth.login("GR0002", "02022010");
+    expect(r.mustChangePassword).toBe(true);
+    const s = await auth.validate(r.token);
+    expect(s?.user.id).toBe(id);
+    expect(s?.user.mustChangePassword).toBe(true);
+  });
+  it("rejects a wrong current password and a weak new one", async () => {
+    const u = await newUser({ loginId: "bob@auth.test", email: "bob@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    await expect(auth.changePassword(u.id, "wrong", "Maple-River-42")).rejects.toBeInstanceOf(LoginError);
+    await expect(auth.changePassword(u.id, "OldPass#123", "bob@auth.test")).rejects.toBeInstanceOf(PasswordError);
+    await expect(auth.changePassword(u.id, "OldPass#123", "OldPass#123")).rejects.toBeInstanceOf(PasswordError);
+  });
+  it("changes the password, clears must-change and ends the other sessions", async () => {
+    const u = await newUser({ loginId: "cy@auth.test", email: "cy@auth.test", passwordHash: await Passwords.hash("OldPass#123"), mustChangePassword: true });
+    const here = await auth.login("cy@auth.test", "OldPass#123");
+    const other = await auth.login("cy@auth.test", "OldPass#123");
+    const keep = (await auth.validate(here.token))!.sessionId;
+    await auth.changePassword(u.id, "OldPass#123", "Maple-River-42", keep);
+    expect(await auth.validate(here.token)).not.toBeNull();
+    expect(await auth.validate(other.token)).toBeNull();
+    expect((await auth.validate(here.token))!.user.mustChangePassword).toBe(false);
+    expect((await auth.login("cy@auth.test", "Maple-River-42")).token).toBeTruthy();
+  });
+  it("lists devices and signs one or all others out", async () => {
+    const u = await newUser({ loginId: "di@auth.test", email: "di@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    const a = await auth.login("di@auth.test", "OldPass#123", { userAgent: "Mozilla/5.0 Chrome/120" });
+    const b = await auth.login("di@auth.test", "OldPass#123");
+    const c = await auth.login("di@auth.test", "OldPass#123");
+    const cur = (await auth.validate(a.token))!.sessionId;
+    const list = await auth.listSessions(u.id, cur);
+    expect(list).toHaveLength(3);
+    expect(list.filter((s) => s.current)).toHaveLength(1);
+    await auth.revokeSession(u.id, (await auth.validate(b.token))!.sessionId);
+    expect(await auth.validate(b.token)).toBeNull();
+    await auth.logoutOthers(u.id, cur);
+    expect(await auth.validate(c.token)).toBeNull();
+    expect(await auth.validate(a.token)).not.toBeNull();
+    const left = await withSchool(schoolId, (tx) => tx.select().from(sessions).where(eq(sessions.userId, u.id)));
+    expect(left).toHaveLength(1);
+  });
+  it("applies an email change only after the link is confirmed", async () => {
+    const u = await newUser({ loginId: "ed@auth.test", email: "ed@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    await expect(auth.requestEmailChange(u.id, "ann@auth.test", "OldPass#123")).rejects.toThrow(/already uses/);
+    await expect(auth.requestEmailChange(u.id, "Ed.New@Auth.test", "wrong-password")).rejects.toBeInstanceOf(LoginError);
+    const keep = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
+    const other = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
+    const { token, oldEmail } = await auth.requestEmailChange(u.id, "Ed.New@Auth.test", "OldPass#123");
+    expect(oldEmail).toBe("ed@auth.test");
+    expect((await auth.contactOf(u.id))?.email).toBe("ed@auth.test");
+    expect((await auth.confirmEmailChange(token)).email).toBe("ed.new@auth.test");
+    expect(await auth.contactOf(u.id)).toMatchObject({ email: "ed.new@auth.test", loginId: "ed.new@auth.test" });
+    await expect(auth.confirmEmailChange(token)).rejects.toBeInstanceOf(LoginError);
+    // The link path ends every session of the user.
+    expect(await auth.validate(keep.token)).toBeNull();
+    expect(await auth.validate(other.token)).toBeNull();
+  });
+  it("a code-confirmed email change ends the other sessions and keeps the current one", async () => {
+    const u = await newUser({ loginId: "ed2@auth.test", email: "ed2@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    const keep = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
+    const other = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
+    const { code } = await auth.requestEmailChange(u.id, "ed2.new@auth.test", "OldPass#123");
+    await auth.confirmEmailChangeWithCode(u.id, code, (await auth.validate(keep.token))!.sessionId);
+    expect(await auth.validate(keep.token)).not.toBeNull();
+    expect(await auth.validate(other.token)).toBeNull();
+  });
+});
+
+describe("RateLimiter", () => {
+  it("allows the limit then blocks until the window ends", () => {
+    const rl = new RateLimiter(2, 1000);
+    expect([rl.take("k", 0), rl.take("k", 1), rl.take("k", 2)]).toEqual([true, true, false]);
+    expect(rl.take("k", 1001)).toBe(true);
+  });
+
+  it("blocked() reads the window without counting", () => {
+    const rl = new RateLimiter(2, 1000);
+    rl.take("k", 0); expect(rl.blocked("k", 1)).toBe(false);
+    rl.take("k", 2); expect(rl.blocked("k", 3)).toBe(true);
+    expect(rl.blocked("k", 1001)).toBe(false);
+  });
+
+  it("successful logins from one school Wi-Fi address never lock it; failures do", async () => {
+    await newUser({ loginId: "wifi@auth.test", email: "wifi@auth.test", passwordHash: await Passwords.hash("WifiPass#123") });
+    loginIpFailLimiter.reset("ip:school-wifi");
+    for (let i = 0; i < 12; i++) await auth.login("wifi@auth.test", "WifiPass#123", { ip: "school-wifi" });
+    for (let i = 0; i < 50; i++) loginIpFailLimiter.take("ip:school-wifi");
+    await expect(auth.login("wifi@auth.test", "WifiPass#123", { ip: "school-wifi" })).rejects.toMatchObject({ reason: "rate_limited" });
+    loginIpFailLimiter.reset("ip:school-wifi");
+  });
+});
+
+// ---------- email codes (PRD 6.1) ----------
+
+const sendCode = async (a: SchoolAuth, id: string, use: "reset" | "login") => (await a.sendOtp(id, use)).send?.code;
+/** Move every code of a user 2 minutes into the past so the 60 s cooldown is over. */
+const ageCodes = (userId: string) => withSchool(schoolId, (tx) => tx.update(oneTimeTokens).set({ createdAt: new Date(Date.now() - 120_000) }).where(eq(oneTimeTokens.userId, userId)));
+const otpReason = (p: Promise<unknown>) => p.then(() => "ok", (e) => (e instanceof OtpError ? e.reason : `other:${String(e)}`));
+
+describe("email codes", () => {
+  it("answers the same for an unknown account; only a known one gets a mail", async () => {
+    const known = await auth.sendOtp("ann@auth.test", "login");
+    const unknown = await auth.sendOtp("nobody@auth.test", "login");
+    expect(known.limited).toBe(unknown.limited);
+    expect(known.send?.code).toMatch(/^\d{6}$/);
+    expect(unknown.send).toBeUndefined();
+    expect((await auth.sendOtp("GR0001", "login")).send).toBeUndefined(); // no email on file
+  });
+
+  it("a right code signs in once, then fails", async () => {
+    const u = await newUser({ loginId: "otp1@auth.test", email: "otp1@auth.test", passwordHash: "x" });
+    const code = (await sendCode(auth, "otp1@auth.test", "login"))!;
+    const r = await auth.loginWithCode("otp1@auth.test", code);
+    expect((await auth.validate(r.token))?.user.id).toBe(u.id);
+    expect(await otpReason(auth.loginWithCode("otp1@auth.test", code))).toBe("none");
+  });
+
+  it("a wrong code never reveals the tries left, and the code dies after 5 tries", async () => {
+    await newUser({ loginId: "otp2@auth.test", email: "otp2@auth.test", passwordHash: "x" });
+    const code = (await sendCode(auth, "otp2@auth.test", "login"))!;
+    const bad = code === "000000" ? "111111" : "000000";
+    const got = [];
+    for (let i = 0; i < 5; i++) got.push(await otpReason(auth.loginWithCode("otp2@auth.test", bad)));
+    expect(got).toEqual(["wrong", "wrong", "wrong", "wrong", "locked"]);
+    expect(await otpReason(auth.loginWithCode("otp2@auth.test", code))).toBe("none");
+  });
+
+  it("an expired code fails", async () => {
+    const u = await newUser({ loginId: "otp3@auth.test", email: "otp3@auth.test", passwordHash: "x" });
+    const code = (await sendCode(auth, "otp3@auth.test", "login"))!;
+    await withSchool(schoolId, (tx) => tx.update(oneTimeTokens).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(oneTimeTokens.userId, u.id)));
+    expect(await otpReason(auth.loginWithCode("otp3@auth.test", code))).toBe("expired");
+  });
+
+  it("a new code kills the old one, and a resend inside 60 s sends nothing", async () => {
+    const u = await newUser({ loginId: "otp4@auth.test", email: "otp4@auth.test", passwordHash: "x" });
+    const first = (await sendCode(auth, "otp4@auth.test", "login"))!;
+    expect(await sendCode(auth, "otp4@auth.test", "login")).toBeUndefined(); // cooldown, same neutral answer
+    await ageCodes(u.id);
+    const second = (await sendCode(auth, "otp4@auth.test", "login"))!;
+    if (first !== second) expect(await otpReason(auth.loginWithCode("otp4@auth.test", first))).toMatch(/^wrong/);
+    expect((await auth.loginWithCode("otp4@auth.test", second)).token).toBeTruthy();
+  });
+
+  it("allows 5 codes an hour per account", async () => {
+    const u = await newUser({ loginId: "otp5@auth.test", email: "otp5@auth.test", passwordHash: "x" });
+    const sent = [];
+    for (let i = 0; i < 6; i++) { forgotIpLimiter.reset("ip:?"); sent.push(!!(await sendCode(auth, "otp5@auth.test", "login"))); await ageCodes(u.id); }
+    expect(sent).toEqual([true, true, true, true, true, false]);
+  });
+
+  it("a code for school A does not work in school B", async () => {
+    const [b] = await withConsole((tx) => tx.insert(schools).values({ slug: "auth-b", name: "Other School", status: "active" }).returning());
+    const authB = new SchoolAuth(b!.id);
+    await withConsole((tx) => tx.insert(users).values({ schoolId: b!.id, role: "teacher", name: "Twin", loginId: "twin@auth.test", email: "twin@auth.test", passwordHash: "x" }));
+    await newUser({ loginId: "twin@auth.test", email: "twin@auth.test", passwordHash: "x" });
+    const code = (await sendCode(auth, "twin@auth.test", "login"))!;
+    expect(await otpReason(authB.loginWithCode("twin@auth.test", code))).toBe("none");
+    expect((await auth.loginWithCode("twin@auth.test", code)).token).toBeTruthy();
+  });
+
+  it("reset by code clears must-change, ends sessions, and a weak password keeps the code", async () => {
+    const u = await newUser({ loginId: "otp6@auth.test", email: "otp6@auth.test", passwordHash: await Passwords.hash("OldPass#123"), mustChangePassword: true });
+    const sess = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
+    const code = (await sendCode(auth, "otp6@auth.test", "reset"))!;
+    await expect(auth.resetPasswordWithCode("otp6@auth.test", code, "password")).rejects.toBeInstanceOf(PasswordError);
+    expect(await auth.validate(sess.token)).not.toBeNull();
+    expect(await auth.resetPasswordWithCode("otp6@auth.test", code, "Maple-River-42")).toBe(u.id);
+    expect(await auth.validate(sess.token)).toBeNull();
+    const [row] = await withSchool(schoolId, (tx) => tx.select().from(users).where(eq(users.id, u.id)));
+    expect(row!.mustChangePassword).toBe(false);
+    expect((await auth.login("otp6@auth.test", "Maple-River-42")).token).toBeTruthy();
+    expect(await otpReason(auth.resetPasswordWithCode("otp6@auth.test", code, "Maple-River-43"))).toBe("none");
+  });
+
+  it("a reset-link mail carries a code that works too, and a login code cannot reset", async () => {
+    await newUser({ loginId: "otp7@auth.test", email: "otp7@auth.test", passwordHash: "x" });
+    const r = await auth.requestPasswordReset("otp7@auth.test");
+    expect(r.send?.code).toMatch(/^\d{6}$/);
+    await expect(auth.resetPasswordWithCode("otp7@auth.test", r.send!.code!, "Maple-River-42")).resolves.toBeTruthy();
+  });
+
+  it("login by code is refused for a disabled user, and must-change is reported", async () => {
+    const u = await newUser({ loginId: "otp8@auth.test", email: "otp8@auth.test", passwordHash: "x", mustChangePassword: true });
+    const code = (await sendCode(auth, "otp8@auth.test", "login"))!;
+    expect((await auth.loginWithCode("otp8@auth.test", code)).mustChangePassword).toBe(true);
+    await ageCodes(u.id);
+    const code2 = (await sendCode(auth, "otp8@auth.test", "login"))!;
+    await withConsole((tx) => tx.update(users).set({ status: "disabled" }).where(eq(users.id, u.id)));
+    expect(await otpReason(auth.loginWithCode("otp8@auth.test", code2))).toBe("none");
+    await ageCodes(u.id);
+    expect((await auth.sendOtp("otp8@auth.test", "login")).send).toBeUndefined();
+  });
+
+  it("an email_change code applies the new email only after verify", async () => {
+    const u = await newUser({ loginId: "otp9@auth.test", email: "otp9@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    const { code } = await auth.requestEmailChange(u.id, "otp9.new@auth.test", "OldPass#123");
+    expect((await auth.contactOf(u.id))?.email).toBe("otp9@auth.test");
+    const bad = code === "000000" ? "111111" : "000000";
+    expect(await otpReason(auth.confirmEmailChangeWithCode(u.id, bad))).toBe("wrong");
+    expect((await auth.contactOf(u.id))?.email).toBe("otp9@auth.test");
+    expect((await auth.confirmEmailChangeWithCode(u.id, code)).email).toBe("otp9.new@auth.test");
+    expect(await auth.contactOf(u.id)).toMatchObject({ email: "otp9.new@auth.test", loginId: "otp9.new@auth.test" });
+    expect(await otpReason(auth.confirmEmailChangeWithCode(u.id, code))).toBe("none");
+  });
+});
+
+describe("verify my email", () => {
+  const verifiedAt = (id: string) => withSchool(schoolId, async (tx) => (await tx.select({ v: users.emailVerifiedAt }).from(users).where(eq(users.id, id)))[0]!.v);
+
+  it("a right code marks the email verified once; wrong codes, no email and an already-verified email are refused", async () => {
+    const u = await newUser({ loginId: "ver1@auth.test", email: "ver1@auth.test" });
+    const { to, code } = await auth.sendVerifyEmailCode(u.id);
+    expect(to).toBe("ver1@auth.test");
+    expect(await otpReason(auth.verifyEmailWithCode(u.id, code === "000000" ? "111111" : "000000"))).toBe("wrong");
+    expect(await verifiedAt(u.id)).toBeNull();
+    await auth.verifyEmailWithCode(u.id, code);
+    expect(await verifiedAt(u.id)).toBeInstanceOf(Date);
+    expect(await otpReason(auth.verifyEmailWithCode(u.id, code))).toBe("none");
+    await expect(auth.sendVerifyEmailCode(u.id)).rejects.toThrow(/already verified/);
+    const noEmail = await newUser({ loginId: "ver-none" });
+    await expect(auth.sendVerifyEmailCode(noEmail.id)).rejects.toThrow(/Add an email/);
+  });
+
+  it("a verify code cannot sign in, and a resend inside 60 s is refused", async () => {
+    const u = await newUser({ loginId: "ver2@auth.test", email: "ver2@auth.test" });
+    const { code } = await auth.sendVerifyEmailCode(u.id);
+    await expect(auth.sendVerifyEmailCode(u.id)).rejects.toThrow(/Wait a minute/);
+    expect(await otpReason(auth.loginWithCode("ver2@auth.test", code))).not.toBe("ok");
+    expect(await verifiedAt(u.id)).toBeNull();
+  });
+
+  it("confirming a new email marks it verified", async () => {
+    const u = await newUser({ loginId: "ver3@auth.test", email: "ver3@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    const { code } = await auth.requestEmailChange(u.id, "ver3.new@auth.test", "OldPass#123");
+    await auth.confirmEmailChangeWithCode(u.id, code);
+    expect(await verifiedAt(u.id)).toBeInstanceOf(Date);
+  });
+});
+
+describe("account enumeration", () => {
+  const msg = (p: Promise<unknown>) => p.then(() => "ok", (e) => (e instanceof OtpError ? otpMessage(e) : `other:${String(e)}`));
+
+  it("unknown account, no code, wrong code and expired code all read the same", async () => {
+    await newUser({ loginId: "enum1@auth.test", email: "enum1@auth.test", passwordHash: "x" });
+    const unknown = await msg(auth.loginWithCode("nobody-enum@auth.test", "123456"));
+    const noCode = await msg(auth.loginWithCode("enum1@auth.test", "123456"));
+    const code = (await sendCode(auth, "enum1@auth.test", "login"))!;
+    const wrong = await msg(auth.loginWithCode("enum1@auth.test", code === "000000" ? "111111" : "000000"));
+    expect(new Set([unknown, noCode, wrong]).size).toBe(1);
+    expect(unknown).not.toMatch(/tr(y|ies)/);
+  });
+
+  it("verifying codes is limited to 10 an hour per account", async () => {
+    await newUser({ loginId: "enum2@auth.test", email: "enum2@auth.test", passwordHash: "x" });
+    otpAcctLimiter.reset(`${schoolId}:enum2@auth.test`);
+    const got: string[] = [];
+    for (let i = 0; i < 11; i++) { loginLimiter.reset("otp-ip:?"); got.push(await otpReason(auth.loginWithCode("enum2@auth.test", "123456"))); }
+    expect(got.slice(0, 10).every((r) => r === "none")).toBe(true);
+    expect(got[10]).toMatch(/^other:.*rate_limited/);
+  });
+
+  it("login runs a password check for an unknown login too (no fast path)", async () => {
+    loginIpFailLimiter.reset("ip:?");
+    await expect(auth.login("nobody-timing@auth.test", "whatever-123")).rejects.toMatchObject({ reason: "invalid" });
+    const t0 = performance.now();
+    await expect(auth.login("nobody-timing2@auth.test", "whatever-123")).rejects.toMatchObject({ reason: "invalid" });
+    const unknownMs = performance.now() - t0;
+    const t1 = performance.now();
+    await expect(auth.login("ann@auth.test", "wrong-password-1")).rejects.toMatchObject({ reason: "invalid" });
+    const knownMs = performance.now() - t1;
+    expect(unknownMs).toBeGreaterThan(knownMs * 0.4); // one Argon2 run either way; the old fast path was ~100x quicker
+  });
+});
+
+describe("disabled and retired accounts", () => {
+  it("a reset link cannot reactivate a disabled account, and is not used up", async () => {
+    const u = await newUser({ loginId: "dis1@auth.test", email: "dis1@auth.test", passwordHash: await Passwords.hash("OldPass#123") });
+    const token = await withSchool(schoolId, (tx) => auth.issueToken(tx, "reset_password", { userId: u.id, minutes: 60 }));
+    await withConsole((tx) => tx.update(users).set({ status: "disabled" }).where(eq(users.id, u.id)));
+    await expect(auth.resetPassword(token, "Maple-River-42")).rejects.toMatchObject({ reason: "disabled" });
+    expect((await auth.peekToken("reset_password", token)).state).toBe("ok");
+    const [row] = await withSchool(schoolId, (tx) => tx.select().from(users).where(eq(users.id, u.id)));
+    expect(row!.status).toBe("disabled");
+  });
+
+  it("an invite link still activates an invited account", async () => {
+    const u = await newUser({ loginId: "inv1@auth.test", email: "inv1@auth.test", passwordHash: null, status: "invited" });
+    const token = await withSchool(schoolId, (tx) => auth.issueToken(tx, "invite", { userId: u.id, minutes: 60 }));
+    await auth.resetPassword(token, "Maple-River-42");
+    const [row] = await withSchool(schoolId, (tx) => tx.select().from(users).where(eq(users.id, u.id)));
+    expect(row!.status).toBe("active");
+  });
+
+  it("a retired parent login cannot sign in, validate, or use a code", async () => {
+    const u = await newUser({ loginId: "par1@auth.test", email: "par1@auth.test", role: "parent", passwordHash: await Passwords.hash("OldPass#123") });
+    await expect(auth.login("par1@auth.test", "OldPass#123")).rejects.toBeInstanceOf(LoginError);
+    const sess = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
+    expect(await auth.validate(sess.token)).toBeNull();
+    expect((await auth.sendOtp("par1@auth.test", "login")).send).toBeUndefined();
+  });
+});

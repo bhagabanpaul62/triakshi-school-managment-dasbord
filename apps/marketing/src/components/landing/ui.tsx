@@ -29,7 +29,7 @@ export function Container({ children, className = "" }: { children: ReactNode; c
 export function Section({ id, tone = "paper", className = "", children, labelledBy }: { id?: string; tone?: "paper" | "white" | "green"; className?: string; children: ReactNode; labelledBy?: string }) {
   const t = tone === "green" ? "on-green bg-green text-white" : tone === "white" ? "bg-white" : "";
   return (
-    <section id={id} aria-labelledby={labelledBy} className={`py-16 md:py-20 ${t} ${className}`}>
+    <section id={id} aria-labelledby={labelledBy} className={`py-14 md:py-16 ${t} ${className}`}>
       <Container>{children}</Container>
     </section>
   );

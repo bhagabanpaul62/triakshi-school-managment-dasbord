@@ -19,7 +19,7 @@ async function seeded(slug: string) {
       schoolId: school.id, admissionNo: `${slug}-${i}-${k}`, name: `Student ${i}-${k}`, classId: c.id, sectionId: sections.find((s) => s.classId === c.id)!.id, rollNo: k + 1,
     }))),
   ).returning());
-  state.students = rows.map((r) => ({ id: r.id, name: r.name, classId: r.classId, sectionId: r.sectionId, userId: null, guardianUserId: null }));
+  state.students = rows.map((r) => ({ id: r.id, name: r.name, classId: r.classId, sectionId: r.sectionId, userId: null }));
   await seed(school.as.admin, state);
   return { school, state };
 }

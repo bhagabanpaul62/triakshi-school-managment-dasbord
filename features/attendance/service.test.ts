@@ -64,7 +64,7 @@ describe("StudentAttendanceService", () => {
     expect((await new StudentAttendanceService(a.as.admin).sectionOptions()).map((o) => o.label)).toEqual(["Class 5-A", "Class 5-B", "Class 5-C"]);
   });
 
-  it("permissions: only admin and teacher mark; students and parents cannot use the staff views", async () => {
+  it("permissions: only admin and teacher mark; students and legacy parent logins cannot use the staff views", async () => {
     const input = { sectionId: fx.own, date: "2026-10-09", entries: entries(fx.kids) };
     for (const who of [a.as.student, a.as.parent, a.as.accountant]) {
       await expect(new StudentAttendanceService(who).mark(input)).rejects.toBeInstanceOf(ForbiddenError);
@@ -91,21 +91,20 @@ describe("StudentAttendanceService", () => {
     await expect(svc.monthlyRegister(fx.own, "2025-13")).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it("students and parents see only their own record", async () => {
+  it("a student sees only their own record, and a legacy parent sees nothing", async () => {
     const admin = new StudentAttendanceService(a.as.admin);
     for (const d of ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]) {
-      await admin.mark({ sectionId: fx.own, date: d, entries: [{ studentId: fx.studentUserKid, status: d === "2026-09-04" ? "absent" : "present" }, { studentId: fx.parentKid, status: "present" }] });
+      await admin.mark({ sectionId: fx.own, date: d, entries: [{ studentId: fx.studentUserKid, status: d === "2026-09-04" ? "absent" : "present" }, { studentId: fx.otherKid, status: "present" }] });
     }
     const student = new StudentAttendanceService(a.as.student);
     expect(await student.studentSummary(fx.studentUserKid, "2026-09-01", "2026-09-30")).toMatchObject({ present: 3, absent: 1, pct: 75 });
     expect((await student.recentAbsences(fx.studentUserKid)).map((r) => r.date)).toContain("2026-09-04");
-    await expect(student.studentSummary(fx.parentKid, "2026-09-01", "2026-09-30")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(student.studentSummary(fx.otherKid, "2026-09-01", "2026-09-30")).rejects.toBeInstanceOf(NotFoundError);
     expect((await student.myStudents()).map((s) => s.name)).toEqual(["Aarav Sharma"]);
 
     const parent = new StudentAttendanceService(a.as.parent);
-    expect((await parent.myStudents()).map((s) => s.name)).toEqual(["Diya Patel"]);
-    expect(await parent.studentSummary(fx.parentKid, "2026-09-01", "2026-09-30")).toMatchObject({ present: 4, pct: 100 });
-    await expect(parent.studentSummary(fx.studentUserKid, "2026-09-01", "2026-09-30")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(parent.myStudents()).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(parent.studentSummary(fx.studentUserKid, "2026-09-01", "2026-09-30")).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("defaulters: below the threshold with enough days, worst first", async () => {

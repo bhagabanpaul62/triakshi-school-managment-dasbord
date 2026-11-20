@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, max, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { Passwords } from "@smw/auth";
 import { nextSequence, schools, users, uuidv7, type Tx } from "@smw/db";
-import { ConflictError, CrudService, LimitError, ValidationError, rethrowUnique, type Ctx, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, CrudService, ForbiddenError, LimitError, ValidationError, rethrowUnique, type Ctx, type ListQuery } from "@smw/feature-kit";
 import { services } from "@smw/integrations";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import studentsFeature from "./feature";
@@ -10,7 +10,7 @@ import { StudentAccess, type Perm } from "./access";
 import { studentInput, studentUpdateInput, type StudentInput } from "./inputs";
 import { ParentAccounts, type GuardianDetails } from "./parent-accounts";
 import { GENDERS, guardianConsents, guardians, studentDocuments, studentEnrollments, studentGuardians, students, STUDENT_STATUSES } from "./schema";
-import { ageOn, ddmmyyyy, sectionLabel, today } from "./util";
+import { ageOn, firstPassword, normalizePhone, sectionLabel, today } from "./util";
 
 export type Student = typeof students.$inferSelect;
 export type StudentListRow = Student & { classSection: string | null; guardianName: string | null; guardianPhone: string | null };
@@ -24,13 +24,23 @@ export interface StudentCapacity {
 const WARN_AT = 0.9;
 const BLOCK_ABOVE = 1.1;
 /** Fields a blank edit-form value should clear instead of keeping the old value. */
-const CLEARABLE = ["dob", "gender", "bloodGroup", "address", "apaarId", "category", "admissionDate"] as const;
+const CLEARABLE = [
+  "dob", "gender", "bloodGroup", "address", "apaarId", "category", "admissionDate", "phone", "altPhone", "motherTongue", "religion",
+  "nationality", "previousSchool", "medicalNotes", "emergencyName", "emergencyPhone",
+] as const;
+const PHONES = ["phone", "altPhone", "emergencyPhone"] as const;
+/** Mobiles are stored as 10 digits, the way guardian phones are. */
+const withPhones = <T extends Record<string, unknown>>(v: T): T => {
+  const out: Record<string, unknown> = { ...v };
+  for (const k of PHONES) if (typeof out[k] === "string") out[k] = normalizePhone(out[k] as string);
+  return out as T;
+};
 
 const isId = (v: string | undefined): v is string => !!v && z.uuid().safeParse(v).success;
 
 /**
  * Students: admission (login, roll number, enrolment, cap), the list and record views, and edits.
- * Students see only themselves and parents only their children (`scopeClause`).
+ * Students see only themselves (`scopeClause`).
  */
 export class StudentService extends CrudService<typeof students, Perm> {
   protected feature = studentsFeature;
@@ -71,6 +81,26 @@ export class StudentService extends CrudService<typeof students, Perm> {
   }
   protected describe(r: Student) { return `${r.name} (${r.admissionNo})`; }
   protected scopeClause(tx: Tx) { return this.access.scope(tx); }
+
+  // Medical notes and the emergency contact: a teacher sees them only for their own sections (PRD P8).
+  protected async findOrThrow(tx: Tx, id: string) {
+    return StudentAccess.redact(await super.findOrThrow(tx, id), await this.access.sensitiveSections(tx));
+  }
+  async list(query: ListQuery = {}) {
+    const page = await super.list(query);
+    const allowed = await this.read("read", (tx) => this.access.sensitiveSections(tx));
+    return allowed ? { ...page, rows: page.rows.map((r) => StudentAccess.redact(r, allowed)) } : page;
+  }
+
+  /** Medical notes and emergency contact of one student; a teacher outside that student's sections is refused. */
+  async medical(id: string) {
+    return this.read("read", async (tx) => {
+      const row = await super.findOrThrow(tx, id);
+      const allowed = await this.access.sensitiveSections(tx);
+      if (allowed && !(row.sectionId && allowed.has(row.sectionId))) throw new ForbiddenError();
+      return { medicalNotes: row.medicalNotes, emergencyName: row.emergencyName, emergencyPhone: row.emergencyPhone };
+    });
+  }
 
   // ---------- views ----------
 
@@ -203,7 +233,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
   }
 
   private guardianOf(d: StudentInput): GuardianDetails | null {
-    return d.guardianName && d.guardianPhone ? { name: d.guardianName, phone: d.guardianPhone, relation: d.guardianRelation ?? "guardian" } : null;
+    return d.guardianName && d.guardianPhone ? { name: d.guardianName, phone: d.guardianPhone, relation: d.guardianRelation ?? "guardian", email: d.guardianEmail } : null;
   }
 
   protected async beforeCreate(tx: Tx, input: Record<string, unknown>) {
@@ -221,8 +251,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
     try {
       [login] = await tx.insert(users).values({
         schoolId: this.ctx.schoolId, role: "student", loginId: admissionNo, name: d.name,
-        // Day-one password: date of birth as DDMMYYYY, or the admission number when there is no date of birth.
-        passwordHash: await Passwords.hash(d.dob ? ddmmyyyy(d.dob) : admissionNo), status: "active",
+        passwordHash: await Passwords.hash(firstPassword(d.dob, admissionNo)), status: "active", mustChangePassword: true,
       }).returning();
     } catch (err) { rethrowUnique(err, `${admissionNo} is already used as a login.`); }
 
@@ -230,7 +259,11 @@ export class StudentService extends CrudService<typeof students, Perm> {
     const guardian = this.guardianOf(d);
     if (guardian) this.pendingGuardian.set(id, guardian);
     return {
-      id, admissionNo, name: d.name, dob: d.dob, gender: d.gender, bloodGroup: d.bloodGroup, address: d.address, apaarId: d.apaarId, category: d.category,
+      ...withPhones({
+        phone: d.phone, altPhone: d.altPhone, emergencyPhone: d.emergencyPhone, motherTongue: d.motherTongue, religion: d.religion,
+        nationality: d.nationality, previousSchool: d.previousSchool, medicalNotes: d.medicalNotes, emergencyName: d.emergencyName,
+      }),
+      id, admissionNo, name: d.name, dob: d.dob, gender: d.gender, bloodGroup: d.bloodGroup, address: d.address, apaarId: d.apaarId, rteQuota: d.rteQuota ?? false, category: d.category,
       classId: section?.classId ?? d.classId, sectionId: section?.id, rollNo: d.rollNo ?? (section ? await this.nextRoll(tx, section.id) : undefined),
       admissionDate: d.admissionDate ?? today(), status: "active", userId: login!.id,
     };
@@ -275,7 +308,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
   // ---------- edit and delete ----------
 
   protected async beforeUpdate(tx: Tx, existing: Student, data: Record<string, unknown>) {
-    const next: Record<string, unknown> = { ...data };
+    const next: Record<string, unknown> = withPhones(data);
     for (const key of CLEARABLE) if (key in data && data[key] === undefined) next[key] = null;
     const sectionId = data.sectionId as string | undefined;
     if (sectionId && sectionId !== existing.sectionId) {

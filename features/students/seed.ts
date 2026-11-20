@@ -19,8 +19,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 /**
  * Demo students: about a dozen per section in Green Valley, a handful in other schools. Each has a father and mother,
- * or one guardian; every ninth section's third student is a sibling sharing the previous section's parents.
- * Parent phones are unique 98xxxxxxxx numbers. Deterministic, so a re-seed gives the same school.
+ * or one guardian; every ninth section's third student is a sibling sharing the previous section's guardians.
+ * Guardian phones are unique 98xxxxxxxx numbers. Deterministic, so a re-seed gives the same school.
  */
 const seed: FeatureSeed = async (ctx, state) => {
   const classes = (state.classes ?? []) as ClassRef[];
@@ -34,7 +34,7 @@ const seed: FeatureSeed = async (ctx, state) => {
   const now = new Date();
   const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
 
-  const out: { id: string; name: string; classId: string; sectionId: string; userId: string; guardianUserId: string }[] = [];
+  const out: { id: string; name: string; classId: string; sectionId: string; userId: string }[] = [];
   let n = 0, phoneN = 0, lastFamily: { surname: string; people: Person[] } | null = null;
   const phone = () => `98${20_000_000 + ++phoneN * 131_071}`;
 
@@ -69,9 +69,8 @@ const seed: FeatureSeed = async (ctx, state) => {
 
       if (out.length === 0) {
         state.demoStudentLogin = student.admissionNo;
-        state.demoParentLogin = people[0]!.phone;
       }
-      out.push({ id: student.id, name: student.name, classId: section.classId, sectionId: section.id, userId: student.userId!, guardianUserId: linked[0]?.userId ?? "" });
+      out.push({ id: student.id, name: student.name, classId: section.classId, sectionId: section.id, userId: student.userId! });
     }
     // The next section's third student is a younger or older sibling of this section's first student.
     lastFamily = firstOfSection[0] ?? null;

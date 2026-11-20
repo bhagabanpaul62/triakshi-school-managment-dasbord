@@ -1,6 +1,6 @@
 import { AppShell, ShellBanner } from "@smw/ui/shell/AppShell";
 import { panelCss } from "@smw/themes";
-import { getSchool, requireCtx } from "@smw/runtime";
+import { getSchool, getSession, requireCtx } from "@smw/runtime";
 import { buildMenu, ROLE_LABEL } from "@/lib/menu";
 import { logout } from "@/lib/auth-actions";
 import { NotificationBellServer } from "@smw/feature-notifications/ui/bell-server";
@@ -11,6 +11,8 @@ import { Button } from "@smw/ui/ui/button";
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
   const [school, ctx] = await Promise.all([getSchool(), requireCtx()]);
+  // A default or temporary password must be replaced before anything else opens. The page lives outside this group, so no loop.
+  if (!ctx.supportStaffId && (await getSession())?.user.mustChangePassword) redirect("/app/change-password");
   // Platform approval gate: a newly registered school sees where it stands, nothing else.
   if (school.status === "pending" || school.status === "rejected") {
     return (

@@ -8,6 +8,8 @@ export const LATE_FEE_KINDS = ["flat", "per_day"] as const;
 export const CONCESSION_KINDS = ["amount", "percent"] as const;
 export const PAYMENT_METHODS = ["cash", "cheque", "upi", "bank_transfer"] as const;
 export const PAYMENT_STATUSES = ["valid", "cancelled"] as const;
+export const CHARGE_KINDS = ["transport", "library_fine", "other"] as const;
+export const CHARGE_STATUSES = ["active", "cancelled"] as const;
 
 const paise = (name: string) => bigint(name, { mode: "number" });
 
@@ -68,6 +70,28 @@ export const studentConcessions = pgTable("student_concessions", {
   approvedBy: uuid("approved_by"),
 }, (t) => [...tenant(t, "student_concessions"), index("student_concessions_student").on(t.studentId, t.yearId)]);
 
+/**
+ * A due that sits beside the fee structure: one month of transport, a library fine. Each active charge is one more
+ * line on the student's ledger. `source_key` is unique per school, so a feature posts the same charge only once
+ * (for example "transport:<student>:2026-07", "library-fine:<loan>"). A paid charge is never cancelled.
+ */
+export const feeCharges = pgTable("fee_charges", {
+  ...schoolColumns(),
+  studentId: uuid("student_id").notNull().references(() => students.id, { onDelete: "cascade" }),
+  yearId: uuid("year_id").notNull().references(() => academicYears.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<(typeof CHARGE_KINDS)[number]>().notNull(),
+  label: text("label").notNull(),
+  dueDate: date("due_date").notNull(),
+  amountPaise: paise("amount_paise").notNull(),
+  status: text("status").$type<(typeof CHARGE_STATUSES)[number]>().notNull().default("active"),
+  sourceKey: text("source_key").notNull(),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+}, (t) => [
+  ...tenant(t, "fee_charges"),
+  uniqueIndex("fee_charges_source").on(t.schoolId, t.sourceKey),
+  index("fee_charges_student").on(t.studentId, t.yearId),
+]);
+
 /** Money received. Never deleted; a wrong one is cancelled with a reason and keeps its receipt number. */
 export const feePayments = pgTable("fee_payments", {
   ...schoolColumns(),
@@ -93,10 +117,12 @@ export const feePayments = pgTable("fee_payments", {
 export const feePaymentAllocations = pgTable("fee_payment_allocations", {
   ...schoolColumns(),
   paymentId: uuid("payment_id").notNull().references(() => feePayments.id, { onDelete: "cascade" }),
-  installmentId: uuid("installment_id").notNull().references(() => installments.id, { onDelete: "cascade" }),
+  /** Exactly one of installment_id and charge_id is set. */
+  installmentId: uuid("installment_id").references(() => installments.id, { onDelete: "cascade" }),
+  chargeId: uuid("charge_id").references(() => feeCharges.id, { onDelete: "cascade" }),
   amountPaise: paise("amount_paise").notNull(),
   lateFeePaise: paise("late_fee_paise").notNull().default(0),
-}, (t) => [...tenant(t, "fee_payment_allocations"), index("fee_payment_allocations_payment").on(t.paymentId)]);
+}, (t) => [...tenant(t, "fee_payment_allocations"), index("fee_payment_allocations_payment").on(t.paymentId), index("fee_payment_allocations_charge").on(t.chargeId)]);
 
 /** Which overdue reminders went out, so the daily job never sends the same one twice. */
 export const feeReminders = pgTable("fee_reminders", {

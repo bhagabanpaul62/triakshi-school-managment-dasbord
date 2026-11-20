@@ -30,6 +30,8 @@ const schema = z.object({
 
   SMTP_HOST: z.string().default("127.0.0.1"),
   SMTP_PORT: z.coerce.number().default(1025),
+  /** Implicit TLS. Unset = on for port 465 only; 587 uses STARTTLS. */
+  SMTP_SECURE: z.enum(["true", "false", "1", "0", ""]).optional().transform((v) => (v ? v === "true" || v === "1" : undefined)),
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().default("Triakshi <no-reply@yourbrand.com>"),

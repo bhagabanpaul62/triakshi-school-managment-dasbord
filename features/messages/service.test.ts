@@ -4,12 +4,12 @@ import { notifications } from "@smw/feature-notifications/schema";
 import { FeatureOffError, ForbiddenError, NotFoundError, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sections, sectionTeachers, subjects } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import { MessageService } from "./service";
 
 let a: TestSchool, b: TestSchool;
-/** A teacher who teaches the child's section, one who does not, a second parent, and a student with their parent. */
-let own: Ctx, other: Ctx, parent2: Ctx;
+/** A teacher who teaches the student's section, one who does not, and a second student with no section. */
+let own: Ctx, other: Ctx, student2: Ctx;
 
 const svc = (ctx: Ctx) => new MessageService(ctx);
 const ids = (list: { id: string }[]) => list.map((c) => c.id);
@@ -24,7 +24,7 @@ beforeAll(async () => {
   ({ a, b } = await createSchoolPair(["academics", "students", "messages"], "m"));
   own = a.as.teacher;
   other = await addUser(a, "teacher", "other");
-  parent2 = await addUser(a, "parent", "two");
+  student2 = await addUser(a, "student", "two");
   await withSchool(a.id, async (tx) => {
     const sid = a.id;
     const [year] = await tx.insert(academicYears).values({ schoolId: sid, name: "2026-27", startsOn: "2026-04-01", endsOn: "2027-03-31", isCurrent: true }).returning();
@@ -32,17 +32,9 @@ beforeAll(async () => {
     const [sec] = await tx.insert(sections).values({ schoolId: sid, classId: cls!.id, yearId: year!.id, name: "A" }).returning();
     const [sub] = await tx.insert(subjects).values({ schoolId: sid, name: "Maths" }).returning();
     await tx.insert(sectionTeachers).values({ schoolId: sid, sectionId: sec!.id, subjectId: sub!.id, teacherId: own.userId });
-    const [kid, kid2] = await tx.insert(students).values([
+    await tx.insert(students).values([
       { schoolId: sid, admissionNo: "A1", name: "Aarav", classId: cls!.id, sectionId: sec!.id, userId: a.as.student.userId },
-      { schoolId: sid, admissionNo: "A2", name: "Diya", classId: cls!.id, sectionId: null },
-    ]).returning();
-    const [g, g2] = await tx.insert(guardians).values([
-      { schoolId: sid, name: "Parent One", userId: a.as.parent.userId },
-      { schoolId: sid, name: "Parent Two", userId: parent2.userId },
-    ]).returning();
-    await tx.insert(studentGuardians).values([
-      { schoolId: sid, studentId: kid!.id, guardianId: g!.id },
-      { schoolId: sid, studentId: kid2!.id, guardianId: g2!.id }, // child with no section: no teachers to reach
+      { schoolId: sid, admissionNo: "A2", name: "Diya", classId: cls!.id, sectionId: null, userId: student2.userId }, // no section: no teachers to reach
     ]);
   });
 });
@@ -56,33 +48,28 @@ describe("who may start a conversation", () => {
     }
   });
 
-  it("a parent can message their child's teachers and the admin, nobody else", async () => {
-    const p = svc(a.as.parent);
-    await expect(p.start({ recipientIds: [own.userId], subject: "Homework", body: "Question" })).resolves.toHaveProperty("id");
-    await expect(p.start({ recipientIds: [a.as.admin.userId], subject: "Fees", body: "Question" })).resolves.toHaveProperty("id");
-    for (const blocked of [other.userId, a.as.student.userId, parent2.userId, a.as.accountant.userId]) {
-      await expect(p.start({ recipientIds: [blocked], subject: "Nope", body: "x" })).rejects.toBeInstanceOf(ForbiddenError);
-    }
-    // one blocked person blocks the whole group
-    await expect(p.start({ recipientIds: [own.userId, other.userId], subject: "Both", body: "x" })).rejects.toBeInstanceOf(ForbiddenError);
+  it("a legacy parent login can start nothing and has no contacts", async () => {
+    await expect(svc(a.as.parent).start({ recipientIds: [own.userId], subject: "Homework", body: "Question" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc(a.as.parent).contacts()).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("a parent whose child has no section can reach only the admin", async () => {
-    expect(ids(await svc(parent2).contacts())).toEqual([a.as.admin.userId]);
+  it("a student with no section can reach only the school office", async () => {
+    expect(ids(await svc(student2).contacts())).toEqual([a.as.admin.userId]);
   });
 
-  it("a student can message their own teachers only", async () => {
+  it("a student (family login) can message their own teachers and the office only", async () => {
     const s = svc(a.as.student);
     await expect(s.start({ recipientIds: [own.userId], subject: "Doubt", body: "Sir?" })).resolves.toHaveProperty("id");
-    for (const blocked of [other.userId, a.as.admin.userId, a.as.parent.userId]) {
+    await expect(s.start({ recipientIds: [a.as.admin.userId], subject: "Fee query", body: "Hello" })).resolves.toHaveProperty("id");
+    for (const blocked of [other.userId, a.as.accountant.userId, a.as.parent.userId, student2.userId]) {
       await expect(s.start({ recipientIds: [blocked], subject: "Nope", body: "x" })).rejects.toBeInstanceOf(ForbiddenError);
     }
+    // one blocked person blocks the whole group
+    await expect(s.start({ recipientIds: [own.userId, other.userId], subject: "Both", body: "x" })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("contacts() lists exactly the people the rules allow, filtered by name", async () => {
-    expect(ids(await svc(a.as.student).contacts())).toEqual([own.userId]);
-    const parentSees = ids(await svc(a.as.parent).contacts());
-    expect(parentSees.sort()).toEqual([own.userId, a.as.admin.userId].sort());
+    expect(new Set(ids(await svc(a.as.student).contacts()))).toEqual(new Set([own.userId, a.as.admin.userId]));
     expect((await svc(a.as.admin).contacts("teacher o")).map((c) => c.name)).toEqual(["teacher other"]);
     expect(ids(await svc(a.as.teacher).contacts())).not.toContain(a.as.teacher.userId);
   });
@@ -103,7 +90,7 @@ describe("membership", () => {
     const { id } = await svc(a.as.admin).start({ recipientIds: [own.userId], subject: "Staff only", body: "Confidential" });
     await expect(svc(other).thread(id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(svc(other).send(id, "I am listening")).rejects.toBeInstanceOf(NotFoundError);
-    await expect(svc(a.as.parent).thread("not-a-uuid")).rejects.toBeInstanceOf(NotFoundError);
+    await expect(svc(a.as.student).thread("not-a-uuid")).rejects.toBeInstanceOf(NotFoundError);
     expect((await svc(other).inbox()).some((t) => t.id === id)).toBe(false);
     expect((await svc(own).inbox()).some((t) => t.id === id)).toBe(true);
   });
@@ -165,21 +152,24 @@ describe("isolation", () => {
 
 describe("message notifications and the unread count", () => {
   const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, userId)));
+  /** Only this conversation's notices: earlier tests also write to the same users. */
+  const inThread = async (school: TestSchool, userId: string, id: string) => (await notes(school, userId)).filter((n) => n.href === `/app/messages?thread=${id}`);
 
   it("a new conversation and a reply each notify everyone else in it, never the sender", async () => {
-    const { id } = await svc(a.as.parent).start({ recipientIds: [own.userId], subject: "Homework", body: "Hello teacher" });
-    const [first] = await notes(a, own.userId);
+    const { id } = await svc(a.as.student).start({ recipientIds: [own.userId], subject: "Homework", body: "Hello teacher" });
+    const [first] = await inThread(a, own.userId, id);
     expect(first).toMatchObject({ kind: "message", href: `/app/messages?thread=${id}`, body: "Hello teacher" });
-    expect(first!.title).toContain(a.as.parent.name);
-    expect(await notes(a, a.as.parent.userId)).toHaveLength(0);
+    expect(first!.title).toContain(a.as.student.name);
+    expect(await inThread(a, a.as.student.userId, id)).toHaveLength(0);
     expect(await svc(own).unreadCount()).toBeGreaterThanOrEqual(1);
 
     await svc(own).send(id, "Reply from teacher");
-    expect((await notes(a, a.as.parent.userId)).map((n) => n.body)).toEqual(["Reply from teacher"]);
-    expect(await notes(a, own.userId)).toHaveLength(1);
-    expect(await svc(a.as.parent).unreadCount()).toBe(1);
-    await svc(a.as.parent).thread(id);
-    expect(await svc(a.as.parent).unreadCount()).toBe(0);
+    expect((await inThread(a, a.as.student.userId, id)).map((n) => n.body)).toEqual(["Reply from teacher"]);
+    expect(await inThread(a, own.userId, id)).toHaveLength(1);
+    expect(await svc(a.as.student).unreadCount()).toBeGreaterThanOrEqual(1);
+    const unreadBefore = await svc(a.as.student).unreadCount();
+    await svc(a.as.student).thread(id);
+    expect(await svc(a.as.student).unreadCount()).toBe(unreadBefore - 1);
     for (const u of Object.values(b.users)) expect(await notes(b, u)).toHaveLength(0);
   });
 });

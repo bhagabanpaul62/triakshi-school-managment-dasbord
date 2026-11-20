@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { SchoolAuth } from "@smw/auth";
-import { closeDb } from "@smw/db";
-import { defineFeature, ForbiddenError, ValidationError } from "@smw/feature-kit";
+import { closeDb, eq, schoolRoles, users, withSchool } from "@smw/db";
+import { allows, defineFeature, ForbiddenError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import { apiHandler, bearerCtx, bearerToken, notReady, readJson } from "./bearer";
 
@@ -53,6 +53,27 @@ describe("bearerCtx", () => {
     await bearerCtx(req(`${a.slug}.localhost`, token));
     await new SchoolAuth(a.id).logout(token);
     await expect(bearerCtx(req(`${a.slug}.localhost`, token))).rejects.toMatchObject({ code: "unauthenticated" });
+  });
+});
+
+describe("bearerSession: custom roles and the must-change gate", () => {
+  const feature = { key: "announcements", permissions: { read: ["admin", "teacher"] as const } };
+
+  it("carries custom-role grants, so the API honours the same narrow access as the panel", async () => {
+    await withSchool(a.id, async (tx) => {
+      const [r] = await tx.insert(schoolRoles).values({ schoolId: a.id, name: "No notices", base: "teacher", grants: ["home:view"] }).returning();
+      await tx.update(users).set({ roleId: r!.id, mustChangePassword: false }).where(eq(users.id, a.users.teacher));
+    });
+    const { token } = await new SchoolAuth(a.id).login(`teacher-${a.slug}`, "password123", { ip: "bearer-test-2" });
+    const ctx = await bearerCtx(req(`${a.slug}.localhost`, token));
+    expect(ctx.grants?.has("home:view")).toBe(true);
+    expect(allows(ctx, feature, "read")).toBe(false); // a default teacher could read; this role cannot
+  });
+
+  it("answers 403 password_change_required while a default or temporary password is in use", async () => {
+    await withSchool(a.id, (tx) => tx.update(users).set({ mustChangePassword: true }).where(eq(users.id, a.users.student)));
+    const { token } = await new SchoolAuth(a.id).login(`student-${a.slug}`, "password123", { ip: "bearer-test-3" });
+    await expect(bearerCtx(req(`${a.slug}.localhost`, token))).rejects.toMatchObject({ code: "password_change_required", status: 403 });
   });
 });
 

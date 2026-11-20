@@ -5,7 +5,7 @@ import { EntityList, ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetP
 import { KpiRow } from "@smw/ui/shell/PageHeader";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { formatMoneyCompact } from "@smw/ui/money";
-import { initials, paise, shortDate } from "@smw/ui/format";
+import { initials, paise, shortDate, tilePaise as tile } from "@smw/ui/format";
 import { METHOD_LABEL } from "@smw/feature-fees/service";
 import type { AccountantHome } from "../home-service";
 import { plural } from "../rules";
@@ -19,9 +19,9 @@ export function AccountantHomeView({ d }: { d: AccountantHome }) {
   return (
     <>
       <KpiRow>
-        {m ? <StatCard label="Collected today" value={paise(m.todayPaise)} icon={<MenuIconView name="money" />} meta={m.todayCount ? plural(m.todayCount, "receipt") : "Nothing received yet"} href="/app/fees" /> : null}
-        {m ? <StatCard label="Collected this month" value={paise(m.summary.collectedThisMonth)} icon={<MenuIconView name="receipt" />} meta={plural(m.summary.receiptsThisMonth, "receipt")} href="/app/fees" /> : null}
-        {m ? <StatCard label="Outstanding" value={paise(m.summary.outstanding)} icon={<MenuIconView name="chart" />} meta={plural(m.summary.studentsWithDues, "student") + " with dues"} href="/app/fees" /> : null}
+        {m ? <StatCard label="Collected today" value={tile(m.todayPaise)} icon={<MenuIconView name="money" />} meta={m.todayCount ? plural(m.todayCount, "receipt") : "Nothing received yet"} href="/app/fees" /> : null}
+        {m ? <StatCard label="Collected this month" value={tile(m.summary.collectedThisMonth)} icon={<MenuIconView name="receipt" />} meta={plural(m.summary.receiptsThisMonth, "receipt")} href="/app/fees" /> : null}
+        {m ? <StatCard label="Outstanding" value={tile(m.summary.outstanding)} icon={<MenuIconView name="chart" />} meta={plural(m.summary.studentsWithDues, "student") + " with dues"} href="/app/fees" /> : null}
         {m ? <StatCard label="Overdue students" value={String(m.summary.overdueCount)} icon={<MenuIconView name="clock" />} meta={m.summary.overdueCount ? `${paise(m.summary.overdueAmount)} overdue` : "Nobody is behind"} href="/app/fees?overdue=1" /> : null}
       </KpiRow>
       <Rows>

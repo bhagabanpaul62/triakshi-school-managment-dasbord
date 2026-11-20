@@ -29,6 +29,11 @@
     "@smw/feature-billing": "workspace:*",
     "@smw/feature-domains": "workspace:*",
     "@smw/feature-notifications": "workspace:*",
-    "@smw/feature-fees": "workspace:*"
+    "@smw/feature-fees": "workspace:*",
+    "@smw/feature-assignments": "workspace:*",
+    "@smw/feature-library": "workspace:*",
+    "@smw/feature-transport": "workspace:*",
+    "@smw/feature-timetable": "workspace:*",
+    "@smw/feature-attendance": "workspace:*"
   }
 }

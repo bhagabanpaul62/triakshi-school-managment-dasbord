@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Panel } from "@smw/ui/kit/Panel";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
@@ -9,12 +10,14 @@ import { Button } from "@smw/ui/ui/button";
 import { toast } from "@smw/ui/shell/toast";
 import type { ImportReport } from "../import-service";
 
+type Imported = { imported: number; slipClasses: { id: string; name: string }[] };
 type Action = (fd: FormData) => Promise<FormResult & { data?: unknown }>;
 
-/** Step 1 choose a CSV and check it (nothing is written), step 2 import it. Errors are listed by row. */
+/** Step 1 choose an Excel or CSV file and check it (nothing is written), step 2 import it. Errors are listed by row. */
 export function ImportForm({ check, commit }: { check: Action; commit: Action }) {
   const [file, setFile] = useState<File | null>(null);
   const [report, setReport] = useState<ImportReport | null>(null);
+  const [done, setDone] = useState<Imported | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const input = useRef<HTMLInputElement>(null);
@@ -32,7 +35,7 @@ export function ImportForm({ check, commit }: { check: Action; commit: Action })
     else { setReport(null); setError(r.fieldErrors?.file ?? r.error); }
   });
   const runImport = () => post(commit, (r) => {
-    if (r.ok) { toast(`${(r.data as { imported: number }).imported} students imported`); router.push("/app/students"); }
+    if (r.ok) { const d = r.data as Imported; toast(`${d.imported} students imported`); setDone(d); setReport(null); setFile(null); router.refresh(); }
     else { setError(r.fieldErrors?.file ?? r.error); toast(r.error, "danger"); }
   });
 
@@ -42,12 +45,22 @@ export function ImportForm({ check, commit }: { check: Action; commit: Action })
     <div className="flex flex-col gap-3">
       <Panel title="1. Choose a file">
         <div className="flex flex-wrap items-center gap-3">
-          <input ref={input} type="file" accept=".csv,text/csv" aria-label="CSV file" className={`${INPUT} max-w-sm py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]`}
+          <input ref={input} type="file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label="Excel or CSV file" className={`${INPUT} max-w-sm py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]`}
             onChange={(e) => { setFile(e.target.files?.[0] ?? null); setReport(null); setError(null); }} />
           <Button type="button" className="rounded-full" onClick={runCheck} disabled={!file} isLoading={pending && !report}>Check file</Button>
         </div>
         {error ? <p role="alert" className="mt-3 text-sm text-[var(--ds-color-danger-400)]">{error}</p> : null}
       </Panel>
+
+      {done ? (
+        <Panel title="Imported">
+          <p className="text-sm">{done.imported} students were admitted. Their first sign-in is the date of birth as DDMMYYYY, or the admission number.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {done.slipClasses.map((c) => <Button key={c.id} asChild variant="secondary" className="rounded-full"><Link href={`/app/students/credentials?classId=${c.id}`}>Login slips: {c.name}</Link></Button>)}
+            <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students">Back to students</Link></Button>
+          </div>
+        </Panel>
+      ) : null}
 
       {report ? (
         <Panel title="2. Review"

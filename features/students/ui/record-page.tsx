@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { NotFoundError } from "@smw/feature-kit";
+import { allows } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import Link from "next/link";
 import { Panel } from "@smw/ui/kit/Panel";
@@ -11,14 +12,17 @@ import { KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { dateTime, shortDate } from "@smw/ui/format";
-import { ConsentService, DocumentService, GuardianService, PhotoService, StudentService } from "../service";
+import { ConsentService, CredentialService, DocumentService, GuardianService, PhotoService, StudentService } from "../service";
 import { DOCUMENT_KINDS } from "../inputs";
 import {
-  addGuardian, deleteDocument, deleteStudent, recordConsent, removeGuardian, setPrimaryGuardian, updateStudent, uploadDocument, uploadPhoto,
+  addGuardian, deleteDocument, deleteStudent, recordConsent, removeGuardian, resetStudentLogin, setPrimaryGuardian, updateStudent, uploadDocument, uploadPhoto,
 } from "./actions";
 import { consentFields, documentFields, guardianFields, GENDER_OPTIONS, photoFields, studentFields } from "./fields";
 import { Avatar, RowList, type RowItem } from "./parts";
 import { RecordTabs } from "./record-tabs";
+
+// shortcut: mirrors the read roles in features/library/feature.ts (importing it would make the packages circular); custom roles go by their library:read grant.
+const libraryRead = (ctx: Parameters<typeof allows>[0]) => allows(ctx, { key: "library", permissions: { read: ["admin", "teacher"] } }, "read");
 
 export const metadata = { title: "Student" };
 
@@ -45,21 +49,23 @@ export default async function StudentRecordPage({ params, searchParams }: {
   const { student: s } = ov;
   const canWrite = students.can("write");
 
-  const [photoUrl, guardians, look] = await Promise.all([
+  const [photoUrl, guardians, look, login] = await Promise.all([
     new PhotoService(ctx).url(id), guardianSvc.forStudent(id), canWrite ? students.lookups() : null,
+    canWrite ? new CredentialService(ctx).loginStatus(id) : null,
   ]);
   const sectionOptions = (look?.sections ?? []).map((x) => ({ value: x.id, label: x.label }));
   // What is still missing on this record, as a link to the tab that fixes it; plus where else this student's data lives.
   const todo = canWrite ? [
-    ov.counts.guardians === 0 ? { label: "Add a guardian so a parent can sign in", href: `?tab=guardians` } : null,
+    ov.counts.guardians === 0 ? { label: "Add a guardian contact for the family", href: `?tab=guardians` } : null,
     ov.counts.documents === 0 ? { label: "Upload the birth or transfer certificate", href: `?tab=documents` } : null,
-    ov.counts.consents === 0 ? { label: "Record the parent's consent", href: `?tab=consent` } : null,
+    ov.counts.consents === 0 ? { label: "Record the guardian's consent", href: `?tab=consent` } : null,
   ].filter((x): x is { label: string; href: string } => !!x) : [];
   const has = (k: string) => ctx.features.has(k);
   const related = [
     has("fees") ? { label: "Fees", hint: "Dues and receipts", href: `/app/fees/students/${id}` } : null,
     has("attendance") ? { label: "Attendance", hint: "Present and absent days", href: "/app/attendance" } : null,
     has("exams") ? { label: "Results", hint: "Marks and report cards", href: "/app/results" } : null,
+    libraryRead(ctx) ? { label: "Library", hint: "Books borrowed and fines", href: `/app/library/members/student/${id}` } : null,
   ].filter((x): x is { label: string; hint: string; href: string } => !!x);
 
   return (
@@ -68,15 +74,17 @@ export default async function StudentRecordPage({ params, searchParams }: {
         back={{ href: "/app/students", label: "Students" }}
         leading={<Avatar name={s.name} src={photoUrl} size={56} />}
         title={s.name}
-        chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}</>}
+        chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}{s.rteQuota ? <ToneBadge label="RTE quota" tone="info" /> : null}</>}
         meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null]}
         actions={canWrite ? (<>
           <FormModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit")} values={{ ...s }} hidden={{ id: s.id }}
             action={updateStudent} trigger={{ label: "Edit", variant: "secondary" }} />
           <FormModal title="Change photo" icon="user" fields={photoFields} hidden={{ studentId: s.id }} action={uploadPhoto}
             trigger={{ label: "Photo", variant: "secondary" }} submitLabel="Upload" />
+          <ActionButton variant="secondary" label="Reset login" action={resetStudentLogin} values={{ id: s.id }}
+            confirm={{ title: `Reset the login of ${s.name}?`, body: "The password goes back to the first password (date of birth as DDMMYYYY, or the admission number). They sign in with it, then choose a new one. Their open sessions end.", confirmLabel: "Reset login" }} />
           <ActionButton variant="secondary" label="Delete" action={deleteStudent} values={{ id: s.id }} redirectTo="/app/students"
-            confirm={{ title: `Delete ${s.name}?`, body: "This removes the student, their login, documents and consent record. Parents with no other child here lose their login too. It cannot be undone.", confirmLabel: "Delete student", danger: true }} />
+            confirm={{ title: `Delete ${s.name}?`, body: "This removes the student, their login, documents and consent record. Guardians with no other child here are removed too. It cannot be undone.", confirmLabel: "Delete student", danger: true }} />
         </>) : null}
       >
         <RecordTabs value={tab} panelId={PANEL_ID} tabs={[
@@ -100,7 +108,7 @@ export default async function StudentRecordPage({ params, searchParams }: {
             <div className="flex flex-col gap-3 lg:col-span-8">
               <Panel title="Guardians">
                 <RowList
-                  empty={{ title: "No guardian yet.", description: "Add a parent so they can sign in and follow this student." }}
+                  empty={{ title: "No guardian yet.", description: "Add a guardian so the office can reach the family." }}
                   items={guardians.map((g): RowItem => ({
                     id: g.id, leading: <Avatar name={g.name} size={36} />, title: g.name, subtitle: g.phone,
                     trailing: <><ToneBadge label={g.relation} />{g.isPrimary ? <ToneBadge label="Primary" tone="info" /> : null}</>,
@@ -135,6 +143,18 @@ export default async function StudentRecordPage({ params, searchParams }: {
                   </ul>
                 </Panel>
               ) : null}
+              {login ? (
+                <Panel title="Login">
+                  <FactList>
+                    <Fact label="Login ID" copy={login.loginId}>{login.loginId}</Fact>
+                    <Fact label="Status">
+                      <ToneBadge label={login.status === "disabled" ? "Disabled" : login.lastLoginAt ? "Active" : "Never signed in"} tone={login.status === "disabled" ? "danger" : login.lastLoginAt ? "success" : "warning"} />
+                    </Fact>
+                    <Fact label="Last sign-in">{login.lastLoginAt ? dateTime(login.lastLoginAt) : null}</Fact>
+                    {login.mustChange ? <Fact label="Password">Must be changed at next sign-in</Fact> : null}
+                  </FactList>
+                </Panel>
+              ) : null}
               <Panel title="Details">
                 <FactList>
                   <Fact label="Admission no" copy={s.admissionNo}>{s.admissionNo}</Fact>
@@ -143,10 +163,26 @@ export default async function StudentRecordPage({ params, searchParams }: {
                   <Fact label="Blood group">{s.bloodGroup}</Fact>
                   <Fact label="Category">{s.category}</Fact>
                   <Fact label="APAAR ID" copy={s.apaarId ?? undefined}>{s.apaarId}</Fact>
+                  <Fact label="RTE quota">{s.rteQuota ? "Yes, under RTE 12(1)(c)" : "No"}</Fact>
                   <Fact label="Address">{s.address}</Fact>
                   <Fact label="Admitted">{s.admissionDate ? shortDate(s.admissionDate) : null}</Fact>
                   {s.leftOn ? <Fact label="Left on">{shortDate(s.leftOn)}</Fact> : null}
+                  <Fact label="Mother tongue">{s.motherTongue}</Fact>
+                  <Fact label="Religion">{s.religion}</Fact>
+                  <Fact label="Nationality">{s.nationality}</Fact>
+                  <Fact label="Previous school">{s.previousSchool}</Fact>
                 </FactList>
+              </Panel>
+              <Panel title="Contact & emergency">
+                <FactList>
+                  <Fact label="Mobile">{s.phone}</Fact>
+                  <Fact label="Alternate mobile">{s.altPhone}</Fact>
+                  <Fact label="Emergency contact">{s.emergencyName}</Fact>
+                  <Fact label="Emergency mobile">{s.emergencyPhone}</Fact>
+                </FactList>
+              </Panel>
+              <Panel title="Medical">
+                <FactList><Fact label="Notes">{s.medicalNotes}</Fact></FactList>
               </Panel>
             </div>
           </div>
@@ -155,16 +191,16 @@ export default async function StudentRecordPage({ params, searchParams }: {
         {tab === "guardians" ? (
           <Panel title="Guardians"
             action={canWrite ? <FormModal title="Add guardian" icon="parent" fields={guardianFields} hidden={{ studentId: s.id }} action={addGuardian} submitLabel="Add"
-              summary="Creates the parent login if this phone is new" /> : null}>
+              summary="A contact record only. Families sign in with the student login" /> : null}>
             <RowList
-              empty={{ title: "No guardian yet.", description: "Add a parent so they can sign in and follow this student." }}
+              empty={{ title: "No guardian yet.", description: "Add a guardian so the office can reach the family." }}
               items={guardians.map((g): RowItem => ({
                 id: g.id, leading: <Avatar name={g.name} size={36} />, title: g.name, subtitle: [g.phone, g.email, g.occupation].filter(Boolean).join(" · "),
                 trailing: <><ToneBadge label={g.relation} />{g.isPrimary ? <ToneBadge label="Primary" tone="info" /> : null}</>,
                 actions: canWrite ? (<>
                   {g.isPrimary ? null : <ActionButton variant="ghost" label="Make primary" action={setPrimaryGuardian} values={{ studentId: s.id, guardianId: g.id }} successMessage="Primary guardian changed" />}
                   <ActionButton variant="icon-delete" label={`Remove ${g.name}`} action={removeGuardian} values={{ studentId: s.id, guardianId: g.id }}
-                    confirm={{ title: `Remove ${g.name}?`, body: "They stop seeing this student. If this is their only child here, their parent login is switched off.", confirmLabel: "Remove", danger: true }} />
+                    confirm={{ title: `Remove ${g.name}?`, body: "They are no longer listed for this student. If this is their only child here, the guardian record is removed.", confirmLabel: "Remove", danger: true }} />
                 </>) : null,
               }))} />
           </Panel>

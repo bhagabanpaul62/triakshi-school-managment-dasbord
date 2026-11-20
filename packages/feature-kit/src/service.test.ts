@@ -1,8 +1,8 @@
 // Proves the base classes: permissions, module and read-only guards, and school A vs B isolation.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { closeDb, schoolDb, sql, supportTickets, withSchool } from "@smw/db";
-import { CrudService, defineFeature, FeatureOffError, ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./index";
+import { closeDb, schoolDb, sql, supportTickets, withSchool, type Tx } from "@smw/db";
+import { by, ConflictError, countIn, CrudService, defineFeature, FeatureOffError, ForbiddenError, NotFoundError, ReadOnlyError, ValidationError } from "./index";
 import { createSchoolPair, type TestSchool } from "./testing";
 
 const support = defineFeature({
@@ -22,11 +22,26 @@ class TicketService extends CrudService<typeof supportTickets, "read" | "write">
   protected describe(r: typeof supportTickets.$inferSelect) { return r.subject; }
 }
 
+/** Same service, but a ticket with replies (or a subject starting "Keep") is still in use. */
+class GuardedTicketService extends TicketService {
+  protected override async usage(tx: Tx, t: typeof supportTickets.$inferSelect): Promise<[string, number][]> {
+    return [["messages", await countIn(tx, "support_messages", by("ticket_id", t.id))], ["missing-feature rows", await countIn(tx, "no_such_table", by("id", t.id))], ["pins", t.subject.startsWith("Keep") ? 1 : 0]];
+  }
+}
+
 let a: TestSchool, b: TestSchool;
 beforeAll(async () => { ({ a, b } = await createSchoolPair(["support"])); });
 afterAll(closeDb);
 
 describe("CrudService", () => {
+  it("usage() stops a delete with a friendly in-use message; a missing table counts as zero; an unused row goes", async () => {
+    const svc = new GuardedTicketService(a.as.admin);
+    const kept = await svc.create({ subject: "Keep this one" });
+    await expect(svc.remove(kept.id)).rejects.toThrow(new ConflictError("This ticket is still in use (1 pins), so it can't be deleted."));
+    const free = await svc.create({ subject: "Free to go" });
+    await expect(svc.remove(free.id)).resolves.toEqual({ id: free.id });
+  });
+
   it("creates, lists and searches within the school", async () => {
     const svc = new TicketService(a.as.admin);
     await svc.create({ subject: "Projector broken" });

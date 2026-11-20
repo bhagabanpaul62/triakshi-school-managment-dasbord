@@ -1,13 +1,15 @@
 import { and, asc, count, eq, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { CrudService, ForbiddenError, NotFoundError, SchoolService, ValidationError, rethrowUnique, type Ctx } from "@smw/feature-kit";
-import { users, type Tx } from "@smw/db";
+import { schools, users, type Tx } from "@smw/db";
 import { academicYears, classes, sectionTeachers, sections } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import attendanceFeature from "./feature";
 import { DEFAULTER_BELOW } from "./constants";
 import { holidayInput, markStaffInput, markStudentsInput, monthInput } from "./inputs";
-import { attendanceHolidays, staffAttendance, studentAttendance } from "./schema";
+import { loadSettings, queueAlerts } from "./alerts";
+import { registerCsv, registerPdf, type RegisterInput } from "./register-export";
+import { attendanceHolidays, periodAttendance, staffAttendance, studentAttendance } from "./schema";
 import { addDays, attendancePercent, countsOf, groupBy, isDate, isSunday, monthDays, tally, todayIST, type Counts } from "./stats";
 
 type Perm = keyof typeof attendanceFeature.permissions;
@@ -146,13 +148,19 @@ export class StudentAttendanceService extends AttendanceBase {
     });
   }
 
-  /** Mark (or re-mark) a whole section for one day. Returns the day's counts. */
-  async mark(input: unknown): Promise<Counts> {
+  /**
+   * Mark (or re-mark) a whole section for one day. Returns the day's counts.
+   * Absent or late students with a login get one alert per date (marker row + notice in this transaction, email after commit);
+   * the seed passes `alerts: false`.
+   */
+  async mark(input: unknown, opts: { alerts?: boolean } = {}): Promise<Counts> {
     this.authorize("mark", "write");
     const data = this.parse(markStudentsInput, input);
     const entries = this.lastPerKey(data.entries, "studentId");
-    return this.write("mark", async (tx) => {
+    const counts = await this.write("mark", async (tx) => {
       await this.assertSectionAccess(tx, data.sectionId);
+      // In period mode the day is worked out from the periods; the office keeps the daily sheet for corrections.
+      if (this.ctx.role === "teacher" && this.ctx.features.has("timetable") && (await loadSettings(tx)).mode === "period") throw new ForbiddenError("This school takes attendance period by period. Mark from My classes.");
       await this.assertOpenDay(tx, data.date);
       const ids = entries.map((e) => e.studentId);
       const inSection = await tx.select({ id: students.id }).from(students).where(and(eq(students.sectionId, data.sectionId), inArray(students.id, ids)));
@@ -160,8 +168,10 @@ export class StudentAttendanceService extends AttendanceBase {
       await this.upsert(tx, studentAttendance, [studentAttendance.studentId, studentAttendance.date],
         entries.map((e) => ({ schoolId: this.ctx.schoolId, studentId: e.studentId, sectionId: data.sectionId, date: data.date, status: e.status, note: e.note ?? null, markedBy: this.ctx.userId })),
         { sectionId: sql`excluded.section_id` });
+      if (opts.alerts !== false) await queueAlerts(tx, this.ctx.schoolId, data.date, entries);
       return tally(entries.map((e) => e.status));
     }, (c) => ({ action: "mark", entity: "Attendance", summary: `Marked ${c.total} students on ${data.date}: ${c.present} present, ${c.absent} absent` }));
+    return counts;
   }
 
   // ---------- the monthly register ----------
@@ -196,19 +206,26 @@ export class StudentAttendanceService extends AttendanceBase {
     });
   }
 
+  /** The month register as printable data (same access rules as the register screen). */
+  private async registerInput(sectionId: string, month: string): Promise<RegisterInput> {
+    const reg = await this.monthlyRegister(sectionId, month);
+    const school = await this.read("read", (tx) => tx.select({ name: schools.name }).from(schools).limit(1).then((r) => r[0]?.name ?? "School"));
+    return {
+      school, title: "Attendance register", subtitle: `${reg.section.label}, ${month}`, days: reg.days,
+      people: reg.rows.map((r) => ({ name: r.name, sub: r.rollNo ? String(r.rollNo) : "", marks: r.marks })),
+    };
+  }
+  async registerPdf(sectionId: string, month: string) { return { bytes: await registerPdf(await this.registerInput(sectionId, month)), fileName: `register-${sectionId.slice(0, 8)}-${month}.pdf` }; }
+  async registerCsv(sectionId: string, month: string) { return { text: registerCsv(await this.registerInput(sectionId, month)), fileName: `register-${sectionId.slice(0, 8)}-${month}.csv` }; }
+
   // ---------- one student ----------
 
-  /** The students the caller is: themselves (student) or their children (parent). */
+  /** The student record this login is. */
   protected async myStudentIds(tx: Tx): Promise<string[]> {
-    if (this.ctx.role === "student") {
-      return (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
-    }
-    const rows = await tx.select({ id: studentGuardians.studentId }).from(studentGuardians)
-      .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(eq(guardians.userId, this.ctx.userId));
-    return rows.map((r) => r.id);
+    return (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
   }
 
-  /** Staff roles read through "read" (teachers only their sections); students and parents through "self" (only their own). */
+  /** Staff roles read through "read" (teachers only their sections); students through "self" (only their own). */
   protected async viewStudent<T>(studentId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
     const staff = this.can("read");
     return this.read(staff ? "read" : "self", async (tx) => {
@@ -222,7 +239,7 @@ export class StudentAttendanceService extends AttendanceBase {
     });
   }
 
-  /** For students and parents: the children (or the student) whose attendance they may see. */
+  /** For student logins: the student whose attendance they may see. */
   async myStudents(): Promise<{ id: string; name: string; sectionLabel: string | null }[]> {
     return this.read("self", async (tx) => {
       const ids = await this.myStudentIds(tx);
@@ -347,6 +364,33 @@ export class StaffAttendanceService extends AttendanceBase {
     }, (c) => ({ action: "mark", entity: "Staff attendance", summary: `Marked ${c.total} staff on ${data.date}: ${c.present} present, ${c.absent} absent` }));
   }
 
+  /** A month of staff attendance as a matrix, for the staff register screen and its PDF. */
+  async monthlyRegister(month: string) {
+    this.parse(monthInput, month);
+    const days = monthDays(month);
+    return this.read("manage", async (tx) => {
+      const [people, marks, holidays, school] = await Promise.all([
+        tx.select({ userId: users.id, name: users.name, role: users.role }).from(users)
+          .where(and(or(eq(users.role, "teacher"), eq(users.role, "accountant")), eq(users.status, "active"))).orderBy(asc(users.role), asc(users.name)),
+        tx.select({ userId: staffAttendance.userId, date: staffAttendance.date, status: staffAttendance.status }).from(staffAttendance)
+          .where(and(gte(staffAttendance.date, days[0]!), lte(staffAttendance.date, days.at(-1)!))),
+        tx.select({ date: attendanceHolidays.date, name: attendanceHolidays.name }).from(attendanceHolidays)
+          .where(and(gte(attendanceHolidays.date, days[0]!), lte(attendanceHolidays.date, days.at(-1)!))),
+        tx.select({ name: schools.name }).from(schools).limit(1).then((r) => r[0]?.name ?? "School"),
+      ]);
+      const byUser = groupBy(marks, (m) => m.userId);
+      const holidayOf = new Map(holidays.map((h) => [h.date, h.name]));
+      const input: RegisterInput = {
+        school, title: "Staff attendance register", subtitle: month,
+        days: days.map((date) => ({ date, day: Number(date.slice(8)), sunday: isSunday(date), holiday: holidayOf.get(date) ?? null })),
+        people: people.map((p) => ({ name: p.name, sub: p.role === "teacher" ? "Teacher" : "Accounts", marks: Object.fromEntries((byUser.get(p.userId) ?? []).map((m) => [m.date, m.status])) })),
+      };
+      return input;
+    });
+  }
+  async registerPdf(month: string) { return { bytes: await registerPdf(await this.monthlyRegister(month)), fileName: `staff-register-${month}.pdf` }; }
+  async registerCsv(month: string) { return { text: registerCsv(await this.monthlyRegister(month)), fileName: `staff-register-${month}.csv` }; }
+
   /** Staff present/absent today, for the staff page. */
   async todaySummary() {
     const date = todayIST();
@@ -375,7 +419,19 @@ export class HolidayService extends CrudService<typeof attendanceHolidays, Perm>
   protected searchColumns() { return [attendanceHolidays.name]; }
   protected describe(r: Holiday) { return `${r.name} (${r.date})`; }
 
+  /** A day somebody already marked cannot become a holiday: the marks would sit on a closed day and skew every %. */
+  private async assertUnmarked(tx: Tx, date: string) {
+    const used = await Promise.all([studentAttendance, staffAttendance, periodAttendance].map((t) => tx.select({ id: t.id }).from(t).where(eq(t.date, date)).limit(1)));
+    if (used.some((r) => r.length)) throw new ValidationError({ date: "Attendance was already marked on that day. Clear it first or pick another date." });
+  }
+  protected async beforeCreate(tx: Tx, data: Record<string, unknown>) { await this.assertUnmarked(tx, String(data.date)); return data; }
+  protected async beforeUpdate(tx: Tx, existing: Holiday, data: Record<string, unknown>) { if (data.date !== existing.date) await this.assertUnmarked(tx, String(data.date)); return data; }
+
   async create(input: unknown) {
     try { return await super.create(input); } catch (e) { rethrowUnique(e, "That date is already a holiday"); }
+  }
+
+  async update(id: string, input: unknown) {
+    try { return await super.update(id, input); } catch (e) { rethrowUnique(e, "That date is already a holiday"); }
   }
 }

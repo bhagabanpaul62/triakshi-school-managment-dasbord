@@ -12,7 +12,7 @@ const CATCH_UP_DAYS = 7;
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const human = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
-/** One school's overdue reminders: tell each guardian once per installment that fell overdue in the last few days and is still unpaid. */
+/** One school's overdue reminders: tell each student login (the family login) once per installment that fell overdue in the last few days and is still unpaid. */
 export class FeeReminders extends FeesService {
   constructor(ctx: Ctx) { super(ctx); }
 
@@ -25,7 +25,7 @@ export class FeeReminders extends FeesService {
       const kids = await this.studentLines(tx, eq(students.status, "active"));
       const books = await this.loadBooks(tx, kids, year.id, today);
       const due = kids.flatMap((k) => new FeeCalculator(books.get(k.id)!.input).statement().lines
-        .filter((l) => l.overdue && l.due > 0 && l.dueDate >= from && l.dueDate < today)
+        .filter((l) => !l.charge && l.overdue && l.due > 0 && l.dueDate >= from && l.dueDate < today)
         .map((l) => ({ student: k, line: l })));
       if (!due.length) return 0;
 
@@ -36,11 +36,11 @@ export class FeeReminders extends FeesService {
       const mine = new Set(claimed.map((c) => `${c.studentId}:${c.installmentId}`));
       const fresh = due.filter((d) => mine.has(`${d.student.id}:${d.line.installmentId}`));
 
-      const parents = await this.guardianUsers(tx, [...new Set(fresh.map((d) => d.student.id))]);
-      const rows = fresh.flatMap((d) => (parents.get(d.student.id) ?? []).map((userId) => ({
-        userId, kind: "fee_due" as const, title: `Fee overdue: ${d.line.name}`,
-        body: `${rupees(d.line.due)} for ${d.student.name} was due on ${human(d.line.dueDate)}.`, href: `/app/fees/students/${d.student.id}`,
-      })));
+      const logins = await this.studentUsers(tx, [...new Set(fresh.map((d) => d.student.id))]);
+      const rows = fresh.flatMap((d) => (logins.has(d.student.id) ? [{
+        userId: logins.get(d.student.id)!, kind: "fee_due" as const, title: `Fee overdue: ${d.line.name}`,
+        body: `${rupees(d.line.due)} was due on ${human(d.line.dueDate)}.`, href: `/app/fees/students/${d.student.id}`,
+      }] : []));
       return NotificationWriter.insert(tx, this.ctx.schoolId, rows);
     });
   }

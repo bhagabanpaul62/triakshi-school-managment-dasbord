@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import Papa from "papaparse";
+import { parseSheet, SheetError } from "@smw/integrations";
 import type { Tx } from "@smw/db";
 import { ValidationError, type Ctx } from "@smw/feature-kit";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
@@ -10,14 +11,19 @@ import { StudentService } from "./student-service";
 import { sectionLabel } from "./util";
 
 /** Column names of the CSV, in template order. */
-export const IMPORT_COLUMNS = ["admission_no", "name", "dob", "gender", "class", "section", "guardian_name", "guardian_phone", "guardian_relation"] as const;
+export const IMPORT_COLUMNS = ["admission_no", "name", "dob", "gender", "class", "section", "guardian_name", "guardian_phone", "guardian_relation",
+  "guardian_email", "phone", "alt_phone", "mother_tongue", "religion", "nationality", "previous_school", "medical_notes", "emergency_name", "emergency_phone"] as const;
 const REQUIRED = ["name", "class", "section"] as const;
 const MAX_ROWS = 1000;
 /** Which CSV column a validation error on an input field belongs to. */
 const COLUMN_OF: Record<string, string> = {
   admissionNo: "admission_no", name: "name", dob: "dob", gender: "gender", sectionId: "section",
-  guardianName: "guardian_name", guardianPhone: "guardian_phone", guardianRelation: "guardian_relation",
+  guardianName: "guardian_name", guardianPhone: "guardian_phone", guardianRelation: "guardian_relation", guardianEmail: "guardian_email",
+  phone: "phone", altPhone: "alt_phone", motherTongue: "mother_tongue", religion: "religion", nationality: "nationality", previousSchool: "previous_school",
+  medicalNotes: "medical_notes", emergencyName: "emergency_name", emergencyPhone: "emergency_phone",
 };
+/** An uploaded .xlsx or .csv. A plain string is read as CSV text. */
+export type ImportFile = string | { name: string; bytes: Uint8Array };
 
 export interface ImportRowReport { line: number; admissionNo: string | null; name: string | null; classSection: string | null; errors: string[] }
 export interface ImportReport { total: number; valid: number; failed: number; rows: ImportRowReport[]; limitMessage: string | null }
@@ -43,28 +49,30 @@ export class ImportService extends StudentRecordService {
     return Papa.unparse({
       fields: [...IMPORT_COLUMNS],
       data: [
-        ["", "Aarav Sharma", "2015-06-14", "male", "Class 4", "A", "Rajesh Sharma", "9876543210", "father"],
-        ["", "Diya Verma", "2014-11-02", "female", "Class 5", "B", "Sunita Verma", "9812345678", "mother"],
+        ["", "Aarav Sharma", "2015-06-14", "male", "Class 4", "A", "Rajesh Sharma", "9876543210", "father", "rajesh@example.com", "", "", "Hindi", "", "Indian", "Sunrise Public School", "Peanut allergy", "Rajesh Sharma", "9876543210"],
       ],
     }, { newline: "\n" }) + "\n";
   }
 
-  async dryRun(csvText: string): Promise<ImportReport> {
+  async dryRun(file: ImportFile): Promise<ImportReport> {
     return this.read("write", async (tx) => {
-      const rows = await this.analyse(tx, csvText);
+      const rows = await this.analyse(tx, file);
       return this.report(rows, await this.admissions.roomWithin(tx, rows.filter((r) => !r.errors.length).length));
     });
   }
 
   /** All-or-nothing: any problem row stops the whole import before anything is written. */
-  async commit(csvText: string) {
+  async commit(file: ImportFile) {
     return this.write("write", async (tx) => {
-      const rows = await this.analyse(tx, csvText);
+      const rows = await this.analyse(tx, file);
       const failed = rows.filter((r) => r.errors.length);
       if (failed.length) throw new ValidationError({ file: `${failed.length} of ${rows.length} rows have problems. Run the check, fix the file and try again.` });
-      for (const r of rows) await this.admissions.admitWithin(tx, r.input!);
-      return { imported: rows.length };
-    }, (r) => ({ action: "import", entity: "Student", summary: `Imported ${r.imported} students from CSV` }));
+      const classIds = new Set<string>();
+      for (const r of rows) { const st = await this.admissions.admitWithin(tx, r.input!); if (st.classId) classIds.add(st.classId); }
+      // Where to print the login slips: one entry per class that received students.
+      const slipClasses = classIds.size ? (await tx.select({ id: classes.id, name: classes.name }).from(classes)).filter((c) => classIds.has(c.id)) : [];
+      return { imported: rows.length, slipClasses };
+    }, (r) => ({ action: "import", entity: "Student", summary: `Imported ${r.imported} students from a spreadsheet` }));
   }
 
   // ---------- checks (shared by dryRun and commit) ----------
@@ -74,21 +82,24 @@ export class ImportService extends StudentRecordService {
     return { total: rows.length, valid: rows.length - failed, failed, rows: rows.map(({ input: _input, ...r }) => r), limitMessage };
   }
 
-  private async analyse(tx: Tx, csvText: string): Promise<Analysed[]> {
-    const parsed = Papa.parse<Record<string, string>>(csvText.replace(/^\uFEFF/, ""), {
-      header: true, skipEmptyLines: "greedy", transformHeader: (h) => h.trim().toLowerCase().replace(/\s+/g, "_"), transform: (v) => v.trim(),
-    });
-    const headers = parsed.meta.fields ?? [];
-    const missing = REQUIRED.filter((c) => !headers.includes(c));
+  private async analyse(tx: Tx, file: ImportFile): Promise<Analysed[]> {
+    let parsed;
+    try {
+      parsed = await parseSheet(typeof file === "string" ? { name: "import.csv", bytes: new TextEncoder().encode(file) } : file);
+    } catch (err) {
+      if (err instanceof SheetError) throw new ValidationError({ file: err.message });
+      throw err;
+    }
+    const missing = REQUIRED.filter((c) => !parsed.columns.includes(c));
     if (missing.length) throw new ValidationError({ file: `The file is missing the column${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}. Download the template for the right headers.` });
-    if (parsed.data.length === 0) throw new ValidationError({ file: "The file has no students in it." });
-    if (parsed.data.length > MAX_ROWS) throw new ValidationError({ file: `Import up to ${MAX_ROWS} students at a time.` });
+    if (parsed.rows.length === 0) throw new ValidationError({ file: "The file has no students in it." });
+    if (parsed.rows.length > MAX_ROWS) throw new ValidationError({ file: `Import up to ${MAX_ROWS} students at a time.` });
 
     const places = await this.places(tx);
     const used = new Set((await tx.select({ no: students.admissionNo }).from(students)).map((r) => r.no.toLowerCase()));
     const seen = new Set<string>();
 
-    return parsed.data.map((row, i): Analysed => {
+    return parsed.rows.map((row, i): Analysed => {
       const errors: string[] = [];
       const cell = (k: string) => row[k] || undefined;
       const className = cell("class"), sectionName = cell("section");
@@ -101,6 +112,9 @@ export class ImportService extends StudentRecordService {
       const candidate = {
         admissionNo: cell("admission_no"), name: cell("name"), dob: cell("dob") && isoDate(cell("dob")!), gender: gender && (GENDER_WORDS[gender] ?? gender),
         sectionId: place?.id, guardianName: cell("guardian_name"), guardianPhone: cell("guardian_phone"), guardianRelation: cell("guardian_relation")?.toLowerCase(),
+        guardianEmail: cell("guardian_email"), phone: cell("phone"), altPhone: cell("alt_phone"), motherTongue: cell("mother_tongue"), religion: cell("religion"),
+        nationality: cell("nationality"), previousSchool: cell("previous_school"), medicalNotes: cell("medical_notes"), emergencyName: cell("emergency_name"),
+        emergencyPhone: cell("emergency_phone"),
       };
       const check = studentInput.safeParse(candidate);
       if (!check.success) for (const issue of check.error.issues) errors.push(`${COLUMN_OF[String(issue.path[0])] ?? issue.path.join(".")}: ${issue.message}`);
@@ -111,7 +125,7 @@ export class ImportService extends StudentRecordService {
       if (no) seen.add(no);
 
       return {
-        line: i + 2, admissionNo: candidate.admissionNo ?? null, name: candidate.name ?? null, classSection: place?.label ?? null,
+        line: parsed.lines[i]!, admissionNo: candidate.admissionNo ?? null, name: candidate.name ?? null, classSection: place?.label ?? null,
         errors,
         input: errors.length === 0 && check.success ? check.data : null,
       };

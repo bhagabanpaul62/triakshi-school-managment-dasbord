@@ -12,8 +12,8 @@ import { paise } from "@smw/ui/format";
 import { buttonVariants } from "@smw/ui/ui/button";
 import { clock12, occupancyTone } from "../rules";
 import { RouteService, StudentTransportService, VehicleService } from "../service";
-import { addStop, assignStudent, deleteRoute, removeStop, unassignStudent, updateRoute, updateStop } from "./actions";
-import { assignFields, routeFields, stopFields } from "./fields";
+import { addStop, assignStudent, deleteRoute, removeStop, sendRouteNotice, unassignStudent, updateRoute, updateStop } from "./actions";
+import { assignFields, noticeFields, routeFields, stopFields } from "./fields";
 
 export const metadata = { title: "Route" };
 
@@ -38,6 +38,7 @@ export default async function RoutePage({ params }: { params: Promise<{ id: stri
         actions={<>
           <a href={`/app/transport/routes/${route.id}/roster`} target="_blank" rel="noreferrer" className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Print route list</a>
           {canManage ? <>
+            <FormModal title="Send notice" icon="bus" description={`Goes to the ${detail.riders} students on this route, in the app and by email.`} fields={noticeFields} hidden={{ routeId: route.id }} action={sendRouteNotice} submitLabel="Send notice" trigger={{ label: "Send notice", variant: "secondary" }} />
             <FormModal title="Edit route" icon="bus" fields={routeFields(vehicles)} values={route} hidden={{ id: route.id }} action={updateRoute} trigger={{ label: "Edit", variant: "secondary" }} />
             <ActionButton variant="icon-delete" label="Delete route" action={deleteRoute} values={{ id: route.id }} redirectTo="/app/transport"
               confirm={{ title: "Delete this route?", body: `${route.name} and its ${stops.length} stops will be removed. This cannot be undone.`, confirmLabel: "Delete", danger: true }} />

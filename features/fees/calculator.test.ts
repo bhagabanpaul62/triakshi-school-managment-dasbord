@@ -157,7 +157,7 @@ describe("allocate", () => {
   });
   it("pays the late fee before the principal", () => {
     const plan = new FeeCalculator(base()).allocate(100_000, "2026-04-20"); // 25,000 late
-    expect(plan.allocations).toEqual([{ installmentId: I1, name: "Term 1", amountPaise: 75_000, lateFeePaise: 25_000 }]);
+    expect(plan.allocations).toEqual([{ installmentId: I1, charge: false, name: "Term 1", amountPaise: 75_000, lateFeePaise: 25_000 }]);
     expect(plan.lateFee).toBe(25_000);
   });
   it("clears an older installment's late fee and principal before moving on", () => {

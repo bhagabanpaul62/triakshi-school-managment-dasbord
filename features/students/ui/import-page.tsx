@@ -20,9 +20,9 @@ export default async function ImportPage() {
       <div className="flex flex-col gap-3">
         <Panel title="Before you start">
           <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-sm text-[var(--ds-on-surface-variant)]">
-            <li>Download the template and fill one student per row. Columns: <span className="font-mono text-xs">{IMPORT_COLUMNS.join(", ")}</span>.</li>
+            <li>Download the template and fill one student per row (Excel or CSV; only name, class and section are required, extra columns are ignored). Columns: <span className="font-mono text-xs">{IMPORT_COLUMNS.join(", ")}</span>.</li>
             <li>Leave <span className="font-mono text-xs">admission_no</span> blank to number students automatically. Dates are YYYY-MM-DD or DD-MM-YYYY.</li>
-            <li>Class and section must already exist for this year. Parents with the same phone are linked to all their children.</li>
+            <li>Class and section must already exist for this year. Guardians with the same phone are linked to all their children. Each student gets a login (admission number) that must be changed at first sign-in; print the slips from the students page.</li>
           </ol>
           <Link href="/app/students" className="mt-4 w-fit text-xs text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface)]">Back to students</Link>
         </Panel>

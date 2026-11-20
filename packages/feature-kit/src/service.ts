@@ -1,10 +1,26 @@
 import { z } from "zod";
-import { and, asc, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { auditLogs, platformAuditLogs, withConsole, withSchool, type Tx } from "@smw/db";
-import type { Ctx, StaffCtx } from "./context";
+import { allows, type Ctx, type StaffCtx } from "./context";
 import type { FeatureDef } from "./feature";
-import { FeatureOffError, ForbiddenError, NotFoundError, ReadOnlyError, parse } from "./errors";
+import { ConflictError, FeatureOffError, ForbiddenError, NotFoundError, ReadOnlyError, parse } from "./errors";
+
+/** The Postgres error code of a driver error (drizzle wraps it in `cause`). */
+export const pgErrorCode = (e: unknown) => (e as { code?: string })?.code ?? (e as { cause?: { code?: string } })?.cause?.code;
+
+/**
+ * Rows of another feature's table that match `where`, for `usage()` guards. A feature's dependents are read by raw SQL,
+ * and a table that does not exist (feature never switched on) counts as zero. `table` and column names are code constants.
+ */
+export async function countIn(tx: Tx, table: string, where: SQL): Promise<number> {
+  const [t] = [...(await tx.execute(sql`select to_regclass(${table}) as t`))] as { t: string | null }[];
+  if (!t?.t) return 0;
+  const [r] = [...(await tx.execute(sql`select count(*)::int as n from ${sql.raw(table)} where ${where}`))] as { n: number }[];
+  return Number(r?.n ?? 0);
+}
+/** `where <col> = <id>` for countIn. */
+export const by = (col: string, id: string) => sql`${sql.raw(col)} = ${id}`;
 
 export interface AuditEntry { action: string; entity?: string; entityId?: string | null; summary?: string; meta?: Record<string, unknown> }
 
@@ -20,12 +36,12 @@ export abstract class SchoolService<P extends string = string> {
 
   /** May the caller do this? For hiding buttons; services still enforce. */
   can(permission: P): boolean {
-    return this.ctx.features.has(this.feature.key) && (this.feature.permissions[permission] ?? []).includes(this.ctx.role);
+    return allows(this.ctx, this.feature, permission);
   }
 
   protected authorize(permission: P, mode: "read" | "write") {
     if (!this.ctx.features.has(this.feature.key)) throw new FeatureOffError(this.feature.key);
-    if (!(this.feature.permissions[permission] ?? []).includes(this.ctx.role)) throw new ForbiddenError();
+    if (!allows(this.ctx, this.feature, permission)) throw new ForbiddenError();
     if (mode === "write" && this.ctx.readOnly) throw new ReadOnlyError();
   }
 
@@ -129,6 +145,15 @@ export abstract class CrudService<
   protected async afterCreate(_tx: Tx, _row: Row): Promise<void> {}
   protected async beforeUpdate(_tx: Tx, _existing: Row, data: Record<string, unknown>): Promise<Record<string, unknown>> { return data; }
   protected async beforeRemove(_tx: Tx, _existing: Row): Promise<void> {}
+  /**
+   * What still uses this row, as [what, how many] (see `countIn`). Anything above zero stops the delete with a friendly
+   * "still in use" message, so history (marks, attendance, payments) is never cascaded away by accident.
+   */
+  protected async usage(_tx: Tx, _existing: Row): Promise<[string, number][]> { return []; }
+
+  protected inUse(why?: string) {
+    return new ConflictError(`This ${this.entityName.toLowerCase()} is still in use${why ? ` (${why})` : " elsewhere"}, so it can't be deleted.`);
+  }
 
   async list(query: ListQuery = {}): Promise<Page<Row>> {
     const q = listQuerySchema.parse(query);
@@ -186,7 +211,13 @@ export abstract class CrudService<
       const existing = await this.findOrThrow(tx, id);
       label = this.describe(existing);
       await this.beforeRemove(tx, existing);
-      await tx.delete(this.table).where(eq(this.table.id, id));
+      const used = (await this.usage(tx, existing)).filter(([, n]) => n > 0);
+      if (used.length) throw this.inUse(used.map(([what, n]) => `${n} ${what}`).join(", "));
+      try { await tx.delete(this.table).where(eq(this.table.id, id)); } catch (e) {
+        // A foreign key that `usage()` did not list still protects the row; say so plainly.
+        if (pgErrorCode(e) === "23503") throw this.inUse();
+        throw e;
+      }
       return { id };
     }, () => ({ action: "delete", entity: this.entityName, entityId: id, summary: `Deleted ${this.entityName.toLowerCase()} ${label}` }));
   }

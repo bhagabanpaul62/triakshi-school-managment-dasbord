@@ -157,7 +157,7 @@ describe("StudentTransportService", () => {
     expect(fileName).toMatch(/^route-route-\d+\.pdf$/);
   });
 
-  it("students and parents see their own route; others see nothing", async () => {
+  it("a student sees their own route; others (a legacy parent login included) see nothing", async () => {
     const { r, s1 } = await route(a, 5);
     const mine = await makeStudent(a, a.users.student);
     const other = await makeStudent(a);
@@ -168,12 +168,12 @@ describe("StudentTransportService", () => {
     expect(seen.map((x) => x.studentId)).toEqual([mine.id]);
     expect(seen[0]).toMatchObject({ stopName: "First", morningTime: "07:00", trip: "Both ways", feePaise: 100000 });
 
-    // the parent is the guardian of `other` only
+    // a guardian is a contact only: it shows on the staff roster, and gives no login
     await withSchool(a.id, async (tx) => {
-      const [g] = await tx.insert(guardians).values({ schoolId: a.id, name: "Parent", userId: a.users.parent, phone: "9845000000" }).returning();
+      const [g] = await tx.insert(guardians).values({ schoolId: a.id, name: "Parent", phone: "9845000000" }).returning();
       await tx.insert(studentGuardians).values({ schoolId: a.id, studentId: other.id, guardianId: g!.id, isPrimary: true });
     });
-    expect((await new StudentTransportService(a.as.parent).mine()).map((x) => x.studentId)).toEqual([other.id]);
+    await expect(new StudentTransportService(a.as.parent).mine()).rejects.toBeInstanceOf(ForbiddenError);
     expect((await svc.roster(r.id)).find((x) => x.studentId === other.id)?.parentPhone).toBe("9845000000");
     await expect(new StudentTransportService(a.as.teacher).mine()).rejects.toBeInstanceOf(ForbiddenError);
   });
@@ -214,12 +214,12 @@ describe("TransportFeeHelper", () => {
     expect(await fee.monthlyFee("not-an-id")).toBe(0);
   });
 
-  it("a parent can only look up their own child; another school gets 0", async () => {
+  it("a student can only look up their own fee; a legacy parent and another school get 0", async () => {
     const { r, s1 } = await route(a, 9);
     const kid = await makeStudent(a, a.users.student);
     await new StudentTransportService(a.as.admin).assign({ studentId: kid.id, routeId: r.id, stopId: s1.id, pickup: "true", drop: "true" });
     expect(await new TransportFeeHelper(a.as.student).monthlyFee(kid.id)).toBe(100000);
-    expect(await new TransportFeeHelper(a.as.parent).monthlyFee(kid.id)).toBe(0); // parent's children were set in an earlier test; not this one
+    await expect(new TransportFeeHelper(a.as.parent).monthlyFee(kid.id)).rejects.toBeInstanceOf(ForbiddenError);
     expect(await new TransportFeeHelper(b.as.admin).monthlyFee(kid.id)).toBe(0);
   });
 });

@@ -2,7 +2,7 @@
 
 import { formToObject, serviceAction } from "@smw/runtime";
 import {
-  AcademicYearService, ClassService, ClassSubjectService, SectionService, SectionTeacherService, SubjectService, TermService, YearRolloverService,
+  AcademicYearService, ClassService, ClassSubjectService, HouseService, SectionService, SectionTeacherService, SubjectGroupService, SubjectService, TermService, YearRolloverService,
 } from "../service";
 
 const id = (fd: FormData) => String(fd.get("id"));
@@ -11,8 +11,12 @@ export async function createYear(fd: FormData) { return serviceAction(AcademicYe
 export async function updateYear(fd: FormData) { return serviceAction(AcademicYearService, (s) => s.update(id(fd), formToObject(fd)), "Academic year updated"); }
 export async function deleteYear(fd: FormData) { return serviceAction(AcademicYearService, (s) => s.remove(id(fd)), "Academic year deleted"); }
 export async function setCurrentYear(fd: FormData) { return serviceAction(AcademicYearService, (s) => s.setCurrent(id(fd)), "Current year changed"); }
-export async function rollForward(fd: FormData) { return serviceAction(YearRolloverService, (s) => s.rollForward(formToObject(fd).name as string | undefined), "Next year created"); }
+export async function rollForward(fd: FormData) {
+  const o = formToObject(fd);
+  return serviceAction(YearRolloverService, (s) => s.rollForward(o.name as string | undefined, o.copyTeachers === "true" || o.copyTeachers === true), "Next year created");
+}
 
+export async function addDefaultTerms(fd: FormData) { return serviceAction(TermService, (s) => s.addDefaults(id(fd)), "Default terms added"); }
 export async function createTerm(fd: FormData) { return serviceAction(TermService, (s) => s.create(formToObject(fd)), "Term added"); }
 export async function updateTerm(fd: FormData) { return serviceAction(TermService, (s) => s.update(id(fd), formToObject(fd)), "Term updated"); }
 export async function deleteTerm(fd: FormData) { return serviceAction(TermService, (s) => s.remove(id(fd)), "Term deleted"); }
@@ -36,3 +40,18 @@ export async function assignSubjects(fd: FormData) { return serviceAction(ClassS
 export async function removeClassSubject(fd: FormData) { return serviceAction(ClassSubjectService, (s) => s.remove(id(fd)), "Subject removed from the class"); }
 
 export async function assignTeacher(fd: FormData) { return serviceAction(SectionTeacherService, (s) => s.assign(formToObject(fd)), "Teacher saved"); }
+
+export async function setElective(fd: FormData) { return serviceAction(ClassSubjectService, (s) => s.setElective(formToObject(fd)), "Subject updated"); }
+export async function createGroup(fd: FormData) { return serviceAction(SubjectGroupService, (s) => s.create(formToObject(fd)), "Group added"); }
+export async function updateGroup(fd: FormData) { return serviceAction(SubjectGroupService, (s) => s.update(id(fd), formToObject(fd)), "Group updated"); }
+export async function deleteGroup(fd: FormData) { return serviceAction(SubjectGroupService, (s) => s.remove(id(fd)), "Group deleted"); }
+export async function assignGroup(fd: FormData) { return serviceAction(SubjectGroupService, (s) => s.assign(formToObject(fd)), "Subjects saved"); }
+export async function setElectiveChoices(fd: FormData) { return serviceAction(SubjectGroupService, (s) => s.setChoices(formToObject(fd)), "Electives saved"); }
+
+export async function createHouse(fd: FormData) { return serviceAction(HouseService, (s) => s.create(formToObject(fd)), "House added"); }
+export async function updateHouse(fd: FormData) { return serviceAction(HouseService, (s) => s.update(id(fd), formToObject(fd)), "House updated"); }
+export async function deleteHouse(fd: FormData) { return serviceAction(HouseService, (s) => s.remove(id(fd)), "House deleted"); }
+export async function updatePoints(fd: FormData) { return serviceAction(HouseService, (s) => s.updatePoints(id(fd), formToObject(fd)), "Points updated"); }
+export async function deletePoints(fd: FormData) { return serviceAction(HouseService, (s) => s.removePoints(id(fd)), "Points entry deleted"); }
+export async function assignHouse(fd: FormData) { return serviceAction(HouseService, (s) => s.assign(formToObject(fd)), "House saved"); }
+export async function awardPoints(fd: FormData) { return serviceAction(HouseService, (s) => s.award(formToObject(fd)), "Points saved"); }

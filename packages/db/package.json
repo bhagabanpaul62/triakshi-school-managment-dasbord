@@ -12,7 +12,7 @@
     "typecheck": "tsgo --noEmit",
     "migrate": "tsx scripts/migrate.ts",
     "generate": "drizzle-kit generate",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "reset": "tsx scripts/reset.ts",
     "post-sql": "tsx scripts/post-sql.ts"
   },

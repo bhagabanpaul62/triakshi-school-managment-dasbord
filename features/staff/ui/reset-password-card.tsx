@@ -33,7 +33,10 @@ export function ResetPasswordCard({ state }: { state: CardState }) {
     <>
       <h1 className="mt-6 text-2xl font-medium tracking-tight">{state.title}</h1>
       <p role="alert" className="mt-2 text-sm text-[var(--ds-on-surface-variant)]">{state.body}</p>
-      <Link href="/login" className="mt-6 inline-flex h-11 items-center rounded-full bg-white/[0.08] px-6 text-sm text-[var(--ds-on-surface)] transition-colors hover:bg-white/[0.14] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Go to sign in</Link>
+      <div className="mt-6 flex flex-wrap gap-2">
+        <Link href="/forgot-password" className="inline-flex h-11 items-center rounded-full bg-[var(--ds-color-primary-500)] px-6 text-sm text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Forgot password</Link>
+        <Link href="/login" className="inline-flex h-11 items-center rounded-full bg-white/[0.08] px-6 text-sm text-[var(--ds-on-surface)] transition-colors hover:bg-white/[0.14] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Go to sign in</Link>
+      </div>
     </>
   );
 }

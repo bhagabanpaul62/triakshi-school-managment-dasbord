@@ -1,10 +1,11 @@
-import { date, index, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { date, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { schoolColumns, tenant, users } from "@smw/db";
 
 /** Staff sign in as platform users; these are the roles a staff member can hold. */
-export const STAFF_USER_ROLES = ["admin", "accountant", "teacher"] as const;
+export const STAFF_USER_ROLES = ["admin", "accountant", "teacher", "staff"] as const;
 export const STAFF_STATUSES = ["active", "left"] as const;
 export const STAFF_GENDERS = ["male", "female", "other"] as const;
+export const EMPLOYMENT_TYPES = ["permanent", "contract", "part_time", "visiting"] as const;
 
 /** The employment record of one staff user (the login itself is the users row). */
 export const staffProfiles = pgTable("staff_profiles", {
@@ -23,6 +24,11 @@ export const staffProfiles = pgTable("staff_profiles", {
   gender: text("gender").$type<(typeof STAFF_GENDERS)[number]>(),
   dob: date("dob"),
   address: text("address"),
+  employmentType: text("employment_type").$type<(typeof EMPLOYMENT_TYPES)[number]>(),
+  experienceYears: integer("experience_years"),
+  bloodGroup: text("blood_group"),
+  emergencyName: text("emergency_name"),
+  emergencyPhone: text("emergency_phone"),
 }, (t) => [
   ...tenant(t, "staff_profiles"),
   uniqueIndex("staff_profiles_user").on(t.userId),

@@ -22,9 +22,10 @@ export const isLate = (dueAt: Date, at: Date) => at.getTime() > dueAt.getTime();
 /** What one student sees for one assignment. `todo` and `returned` need action; `overdue` means nothing was handed in. */
 export type SelfState = "todo" | "overdue" | "submitted" | "late" | "graded" | "returned";
 
-export function selfState(a: { dueAt: Date; status: AssignmentStatus }, sub: { status: SubmissionStatus } | null, now: Date): SelfState {
+/** `dueAt` is the student's own due date: the assignment's, or their extension. */
+export function selfState(a: { dueAt: Date; status: AssignmentStatus }, sub: { status: SubmissionStatus } | null, now: Date, dueAt: Date = a.dueAt): SelfState {
   if (sub) return sub.status;
-  return a.status === "published" && !isLate(a.dueAt, now) ? "todo" : "overdue";
+  return a.status === "published" && !isLate(dueAt, now) ? "todo" : "overdue";
 }
 
 const RANK: Record<SelfState, number> = { todo: 0, returned: 0, overdue: 1, submitted: 2, late: 2, graded: 2 };
@@ -38,17 +39,27 @@ export function sortSelf<T extends { state: SelfState; dueAt: Date }>(rows: T[])
   });
 }
 
-export interface Progress { total: number; submitted: number; late: number; graded: number; returned: number; missing: number }
-export const EMPTY_PROGRESS: Progress = { total: 0, submitted: 0, late: 0, graded: 0, returned: 0, missing: 0 };
+/** `missing` = nothing handed in and no time left. `pending` = nothing handed in yet, but an extension is still running. */
+export interface Progress { total: number; submitted: number; late: number; graded: number; returned: number; missing: number; pending: number }
+export const EMPTY_PROGRESS: Progress = { total: 0, submitted: 0, late: 0, graded: 0, returned: 0, missing: 0, pending: 0 };
 
-/** Counts for one assignment from the class size and the submission counts by status. */
-export function tally(total: number, byStatus: Partial<Record<SubmissionStatus, number>>): Progress {
+/** Counts for one assignment from the class size, the submission counts by status and how many unsubmitted students still have an extension running. */
+export function tally(total: number, byStatus: Partial<Record<SubmissionStatus, number>>, pending = 0): Progress {
   const submitted = byStatus.submitted ?? 0, late = byStatus.late ?? 0, graded = byStatus.graded ?? 0, returned = byStatus.returned ?? 0;
-  return { total, submitted, late, graded, returned, missing: Math.max(0, total - submitted - late - graded - returned) };
+  const none = Math.max(0, total - submitted - late - graded - returned);
+  const p = Math.min(pending, none);
+  return { total, submitted, late, graded, returned, missing: none - p, pending: p };
 }
 
+/** Students who handed something in, whatever its state. */
+export const handedIn = (p: Progress) => p.total - p.missing - p.pending;
+
 /** Share of the class that has handed something in, 0..100. */
-export const turnedIn = (p: Progress) => (p.total === 0 ? 0 : Math.round(((p.total - p.missing) / p.total) * 100));
+export const turnedIn = (p: Progress) => (p.total === 0 ? 0 : Math.round((handedIn(p) / p.total) * 100));
+
+/** A comment can be edited by its author, and deleted by its author, for this long. Staff who grade the work can delete any comment. */
+export const COMMENT_WINDOW_MS = 15 * 60_000;
+export const withinCommentWindow = (createdAt: Date, now: Date) => now.getTime() - createdAt.getTime() <= COMMENT_WINDOW_MS;
 
 const DAY = 86_400_000;
 const dayOf = (d: Date) => Math.floor((d.getTime() + IST_MS) / DAY);

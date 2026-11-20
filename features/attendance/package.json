@@ -24,7 +24,10 @@
     "@smw/integrations": "workspace:*",
     "@smw/feature-students": "workspace:*",
     "@smw/feature-academics": "workspace:*",
+    "@smw/feature-timetable": "workspace:*",
+    "@smw/feature-notifications": "workspace:*",
     "drizzle-orm": "^0.45.4",
+    "pdf-lib": "^1.17.1",
     "zod": "^4.6.7",
     "@tabler/icons-react": "^3.52.0"
   },

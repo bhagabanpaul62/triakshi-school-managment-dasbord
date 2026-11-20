@@ -37,3 +37,4 @@ export function services(): Services {
 /** Replace some services (tests, local tools). */
 export function useServices(overrides: Partial<Services>) { Object.assign((g.__smwServices ??= {}), overrides); }
 export * from "./cashfree";
+export { parseSheet, SheetError, type SheetRows } from "./sheet";

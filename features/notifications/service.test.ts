@@ -24,10 +24,10 @@ const send = (s: TestSchool, userId: string, title: string) =>
 
 describe("NotificationService", () => {
   it("lists only the caller's own notifications, with an unread count", async () => {
-    await send(a, a.users.parent, "For the parent");
+    await send(a, a.users.accountant, "For the accountant");
     await send(a, a.users.teacher, "For the teacher");
-    const mine = await new NotificationService(a.as.parent).forUser();
-    expect(mine.items.map((n) => n.title)).toEqual(["For the parent"]);
+    const mine = await new NotificationService(a.as.accountant).forUser();
+    expect(mine.items.map((n) => n.title)).toEqual(["For the accountant"]);
     expect(mine.unread).toBe(1);
   });
 
@@ -46,8 +46,8 @@ describe("NotificationService", () => {
   it("cannot read or mark another user's notification in the same school", async () => {
     await send(a, a.users.accountant, "Private to accountant");
     const target = (await new NotificationService(a.as.accountant).forUser()).items[0]!;
-    expect((await new NotificationService(a.as.parent).markRead(target.id)).updated).toBe(0);
-    expect((await new NotificationService(a.as.parent).list()).rows.some((n) => n.id === target.id)).toBe(false);
+    expect((await new NotificationService(a.as.teacher).markRead(target.id)).updated).toBe(0);
+    expect((await new NotificationService(a.as.teacher).list()).rows.some((n) => n.id === target.id)).toBe(false);
   });
 
   it("school B cannot see or mark school A's notifications", async () => {
@@ -62,21 +62,21 @@ describe("NotificationService", () => {
   });
 
   it("notify checks permission and input", async () => {
-    await expect(new NotificationService(a.as.parent).notify([a.users.student], { title: "Hi" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new NotificationService(a.as.student).notify([a.users.teacher], { title: "Hi" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new NotificationService(a.as.admin).notify([a.users.student], { title: "" })).rejects.toBeInstanceOf(ValidationError);
     await expect(new NotificationService(a.as.admin).notify([a.users.student], { title: "Hi", href: "https://evil.example" })).rejects.toBeInstanceOf(ValidationError);
-    expect(await new NotificationService(a.as.admin).notify([a.users.parent, a.users.parent], { title: "Fee due", kind: "fee_due", href: "/app/fees" })).toBe(1);
+    expect(await new NotificationService(a.as.admin).notify([a.users.student, a.users.student], { title: "Fee due", kind: "fee_due", href: "/app/fees" })).toBe(1);
   });
 
   it("the writer skips users of another school and drops off-app links", async () => {
-    expect(await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [{ userId: b.users.parent, title: "Leak" }]))).toBe(0);
+    expect(await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [{ userId: b.users.student, title: "Leak" }]))).toBe(0);
     await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [{ userId: a.users.student, title: "Link", href: "//evil.example/app" }]));
     const [n] = (await new NotificationService(a.as.student).forUser()).items.filter((x) => x.title === "Link");
     expect(n?.href).toBeNull();
   });
 
   it("stores the email digest preference per user", async () => {
-    const svc = new NotificationService(a.as.parent);
+    const svc = new NotificationService(a.as.teacher);
     expect(await svc.emailDigestEnabled()).toBe(true);
     await svc.setEmailDigest(false);
     await svc.setEmailDigest(false);
@@ -90,14 +90,14 @@ describe("email digest job", () => {
   it("sends one email per user and never emails the same notification twice", async () => {
     await withSchool(b.id, (tx) => tx.delete(notifications).where(and(eq(notifications.schoolId, b.id))));
     mail.sent.length = 0;
-    await send(b, b.users.parent, "Fee <b>due</b>");
-    await send(b, b.users.parent, "Result published");
+    await send(b, b.users.student, "Fee <b>due</b>");
+    await send(b, b.users.student, "Result published");
     await send(b, b.users.teacher, "Staff meeting");
     const first = await runEmailDigest({ schoolId: b.id });
     expect(first).toMatchObject({ emails: 2, notifications: 3, failed: 0 });
-    const toParent = mail.sent.find((m) => m.to === `parent@${b.slug}.test`)!;
-    expect(toParent.subject).toContain("2 new notifications");
-    expect(toParent.html).toContain("Fee &lt;b&gt;due&lt;/b&gt;");
+    const toStudent = mail.sent.find((m) => m.to === `student@${b.slug}.test`)!;
+    expect(toStudent.subject).toContain("2 new notifications");
+    expect(toStudent.html).toContain("Fee &lt;b&gt;due&lt;/b&gt;");
     const second = await runEmailDigest({ schoolId: b.id });
     expect(second).toMatchObject({ emails: 0, notifications: 0 });
     expect(mail.sent).toHaveLength(2);

@@ -23,7 +23,19 @@ export const students = pgTable("students", {
   address: text("address"),
   /** Optional APAAR ID (One Nation One Student ID). Aadhaar is never stored. */
   apaarId: text("apaar_id"),
+  /** Admitted on a free seat under RTE section 12(1)(c). */
+  rteQuota: boolean("rte_quota").notNull().default(false),
   category: text("category"),
+  phone: text("phone"),
+  altPhone: text("alt_phone"),
+  motherTongue: text("mother_tongue"),
+  religion: text("religion"),
+  nationality: text("nationality"),
+  previousSchool: text("previous_school"),
+  /** Allergies or conditions. Visible to admins, the student, and teachers of the student's sections only. */
+  medicalNotes: text("medical_notes"),
+  emergencyName: text("emergency_name"),
+  emergencyPhone: text("emergency_phone"),
   /** The student's own login (role student), login_id = admission number. */
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
   leftOn: date("left_on"),

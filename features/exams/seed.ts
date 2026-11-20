@@ -2,6 +2,7 @@ import type { FeatureSeed } from "@smw/feature-kit";
 import { and, eq, inArray, schools, withConsole, withSchool } from "@smw/db";
 import { subjects } from "@smw/feature-academics/schema";
 import { ExamService, GradeScaleService, MarksService } from "./service";
+import { TermWeightService } from "./setup";
 
 interface SeedStudent { id: string; classId: string; sectionId?: string | null }
 interface SeedClass { id: string; grade: number }
@@ -81,6 +82,9 @@ const seed: FeatureSeed = async (ctx, state) => {
   await enterMarks(halfYearly.id);
   await gradeCoScholastic(halfYearly.id);
   if (publishHalfYearly) await exams.transition({ id: halfYearly.id, to: "published" });
+
+  // Term report cards need weights that total 100.
+  if (termId) await new TermWeightService(ctx).save({ termId, weights: [{ examId: unitTest.id, weightPercent: 20 }, { examId: halfYearly.id, weightPercent: 80 }] });
 
   state.exams = [{ id: unitTest.id, name: unitTest.name }, { id: halfYearly.id, name: halfYearly.name }];
 };

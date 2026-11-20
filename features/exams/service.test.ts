@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb, eq, withSchool } from "@smw/db";
+import { and, closeDb, eq, sql, withSchool } from "@smw/db";
 import { notifications } from "@smw/feature-notifications/schema";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classSubjects, classes, sectionTeachers, sections, subjects, terms } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import { ExamService, GradeScaleService, MarksService, ReportCardService, ResultService } from "./service";
 
 let a: TestSchool, b: TestSchool;
@@ -20,7 +20,7 @@ async function build(school: TestSchool, withTeacher: boolean): Promise<Fixture>
     const [term] = await tx.insert(terms).values({ schoolId: sid, yearId: year!.id, name: "Term 1", startsOn: "2026-04-01", endsOn: "2026-09-30" }).returning();
     const [cls] = await tx.insert(classes).values({ schoolId: sid, name: "Class 6", grade: 6 }).returning();
     const secs = await tx.insert(sections).values([
-      { schoolId: sid, classId: cls!.id, yearId: year!.id, name: "A" }, { schoolId: sid, classId: cls!.id, yearId: year!.id, name: "B" },
+      { schoolId: sid, classId: cls!.id, yearId: year!.id, name: "A", classTeacherId: withTeacher ? school.users.teacher : null }, { schoolId: sid, classId: cls!.id, yearId: year!.id, name: "B" },
     ]).returning();
     const subs = await tx.insert(subjects).values([
       { schoolId: sid, name: "Maths" }, { schoolId: sid, name: "Science" }, { schoolId: sid, name: "Art", kind: "co_scholastic" },
@@ -33,8 +33,6 @@ async function build(school: TestSchool, withTeacher: boolean): Promise<Fixture>
       { schoolId: sid, admissionNo: "A3", name: "Kabir Singh", classId: cls!.id, sectionId: secs[0]!.id, rollNo: 3 },
       { schoolId: sid, admissionNo: "B1", name: "Meera Nair", classId: cls!.id, sectionId: secs[1]!.id, rollNo: 1 },
     ]).returning();
-    const [g] = await tx.insert(guardians).values({ schoolId: sid, name: "Parent", userId: school.users.parent }).returning();
-    await tx.insert(studentGuardians).values({ schoolId: sid, studentId: st[0]!.id, guardianId: g!.id, isPrimary: true });
     return { yearId: year!.id, termId: term!.id, classId: cls!.id, secA: secs[0]!.id, secB: secs[1]!.id, maths: subs[0]!.id, science: subs[1]!.id, art: subs[2]!.id, s1: st[0]!.id, s2: st[1]!.id, s3: st[2]!.id, s4: st[3]!.id };
   });
 }
@@ -194,7 +192,7 @@ describe("MarksService", () => {
     expect(detail.papers.map((p) => [p.subjectName, p.canEnter])).toEqual([["Maths", true], ["Science", false]]);
   });
 
-  it("students, parents and accountants cannot enter marks", async () => {
+  it("students, legacy parent logins and accountants cannot enter marks", async () => {
     const { maths } = await openExam("Marks perms");
     for (const who of [a.as.student, a.as.parent, a.as.accountant]) {
       await expect(new MarksService(who).save({ paperId: maths.id, entries: entries([[fa.s1, 50]]) })).rejects.toBeInstanceOf(ForbiddenError);
@@ -248,19 +246,17 @@ describe("ResultService", () => {
     expect(other.results).toHaveLength(1);
   });
 
-  it("students and parents see results only after publish, and only their own", async () => {
+  it("students see results only after publish and only their own; a legacy parent sees nothing", async () => {
     const student = new ResultService(a.as.student);
-    const parent = new ResultService(a.as.parent);
     await expect(student.studentResult(examId, fa.s1)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(parent.studentResult(examId, fa.s1)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(new ResultService(a.as.parent).studentResult(examId, fa.s1)).rejects.toBeInstanceOf(ForbiddenError);
     expect((await student.mine())[0]!.items.some((i) => i.examId === examId)).toBe(false); // not published yet
 
     await new ExamService(a.as.admin).transition({ id: examId, to: "published" });
 
     expect((await student.studentResult(examId, fa.s1)).result.percent).toBe(82.5);
-    expect((await parent.studentResult(examId, fa.s1)).result.rank).toBe(1);
+    expect((await student.studentResult(examId, fa.s1)).result.rank).toBe(1);
     await expect(student.studentResult(examId, fa.s2)).rejects.toBeInstanceOf(NotFoundError); // a classmate
-    await expect(parent.studentResult(examId, fa.s2)).rejects.toBeInstanceOf(NotFoundError);
     const mine = await student.mine();
     expect(mine[0]!.items.map((i) => [i.examName, i.grade, i.rank])).toContainEqual(["Results", "A2", 1]);
     await expect(student.classResult(examId, fa.secA)).rejects.toBeInstanceOf(ForbiddenError); // staff only
@@ -288,10 +284,10 @@ describe("ResultService", () => {
     const batch = await svc.classBatch(examId, fa.secA);
     expect(Buffer.from(batch.bytes.slice(0, 5)).toString()).toBe("%PDF-");
     expect(batch.bytes.length).toBeGreaterThan(one.bytes.length);
-    // a parent may download their child's card, but not a classmate's, and not the batch
-    await expect(new ReportCardService(a.as.parent).pdf({ examId }, fa.s1)).resolves.toBeTruthy();
-    await expect(new ReportCardService(a.as.parent).pdf({ examId }, fa.s2)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(new ReportCardService(a.as.parent).classBatch(examId, fa.secA)).rejects.toBeInstanceOf(ForbiddenError);
+    // a student may download their own card, but not a classmate's, and not the batch
+    await expect(new ReportCardService(a.as.student).pdf({ examId }, fa.s1)).resolves.toBeTruthy();
+    await expect(new ReportCardService(a.as.student).pdf({ examId }, fa.s2)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(new ReportCardService(a.as.student).classBatch(examId, fa.secA)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("makes a term report card across the term's exams", async () => {
@@ -332,18 +328,48 @@ describe("GradeScaleService", () => {
 });
 
 describe("result notifications", () => {
-  it("publishing tells each student of the exam and their guardian once, never the publisher", async () => {
+  it("publishing tells each student login of the exam once, never the publisher", async () => {
     const { id, svc } = await openExam("Unit Test Notify");
-    const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, userId)));
+    // Other tests in this file publish exams too, so count only this exam's notices.
+    const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.title, "Unit Test Notify results are out"))));
     expect(await notes(a, a.users.student)).toHaveLength(0);
     await svc.transition({ id, to: "published", force: true });
     const [kid] = await notes(a, a.users.student);
     expect(kid).toMatchObject({ kind: "result", title: "Unit Test Notify results are out", href: `/app/results/${id}/${fa.s1}` });
-    expect(await notes(a, a.users.parent)).toHaveLength(1);
+    expect(await notes(a, a.users.parent)).toHaveLength(0);
     expect(await notes(a, a.users.admin)).toHaveLength(0);
     expect(await notes(a, a.users.teacher)).toHaveLength(0);
     await svc.transition({ id, to: "published", force: true }); // a repeat is a no-op, not a second notice
     expect(await notes(a, a.users.student)).toHaveLength(1);
     for (const u of Object.values(b.users)) expect(await notes(b, u)).toHaveLength(0);
+  });
+});
+
+describe("homework marks for internal assessment", () => {
+  it("sums graded homework in the paper's subject within the exam's term, per student", async () => {
+    const { maths } = await openExam("Homework IA");
+    await withSchool(a.id, async (tx) => {
+      const hw = async (subjectId: string, due: string, max: number | null) => {
+        const [r] = [...await tx.execute<{ id: string }>(sql`insert into assignments (id, school_id, section_id, subject_id, title, due_at, max_marks, status)
+          values (gen_random_uuid(), ${a.id}, ${fa.secA}, ${subjectId}, 'HW', ${due}::timestamptz, ${max}, 'published') returning id`)];
+        return r!.id;
+      };
+      const sub = (assignmentId: string, studentId: string, marks: number | null, status: string) =>
+        tx.execute(sql`insert into submissions (id, school_id, assignment_id, student_id, status, marks) values (gen_random_uuid(), ${a.id}, ${assignmentId}, ${studentId}, ${status}, ${marks})`);
+      const h1 = await hw(fa.maths, "2026-05-10T10:00:00+05:30", 10), h2 = await hw(fa.maths, "2026-06-10T10:00:00+05:30", 20);
+      const later = await hw(fa.maths, "2026-11-01T10:00:00+05:30", 10); // after the term ends
+      const unmarked = await hw(fa.maths, "2026-07-01T10:00:00+05:30", null);
+      const sci = await hw(fa.science, "2026-05-10T10:00:00+05:30", 10);
+      await sub(h1, fa.s1, 8, "graded"); await sub(h2, fa.s1, 12, "returned"); await sub(later, fa.s1, 10, "graded"); await sub(unmarked, fa.s1, null, "submitted");
+      await sub(h1, fa.s2, null, "submitted"); // handed in, not graded yet
+      await sub(sci, fa.s3, 10, "graded"); // other subject
+    });
+    const withHw = (ctx: typeof a.as.admin) => ({ ...ctx, features: new Set([...ctx.features, "assignments"]) });
+    const got = await new MarksService(withHw(a.as.admin)).homeworkMarks(maths.id);
+    expect(Object.keys(got)).toEqual([fa.s1]);
+    expect(got[fa.s1]!.graded).toBe(2);
+    expect(got[fa.s1]!.pct).toBeCloseTo(20 / 30);
+    expect(await new MarksService(withHw(a.as.teacher)).homeworkMarks(maths.id)).toHaveProperty(fa.s1); // teacher of Maths in A
+    expect(await new MarksService(a.as.admin).homeworkMarks(maths.id)).toEqual({}); // Assignments module off
   });
 });

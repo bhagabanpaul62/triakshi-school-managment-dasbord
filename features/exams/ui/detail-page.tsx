@@ -34,21 +34,21 @@ function nextStep(d: ExamDetail, canManage: boolean) {
     if (exam.status === "marks_open") return mine.length
       ? { title: `${mine.length} of your ${mine.length === 1 ? "paper needs" : "papers need"} marks`, body: "Open a paper below and type the marks. Enter moves to the next student.", href: `/app/exams/${exam.id}/marks/${mine[0]!.id}`, hrefLabel: "Enter marks" }
       : { title: "Your marks are all in", body: "The school publishes results when every class is done." };
-    return { title: STATUS_LABEL[exam.status], body: exam.status === "published" ? "Marks are locked and results are visible to students and parents." : "Marks entry opens once the school is ready." };
+    return { title: STATUS_LABEL[exam.status], body: exam.status === "published" ? "Marks are locked and results are visible to students." : "Marks entry opens once the school is ready." };
   }
-  if (exam.status === "draft") return { title: "Schedule this exam", body: `${totals.papers} papers are ready. Students and parents see nothing until you publish.`, to: "scheduled", label: "Schedule exam", force: false, confirm: undefined };
+  if (exam.status === "draft") return { title: "Schedule this exam", body: `${totals.papers} papers are ready. Students see nothing until you publish.`, to: "scheduled", label: "Schedule exam", force: false, confirm: undefined };
   if (exam.status === "scheduled") return { title: "Open marks entry when the exams are done", body: "Teachers can type marks for the subjects they teach as soon as it opens.", to: "marks_open", label: "Open marks entry", force: false, confirm: undefined };
   if (exam.status === "marks_open") {
     const missing = totals.missing > 0;
     return {
       title: missing ? `${totals.missing} marks are still missing` : "All marks are in",
-      body: missing ? `Marks are still missing across ${papers.filter((p) => p.entered < p.students).length} papers. Publishing now shows them as pending to students and parents, and locks marks entry for good.` : "Publish to show results to students and parents. Marks entry locks for good.",
+      body: missing ? `Marks are still missing across ${papers.filter((p) => p.entered < p.students).length} papers. Publishing now shows them as pending to students, and locks marks entry for good.` : "Publish to show results to students. Marks entry locks for good.",
       to: "published", label: missing ? "Publish anyway" : "Publish results", force: missing,
       confirm: { title: missing ? "Publish with marks missing?" : "Publish these results?", confirmLabel: "Publish", danger: false,
-        body: `Students and parents will see the results and marks entry locks for good.${missing ? ` ${totals.missing} marks are still missing and will show as pending.` : ""}` },
+        body: `Students will see the results and marks entry locks for good.${missing ? ` ${totals.missing} marks are still missing and will show as pending.` : ""}` },
     };
   }
-  return { title: "Results are published", body: "Students and parents can see them. Marks are locked.", href: `/app/results?examId=${exam.id}`, hrefLabel: "View class results" };
+  return { title: "Results are published", body: "Students can see them. Marks are locked.", href: `/app/results?examId=${exam.id}`, hrefLabel: "View class results" };
 }
 
 export default async function ExamDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -75,14 +75,15 @@ export default async function ExamDetailPage({ params, searchParams }: { params:
         title={exam.name}
         chips={<><ToneBadge label={STATUS_LABEL[exam.status]} tone={STATUS_TONE[exam.status]} /><ToneBadge label={KIND_LABEL[exam.kind]} /></>}
         meta={[d.yearName, d.termName, `${shortDate(exam.startsOn)} to ${shortDate(exam.endsOn)}`]}
-        actions={canManage ? (
+        actions={(
           <>
-            {exam.status !== "published" ? (
+            <Button asChild variant="secondary" className="rounded-full"><Link href={`/app/exams/${exam.id}/date-sheet`}>Date sheet</Link></Button>
+            {canManage && exam.status !== "published" ? (
               <FormModal title="Add papers" icon="exam" fields={paperFields(options, "")} action={addPapers} hidden={{ examId: exam.id }} values={{ maxMarks: 80, passMarks: 27 }}
                 trigger={{ label: "Add papers", variant: "secondary" }} successMessage="Papers added" />
             ) : null}
           </>
-        ) : null}
+        )}
         className="pb-8"
       />
 
@@ -130,7 +131,7 @@ export default async function ExamDetailPage({ params, searchParams }: { params:
               <Fact label="Starts">{shortDate(exam.startsOn)}</Fact>
               <Fact label="Ends">{shortDate(exam.endsOn)}</Fact>
               <Fact label="Type">{KIND_LABEL[exam.kind]}</Fact>
-              <Fact label="Results">{exam.status === "published" ? "Visible to students and parents" : "Hidden until published"}</Fact>
+              <Fact label="Results">{exam.status === "published" ? "Visible to students" : "Hidden until published"}</Fact>
             </FactList>
           </Panel>
         </div>

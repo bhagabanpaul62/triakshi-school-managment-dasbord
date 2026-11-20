@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
-import { expectHealthy, login, SCHOOL } from "./helpers";
+import { expectHealthy, login, loginStudent, SCHOOL } from "./helpers";
 
 // Communication journeys: assignments, announcements, events, messages. Screenshots land in test-results/ux-communication/.
 /** One value from the local seed database, or null when it is not reachable. */
@@ -109,7 +109,7 @@ test("teacher posts an assignment with a file, sees progress, grades", async ({ 
 test("student sees what is due, opens it and the hand-in form", async ({ page }) => {
   const dob = sql("select to_char(dob,'DDMMYYYY') from students where admission_no='GR0001' limit 1");
   test.skip(!dob, "local database not reachable");
-  await login(page, SLUG, "GR0001", dob!);
+  await loginStudent(page, SLUG, "GR0001", dob!);
   await go(page, "/app/assignments");
   await expect(page.getByRole("heading", { name: "Assignments" }).first()).toBeVisible({ timeout: 200_000 });
   await shot(page, "s1-list");
@@ -130,7 +130,7 @@ test("student sees what is due, opens it and the hand-in form", async ({ page })
   }
 });
 
-test("admin posts a class announcement; student and parent feeds", async ({ page }) => {
+test("admin posts a class announcement; student feed", async ({ page }) => {
   await login(page, SLUG, "admin");
   await go(page, "/app/announcements");
   await shot(page, "a1-staff");
@@ -164,10 +164,11 @@ test("events list, month calendar, create an event", async ({ page }) => {
   await phone(page, "e3-month");
 });
 
-test("parent: messages list and thread on phone, announcements and events", async ({ page }) => {
-  const phoneNo = sql("select g.phone from guardians g join student_guardians sg on sg.guardian_id=g.id join students st on st.id=sg.student_id where st.admission_no='GR0001' and g.user_id is not null limit 1");
-  test.skip(!phoneNo, "local database not reachable");
-  await login(page, SLUG, phoneNo!, phoneNo!.slice(-6));
+// No parent logins: the student login is the family login.
+test("student: messages list and thread on phone, announcements and events", async ({ page }) => {
+  const dob = sql("select to_char(dob,'DDMMYYYY') from students where admission_no='GR0001' limit 1");
+  test.skip(!dob, "local database not reachable");
+  await loginStudent(page, SLUG, "GR0001", dob!);
   await go(page, "/app/messages");
   await shot(page, "m1-inbox");
   await phone(page, "m1-inbox");

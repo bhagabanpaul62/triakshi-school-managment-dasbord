@@ -14,11 +14,20 @@ const CELL = "flex min-h-[64px] w-full min-w-0 flex-col justify-center gap-0.5 r
 /** One cell: the subject, then who (section view) or where (teacher view), then the room. */
 function Lesson({ cell, perspective }: { cell: GridCell; perspective: "section" | "teacher" }) {
   const second = perspective === "section" ? cell.teacher : cell.section;
+  // An elective block seen whole (admin): its name, then one line per alternative.
+  if (cell.blockId && (cell.options?.length ?? 0) > 1) return (
+    <>
+      <span className="truncate text-sm font-medium text-[var(--ds-on-surface)]">{cell.blockName}</span>
+      {cell.options!.map((o) => <span key={o.optionId} className="truncate text-xs text-[var(--ds-on-surface-variant)]">{o.subject}{o.teacher ? ` (${o.teacher})` : ""}</span>)}
+      {cell.locked ? <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-[var(--ds-color-primary-300)]">Pinned</span> : null}
+    </>
+  );
   return (
     <>
       <span className="truncate text-sm font-medium text-[var(--ds-on-surface)]">{cell.subject}</span>
       {second ? <span className="truncate text-xs text-[var(--ds-on-surface-variant)]">{second}</span> : null}
       {cell.room ? <span className="truncate font-mono text-[11px] text-[var(--ds-on-surface-muted)]">Room {cell.room}</span> : null}
+      {cell.locked ? <span className="font-mono text-[11px] uppercase tracking-[0.05em] text-[var(--ds-color-primary-300)]">Pinned</span> : null}
     </>
   );
 }
@@ -59,7 +68,7 @@ export function TimetableGrid({ timetable, perspective, editor }: { timetable: T
     }
     return (
       <button type="button" onClick={() => setEditing({ day: d, period: p })}
-        aria-label={`${dayName(d)}, ${p.name}: ${cell ? `${cell.subject} with ${cell.teacher ?? "no teacher"}. Edit` : "empty. Add a class"}`}
+        aria-label={`${dayName(d)}, ${p.name}: ${cell ? `${cell.subject}${cell.blockId ? "" : ` with ${cell.teacher ?? "no teacher"}`}. Edit` : "empty. Add a class"}`}
         className={`${CELL} transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)] ${cell ? `${live ? NOW : "bg-white/[0.05]"} hover:bg-white/[0.09]` : "bg-white/[0.02] text-[var(--ds-on-surface-muted)] hover:bg-white/[0.06]"}`}>
         {cell ? <Lesson cell={cell} perspective={perspective} /> : <span className="text-xs">+ Add</span>}
       </button>

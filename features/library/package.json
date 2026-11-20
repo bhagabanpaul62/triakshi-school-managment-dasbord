@@ -24,6 +24,8 @@
     "@smw/integrations": "workspace:*",
     "@smw/feature-students": "workspace:*",
     "@smw/feature-academics": "workspace:*",
+    "@smw/feature-notifications": "workspace:*",
+    "@smw/feature-fees": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7",
     "@tabler/icons-react": "^3.52.0"

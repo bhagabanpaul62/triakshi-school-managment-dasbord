@@ -65,7 +65,7 @@ export default async function EventsPage({ searchParams }: { searchParams: Searc
             { key: "kind", label: "Type", options: [{ value: "event", label: "Events" }, { value: "holiday", label: "Holidays" }] },
             { key: "audience", label: "Audience", options: audienceOptions.filter((o) => o.value !== "class") },
           ]}
-          empty={{ title: "No events yet.", description: "Add one so parents, students and staff can plan around it.", action: canWrite ? create : undefined }}
+          empty={{ title: "No events yet.", description: "Add one so families, students and staff can plan around it.", action: canWrite ? create : undefined }}
           rowActions={canWrite ? Object.fromEntries(rows.map((r) => [r.id, <EventActions key={r.id} event={r} classes={classes} />])) : undefined}
         />
       </div>

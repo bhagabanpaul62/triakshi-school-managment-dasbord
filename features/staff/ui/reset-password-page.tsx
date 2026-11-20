@@ -3,12 +3,12 @@ import { initials } from "@smw/ui/format";
 import { ResetPasswordCard, type CardState } from "./reset-password-card";
 import { linkState } from "./reset-link";
 
-export const metadata = { title: "Set your password" };
+export const metadata = { title: "Reset your password" };
 
 const PROBLEM = {
-  used: { title: "This link was already used", body: "Your password is set. Sign in with it, or ask your school admin to send a new link if you forgot it." },
-  expired: { title: "This link has expired", body: "Links work for a limited time. Ask your school admin to send you a new one." },
-  unknown: { title: "This link is not valid", body: "Open the email again and use its button, or ask your school admin to send a new link." },
+  used: { title: "This link was already used", body: "Your password is set. Sign in with it, or use Forgot password if you do not remember it." },
+  expired: { title: "This link has expired", body: "Links work for a limited time. Use Forgot password to get a new one, or ask your school office." },
+  unknown: { title: "This link is not valid", body: "Open the email again and use its button, or use Forgot password to get a new link. No email on file? Ask your school office." },
 } as const;
 
 /** The page the invite email links to. Public: it needs only the token in the link. */
@@ -16,8 +16,8 @@ export default async function ResetPasswordPage({ searchParams }: { searchParams
   const [school, { token }] = await Promise.all([getSchool(), searchParams]);
   const state = token ? await linkState(school.id, token) : null;
   const card: CardState = state?.ok && token
-    ? { kind: "form", token, heading: state.kind === "invite" ? `Welcome, ${state.firstName}` : "Set a new password",
-        intro: state.kind === "invite" ? "Choose a password to finish setting up your account. You will be signed in right after." : `Hello ${state.firstName}, choose a new password. You will be signed in right after.` }
+    ? { kind: "form", token, heading: state.kind === "invite" ? "Set up your account" : "Set a new password",
+        intro: state.kind === "invite" ? `Welcome, ${state.firstName}. Choose a password to finish setting up your account. You will be signed in right after.` : `Hello ${state.firstName}, choose a new password. You will be signed in right after.` }
     : { kind: "problem", ...(!state ? PROBLEM.unknown : state.ok ? PROBLEM.unknown : PROBLEM[state.reason]) };
   return (
     <main className="flex min-h-dvh items-center justify-center p-4">

@@ -1,4 +1,5 @@
 import type { Field } from "@smw/ui/shell/FormModal";
+import type { MatrixModule } from "../catalogue";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 export const monthName = (m: number) => MONTHS[m - 1] ?? "-";
@@ -30,13 +31,29 @@ export const logoFields: Field[] = [
   { name: "logo", label: "Logo", type: "file", required: true, accept: "image/png,image/jpeg,image/webp", hint: "PNG, JPG or WebP, up to 5 MB. A square image works best.", wide: true },
 ];
 
-export const roleFields: Field[] = [
-  { name: "role", label: "Role", type: "select", required: true, wide: true, options: [
-    { value: "admin", label: "Admin: manages everything" },
-    { value: "accountant", label: "Accountant: fees and money" },
-    { value: "teacher", label: "Teacher: classes, attendance, marks" },
-  ] },
+/** Built-in roles and custom roles, as `value` = key or role id. */
+export const roleFields = (options: { value: string; label: string }[]): Field[] => [
+  { name: "role", label: "Role", type: "select", required: true, wide: true, options, hint: "They are signed out on every device when the role changes." },
 ];
+
+/** The role form: name, how it works, and one checkbox group per enabled module (the module × permission matrix). */
+export const customRoleFields = (matrix: MatrixModule[]): Field[] => [
+  { name: "name", label: "Role name", required: true, wide: true, section: "Role", placeholder: "Librarian" },
+  { name: "base", label: "Works like", type: "select", required: true, section: "Role", options: [
+    { value: "staff", label: "Office staff: sees school-wide records" },
+    { value: "teacher", label: "Teacher: sees their own classes" },
+  ] },
+  { name: "description", label: "What is it for?", section: "Role" },
+  ...matrix.map((m): Field => ({
+    name: `g.${m.key}`, label: m.name, type: "multiselect", section: "What they can do",
+    options: m.permissions.map((p) => ({ value: p.grant, label: p.label })),
+  })),
+];
+
+export const customRoleValues = (r: { name: string; base: string; description: string | null; grants: string[] }, matrix: MatrixModule[]): Record<string, unknown> => ({
+  name: r.name, base: r.base, description: r.description,
+  ...Object.fromEntries(matrix.map((m) => [`g.${m.key}`, m.permissions.map((p) => p.grant).filter((g) => r.grants.includes(g))])),
+});
 
 export const profileFields: Field[] = [
   { name: "name", label: "Name", required: true, wide: true },

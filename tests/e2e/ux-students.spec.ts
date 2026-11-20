@@ -1,5 +1,5 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test";
-import { SCHOOL, expectHealthy, login } from "./helpers";
+import { SCHOOL, expectHealthy, login, loginStudent } from "./helpers";
 const expect = baseExpect.configure({ timeout: 120_000 }); // the shared dev server is slow under load
 
 const SHOTS = "test-results/ux-students";
@@ -19,6 +19,7 @@ async function shot(page: Page, name: string) {
 
 async function noHorizontalScroll(page: Page) {
   await page.setViewportSize(SIZES.phone);
+  await page.waitForTimeout(300); // let charts and tables re-measure at the new width
   const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(over).toBeLessThanOrEqual(1);
   await page.setViewportSize(SIZES.desktop);
@@ -48,7 +49,7 @@ test.describe("students journeys", () => {
       await search.fill("Aarav");
       await baseExpect(page).toHaveURL(/q=Aarav/, { timeout: 8_000 });
     }).toPass({ timeout: 180_000 });
-    await expect(page.getByRole("link", { name: /Aarav Sharma/ }).first()).toBeVisible();
+    await expect(page.locator("[aria-label^='Children of'] a[href^='/app/students/']").first()).toBeVisible(); // a guardian's child chip opens the student
     await shot(page, "list-search");
 
     await open(page, "/app/students?q=zzzznobody");
@@ -163,31 +164,18 @@ test.describe("students journeys", () => {
     await noHorizontalScroll(page);
   });
 
-  test("admin: parents with their children", async ({ page }) => {
+  test("admin: guardians with their children", async ({ page }) => {
     await login(page, SLUG, "admin");
     await open(page, "/app/parents");
-    await expect(page.getByRole("heading", { name: "Parents" })).toBeVisible({ timeout: 240_000 });
-    await expect(page.getByRole("link", { name: /Aarav Sharma/ }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Guardians" })).toBeVisible({ timeout: 240_000 });
+    await expect(page.locator("[aria-label^='Children of'] a[href^='/app/students/']").first()).toBeVisible(); // a guardian's child chip opens the student
     await shot(page, "parents");
     await noHorizontalScroll(page);
     await expectHealthy(page);
   });
 
-  test("parent: sees only own child", async ({ page }) => {
-    await login(page, SLUG, "9820131071", "131071");
-    await open(page, "/app/students");
-    await expect(page.getByRole("heading", { name: "Students", exact: true })).toBeVisible({ timeout: 240_000 });
-    await expect(page.getByRole("link", { name: /Aarav Sharma/ }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: /admit student/i })).toHaveCount(0);
-    await shot(page, "parent-list");
-    await openRecord(page, /Aarav Sharma/);
-    await expect(page.getByRole("button", { name: "Delete", exact: true })).toHaveCount(0);
-    await shot(page, "parent-record");
-    await noHorizontalScroll(page);
-  });
-
   test("student: only own record", async ({ page }) => {
-    await login(page, SLUG, "GR0001", "01012023");
+    await loginStudent(page, SLUG, "GR0001", "01012023");
     await open(page, "/app/students");
     await expect(page.getByRole("link", { name: /Aarav Sharma/ }).first()).toBeVisible({ timeout: 240_000 });
     await expect(page.getByRole("link", { name: /Saanvi Nair/ })).toHaveCount(0);

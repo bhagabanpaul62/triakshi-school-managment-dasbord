@@ -6,10 +6,10 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
 import { GuardianService } from "../service";
 
-export const metadata = { title: "Parents" };
+export const metadata = { title: "Guardians" };
 
 const columns: Column[] = [
-  { key: "name", label: "Parent", type: "person", metaKey: "phone" },
+  { key: "name", label: "Guardian", type: "person", metaKey: "phone" },
   { key: "relation", label: "Relation", type: "badge", hideOnMobile: true },
   { key: "childCount", label: "Children", type: "number" },
 ];
@@ -23,7 +23,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <PageHeader eyebrow="People" title="Parents" description="Parent logins and the children linked to each. Add a guardian from a student's record." />
+      <PageHeader eyebrow="People" title="Guardians" description="Contact directory: each guardian and the children linked to them. Families sign in with the student's login. Add a guardian from a student's record." />
       <DataTable
         columns={columns}
         rows={rows}
@@ -31,7 +31,7 @@ export default async function ParentsPage({ searchParams }: { searchParams: Prom
         page={page.page}
         pageCount={page.pageCount}
         searchPlaceholder="Search by name or phone"
-        empty={{ title: "No parents yet.", description: "Parents appear here when you add a guardian to a student or import a CSV." }}
+        empty={{ title: "No guardians yet.", description: "Guardians appear here when you add a guardian to a student or import a CSV." }}
         rowActions={Object.fromEntries(rows.map((r) => [r.id, (
           <span key={r.id} className="inline-flex max-w-[22rem] flex-wrap justify-end gap-1.5" aria-label={`Children of ${r.name}`}>
             {r.children.map((c) => (

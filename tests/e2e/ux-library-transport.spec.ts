@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { SCHOOL, expectHealthy, login } from "./helpers";
+import { execSync } from "node:child_process";
+import { SCHOOL, expectHealthy, login, loginStudent } from "./helpers";
 
 const SLUG = "greenvalley";
 const SHOTS = "test-results/ux-library-transport";
@@ -68,7 +69,7 @@ test("overdue list says who to chase, and a fine is explained before the return"
   await login(page, SLUG, "teacher");
   await go(page, "/app/library");
   await expect(page.getByText("Overdue books")).toBeVisible({ timeout: 90_000 });
-  const overdue = page.locator("li").filter({ hasText: /late/ });
+  const overdue = page.locator("li").filter({ hasText: /\d+ days? late/ });
   if (await overdue.count()) {
     await expect(overdue.first().getByText(/due [A-Z][a-z]{2} \d/)).toBeVisible();
     await overdue.first().getByRole("button", { name: /^return$/i }).click();
@@ -104,7 +105,6 @@ test("admin adds a book with copies and sees real counts", async ({ page }) => {
   await page.waitForURL(/library\/books$/, { timeout: 60_000 });
 });
 
-let parentPhone = "";
 test("admin sees transport occupancy, route page and the route PDF", async ({ page }) => {
   await login(page, SLUG, "admin");
   await go(page, "/app/transport");
@@ -121,9 +121,6 @@ test("admin sees transport occupancy, route page and the route PDF", async ({ pa
   expect(pdf.status()).toBe(200);
   expect(pdf.headers()["content-type"]).toContain("application/pdf");
 
-  const phone = page.locator('a[href^="tel:"]').filter({ hasText: /Parent:/ }).first();
-  if (await phone.count()) parentPhone = ((await phone.innerText()).replace(/\D/g, "")).slice(-10);
-
   // The assign form shows what the choice means: seats left and the stop's times and fee.
   const add = page.getByRole("button", { name: /add student/i });
   if (await add.count()) {
@@ -136,13 +133,17 @@ test("admin sees transport occupancy, route page and the route PDF", async ({ pa
   }
 });
 
-test("parent sees the child's bus, stop and times on a phone", async ({ page }) => {
-  test.skip(!parentPhone, "no parent phone on the seeded route");
+// No parent logins: the student's own login shows their bus, stop and times.
+test("student sees their bus, stop and times on a phone", async ({ page }) => {
+  const psql = (q: string) => execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tAc "${q}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
+  const row = psql("select s.admission_no || '|' || to_char(s.dob,'DDMMYYYY') from student_transport t join students s on s.id=t.student_id join schools sc on sc.id=s.school_id where sc.slug='greenvalley' and s.dob is not null order by s.admission_no limit 1");
+  test.skip(!row, "no student on a seeded route");
+  const [no, dob] = row.split("|");
   await page.setViewportSize(PHONE);
-  await login(page, SLUG, parentPhone, parentPhone.slice(-6));
+  await loginStudent(page, SLUG, no!, dob!);
   await go(page, "/app/transport");
   await expect(page.getByText("Morning pickup").first()).toBeVisible({ timeout: 90_000 });
   await expect(page.getByText("Evening drop").first()).toBeVisible();
   await expect(page.getByRole("link", { name: /call driver/i }).first()).toBeVisible();
-  await shoot(page, "transport-parent");
+  await shoot(page, "transport-student");
 });

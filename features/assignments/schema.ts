@@ -19,7 +19,20 @@ export const assignments = pgTable("assignments", {
   maxMarks: integer("max_marks"),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
   status: text("status").$type<AssignmentStatus>().notNull().default("published"),
+  /** Drafts only: the moment the scheduler publishes it (and sends the notice). Null = publish by hand. */
+  publishAt: timestamp("publish_at", { withTimezone: true }),
+  /** Set once the due-soon reminder has run for this assignment, so it fires once. */
+  remindedAt: timestamp("reminded_at", { withTimezone: true }),
 }, (t) => [...tenant(t, "assignments"), index("assignments_section_due").on(t.schoolId, t.sectionId, t.dueAt)]);
+
+/** A later due date for one student. Late detection and that student's due date use it when present. */
+export const assignmentExtensions = pgTable("assignment_extensions", {
+  ...schoolColumns(),
+  assignmentId: uuid("assignment_id").notNull().references(() => assignments.id, { onDelete: "cascade" }),
+  studentId: uuid("student_id").notNull().references(() => students.id, { onDelete: "cascade" }),
+  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+  grantedBy: uuid("granted_by").references(() => users.id, { onDelete: "set null" }),
+}, (t) => [...tenant(t, "assignment_extensions"), uniqueIndex("assignment_extensions_assignment_student").on(t.assignmentId, t.studentId)]);
 
 export const assignmentFiles = pgTable("assignment_files", {
   ...schoolColumns(),
@@ -46,6 +59,14 @@ export const submissions = pgTable("submissions", {
   uniqueIndex("submissions_assignment_student").on(t.assignmentId, t.studentId),
   index("submissions_student").on(t.studentId),
 ]);
+
+/** Thread on one submission between the student and the staff who can grade it. */
+export const submissionComments = pgTable("submission_comments", {
+  ...schoolColumns(),
+  submissionId: uuid("submission_id").notNull().references(() => submissions.id, { onDelete: "cascade" }),
+  authorId: uuid("author_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+}, (t) => [...tenant(t, "submission_comments"), index("submission_comments_submission").on(t.submissionId, t.createdAt)]);
 
 export const submissionFiles = pgTable("submission_files", {
   ...schoolColumns(),

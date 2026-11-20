@@ -2,7 +2,7 @@ import { and, asc, eq, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { CrudService, f, type Ctx } from "@smw/feature-kit";
 import type { Tx } from "@smw/db";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import eventsFeature from "./feature";
 import { addDays, allDaySpan, monthRange, parseIst } from "./dates";
 import { eventInput } from "./inputs";
@@ -14,7 +14,7 @@ export type SchoolEvent = typeof events.$inferSelect;
 /** The last moment an event is on: its end, or its start when it has none. */
 const endOf = sql<Date>`coalesce(${events.endsAt}, ${events.startsAt})`;
 
-/** School events and holidays. Staff see everything; students and parents see what is addressed to them, plus every holiday. */
+/** School events and holidays. Staff see everything; students (the family login) see what is addressed to them, plus every holiday. */
 export class EventService extends CrudService<typeof events, Perm> {
   protected feature = eventsFeature;
   protected table = events;
@@ -38,16 +38,10 @@ export class EventService extends CrudService<typeof events, Perm> {
   }
 
   protected async scopeClause(tx: Tx): Promise<SQL | undefined> {
-    const audiences = { student: ["all", "students"], parent: ["all", "parents"] } as const;
-    const mine = audiences[this.ctx.role as keyof typeof audiences];
-    if (!mine) return undefined;
-    // A class event reaches only that class's students, and the guardians of its students.
-    const myClasses = this.ctx.role === "student"
-      ? tx.select({ c: students.classId }).from(students).where(eq(students.userId, this.ctx.userId))
-      : tx.select({ c: students.classId }).from(students)
-        .innerJoin(studentGuardians, eq(studentGuardians.studentId, students.id))
-        .innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(eq(guardians.userId, this.ctx.userId));
-    return or(inArray(events.audience, [...mine]), eq(events.isHoliday, true), and(eq(events.audience, "class"), inArray(events.classId, myClasses)));
+    if (this.ctx.role !== "student") return undefined;
+    // "parents" means families, who sign in as the student. A class event reaches only that class's students.
+    const myClasses = tx.select({ c: students.classId }).from(students).where(eq(students.userId, this.ctx.userId));
+    return or(inArray(events.audience, ["all", "students", "parents"]), eq(events.isHoliday, true), and(eq(events.audience, "class"), inArray(events.classId, myClasses)));
   }
 
   /** Holidays are all-day by definition; all-day events cover whole days; only class events keep a class. */

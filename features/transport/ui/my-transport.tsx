@@ -9,9 +9,9 @@ import type { StudentTransportService } from "../service";
 
 type Mine = Awaited<ReturnType<StudentTransportService["mine"]>>;
 
-/** Student and parent view: when and where the bus comes, who drives it, and one tap to call. Built for a phone. */
+/** Student view: when and where the bus comes, who drives it, and one tap to call. Built for a phone. */
 export function MyTransport({ rows }: { rows: Mine }) {
-  if (!rows.length) return <WidgetEmptyState title="No school transport yet." description="If your child needs the school bus, ask the school office to add them to a route and stop." />;
+  if (!rows.length) return <WidgetEmptyState title="No school transport yet." description="If you need the school bus, ask the school office to add them to a route and stop." />;
   return (
     <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
       {rows.map((r) => (
@@ -28,6 +28,7 @@ export function MyTransport({ rows }: { rows: Mine }) {
               <Fact label="Driver">{r.driverName ?? "Not decided yet"}</Fact>
               <Fact label="Monthly fee">{r.feePaise ? `${paise(r.feePaise)} a month` : "-"}</Fact>
             </FactList>
+            {r.trackingUrl ? <a href={r.trackingUrl} target="_blank" rel="noopener noreferrer" className={buttonVariants({ variant: "secondary", className: "h-11 w-full rounded-full sm:w-fit" })}>Track the bus live</a> : null}
             {r.driverPhone ? <a href={`tel:${r.driverPhone}`} className={buttonVariants({ variant: "secondary", className: "h-11 w-full rounded-full sm:w-fit" })}>Call driver, {r.driverPhone}</a> : null}
           </div>
         </Panel>

@@ -9,8 +9,8 @@ export default defineFeature({
   permissions: {
     read: ["admin", "accountant"],
     manage: ["admin", "accountant"],
-    /** Students and parents see only their own ledger and receipts. */
-    self: ["student", "parent"],
+    /** Students see only their own ledger and receipts. */
+    self: ["student"],
   },
   menu: [
     { label: "Fees", href: "/app/fees", icon: "money", permission: "read", group: "finance", order: 10 },

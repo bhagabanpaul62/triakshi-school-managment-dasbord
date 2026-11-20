@@ -10,8 +10,8 @@ export default defineFeature({
     read: ["admin", "teacher"],
     write: ["admin", "teacher"],
     submit: ["student"],
-    /** Students see their own work, parents see their children's. */
-    self: ["student", "parent"],
+    /** Students see their own work. */
+    self: ["student"],
   },
   // One page, two audiences: the shell shows each role exactly one of these.
   menu: [

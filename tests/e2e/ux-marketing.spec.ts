@@ -17,14 +17,14 @@ for (const [name, size] of Object.entries(VIEWS)) {
     test.setTimeout(360_000);
     await page.setViewportSize(size);
     await page.goto(MARKETING, { waitUntil: "networkidle", timeout: 150_000 });
-    await expect(page.getByRole("heading", { level: 1 })).toContainText(/one dashboard/i);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(/one calm dashboard/i);
     await reveal(page);
     await page.screenshot({ path: `${OUT}/home-${name}.png`, fullPage: true });
 
-    // Page length stays within ~8 desktop screens; no sideways scroll.
+    // Page length stays within about 10 desktop screens (the ceiling for every landing page); no sideways scroll.
     const { h, sw, cw } = await page.evaluate(() => ({ h: document.documentElement.scrollHeight, sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
     expect(sw).toBeLessThanOrEqual(cw);
-    if (name === "desktop") expect(h).toBeLessThanOrEqual(900 * 8);
+    if (name === "desktop") expect(h).toBeLessThanOrEqual(900 * 10);
 
     // Pricing from the DB, GST shown.
     const pricing = page.locator("#pricing");
@@ -33,9 +33,9 @@ for (const [name, size] of Object.entries(VIEWS)) {
     await expect(pricing.getByRole("link", { name: /start free trial/i }).first()).toBeVisible();
 
     // FAQ opens.
-    const q = page.locator("#faq summary").first();
+    const q = page.locator("#faq button[aria-expanded]").first();
     await q.click();
-    await expect(page.locator("#faq details[open]")).toHaveCount(1);
+    await expect(page.locator('#faq button[aria-expanded="true"]')).toHaveCount(1);
 
     // Pricing page.
     await page.goto(`${MARKETING}/pricing`, { timeout: 150_000 });

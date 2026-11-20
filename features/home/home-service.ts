@@ -1,7 +1,7 @@
-import { and, asc, count, desc, eq, inArray, sql, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql, sum } from "drizzle-orm";
 import { AppError, FeatureOffError, ForbiddenError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { academicYears, classes, sections, terms } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { students } from "@smw/feature-students/schema";
 import { attendanceHolidays, studentAttendance } from "@smw/feature-attendance/schema";
 import { attendancePercent } from "@smw/feature-attendance/stats";
 import { feePayments } from "@smw/feature-fees/schema";
@@ -16,6 +16,7 @@ import { AnnouncementService, type Announcement } from "@smw/feature-announcemen
 import { EventService, type SchoolEvent } from "@smw/feature-events/service";
 import { EnquiryService } from "@smw/feature-website/service";
 import homeFeature from "./feature";
+import { staffLinks } from "./staff-links";
 import { clockIST, dayLabel, greeting, isSunday, markPeriods, monthStart, todayIST, type PeriodState } from "./rules";
 
 // ---------- shapes ----------
@@ -37,7 +38,6 @@ export interface AssignmentRow { assignmentId: string; title: string; subjectNam
 export interface AssignmentsDue { rows: AssignmentRow[]; todo: number; overdue: number }
 export interface LatestResult { studentId: string; examId: string; examName: string; percent: number | null; grade: string | null; result: string; rank: number | null; sectionSize: number }
 export interface AttendanceMonth { pct: number | null; present: number; absent: number; late: number; leave: number; from: string }
-export interface Absence { date: string; status: "present" | "absent" | "late" | "leave" | "half_day"; note: string | null }
 export interface GradingRow { id: string; title: string; sectionLabel: string; subjectName: string; toGrade: number; dueAt: Date }
 export interface ClassMonth { sectionId: string; label: string; pct: number | null; students: number }
 export interface RecentPayment { id: string; student: string; amountPaise: number; method: string; receiptNo: string; paidOn: string }
@@ -72,10 +72,12 @@ export interface LearnerPanels {
   fees: Slot<DueRow | null>;
 }
 export interface StudentHome extends Common, LearnerPanels { child: Child | null; timetable: Slot<TodayTimetable> }
-export interface ParentHome extends Common, LearnerPanels { children: Child[]; child: Child | null; recentAbsences: Slot<Absence[]>; events: Slot<SchoolEvent[]> }
+export interface QuickLink { label: string; href: string; icon: string }
+/** Non-teaching staff: their access comes from a custom role, so Home is a greeting plus links to what that role may open. */
+export interface StaffHome extends Common { links: QuickLink[] }
 export type HomeData =
   | { role: "admin"; data: AdminHome } | { role: "accountant"; data: AccountantHome } | { role: "teacher"; data: TeacherHome }
-  | { role: "student"; data: StudentHome } | { role: "parent"; data: ParentHome };
+  | { role: "student"; data: StudentHome } | { role: "staff"; data: StaffHome };
 
 type Perm = keyof typeof homeFeature.permissions;
 const UNAVAILABLE = "Could not load this. Try again in a moment.";
@@ -125,14 +127,15 @@ export class HomeService extends SchoolService<Perm> {
     });
   }
 
-  async forRole(opts: { childId?: string } = {}): Promise<HomeData> {
+  async forRole(): Promise<HomeData> {
     this.authorize("view", "read");
     switch (this.ctx.role) {
       case "admin": return { role: "admin", data: await this.admin() };
       case "accountant": return { role: "accountant", data: await this.accountant() };
       case "teacher": return { role: "teacher", data: await this.teacher() };
       case "student": return { role: "student", data: await this.student() };
-      default: return { role: "parent", data: await this.parent(opts.childId) };
+      case "staff": return { role: "staff", data: await this.staff() };
+      default: throw new ForbiddenError(); // legacy parent logins are disabled
     }
   }
 
@@ -321,23 +324,27 @@ export class HomeService extends SchoolService<Perm> {
     }));
   }
 
-  // ---------- student and parent ----------
+  // ---------- staff ----------
 
-  /** The student this login is, or the children of this parent. */
+  async staff(): Promise<StaffHome> {
+    const [header, announcements] = await Promise.all([this.header(), this.announcements(4)]);
+    return { header, announcements, links: staffLinks(this.ctx) };
+  }
+
+  // ---------- student ----------
+
+  /** The student this login is. */
   async children(): Promise<Child[]> {
     if (!this.ctx.features.has("students")) return [];
     return this.read("view", async (tx) => {
-      const ids = this.ctx.role === "student"
-        ? tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))
-        : tx.select({ id: studentGuardians.studentId }).from(studentGuardians).innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(eq(guardians.userId, this.ctx.userId));
       const rows = await tx.select({ id: students.id, name: students.name, cls: classes.name, section: sections.name }).from(students)
         .leftJoin(sections, eq(sections.id, students.sectionId)).leftJoin(classes, eq(classes.id, sections.classId))
-        .where(and(inArray(students.id, ids), eq(students.status, "active"))).orderBy(asc(students.name));
+        .where(and(eq(students.userId, this.ctx.userId), eq(students.status, "active"))).orderBy(asc(students.name));
       return rows.map((r) => ({ id: r.id, name: r.name, sectionLabel: r.cls ? `${r.cls}-${r.section}` : null }));
     });
   }
 
-  /** The numbers both learner pages share, for one child (loaded in parallel). */
+  /** The numbers the student page shows (loaded in parallel). */
   protected async learnerPanels(child: Child | null): Promise<LearnerPanels> {
     const date = this.today;
     const forChild = <T>(needs: string, fn: (c: Child) => Promise<T>) => (child ? this.slot(needs, () => fn(child)) : Promise.resolve<Slot<T>>({ state: "off" }));
@@ -367,15 +374,5 @@ export class HomeService extends SchoolService<Perm> {
     const [child] = await this.children();
     const [header, timetable, announcements] = await Promise.all([this.header(), this.slot("timetable", () => this.timetableToday()), this.announcements(4)]);
     return { header, child: child ?? null, timetable, announcements, ...(await this.learnerPanels(child ?? null)) };
-  }
-
-  async parent(childId?: string): Promise<ParentHome> {
-    const kids = await this.children();
-    const child = kids.find((k) => k.id === childId) ?? kids[0] ?? null;
-    const [header, announcements, events, panels, recentAbsences] = await Promise.all([
-      this.header(), this.announcements(4), this.events(4), this.learnerPanels(child),
-      child ? this.slot("attendance", async () => new StudentAttendanceService(this.ctx).recentAbsences(child.id, 4)) : Promise.resolve<Slot<Absence[]>>({ state: "ok", data: [] }),
-    ]);
-    return { header, children: kids, child, announcements, events, recentAbsences, ...panels };
   }
 }

@@ -10,6 +10,21 @@ export const vehicleFields: Field[] = [
   { name: "driverPhone", label: "Driver's mobile", type: "tel", required: true },
   { name: "attendantName", label: "Attendant" },
   { name: "gpsDeviceId", label: "GPS device ID", hint: "Leave empty if the vehicle has no tracker" },
+  { name: "trackingUrl", label: "Live tracking link", type: "text", wide: true, placeholder: "https://", hint: "The page your GPS vendor gives parents. Students see it under My transport. Must start with https://" },
+];
+
+export const documentFields = (kinds: { value: string; label: string }[]): Field[] => [
+  { name: "kind", label: "Paper", type: "select", required: true, options: kinds },
+  { name: "number", label: "Number" },
+  { name: "expiresOn", label: "Expires on", type: "date", required: true },
+  { name: "file", label: "Copy", type: "file", accept: "application/pdf,image/png,image/jpeg,image/webp", hint: "PDF or photo, up to 15 MB. Optional" },
+];
+
+export const checklistItemFields: Field[] = [{ name: "label", label: "Item", required: true, placeholder: "Panic button" }];
+
+export const noticeFields: Field[] = [
+  { name: "title", label: "Title", required: true, wide: true, placeholder: "Bus is running late" },
+  { name: "body", label: "Message", type: "textarea", required: true, wide: true, placeholder: "The bus will reach stops about 20 minutes late today." },
 ];
 
 export const routeFields = (vehicles: { id: string; registrationNo: string; kind: string; capacity: number }[]): Field[] => [

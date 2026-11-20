@@ -77,7 +77,8 @@ export function StatCard({
   );
 
   return href ? (
-    <Link href={href} className="block h-full rounded-3xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]/50">
+    // An <article> inside a link blocks name-from-content, so the link names itself.
+    <Link href={href} aria-label={`${label}: ${value}${typeof meta === "string" ? `, ${meta}` : ""}`} className="block h-full rounded-3xl focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]/50">
       {card}
     </Link>
   ) : (

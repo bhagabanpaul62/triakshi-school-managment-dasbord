@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import { INPUT } from "@smw/ui/shell/FormModal";
 import { Button } from "@smw/ui/ui/button";
-import { setPassword, type SetPasswordState } from "./actions";
+import { setPassword, type SetPasswordState } from "./reset-password-actions";
 
 /** The form. When the password is set it flips `onDone` before the page refresh swaps it for "link already used". */
 export function ResetPasswordForm({ token, onDone }: { token: string; onDone: () => void }) {
@@ -27,7 +27,7 @@ export function ResetPasswordForm({ token, onDone }: { token: string; onDone: ()
         <input name="password" type={kind} autoComplete="new-password" minLength={8} required autoFocus value={pw} onChange={(e) => setPw(e.target.value)}
           aria-invalid={short || undefined} aria-describedby="pw-hint" className={INPUT} />
         <span id="pw-hint" className={short ? "text-xs font-normal text-[var(--ds-color-danger-400)]" : "text-xs font-normal text-[var(--ds-on-surface-muted)]"}>
-          {short ? `${8 - pw.length} more character${8 - pw.length === 1 ? "" : "s"} needed` : "At least 8 characters"}
+          {short ? `${8 - pw.length} more character${8 - pw.length === 1 ? "" : "s"} needed` : "At least 8 characters, not your login ID or date of birth"}
         </span>
       </label>
       <label className="flex flex-col gap-1.5 text-[13px] font-medium text-[var(--ds-on-surface-variant)]">

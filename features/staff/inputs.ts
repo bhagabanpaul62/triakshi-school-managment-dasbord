@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { f } from "@smw/feature-kit";
-import { STAFF_GENDERS, STAFF_USER_ROLES } from "./schema";
+import { EMPLOYMENT_TYPES, STAFF_GENDERS } from "./schema";
 
-const role = z.enum(STAFF_USER_ROLES, { error: "Pick a role" });
+const blank = (v: unknown) => (v === "" || v === null ? undefined : v);
+
+/** A built-in role by key, or a custom role by id. */
+const role = z.string({ error: "Pick a role" }).min(1, "Pick a role");
 
 /** Everything about the person except the role (shared by create and edit). */
 const person = {
@@ -17,10 +20,19 @@ const person = {
   gender: z.preprocess((v) => (v === "" ? undefined : v), z.enum(STAFF_GENDERS).optional()),
   dob: f.optDate(),
   address: f.optText(300),
+  employmentType: z.preprocess(blank, z.enum(EMPLOYMENT_TYPES).optional()),
+  experienceYears: z.preprocess(blank, z.coerce.number({ error: "Enter years as a number" }).int("Enter whole years").min(0, "Enter 0 or more").max(60, "Enter at most 60").optional()),
+  bloodGroup: z.preprocess(blank, z.enum(["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"], { error: "Use a blood group like O+" }).optional()),
+  emergencyName: f.optText(80),
+  emergencyPhone: f.optPhone(),
 };
 
 export const staffInput = z.object({ role, ...person });
 export const staffUpdateInput = z.object(person);
+/** What a staff member may change about themselves; everything else stays with the office. */
+export const myContactInput = z.object({
+  phone: f.optPhone(), address: f.optText(300), emergencyName: f.optText(80), emergencyPhone: f.optPhone(), qualification: f.optText(120),
+});
 export const roleInput = z.object({ role });
 
 export const resetPasswordInput = z.object({

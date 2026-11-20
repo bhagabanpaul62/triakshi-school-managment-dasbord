@@ -7,7 +7,7 @@ import { isDate, todayIST } from "../stats";
 import { markStaffAttendance } from "./actions";
 import { AttendanceGrid } from "./AttendanceGrid";
 import { AttendanceNav } from "./nav";
-import { attendanceNav } from "./pages";
+import { attendanceNavFor } from "./pages";
 import { QueryPicker } from "./QueryPicker";
 
 export const metadata = { title: "Staff attendance" };
@@ -25,7 +25,7 @@ export default async function StaffAttendancePage({ searchParams }: { searchPara
 
   return (
     <>
-      <PageHeader eyebrow="People" title="Staff attendance" description="Teachers and accountants, one tap each." actions={<AttendanceNav items={attendanceNav(true, svc.can("manage"))} active="/app/attendance/staff" />} />
+      <PageHeader eyebrow="People" title="Staff attendance" description="Teachers and accountants, one tap each." actions={<AttendanceNav items={attendanceNavFor(ctx)} active="/app/attendance/staff" />} />
       <KpiRow>
         <StatCard label="Present today" value={summary.pct === null ? "-" : `${summary.pct}%`} meta={summary.total ? `${summary.total} staff marked` : "Nothing marked yet"} />
         <StatCard label="Absent" value={String(summary.absent)} meta="Today" />

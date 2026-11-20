@@ -48,3 +48,14 @@ export function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
 /** Counts from grouped `{ status, n }` rows (a SQL GROUP BY status). */
 export const countsOf = (rows: { status: string; n: number | string }[]): Counts =>
   tally(rows.flatMap((r) => Array<string>(Number(r.n)).fill(r.status)));
+
+/**
+ * A day's status from its periods: present when present or late in at least `pct`% of the periods that count.
+ * Leave periods are excused (left out of both sides); a day of only leave is leave.
+ */
+export function rollupStatus(statuses: string[], pct: number): "present" | "absent" | "leave" {
+  const counted = statuses.filter((s) => s !== "leave");
+  if (counted.length === 0) return "leave";
+  const here = counted.filter((s) => s === "present" || s === "late").length;
+  return here * 100 >= pct * counted.length ? "present" : "absent";
+}

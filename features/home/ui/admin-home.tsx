@@ -7,7 +7,7 @@ import { TickBar } from "@smw/ui/kit/TickBar";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { KpiRow } from "@smw/ui/shell/PageHeader";
 import { MenuIconView } from "@smw/ui/shell/icons";
-import { paise } from "@smw/ui/format";
+import { tilePaise as tile } from "@smw/ui/format";
 import type { AdminHome } from "../home-service";
 import { attendanceTone, isSunday, plural, planTone } from "../rules";
 import { FeeTrend } from "./fee-trend";
@@ -26,8 +26,8 @@ export function AdminHomeView({ d }: { d: AdminHome }) {
       <KpiRow>
         {cap ? <StatCard label="Students" value={String(cap.active)} icon={<MenuIconView name="users" />} meta={`of ${cap.cap} on your plan`} href="/app/students" /> : null}
         {att ? <StatCard label="Attendance today" value={att.pct === null ? "-" : `${Math.round(att.pct)}%`} icon={<MenuIconView name="check" />} meta={att.marked ? `${plural(att.absent, "student")} absent` : isSunday(att.date) ? "Sunday, no classes" : "Not marked yet"} href="/app/attendance" /> : null}
-        {fees ? <StatCard label="Collected this month" value={paise(fees.collectedThisMonth)} icon={<MenuIconView name="money" />} meta={plural(fees.receiptsThisMonth, "receipt")} href="/app/fees" /> : null}
-        {fees ? <StatCard label="Outstanding" value={paise(fees.outstanding)} icon={<MenuIconView name="receipt" />} meta={fees.overdueCount ? `${plural(fees.overdueCount, "student")} overdue` : "Nobody is overdue"} href="/app/fees?overdue=1" /> : null}
+        {fees ? <StatCard label="Collected this month" value={tile(fees.collectedThisMonth)} icon={<MenuIconView name="money" />} meta={plural(fees.receiptsThisMonth, "receipt")} href="/app/fees" /> : null}
+        {fees ? <StatCard label="Outstanding" value={tile(fees.outstanding)} icon={<MenuIconView name="receipt" />} meta={fees.overdueCount ? `${plural(fees.overdueCount, "student")} overdue` : "Nobody is overdue"} href="/app/fees?overdue=1" /> : null}
       </KpiRow>
       <Rows>
         <PanelRow cells={[

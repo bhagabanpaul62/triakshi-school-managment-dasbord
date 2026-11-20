@@ -27,3 +27,10 @@ export const forgetHost = (host?: string) => (host ? cache.delete(normalizeHost(
 export const SCHOOL_HEADER = "x-smw-school-id";
 export const STATUS_HEADER = "x-smw-school-status";
 export const REQUEST_ID_HEADER = "x-smw-request-id";
+/**
+ * The host the browser asked for. Next.js renders a server action's redirect target through an internal request whose
+ * `host` is the server's own origin, but it keeps the original in x-forwarded-host (Caddy also overwrites that header in
+ * production). A spoofed value can at most render another school's public page: cookies are host-only and sessions are
+ * checked inside that school's RLS scope.
+ */
+export const requestHost = (h: Headers) => h.get("x-forwarded-host")?.split(",")[0]?.trim() || h.get("host") || "";

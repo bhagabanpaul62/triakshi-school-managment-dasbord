@@ -4,7 +4,7 @@ import { FeeCalculator } from "./calculator";
 import { ConcessionService, DuesService, FeeHeadService, FeeStructureService, PaymentService, todayIST } from "./service";
 
 interface SeedClass { id: string; name: string; grade: number }
-interface SeedStudent { id: string; name: string; classId: string; guardianUserId?: string | null }
+interface SeedStudent { id: string; name: string; classId: string }
 
 const addDays = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 const METHODS = [
@@ -55,12 +55,9 @@ const seed: FeatureSeed = async (ctx, state) => {
   state.feeStructures = created;
   if (!studentRows.length) return;
 
-  // 10% sibling concession for the younger children of a family (or a few students if no siblings exist).
+  // A 10% concession for a few students.
   const concessions = new ConcessionService(ctx);
-  const byFamily = new Map<string, SeedStudent[]>();
-  for (const s of studentRows) if (s.guardianUserId) byFamily.set(s.guardianUserId, [...(byFamily.get(s.guardianUserId) ?? []), s]);
-  const siblings = [...byFamily.values()].filter((g) => g.length > 1).flatMap((g) => g.slice(1));
-  for (const s of (siblings.length ? siblings : studentRows.filter((_, i) => i % 17 === 5)).slice(0, 8)) {
+  for (const s of studentRows.filter((_, i) => i % 17 === 5).slice(0, 8)) {
     await concessions.create({ studentId: s.id, kind: "percent", percent: "10", reason: "Sibling discount" });
   }
 

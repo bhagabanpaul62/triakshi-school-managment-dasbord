@@ -1,11 +1,11 @@
-// Test-only: a small academic structure for one test school (year, two classes, four sections, two subjects, two teachers, a student and a parent).
+// Test-only: a small academic structure for one test school (year, two classes, four sections, two subjects, two teachers, a student).
 import { sql } from "drizzle-orm";
 import { users, withConsole } from "@smw/db";
 import type { TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sectionTeachers, sections, subjects } from "@smw/feature-academics/schema";
 
 /**
- * s1 = Class 5-A (Maths t1, English t2; holds the school's student and parent), s2 = Class 5-B (Maths t1),
+ * s1 = Class 5-A (Maths t1, English t2; holds the school's student), s2 = Class 5-B (Maths t1),
  * s3 = Class 6-A (Maths t1, English t2), s4 = Class 6-B (no teachers).
  */
 export class AcademicsFixture {
@@ -38,12 +38,8 @@ export class AcademicsFixture {
         { schoolId, sectionId: s3!.id, subjectId: english!.id, teacherId: t2!.id },
       ]);
       // The students module owns these tables; plain SQL keeps this feature free of that dependency.
-      const [student] = [...(await tx.execute(sql`insert into students (id, school_id, admission_no, name, section_id, user_id)
-        values (gen_random_uuid(), ${schoolId}, 'T-1', 'Riya Sharma', ${s1!.id}, ${school.users.student}) returning id`))] as { id: string }[];
-      const [guardian] = [...(await tx.execute(sql`insert into guardians (id, school_id, name, relation, user_id)
-        values (gen_random_uuid(), ${schoolId}, 'Meena Sharma', 'mother', ${school.users.parent}) returning id`))] as { id: string }[];
-      await tx.execute(sql`insert into student_guardians (id, school_id, student_id, guardian_id, is_primary)
-        values (gen_random_uuid(), ${schoolId}, ${student!.id}, ${guardian!.id}, true)`);
+      await tx.execute(sql`insert into students (id, school_id, admission_no, name, section_id, user_id)
+        values (gen_random_uuid(), ${schoolId}, 'T-1', 'Riya Sharma', ${s1!.id}, ${school.users.student})`);
       return new AcademicsFixture(s1!.id, s2!.id, s3!.id, s4!.id, maths!.id, english!.id, t1!.id, t2!.id);
     });
   }

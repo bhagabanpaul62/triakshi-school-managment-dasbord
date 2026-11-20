@@ -51,7 +51,8 @@ test("owner: approvals queue, review a school, reject then reopen", async ({ pag
   await consoleLogin(page);
   await open(page, "/approvals", "Approvals");
   await shoot(page, "approvals");
-  const rows = page.locator("a[href^='/approvals/']");
+  // The approval-setup spec decides its own "UX … Public School" in parallel; reviewing it here races that spec.
+  const rows = page.locator("a[href^='/approvals/']").filter({ hasNotText: /UX \w+ Public School/ });
   if ((await rows.count()) === 0) test.skip(true, "No pending schools in the seed");
   await rows.first().click();
   await page.waitForURL(/\/approvals\//, GOTO);
@@ -136,7 +137,8 @@ test("support role: can view, cannot approve or manage staff", async ({ page }) 
   await expect(page.getByRole("button", { name: /^approve$/i })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Staff", exact: true })).toHaveCount(0);
   await shoot(page, "support-approvals");
-  const rows = page.locator("a[href^='/approvals/']");
+  // The approval-setup spec decides its own "UX … Public School" in parallel; reviewing it here races that spec.
+  const rows = page.locator("a[href^='/approvals/']").filter({ hasNotText: /UX \w+ Public School/ });
   if ((await rows.count()) > 0) {
     await rows.first().click();
     await expect(page.getByRole("button", { name: /^(approve|reject)$/i })).toHaveCount(0);

@@ -20,7 +20,7 @@ export const GROUPS: Group[] = [
     mods: [
       { name: "Students & admissions", icon: IconUserPlus, line: "One profile per student, from admission onwards.", bullets: ["Guardians and contact details", "Documents kept on the profile", "Import your existing list from a spreadsheet"], who: ["Admin", "Office staff"] },
       { name: "Staff & roles", icon: IconUsers, line: "Invite teachers and office staff, and give each a role.", bullets: ["Invite by email", "The role decides what each person sees", "Deactivate when someone leaves"], who: ["Admin"] },
-      { name: "Parent & student logins", icon: IconKey, line: "Every family signs in on the phone they already have.", bullets: ["A parent sees only their own child", "A student sees only their own work", "Runs in the browser, nothing to install"], who: ["Parent", "Student"] },
+      { name: "Family logins", icon: IconKey, line: "One login per student, shared by the family, on the phone they already have.", bullets: ["The family sees only their own child", "Homework, attendance, results and fees in one place", "Runs in the browser, nothing to install"], who: ["Parent", "Student"] },
     ],
   },
   {

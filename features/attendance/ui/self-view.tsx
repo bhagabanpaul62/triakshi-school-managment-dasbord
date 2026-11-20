@@ -61,7 +61,7 @@ function MonthCalendar({ data, today, basePath }: { data: Month; today: string; 
   );
 }
 
-/** Students see their own attendance; parents see each child's: the year's %, a month calendar, recent absences. */
+/** A student login sees its own attendance: the year's %, a month calendar, recent absences. */
 export async function SelfView({ ctx, month }: { ctx: Ctx; month: string }) {
   const svc = new StudentAttendanceService(ctx);
   const today = todayIST();

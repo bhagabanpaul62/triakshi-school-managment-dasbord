@@ -1,5 +1,5 @@
 // Pure data and helpers: Indian class presets, board subject presets, April-March year maths. No framework imports.
-import type { SUBJECT_KINDS } from "./schema";
+import type { STAGES, SUBJECT_KINDS } from "./schema";
 
 type Kind = (typeof SUBJECT_KINDS)[number];
 
@@ -41,3 +41,7 @@ export function defaultTerms(name: string) {
     { name: "Term 2", startsOn: `${y}-10-01`, endsOn: `${y + 1}-03-31` },
   ];
 }
+
+/** The school stage of a grade (-2 Nursery ... 12): pre-primary up to UKG, primary 1-5, middle 6-8, secondary 9-10, senior secondary 11-12. */
+export const stageOf = (grade: number): (typeof STAGES)[number] =>
+  grade <= 0 ? "pre_primary" : grade <= 5 ? "primary" : grade <= 8 ? "middle" : grade <= 10 ? "secondary" : "senior_secondary";

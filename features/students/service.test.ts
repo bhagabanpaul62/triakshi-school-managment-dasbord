@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Passwords } from "@smw/auth";
-import { closeDb, eq, schools, users, withConsole, withSchool } from "@smw/db";
+import { closeDb, eq, schools, sessions, users, withConsole, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { createTestSchool, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryStorage, useServices } from "@smw/integrations";
@@ -8,8 +9,9 @@ import { academicYears, classes, sections } from "@smw/feature-academics/schema"
 import academicsFeature from "@smw/feature-academics/feature";
 import studentsFeature from "./feature";
 import {
-  ConsentService, DocumentService, GuardianService, ImportService, PhotoService, PromotionService, StudentService,
+  ConsentService, CredentialService, DocumentService, GuardianService, ImportService, PhotoService, PromotionService, StudentSelfService, StudentService,
 } from "./service";
+import { auditLogs } from "@smw/db";
 import { guardians, studentEnrollments, students } from "./schema";
 import seedStudents from "./seed";
 
@@ -46,7 +48,6 @@ afterAll(closeDb);
 
 const asAdmin = (s: TestSchool) => new StudentService(s.as.admin);
 const loginOf = (schoolId: string, userId: string) => withSchool(schoolId, async (tx) => (await tx.select().from(users).where(eq(users.id, userId)))[0]!);
-const asParent = (userId: string): Ctx => ({ ...a.as.parent, userId });
 const asStudent = (userId: string): Ctx => ({ ...a.as.student, userId });
 
 describe("admission", () => {
@@ -59,7 +60,7 @@ describe("admission", () => {
     expect(s.classId).toBe(c4);
 
     const login = await loginOf(a.id, s.userId!);
-    expect(login).toMatchObject({ role: "student", loginId: "GR0001", status: "active" });
+    expect(login).toMatchObject({ role: "student", loginId: "GR0001", status: "active", mustChangePassword: true });
     expect(await Passwords.verify(login.passwordHash, "14062015")).toBe(true);
     // No date of birth: the admission number is the first password.
     expect(await Passwords.verify((await loginOf(a.id, next.userId!)).passwordHash, "GR0002")).toBe(true);
@@ -67,6 +68,15 @@ describe("admission", () => {
     const enrol = await withSchool(a.id, (tx) => tx.select().from(studentEnrollments).where(eq(studentEnrollments.studentId, s.id)));
     expect(enrol).toHaveLength(1);
     expect(enrol[0]).toMatchObject({ yearId: yearNow, sectionId: s4A, rollNo: 1, outcome: "studying" });
+  });
+
+  it("records an RTE quota seat from the Yes/No select, and an edit without it keeps the flag", async () => {
+    const svc = asAdmin(a);
+    const s = await svc.create({ name: "Ishaan Rao", admissionNo: "RTE-1", sectionId: s4A, rteQuota: "true" });
+    expect(s.rteQuota).toBe(true);
+    expect((await svc.update(s.id, { name: "Ishaan Rao" })).rteQuota).toBe(true); // not on the form: unchanged
+    expect((await svc.update(s.id, { rteQuota: "false" })).rteQuota).toBe(false);
+    expect((await svc.create({ name: "Riya Sen", admissionNo: "RTE-2", sectionId: s4A })).rteQuota).toBe(false);
   });
 
   it("keeps a typed admission number, rejects a duplicate, and skips it when numbering", async () => {
@@ -84,7 +94,8 @@ describe("admission", () => {
     await expect(asAdmin(a).create({ name: "Kabir Rao", sectionId: "7b0f2a2e-0000-4000-8000-000000000000" })).rejects.toMatchObject({ fieldErrors: { sectionId: expect.any(String) } });
   });
 
-  it("creates the parent login with the guardian, and one parent covers two children", async () => {
+  it("saves the guardian as a contact only (no login), and one guardian covers two children", async () => {
+    const usersBefore = await withSchool(a.id, async (tx) => (await tx.select().from(users)).length);
     const one = await asAdmin(a).create({ name: "Sibling One", sectionId: s4A, guardianName: "Rakesh Gupta", guardianPhone: "9811100001", guardianRelation: "father" });
     const two = await asAdmin(a).create({ name: "Sibling Two", sectionId: s12A, guardianName: "Rakesh Gupta", guardianPhone: "+91 9811100001", guardianRelation: "father" });
     const g = new GuardianService(a.as.admin);
@@ -92,14 +103,19 @@ describe("admission", () => {
     expect(g1).toMatchObject({ phone: "9811100001", isPrimary: true });
     expect(g2!.id).toBe(g1!.id);
 
-    const parent = await withSchool(a.id, async (tx) => (await tx.select({ u: users }).from(guardians).innerJoin(users, eq(users.id, guardians.userId)).where(eq(guardians.id, g1!.id)))[0]!.u);
-    expect(parent).toMatchObject({ role: "parent", loginId: "9811100001", status: "active" });
-    expect(await Passwords.verify(parent.passwordHash, "100001")).toBe(true);
+    const [row] = await withSchool(a.id, (tx) => tx.select().from(guardians).where(eq(guardians.id, g1!.id)));
+    expect(row!.userId).toBeNull();
+    // Only the two student logins were added: no parent user exists for the guardian.
+    const after = await withSchool(a.id, (tx) => tx.select().from(users));
+    expect(after.length).toBe(usersBefore + 2);
+    expect(after.some((u) => u.role === "parent" && u.loginId === "9811100001")).toBe(false);
   });
 
-  it("a phone already used by a staff login cannot become a parent", async () => {
+  it("a guardian phone that belongs to a staff login is still just a contact", async () => {
     await withSchool(a.id, (tx) => tx.update(users).set({ phone: "9000000001" }).where(eq(users.id, a.users.teacher)));
-    await expect(asAdmin(a).create({ name: "Clash Kid", guardianName: "Someone", guardianPhone: "9000000001" })).rejects.toBeInstanceOf(ConflictError);
+    const kid = await asAdmin(a).create({ name: "Clash Kid", guardianName: "Someone", guardianPhone: "9000000001" });
+    const [g] = await new GuardianService(a.as.admin).forStudent(kid.id);
+    expect(g).toMatchObject({ phone: "9000000001", userId: null });
   });
 
   it("only admins admit students", async () => {
@@ -124,19 +140,13 @@ describe("student cap", () => {
 });
 
 describe("who sees which students", () => {
-  it("a parent sees only their children and a student only themselves", async () => {
+  it("a student sees only themselves, and a legacy parent login sees nothing", async () => {
     const mine = await asAdmin(a).create({ name: "Scoped Child", sectionId: s4A, guardianName: "Scoped Parent", guardianPhone: "9822200001" });
     await asAdmin(a).create({ name: "Someone Else", sectionId: s4A, guardianName: "Other Parent", guardianPhone: "9822200002" });
-    const parentUser = (await new GuardianService(a.as.admin).forStudent(mine.id))[0]!;
-    const parentId = await withSchool(a.id, async (tx) => (await tx.select().from(guardians).where(eq(guardians.id, parentUser.id)))[0]!.userId!);
-
-    const parentView = new StudentService(asParent(parentId));
-    expect((await parentView.list()).rows.map((r) => r.name)).toEqual(["Scoped Child"]);
-    await expect(parentView.get(mine.id)).resolves.toMatchObject({ name: "Scoped Child" });
     const other = (await asAdmin(a).list({ q: "Someone Else" })).rows[0]!;
-    await expect(parentView.get(other.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(new GuardianService(asParent(parentId)).forStudent(other.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(new GuardianService(asParent(parentId)).listParents()).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new StudentService(a.as.parent).list()).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new GuardianService(asStudent(mine.userId!)).forStudent(other.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(new GuardianService(asStudent(mine.userId!)).listParents()).rejects.toBeInstanceOf(ForbiddenError);
 
     const studentView = new StudentService(asStudent(mine.userId!));
     expect((await studentView.list()).rows.map((r) => r.id)).toEqual([mine.id]);
@@ -252,10 +262,10 @@ describe("consent, documents and photo", () => {
 
     await expect(svc.upload({ studentId: s.id, kind: "other" }, { name: "x.exe", type: "application/x-msdownload", bytes: new Uint8Array([1]) })).rejects.toMatchObject({ fieldErrors: { file: expect.any(String) } });
 
-    const parentId = await withSchool(a.id, async (tx) => (await tx.select().from(guardians).where(eq(guardians.phone, "9877700001")))[0]!.userId!);
-    expect(await new DocumentService(asParent(parentId)).list(s.id)).toHaveLength(1);
-    await expect(new DocumentService(asParent(parentId)).upload({ studentId: s.id, kind: "other" }, png())).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(new DocumentService(asParent(parentId)).remove(doc.id)).rejects.toBeInstanceOf(ForbiddenError);
+    const own = asStudent(s.userId!);
+    expect(await new DocumentService(own).list(s.id)).toHaveLength(1);
+    await expect(new DocumentService(own).upload({ studentId: s.id, kind: "other" }, png())).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new DocumentService(own).remove(doc.id)).rejects.toBeInstanceOf(ForbiddenError);
 
     await svc.remove(doc.id);
     expect(storage.files.has(doc.fileKey)).toBe(false);
@@ -309,7 +319,7 @@ describe("CSV import", () => {
     expect(await count()).toBe(before);
 
     const good = HEAD + ",Import One,2015-01-05,male,Class 4,A,Imp Parent,9890000002,father\n,Import Two,2014-02-02,female,Class 12,A,Imp Parent,9890000002,father";
-    await expect(new ImportService(a.as.admin).commit(good)).resolves.toEqual({ imported: 2 });
+    await expect(new ImportService(a.as.admin).commit(good)).resolves.toMatchObject({ imported: 2 });
     expect(await count()).toBe(before + 2);
     const parents = await new GuardianService(a.as.admin).listParents({ q: "9890000002" });
     expect(parents.rows[0]!.children).toHaveLength(2);
@@ -318,7 +328,7 @@ describe("CSV import", () => {
   it("rejects a file without the needed columns, and non-admins", async () => {
     await expect(new ImportService(a.as.admin).dryRun("a,b\n1,2")).rejects.toMatchObject({ fieldErrors: { file: expect.stringContaining("missing") } });
     await expect(new ImportService(a.as.teacher).dryRun(HEAD)).rejects.toBeInstanceOf(ForbiddenError);
-    expect(ImportService.templateCsv().split("\n")[0]).toBe(HEAD.trim());
+    expect(ImportService.templateCsv().split("\n")[0]).toMatch(new RegExp("^" + HEAD.trim()));
   });
 });
 
@@ -390,13 +400,11 @@ describe("review additions", () => {
     await expect(svc.update(first.id, { status: "active" })).rejects.toBeInstanceOf(LimitError);
   }, 60_000);
 
-  it("a parent cannot read or change another child's guardians, documents, consent or photo", async () => {
+  it("a student cannot read or change another student's guardians, documents, consent or photo", async () => {
     const mine = await asAdmin(a).create({ name: "Mine Child", sectionId: s4A, guardianName: "Mine Parent", guardianPhone: "9855500001" });
     const other = await asAdmin(a).create({ name: "Other Child", sectionId: s4A, guardianName: "Other Mum", guardianPhone: "9855500002" });
     const doc = await new DocumentService(a.as.admin).upload({ studentId: other.id, kind: "other" }, { name: "x.pdf", type: "application/pdf", bytes: new Uint8Array([1, 2, 3]) });
-    const g = (await new GuardianService(a.as.admin).forStudent(mine.id))[0]!;
-    const parentId = await withSchool(a.id, async (tx) => (await tx.select().from(guardians).where(eq(guardians.id, g.id)))[0]!.userId!);
-    const p = asParent(parentId);
+    const p = asStudent(mine.userId!);
     await expect(new DocumentService(p).list(other.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(new ConsentService(p).forStudent(other.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(new PhotoService(p).url(other.id)).rejects.toBeInstanceOf(NotFoundError);
@@ -445,6 +453,58 @@ describe("isolation", () => {
   });
 });
 
+describe("student logins", () => {
+  it("import also makes logins that must change their password", async () => {
+    const res = await new ImportService(a.as.admin).commit("admission_no,name,dob,gender,class,section\nIMP9001,Import Login,2015-01-05,male,Class 4,A");
+    expect(res).toMatchObject({ imported: 1 });
+    const [st] = await withSchool(a.id, (tx) => tx.select().from(students).where(eq(students.admissionNo, "IMP9001")));
+    expect(await loginOf(a.id, st!.userId!)).toMatchObject({ mustChangePassword: true });
+  });
+
+  it("slips list only never-signed-in active students of that class, with the first password, and nothing from another school", async () => {
+    const one = await asAdmin(a).create({ name: "Slip One", dob: "2012-03-09", sectionId: s12A });
+    const signed = await asAdmin(a).create({ name: "Slip Signed", sectionId: s12A });
+    const other = await asAdmin(a).create({ name: "Slip Other Class", sectionId: s4A });
+    await withSchool(a.id, (tx) => tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, signed.userId!)));
+
+    const { slips, schoolName } = await new CredentialService(a.as.admin).slips(c12);
+    const names = slips.map((x) => x.name);
+    expect(names).toContain("Slip One");
+    expect(names).not.toContain("Slip Signed");
+    expect(names).not.toContain(other.name);
+    expect(slips.find((x) => x.name === "Slip One")).toMatchObject({ loginId: one.admissionNo, password: "09032012" });
+    expect(schoolName).toBe(`School ${a.slug.toUpperCase()}`);
+
+    expect((await new CredentialService(b.as.admin).slips(c12)).slips).toEqual([]);
+    await expect(new CredentialService(a.as.teacher).slips(c12)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("a slip says to ask the office once an admin set a temporary password", async () => {
+    const t = await asAdmin(a).create({ name: "Slip Temp", dob: "2012-05-05", sectionId: s12A });
+    await withSchool(a.id, async (tx) => tx.update(users).set({ passwordHash: await Passwords.hash("temp-pass-xyz") }).where(eq(users.id, t.userId!)));
+    const slip = (await new CredentialService(a.as.admin).slips(c12)).slips.find((x) => x.name === "Slip Temp");
+    expect(slip).toMatchObject({ loginId: t.admissionNo, password: null });
+  });
+
+  it("reset login restores the first password, sets the flag and ends the sessions", async () => {
+    const s = await asAdmin(a).create({ name: "Reset Me", dob: "2013-07-01", sectionId: s4A });
+    await withSchool(a.id, async (tx) => {
+      await tx.update(users).set({ passwordHash: await Passwords.hash("chosen-by-student1"), mustChangePassword: false, lastLoginAt: new Date() }).where(eq(users.id, s.userId!));
+      await tx.insert(sessions).values({ schoolId: a.id, userId: s.userId!, tokenHash: `reset-${s.id}`, expiresAt: new Date(Date.now() + 86_400_000) });
+    });
+    expect(await new CredentialService(a.as.admin).loginStatus(s.id)).toMatchObject({ loginId: s.admissionNo, status: "active", mustChange: false });
+
+    await new CredentialService(a.as.admin).resetLogin(s.id);
+    const login = await loginOf(a.id, s.userId!);
+    expect(login.mustChangePassword).toBe(true);
+    expect(await Passwords.verify(login.passwordHash, "01072013")).toBe(true);
+    expect(await withSchool(a.id, (tx) => tx.select().from(sessions).where(eq(sessions.userId, s.userId!)))).toHaveLength(0);
+
+    await expect(new CredentialService(a.as.teacher).resetLogin(s.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new CredentialService(b.as.admin).resetLogin(s.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe("seed", () => {
   it("fills a big school and a small one with realistic, unique data", async () => {
     const run = async (school: TestSchool, secs: { id: string; classId: string; name: string }[], grades: Record<string, number>) => {
@@ -453,15 +513,14 @@ describe("seed", () => {
         sections: secs,
       };
       await seedStudents(school.as.admin, state);
-      return state as { students: { id: string; name: string; userId: string; guardianUserId: string; sectionId: string }[]; demoStudentLogin: string; demoParentLogin: string };
+      return state as { students: { id: string; name: string; userId: string; sectionId: string }[]; demoStudentLogin: string };
     };
     const greenState = await run(a, [{ id: s4A, classId: c4, name: "A" }, { id: s12A, classId: c12, name: "A" }], { [c4]: 4, [c12]: 12 });
     const perSection = (sid: string) => greenState.students.filter((s) => s.sectionId === sid).length;
     expect(perSection(s4A)).toBeGreaterThanOrEqual(10);
     expect(perSection(s4A)).toBeLessThanOrEqual(14);
-    expect(greenState.students.every((s) => s.userId && s.guardianUserId)).toBe(true);
+    expect(greenState.students.every((s) => s.userId)).toBe(true);
     expect(greenState.demoStudentLogin).toMatch(/^GR\d{4}$/);
-    expect(greenState.demoParentLogin).toMatch(/^98\d{8}$/);
 
     const phones = (await new GuardianService(a.as.admin).listParents({ pageSize: 100 })).rows.map((r) => r.phone);
     expect(new Set(phones).size).toBe(phones.length);
@@ -469,4 +528,94 @@ describe("seed", () => {
     expect(sunState.students.length).toBeLessThanOrEqual(6);
     expect(sunState.students.length).toBeGreaterThanOrEqual(4);
   }, 120_000);
+});
+
+describe("student self-service and who sees medical notes", () => {
+  const mk = (name: string, sectionId: string) => asAdmin(a).create({ name, sectionId, medicalNotes: "Peanut allergy", emergencyName: "Uncle Ram", emergencyPhone: "9877700001" });
+
+  it("a student changes only the allowed fields, applied at once and audit-logged without the medical text", async () => {
+    const me = await mk("Self Edit", s4A);
+    const svc = new StudentSelfService(asStudent(me.userId!));
+    const res = await svc.updateMyContact({ phone: "+91 9877700002", altPhone: "", address: "5 Park Lane", emergencyName: "Aunt Sita", emergencyPhone: "9877700003", medicalNotes: "Asthma",
+      name: "Hacked", dob: "2001-01-01", sectionId: s12A, rollNo: 99, status: "left", admissionNo: "ZZ" });
+    expect(res.changed).toEqual(["phone", "address", "emergencyName", "emergencyPhone", "medicalNotes"]);
+    const rec = await svc.myRecord();
+    expect(rec.student).toMatchObject({ name: "Self Edit", dob: null, sectionId: s4A, status: "active", phone: "9877700002", address: "5 Park Lane", medicalNotes: "Asthma", emergencyName: "Aunt Sita" });
+    expect(rec.classSection).toBe("4-A");
+    await expect(svc.updateMyContact({ phone: "12345" })).rejects.toMatchObject({ fieldErrors: { phone: expect.any(String) } });
+
+    const log = await withSchool(a.id, (tx) => tx.select().from(auditLogs).where(eq(auditLogs.entityId, me.id)));
+    const entry = log.find((l) => (l.meta as { self?: boolean }).self)!;
+    expect(entry.actorUserId).toBe(me.userId);
+    expect(entry.meta).toMatchObject({ fields: ["phone", "address", "emergencyName", "emergencyPhone", "medicalNotes"] });
+    expect(JSON.stringify(entry)).not.toContain("Asthma");
+  });
+
+  it("only a student login may use it, and a student cannot read another student's record", async () => {
+    await expect(new StudentSelfService(a.as.admin).updateMyContact({ phone: "9877700009" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new StudentSelfService(a.as.teacher).myRecord()).rejects.toBeInstanceOf(ForbiddenError);
+    const one = await mk("Peek One", s4A), two = await mk("Peek Two", s4A);
+    await expect(new StudentService(asStudent(one.userId!)).get(two.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(new StudentService(asStudent(one.userId!)).medical(two.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("a teacher sees medical notes for their own section only", async () => {
+    const mine = await mk("Mine Kid", s4A), other = await mk("Other Kid", s12A);
+    await withSchool(a.id, (tx) => tx.update(sections).set({ classTeacherId: a.users.teacher }).where(eq(sections.id, s4A)));
+    const t = new StudentService(a.as.teacher);
+    expect(await t.medical(mine.id)).toMatchObject({ medicalNotes: "Peanut allergy", emergencyPhone: "9877700001" });
+    await expect(t.medical(other.id)).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await t.get(mine.id)).toMatchObject({ medicalNotes: "Peanut allergy" });
+    expect(await t.get(other.id)).toMatchObject({ name: "Other Kid", medicalNotes: null, emergencyName: null, emergencyPhone: null });
+    expect((await t.overview(other.id)).student.medicalNotes).toBeNull();
+    expect((await t.list({ q: "Other Kid" })).rows[0]!.medicalNotes).toBeNull();
+    // Office staff keep the full view.
+    expect((await new StudentService(a.as.accountant).get(other.id)).medicalNotes).toBe("Peanut allergy");
+    await withSchool(a.id, (tx) => tx.update(sections).set({ classTeacherId: null }).where(eq(sections.id, s4A)));
+  });
+
+  it("school B cannot reach A's student through myRecord, and each school sees its own", async () => {
+    const mineA = await mk("Iso A", s4A);
+    const bStudent = await new StudentService(b.as.admin).create({ name: "Iso B" });
+    expect((await new StudentSelfService(asStudent(mineA.userId!)).myRecord()).student.name).toBe("Iso A");
+    expect((await new StudentSelfService({ ...b.as.student, userId: bStudent.userId! }).myRecord()).student.name).toBe("Iso B");
+    await expect(new StudentSelfService({ ...b.as.student, userId: mineA.userId! }).myRecord()).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("xlsx and csv import", () => {
+  const xlsx = new Uint8Array(readFileSync(new URL("./fixtures/students-import.xlsx", import.meta.url)));
+  const csv = [
+    "admission_no,name,dob,gender,class,section,guardian_name,guardian_phone,guardian_relation,phone,medical_notes,ignored_extra",
+    ",Xl Good One,2015-01-05,female,Class 4,A,Xl Parent,9890000011,mother,9890000012,Asthma,zz",
+    ",Xl Good Two,2014-02-02,male,Class 12,A,,,,,,",
+    ",Xl Bad Phone,2015-01-05,male,Class 4,A,,,,12345,,",
+  ].join("\n");
+  const count = () => asAdmin(a).list().then((p) => p.total);
+
+  it("an .xlsx and the same rows as .csv give the same report; a bad row names its line and column and nothing is written", async () => {
+    const before = await count();
+    const svc = new ImportService(a.as.admin);
+    const fromX = await svc.dryRun({ name: "students.xlsx", bytes: xlsx });
+    const fromC = await svc.dryRun({ name: "students.csv", bytes: new TextEncoder().encode(csv) });
+    expect(fromX).toEqual(fromC);
+    expect(fromX).toMatchObject({ total: 3, valid: 2, failed: 1 });
+    expect(fromX.rows[2]).toMatchObject({ line: 4 });
+    expect(fromX.rows[2]!.errors[0]).toMatch(/^phone:/);
+    await expect(svc.commit({ name: "students.xlsx", bytes: xlsx })).rejects.toMatchObject({ fieldErrors: { file: expect.stringContaining("1 of 3 rows") } });
+    expect(await count()).toBe(before);
+  });
+
+  it("commits the new columns, ignores unknown ones, and names the classes for login slips", async () => {
+    const good = csv.split("\n").slice(0, 3).join("\n");
+    const res = await new ImportService(a.as.admin).commit({ name: "ok.csv", bytes: new TextEncoder().encode(good) });
+    expect(res).toMatchObject({ imported: 2, slipClasses: expect.arrayContaining([{ id: c4, name: "Class 4" }, { id: c12, name: "Class 12" }]) });
+    const [row] = (await asAdmin(a).list({ q: "Xl Good One" })).rows;
+    expect(row).toMatchObject({ phone: "9890000012", medicalNotes: "Asthma" });
+  });
+
+  it("a missing required column is a clear error and the template has the new columns", async () => {
+    await expect(new ImportService(a.as.admin).dryRun({ name: "x.csv", bytes: new TextEncoder().encode("name,class\nA,4") })).rejects.toMatchObject({ fieldErrors: { file: expect.stringContaining("section") } });
+    expect(ImportService.templateCsv().split("\n")[0]).toContain("medical_notes");
+  });
 });

@@ -6,8 +6,8 @@ import type { LoanRow } from "../service";
 const TONE = { open: "info", overdue: "danger", returned: "default" } as const;
 const LABEL = { open: "With you", overdue: "Overdue", returned: "Returned" } as const;
 
-/** Student and parent view: their library books and any fine. */
-export function MyLoans({ rows, showName }: { rows: LoanRow[]; showName: boolean }) {
+/** Student view: their library books and any fine. */
+export function MyLoans({ rows }: { rows: LoanRow[] }) {
   const fine = rows.reduce((a, r) => a + r.finePaise, 0);
   if (!rows.length) return <WidgetEmptyState title="No library books yet." description="Books borrowed from the school library will show up here." />;
   return (
@@ -18,7 +18,7 @@ export function MyLoans({ rows, showName }: { rows: LoanRow[]; showName: boolean
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm" title={r.title}>{r.title}</span>
               <span className="block text-xs text-[var(--ds-on-surface-muted)]">
-                {showName ? `${r.borrowerName} · ` : ""}Issued {shortDate(r.issuedOn)} · {r.returnedOn ? `back ${shortDate(r.returnedOn)}` : `due ${shortDate(r.dueOn)}`}
+                Issued {shortDate(r.issuedOn)} · {r.returnedOn ? `back ${shortDate(r.returnedOn)}` : `due ${shortDate(r.dueOn)}`}
                 {r.finePaise > 0 ? ` · fine ${paise(r.finePaise)}` : ""}
               </span>
             </span>

@@ -130,7 +130,8 @@ describe("year rollover", () => {
 describe("permissions", () => {
   it("everyone reads, only the admin manages", async () => {
     expect((await new ClassService(a.as.student).list()).total).toBeGreaterThan(0);
-    expect((await new SectionService(a.as.parent).options()).length).toBeGreaterThan(0);
+    expect((await new SectionService(a.as.teacher).options()).length).toBeGreaterThan(0);
+    await expect(new SectionService(a.as.parent).options()).rejects.toBeInstanceOf(ForbiddenError); // legacy parent logins are disabled
     for (const who of [a.as.teacher, a.as.student, a.as.parent, a.as.accountant]) {
       await expect(new ClassService(who).create({ name: "Class 99", grade: 12 })).rejects.toBeInstanceOf(ForbiddenError);
       await expect(new ClassService(who).addPresets()).rejects.toBeInstanceOf(ForbiddenError);
