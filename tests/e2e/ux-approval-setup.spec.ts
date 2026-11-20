@@ -102,8 +102,11 @@ test.describe("approval and setup journey", () => {
     await shot(page, "05-wizard-first-step-desktop");
     await expectHealthy(page);
 
-    // profile (prefilled): continue
-    await expect(page.getByLabel("School name")).toHaveValue(/UX/, { timeout: 240_000 });
+    // The signup already filled the school profile, so the wizard opens at the first unfinished step: the year.
+    await page.waitForURL(/setup\/year/, { timeout: 240_000 });
+    await expect(page.getByRole("link", { name: /Done School profile/ })).toBeVisible();
+    await page.goto(`${SCHOOL(slug)}/app/setup/profile`);
+    await expect(page.getByLabel("School name")).toHaveValue(/UX/, { timeout: 240_000 }); // prefilled from the signup
     await shot(page, "05b-wizard-profile-desktop");
     await page.getByRole("button", { name: /save and continue/i }).click();
     // year: defaults must be enough

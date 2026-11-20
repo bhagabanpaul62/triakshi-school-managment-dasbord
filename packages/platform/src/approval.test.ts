@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { closeDb, platformAuditLogs, schools, withConsole } from "@smw/db";
+import { closeDb, platformAuditLogs, schools, users, withConsole } from "@smw/db";
+import { SchoolAuth } from "@smw/auth";
 import { ConflictError, ForbiddenError, ValidationError, type StaffCtx } from "@smw/feature-kit";
 import { MemoryEmailSender, useServices as setServices } from "@smw/integrations";
 import { createSchool } from "@smw/onboarding";
@@ -46,7 +47,27 @@ describe("ApprovalService", () => {
     expect(mail.sent).toHaveLength(1);
     expect(mail.sent[0]).toMatchObject({ to: p.email });
     expect(mail.sent[0]!.text).toContain(`${p.slug}.`);
-    expect(mail.sent[0]!.text).toContain("/login");
+    // No password yet: the button opens "Set up your account", and using it signs them in with the email marked verified.
+    const link = mail.sent[0]!.text.match(/https?:\/\/\S+\/reset-password\?token=\S+/)?.[0];
+    expect(link, "approval email links to the set-password page").toBeTruthy();
+    const token = new URL(link!).searchParams.get("token")!;
+    const userId = await new SchoolAuth(p.schoolId).resetPassword(token, "Brand-New-Pass-42");
+    const [admin] = await withConsole((tx) => tx.select().from(users).where(eq(users.id, userId)));
+    expect(admin).toMatchObject({ status: "active", email: p.email });
+    expect(admin!.emailVerifiedAt).toBeInstanceOf(Date);
+  });
+
+  it("resend sign-in: a password-holder gets sign-in with the email filled in; pending schools are refused", async () => {
+    const p = await pending();
+    const svc = new ApprovalService(owner);
+    await expect(svc.resendSignIn(p.schoolId)).rejects.toBeInstanceOf(ConflictError);
+    await svc.approve(p.schoolId);
+    await withConsole((tx) => tx.update(users).set({ passwordHash: "x", status: "active" }).where(eq(users.schoolId, p.schoolId)));
+    mail.sent.length = 0;
+    expect(await svc.resendSignIn(p.schoolId)).toEqual({ emailSent: true, setPassword: false });
+    expect(mail.sent[0]!.text).toContain(`/login?id=${encodeURIComponent(p.email)}`);
+    expect(await logged("school.resend_sign_in", p.schoolId)).toHaveLength(1);
+    await expect(new ApprovalService(staff("sales")).resendSignIn(p.schoolId)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it("only pending schools can be approved, and only once", async () => {

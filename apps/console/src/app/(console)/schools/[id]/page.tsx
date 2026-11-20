@@ -21,7 +21,7 @@ import { ReviewActions } from "@/components/review-actions";
 import { TabLinks } from "@/components/tab-links";
 import { SimpleTable } from "@/components/simple-table";
 import { DOMAIN_LABELS, DOMAIN_TONES, PRIORITY_TONES, SCHOOL_LABELS, SCHOOL_TONES, STAGE_LABELS, STAGE_TONES, TICKET_LABELS, TICKET_TONES } from "@/lib/tones";
-import { changePlan, createSupportLogin, extendTrial, makeSchoolReadOnly, reactivateSchool, removeOverride, scheduleDeletion, setOverride, suspendSchool } from "../../actions";
+import { changePlan, createSupportLogin, extendTrial, makeSchoolReadOnly, reactivateSchool, removeOverride, resendSchoolSignIn, scheduleDeletion, setOverride, suspendSchool } from "../../actions";
 import { SupportLoginDialog } from "./support-login-dialog";
 
 export const metadata = { title: "School" };
@@ -94,6 +94,10 @@ export default async function SchoolPage({ params, searchParams }: { params: Pro
   ];
 
   const lifecycle: { key: string; title: string; effect: string; button: ReactNode }[] = [
+    ...(canStatus && !underReview ? [
+      { key: "signin", title: "Resend sign-in email", effect: "The administrator gets a link to set their password (if they never did) or to sign in with their email filled in.",
+        button: <ActionButton action={resendSchoolSignIn} values={{ id }} label="Resend sign-in email" confirm={{ title: "Email the administrator a sign-in link?", body: `${s.name}'s administrator gets one email with a link into the school.`, confirmLabel: "Send" }} /> },
+    ] : []),
     ...(canStatus && running ? [
       { key: "ro", title: "Make read-only", effect: "They can sign in and export, but change nothing.",
         button: <ActionButton action={makeSchoolReadOnly} values={{ id }} label="Make read-only" confirm={{ title: "Make this school read-only?", body: `${s.name} can still sign in and export, but cannot change anything.`, confirmLabel: "Make read-only" }} /> },

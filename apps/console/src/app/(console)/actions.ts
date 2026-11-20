@@ -67,6 +67,12 @@ export async function approveSchool(fd: FormData) {
   if (!r.ok) return r;
   return { ...r, message: r.data.emailSent ? "Approved. The 30-day trial has started and the administrator has a sign-in link." : "Approved, but the email did not send. Tell the administrator to sign in." };
 }
+export async function resendSchoolSignIn(fd: FormData) {
+  const r = await consoleAction(ApprovalService, (s) => s.resendSignIn(id(fd)));
+  if (!r.ok) return r;
+  return { ...r, message: !r.data.emailSent ? "The email did not send. Check the email settings, then try again."
+    : r.data.setPassword ? "Sent. The administrator gets a link to set their password and sign in." : "Sent. The administrator gets a sign-in link with their email filled in." };
+}
 export async function rejectSchool(fd: FormData) {
   const r = await consoleAction(ApprovalService, (s) => s.reject(id(fd), field(fd, "reason")));
   if (!r.ok) return r;
