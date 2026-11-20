@@ -147,7 +147,9 @@ Re-run against 4110 (cut off at 500 s, so partial):
   - marketing: `https://161-118-163-201.sslip.io`
   - console: `https://console.161-118-163-201.sslip.io`
   - schools: `https://<slug>.161-118-163-201.sslip.io` (a certificate is issued on first visit, only for real schools)
-- Everything runs locally on the VM: Postgres, RustFS (in place of S3), Mailpit in place of SES (inbox `http://100.74.65.66:8025`, tailnet only), and the test checkout (`FAKE_PAYMENTS=true`: anyone can "pay", so never on a real launch). WAL archiving is off.
+- Everything runs locally on the VM: Postgres, RustFS (in place of S3), and the test checkout (`FAKE_PAYMENTS=true`: anyone can "pay", so never on a real launch). WAL archiving is off.
+- **Email is real since 2026-11-20:** Brevo SMTP (`smtp-relay.brevo.com:587`, 300 a day free), sent from `Triakshi AI <bhagabanpaulofficial@gmail.com>`. The Mailpit container still runs but nothing sends to it. Before the switch, the old `.env` was saved as `/opt/triakshi/.env.bak-20261120-1124`.
+- **Deployed 2026-11-20:** `d724564` (Academics group, auth and People, migrations 0001–0008). Before migrating, the DB was backed up to `/opt/triakshi/backup-20261120-1124-before-0001-0008.sql.gz` (`pg_dumpall`, mode 600). The worker runs 12 jobs, including `attendance.send-alerts` and `timetable.publish-due`.
 - Files on the VM:
   - `/opt/triakshi/repo`: the fork's `feat/school-platform` branch
   - `/opt/triakshi/.env`: secrets, mode 600
@@ -156,7 +158,9 @@ Re-run against 4110 (cut off at 500 s, so partial):
   - `/opt/triakshi/superadmin.txt`: the console owner's one-time password and TOTP secret, mode 600
 - The host Caddy (systemd) serves other sites too. The Triakshi part is `/etc/caddy/triakshi.caddy`, imported at the end of `/etc/caddy/Caddyfile`, plus an `on_demand_tls { ask … }` global block at the top. A backup is `Caddyfile.bak-triakshi-*`.
 - Deploy an update:
-  `cd /opt/triakshi/repo && git pull && /opt/triakshi/build.sh` (run it with the guard, as before)
+  `cd /opt/triakshi/repo && git pull`, then start the build in the background with the guard:
+  `cd /opt/triakshi && : > build.log && nohup ./build.sh > build.log 2>&1 & echo $! > build.pid; nohup ./mem-guard.sh &`.
+  `build.sh` builds worker, school, console and marketing one at a time (pass names to build only some). It is done when `build.log` ends with `BUILD_EXIT=0`. Back up the DB before migrating.
   then `docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml -f /opt/triakshi/compose.freevm.yml` with `run --rm migrate`, `run --rm worker pnpm --filter @smw/school bootstrap` and `up -d`.
 - Remove it completely:
   1. Run `down -v` with the same compose command.
