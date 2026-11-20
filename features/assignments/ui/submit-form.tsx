@@ -3,7 +3,7 @@
 import { useRef } from "react";
 import { ModalField } from "@smw/ui/kit/Modal";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
-import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
+import { INPUT, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { Button } from "@smw/ui/ui/button";
 import { cn } from "@smw/ui/utils";
 import { useActionForm } from "./use-action-form";
@@ -16,7 +16,7 @@ export function SubmitForm({ assignmentId, text, hasFiles, handedIn, pastDue, ac
   const { errors, pending, submit } = useActionForm(action, () => { if (fileRef.current) fileRef.current.value = ""; });
 
   return (
-    <form action={submit} className="flex flex-col gap-4" noValidate>
+    <form onSubmit={keepValues(submit)} className="flex flex-col gap-4" noValidate>
       <input type="hidden" name="assignmentId" value={assignmentId} />
       {pastDue ? <ToneBadge label="Past the due time: this will be marked late" tone="warning" className="w-fit" /> : null}
       <ModalField label="Your answer" htmlFor="submit-text" error={errors.text}>

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Modal, ModalField, ModalFooter, ModalSection } from "@smw/ui/kit/Modal";
 import { Button } from "@smw/ui/ui/button";
-import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
+import { INPUT, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { cn } from "@smw/ui/utils";
 import type { Contact } from "../contact-rules";
@@ -56,7 +56,7 @@ export function ComposeModal({ search, start }: { search: Action; start: Action 
       <Modal open={open} onOpenChange={setOpen} size="md" title="New message" description="Only people you are allowed to message are listed." dismissOnOutsideClick={false}
         footer={<ModalFooter summary={chosen.length ? `${chosen.length} ${chosen.length === 1 ? "person" : "people"} selected` : undefined}
           secondary={{ onClick: () => setOpen(false) }} primary={{ label: "Send", type: "submit", form: formId, loading: pending }} />}>
-        <form id={formId} action={submit} className="pt-2" noValidate>
+        <form id={formId} onSubmit={keepValues(submit)} className="pt-2" noValidate>
           <ModalSection>
             <div className="flex flex-col gap-4">
               <ModalField label="To" htmlFor={`${formId}-q`} required error={errors.recipientIds}>

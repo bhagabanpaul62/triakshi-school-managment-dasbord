@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ModalField } from "@smw/ui/kit/Modal";
-import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
+import { INPUT, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { Button } from "@smw/ui/ui/button";
 import { cn } from "@smw/ui/utils";
 import { useActionForm } from "./use-action-form";
@@ -19,7 +19,7 @@ export function BulkGrade({ assignmentId, rows, maxMarks, action }: {
   const all = rows.length > 0 && picked.size === rows.length;
 
   return (
-    <form action={submit} className="flex flex-col gap-4" noValidate>
+    <form onSubmit={keepValues(submit)} className="flex flex-col gap-4" noValidate>
       <input type="hidden" name="assignmentId" value={assignmentId} />
       <div className="flex items-center justify-between gap-3">
         <span className="text-sm text-[var(--ds-on-surface-muted)]">{picked.size} of {rows.length} selected</span>

@@ -47,6 +47,9 @@ for (const [name, size] of Object.entries(VIEWS)) {
   test(`owner signs up (${name})`, async ({ page }) => {
     test.setTimeout(300_000);
     await page.setViewportSize(size);
+    // The suite signs up more schools than the 5-an-hour-per-network limit allows; locally nothing sits in front of the
+    // server, so this request's own forwarded address stands in for a different network (in production the proxy's is used).
+    await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${1 + Math.floor(Math.random() * 254)}` }); // a fresh one each run: the limit is held in memory for an hour
     await page.goto(`${MARKETING}/signup`, { waitUntil: "networkidle", timeout: 150_000 });
     await page.screenshot({ path: `${OUT}/signup-1-${name}.png`, fullPage: true });
 

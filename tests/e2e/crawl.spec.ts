@@ -48,7 +48,8 @@ async function visit(page: Page, role: string, path: string, problems: string[])
   const errors: string[] = [];
   page.removeAllListeners("pageerror");
   page.on("pageerror", (e) => errors.push(e.message));
-  const res = await page.goto(`${SCHOOL(school)}${path}`, { waitUntil: "networkidle" }).catch((e) => { problems.push(`${path}: navigation ${e.message}`); return null; });
+  // 30 s cap: a page whose network never goes quiet (a stuck request) is reported here instead of eating the test budget.
+  const res = await page.goto(`${SCHOOL(school)}${path}`, { waitUntil: "networkidle", timeout: 30_000 }).catch((e) => { problems.push(`${path}: navigation ${e.message.split("\n")[0]}`); return null; });
   const status = res?.status() ?? 0;
   const overlay = await page.locator("[data-nextjs-dialog]").count();
   const name = path.replace(/[^a-z0-9]+/gi, "_").slice(0, 80) || "root";

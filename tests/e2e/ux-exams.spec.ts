@@ -96,7 +96,8 @@ test.describe("exams and results journeys", () => {
     await noHorizontalScroll(page);
     await page.getByRole("button", { name: `Delete ${NAME}` }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-    await expect(page.getByText(NAME)).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByText(`Nothing matches "${NAME}".`)).toBeVisible({ timeout: 30_000 }); // the search echoes the name, so look for the empty state
+    await expect(page.getByRole("button", { name: `Delete ${NAME}` })).toHaveCount(0);
   });
 
   test("teacher: keyboard marks entry with inline validation and sticky save, own subjects only", async ({ page }) => {
@@ -117,7 +118,7 @@ test.describe("exams and results journeys", () => {
     await inputs.first().focus();
     await page.keyboard.type("9999");
     await expect(page.getByRole("alert").first()).toContainText(/0 to/); // inline, before saving
-    await page.keyboard.press("Control+a");
+    await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.type("41");
     await page.keyboard.press("Enter");
     await expect(inputs.nth(1)).toBeFocused();
@@ -141,10 +142,11 @@ test.describe("exams and results journeys", () => {
     await shot(page, "admin-results");
     const first = page.getByRole("link", { name: /Report card/ }).first();
     await expect(first).toBeVisible();
-    const res = await page.request.get((await first.getAttribute("href"))!);
+    const abs = async (link: ReturnType<typeof page.getByRole>) => new URL((await link.getAttribute("href"))!, page.url()).toString(); // the links are relative
+    const res = await page.request.get(await abs(first));
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toContain("pdf");
-    const batch = await page.request.get((await page.getByRole("link", { name: /Download all report cards/ }).getAttribute("href"))!);
+    const batch = await page.request.get(await abs(page.getByRole("link", { name: /Download all report cards/ }).first()));
     expect(batch.status()).toBe(200);
     await noHorizontalScroll(page);
     await expectHealthy(page);

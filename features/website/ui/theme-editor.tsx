@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { checkContrast, FONTS, RADII, type Theme } from "@smw/themes";
 import { Panel } from "@smw/ui/kit/Panel";
 import { Button } from "@smw/ui/ui/button";
-import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
+import { INPUT, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 
@@ -40,7 +40,7 @@ export function ThemeEditor({ initial, presets, limited, schoolName, action }: {
   const vars = { "--p": c.primary, "--pl": c.primaryLight, "--s": c.secondary, "--a": c.accent, "--bg": c.background, "--sf": c.surface, "--tx": c.text, "--mt": c.mutedText, "--r": RADII[t.radius] } as CSSProperties;
 
   return (
-    <form action={submit} className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+    <form onSubmit={keepValues(submit)} className="grid grid-cols-1 gap-3 lg:grid-cols-12">
       {/* locked fields still travel with the form, so the saved theme stays whole */}
       <input type="hidden" name="preset" value={t.preset} />
       {limited ? <>

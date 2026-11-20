@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition, type ReactNode } from "react";
+import { useId, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { IconPlus } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
@@ -11,6 +11,17 @@ import { toast } from "./toast";
 import { MenuIconView } from "./icons";
 
 /** What every server action returns (same shape as @smw/runtime ActionResult). */
+/**
+ * `<form onSubmit={keepValues(submit)}>` in place of `action={submit}`: React resets a form after every `action`,
+ * so a server-side "no" (wrong password, a field error) wiped everything the person typed. This sends the same
+ * FormData without that reset; `submit` gets `reset` to call on success when the form should clear.
+ */
+export const keepValues = (submit: (fd: FormData, reset: () => void) => void) => (e: FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  submit(new FormData(form, (e.nativeEvent as SubmitEvent).submitter), () => form.reset());
+};
+
 export type FormResult = { ok: true; data?: unknown; message?: string } | { ok: false; error: string; code?: string; fieldErrors?: Record<string, string> };
 
 /** One form field, as plain data, so server pages can describe forms. */
@@ -160,7 +171,7 @@ export function FormModal({ title, description, icon = "users", fields, values, 
       <Modal open={open} onOpenChange={setOpen} size={size ?? (fields.length > 6 ? "lg" : "md")} title={title} description={description}
         icon={<IconChip className="h-10 w-10"><MenuIconView name={icon} /></IconChip>} dismissOnOutsideClick={false}
         footer={<ModalFooter summary={summary} secondary={{ onClick: () => setOpen(false) }} primary={{ label: submitLabel, type: "submit", form: formId, loading: pending }} />}>
-        <form id={formId} action={submit} className="pt-2" noValidate>
+        <form id={formId} onSubmit={keepValues(submit)} className="pt-2" noValidate>
           <FieldGrid fields={fields} values={values} errors={errors} />
         </form>
       </Modal>

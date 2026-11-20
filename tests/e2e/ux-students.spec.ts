@@ -49,7 +49,7 @@ test.describe("students journeys", () => {
       await search.fill("Aarav");
       await baseExpect(page).toHaveURL(/q=Aarav/, { timeout: 8_000 });
     }).toPass({ timeout: 180_000 });
-    await expect(page.locator("[aria-label^='Children of'] a[href^='/app/students/']").first()).toBeVisible(); // a guardian's child chip opens the student
+    await expect(page.getByRole("link", { name: /Aarav Sharma/ }).first()).toBeVisible();
     await shot(page, "list-search");
 
     await open(page, "/app/students?q=zzzznobody");

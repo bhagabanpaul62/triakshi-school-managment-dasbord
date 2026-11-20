@@ -71,7 +71,7 @@ test("overdue list says who to chase, and a fine is explained before the return"
   await expect(page.getByText("Overdue books")).toBeVisible({ timeout: 90_000 });
   const overdue = page.locator("li").filter({ hasText: /\d+ days? late/ });
   if (await overdue.count()) {
-    await expect(overdue.first().getByText(/due [A-Z][a-z]{2} \d/)).toBeVisible();
+    await expect(overdue.first().getByText(/due \d{1,2} [A-Z][a-z]{2}/)).toBeVisible();
     await overdue.first().getByRole("button", { name: /^return$/i }).click();
     if (await page.getByText(/is \d+ days? late\. .* owes a fine of/i).count()) await expect(page.getByRole("button", { name: /^return, fine/i })).toBeVisible();
     await shoot(page, "library-overdue-confirm");
@@ -87,10 +87,11 @@ test("admin adds a book with copies and sees real counts", async ({ page }) => {
   await go(page, "/app/library/books");
   await page.getByRole("button", { name: /add book/i }).click();
   const title = `UX test book ${Date.now() % 100000}`;
-  await page.getByLabel(/^title/i).fill(title);
-  await page.getByLabel(/^author/i).fill("Test Author");
-  await page.getByLabel(/^category/i).selectOption("Fiction");
-  await page.getByLabel(/copies to add/i).fill("3");
+  const add = page.getByRole("dialog"); // the list behind it has its own Category filter
+  await add.getByLabel(/^title/i).fill(title);
+  await add.getByLabel(/^author/i).fill("Test Author");
+  await add.getByLabel(/^category/i).selectOption("Fiction");
+  await add.getByLabel(/copies to add/i).fill("3");
   await shoot(page, "library-add-book");
   await page.getByRole("button", { name: /^add book$/i }).last().click();
   await expect(page.getByText("Book added")).toBeVisible({ timeout: 60_000 });

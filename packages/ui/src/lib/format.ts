@@ -5,7 +5,7 @@ const IST = "Asia/Kolkata";
 type DateLike = Date | string | number | null | undefined;
 const toDate = (d: DateLike) => (d == null || d === "" ? null : d instanceof Date ? d : new Date(d));
 
-/** "Sep 29" (adds the year when it is not this year: "Sep 29, 2025"). */
+/** "29 Sep", the Indian order (adds the year when it is not this year: "29 Sep 2025"). */
 export function shortDate(d: DateLike, tz = IST): string {
   const x = toDate(d);
   if (!x || Number.isNaN(x.getTime())) return "-";
