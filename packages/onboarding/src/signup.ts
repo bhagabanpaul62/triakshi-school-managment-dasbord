@@ -5,6 +5,7 @@ import { AppError, parse, ValidationError } from "@smw/feature-kit";
 import { services } from "@smw/integrations";
 import { OnboardingEmails } from "./emails";
 import { createSchool, slugTaken, type CreatedSchool } from "./create-school";
+import { emailOwner, signInLink } from "./sign-in-link";
 import { signupSchema, type SignupInput } from "./schema";
 import { SlugPolicy } from "./slug";
 
@@ -36,6 +37,16 @@ export class SignupService {
   static async start(input: SignupInput, opts: { ip?: string } = {}): Promise<SignupResult> {
     if (!signupLimiter.take(`signup:${opts.ip ?? "?"}`)) throw new AppError("Too many signups from this network. Try again in an hour.", "rate_limited", 429);
     const d = parse(signupSchema, input);
+    // One email, one account: an address that already signs in somewhere never starts a second school.
+    const owner = await emailOwner(d.email);
+    if (owner?.kind === "console") throw new ValidationError({ email: "This email is a Triakshi team login. Register the school with a different email." });
+    if (owner?.kind === "school") {
+      // Tell the owner of the address, not the person typing: the form never names the school.
+      const { url, setPassword } = await signInLink(owner.schoolId, owner.slug, { id: owner.userId, email: d.email, hasPassword: owner.hasPassword });
+      await services().email.send(OnboardingEmails.existingAccount({ to: d.email, name: owner.name, schoolName: owner.schoolName, link: url, setPassword }))
+        .catch((err) => console.error(JSON.stringify({ level: "warn", msg: "existing-account email failed", err: String(err) })));
+      throw new ValidationError({ email: "This email already has a Triakshi account, so we have emailed it a sign-in link. To register another school, use a different email." });
+    }
     const check = await SignupService.checkSlug(d.slug);
     if (!check.available) throw new ValidationError({ slug: check.reason ?? "That address is taken." });
 

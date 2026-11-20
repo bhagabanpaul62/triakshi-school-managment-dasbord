@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SchoolAuth } from "@smw/auth";
-import { eq, plans, schoolDomains, schools, users, withConsole, withSchool } from "@smw/db";
+import { eq, plans, platformStaff, schoolDomains, schools, users, withConsole, withSchool } from "@smw/db";
 import { MemoryEmailSender, useServices } from "@smw/integrations";
 import { ConflictError, createSchool, PlanCatalog, SignupService, signupLimiter, resendLimiter, ValidationError } from "./index";
 
@@ -87,7 +87,31 @@ describe("SignupService", () => {
   });
 
   it("a taken address is a field error and sends no email", async () => {
-    await expect(SignupService.start({ ...base, slug: "moonrise" }, { ip: "1.1.1.1" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(SignupService.start({ ...base, email: "fresh@moon.test", slug: "moonrise" }, { ip: "1.1.1.1" })).rejects.toMatchObject({ fieldErrors: { slug: expect.any(String) } });
+    expect(mail.sent).toHaveLength(0);
+  });
+
+  it("an email that already signs in to a school starts no new school: its owner is emailed the way in", async () => {
+    const before = (await withConsole((tx) => tx.select().from(schools))).length;
+    // Asha administers "sunrise" (from createSchool above) and has no password yet: the mail offers to set one.
+    await expect(SignupService.start({ ...base, email: " ASHA@sunrise.test ", slug: "second-school" }, { ip: "1.1.1.1" }))
+      .rejects.toMatchObject({ fieldErrors: { email: expect.stringMatching(/already has a Triakshi account/) } });
+    expect((await withConsole((tx) => tx.select().from(schools))).length).toBe(before);
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0]).toMatchObject({ to: "asha@sunrise.test", subject: expect.stringContaining("Sunrise Public School") });
+    expect(mail.sent[0]!.text).toMatch(/sunrise\.localhost\S*\/reset-password\?token=/);
+
+    // With a password set, the mail points at sign-in with the email filled in instead.
+    await withConsole((tx) => tx.update(users).set({ passwordHash: "x" }).where(eq(users.email, "asha@sunrise.test")));
+    mail.sent.length = 0;
+    await expect(SignupService.start({ ...base, slug: "third-school" }, { ip: "1.1.1.1" })).rejects.toBeInstanceOf(ValidationError);
+    expect(mail.sent[0]!.text).toContain("/login?id=asha%40sunrise.test");
+  });
+
+  it("a Triakshi team email cannot register a school", async () => {
+    await withConsole((tx) => tx.insert(platformStaff).values({ email: "Owner@Triakshi.test", name: "Owner", role: "owner", passwordHash: "x" }));
+    await expect(SignupService.start({ ...base, email: "owner@triakshi.test", slug: "team-school" }, { ip: "1.1.1.1" }))
+      .rejects.toMatchObject({ fieldErrors: { email: expect.stringMatching(/team login/) } });
     expect(mail.sent).toHaveLength(0);
   });
 

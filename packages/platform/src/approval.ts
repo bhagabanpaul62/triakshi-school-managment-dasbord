@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, plans, platformAuditLogs, schools, users, type Tx } from "@smw/db";
+import { and, asc, desc, eq, inArray, plans, platformAuditLogs, schools, sql, users, type Tx } from "@smw/db";
 import { ConflictError, NotFoundError, PlatformService } from "@smw/feature-kit";
 import { services, type Mail } from "@smw/integrations";
-import { OnboardingEmails } from "@smw/onboarding";
+import { OnboardingEmails, signInLink } from "@smw/onboarding";
 import { assertId } from "./inputs";
 
 const DAY = 86_400_000;
@@ -89,8 +89,38 @@ export class ApprovalService extends PlatformService {
       await this.audit(tx, "school.approve", `Approved ${school.name}`, id, { from: "pending", to: "trial", note: n ?? null, trialEndsAt: trialEndsAt.toISOString() });
       return { school, admin };
     });
-    const emailSent = await this.send(admin && OnboardingEmails.approved({ to: admin.email!, adminName: admin.name, schoolName: school.name, slug: school.slug, trialDays: TRIAL_DAYS }));
+    const emailSent = await this.sendSignIn(school, admin);
     return { schoolId: id, status: "trial", trialEndsAt: school.trialEndsAt, emailSent };
+  }
+
+  /**
+   * Email the school's administrator their way in again: the "set your password" page if they never set one
+   * (the usual case when the first link was lost), otherwise sign-in with their email filled in. Approved schools only.
+   */
+  async resendSignIn(id: string): Promise<{ emailSent: boolean; setPassword: boolean }> {
+    this.require("owner", "support");
+    assertId(id, "School");
+    const { school, admin } = await this.tx(async (tx) => {
+      const [school] = await tx.select().from(schools).where(eq(schools.id, id)).limit(1);
+      if (!school) throw new NotFoundError("School");
+      if (school.status === "pending" || school.status === "rejected") throw new ConflictError(`${school.name} is ${school.status}; approve it first.`);
+      const admin = await this.admin(tx, id);
+      if (!admin) throw new ConflictError(`${school.name} has no administrator with an email.`);
+      await this.audit(tx, "school.resend_sign_in", `Resent the sign-in email for ${school.name}`, id, {});
+      return { school, admin };
+    });
+    return { emailSent: await this.sendSignIn(school, admin), setPassword: !admin.hasPassword };
+  }
+
+  private async sendSignIn(school: { id: string; name: string; slug: string }, admin: Awaited<ReturnType<ApprovalService["admin"]>>): Promise<boolean> {
+    if (!admin) return false;
+    try {
+      const { url, setPassword } = await signInLink(school.id, school.slug, { id: admin.id, email: admin.email!, hasPassword: admin.hasPassword });
+      return await this.send(OnboardingEmails.approved({ to: admin.email!, adminName: admin.name, schoolName: school.name, trialDays: TRIAL_DAYS, link: url, setPassword }));
+    } catch (err) { // the approval already committed; a link or mail failure is reported, never undone
+      console.error(JSON.stringify({ level: "warn", msg: "sign-in email failed", schoolId: school.id, err: String(err) }));
+      return false;
+    }
   }
 
   /** Pending to rejected, with a reason the school reads in its email. */
@@ -124,7 +154,7 @@ export class ApprovalService extends PlatformService {
   }
 
   private async admin(tx: Tx, schoolId: string) {
-    const [a] = await tx.select({ name: users.name, email: users.email }).from(users).where(and(eq(users.schoolId, schoolId), eq(users.role, "admin"))).orderBy(asc(users.createdAt)).limit(1);
+    const [a] = await tx.select({ id: users.id, name: users.name, email: users.email, hasPassword: sql<boolean>`${users.passwordHash} is not null` }).from(users).where(and(eq(users.schoolId, schoolId), eq(users.role, "admin"))).orderBy(asc(users.createdAt)).limit(1);
     return a?.email ? a : null;
   }
 

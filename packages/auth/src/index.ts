@@ -546,6 +546,9 @@ export class SchoolAuth {
       const row = await this.consumeToken(tx, "reset_password", token) ?? await this.consumeToken(tx, "invite", token);
       if (!row?.userId) throw new LoginError("invalid");
       await this.applyReset(tx, row.userId, next, "Set a new password from an email link");
+      // The link was mailed to `meta.email`: using it proves that inbox, as long as the account still has that address.
+      const sentTo = (row.meta as { email?: string } | null)?.email;
+      if (sentTo) await tx.update(users).set({ emailVerifiedAt: new Date() }).where(and(eq(users.id, row.userId), sql`lower(${users.email}) = ${sentTo}`, isNull(users.emailVerifiedAt)));
       return row.userId;
     });
   }

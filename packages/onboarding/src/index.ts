@@ -7,5 +7,6 @@ export { BOARDS, phoneSchema, signupSchema, type SignupData, type SignupInput } 
 export { PlanCatalog, type PublicPlan } from "./plans";
 export { createSchool, slugTaken, type CreateSchoolInput, type CreatedSchool } from "./create-school";
 export { OnboardingEmails, supportEmail } from "./emails";
+export { emailOwner, signInLink, SET_PASSWORD_MINUTES, type EmailOwner } from "./sign-in-link";
 export { SignupService, signupLimiter, slugCheckLimiter, resendLimiter, VERIFY_TOKEN_MINUTES, type SignupResult, type SlugCheck } from "./signup";
 export { AppError, ConflictError, ValidationError } from "@smw/feature-kit";
