@@ -9,7 +9,7 @@ import { CopyValue } from "@smw/ui/finance/CopyValue";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { Money } from "@smw/ui/finance/Money";
 import { submitSlip } from "../collect-actions";
-import { DeskService } from "../collect/desk-service";
+import { DeskService } from "../../service";
 import { BackLink, one, type Search } from "../collect/shared";
 import { BillPicker } from "./bill-picker";
 import { loadFamily } from "./family-data";
@@ -61,8 +61,8 @@ export default async function PayPage({ searchParams }: { searchParams: Search }
                       { name: "file", label: "Screenshot (optional)", type: "file", accept: "image/jpeg,image/png,application/pdf", asJpeg: true }]} />
                 </div>
               </Panel>
-            ) : cfg.upiOn && cfg.upi && !picked.length ? <Panel title="2. Pay by UPI"><p className="text-sm text-[var(--ds-on-surface-muted)]">Tick at least one bill to see the code.</p></Panel> : <OfficeLine school={cfg.school} />}
-            {uri ? <OfficeLine school={cfg.school} /> : null}
+            ) : cfg.upiOn && cfg.upi && !picked.length ? <Panel title="2. Pay by UPI"><p className="text-sm text-[var(--ds-on-surface-muted)]">Tick at least one bill to see the code.</p></Panel> : null}
+            <OfficeLine school={cfg.school} hours={cfg.officeHours} />
           </div>
         </div>
       )}

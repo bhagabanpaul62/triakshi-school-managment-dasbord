@@ -28,7 +28,7 @@ export default async function ReviseInvoicePage({ params, searchParams }: { para
       <BackLink href={back}>{inv.number}</BackLink>
       <PageHeader eyebrow="Fees" title={`Revise ${inv.number}`} description="Change what is still open. The old bill stays on file and the new version is linked to it." />
       <InvoiceEditor mode="revise" {...(await editorBase(ctx))} canGroup={false} student={{ id: d.student.id, label: inv.snapshot.studentName, meta: `${inv.snapshot.admissionNo} · ${inv.snapshot.classLabel}` }}
-        invoice={{ id: inv.id, number: inv.number, label: p.label ?? inv.label, dueDate: p.dueDate ?? inv.dueDate, note: null, lines }}
+        invoice={{ id: inv.id, number: inv.number, label: p.label ?? inv.label, dueDate: p.dueDate ?? inv.dueDate, note: null, lateRule: inv.lateRule, lines }}
         revise={{ oldLines: inv.lines.map((l) => ({ label: l.label, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise, creditedPaise: l.creditedPaise, paidPaise: l.paidPaise })), changeId: again?.id, reason: p.reason }} />
     </>
   );

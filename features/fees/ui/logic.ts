@@ -231,3 +231,10 @@ export const daysLate = (due: string, today: string) => Math.max(0, Math.round((
 /** A `?next=` target is followed only when it stays inside the app. */
 export const safeNext = (v: string | undefined) => (v && /^\/app(\/|$)/.test(v) && !v.includes("//") ? v : undefined);
 export const withNext = (href: string, next: string) => `${href}${href.includes("?") ? "&" : "?"}next=${encodeURIComponent(next)}`;
+
+const SKIP_WORDS: Record<string, string> = { stopped: "reminders are stopped", promise: "promised to pay", nothing_open: "nothing open", already_today: "already reminded today", no_login: "no family login" };
+/** One line for the result of "Remind now": how many got a notice, and how many were skipped and why. */
+export function remindSummary(r: { sent: unknown[]; skipped: { reason: string }[] }): string {
+  const why = Object.entries(r.skipped.reduce<Record<string, number>>((m, x) => ({ ...m, [x.reason]: (m[x.reason] ?? 0) + 1 }), {})).map(([k, n]) => `${n} ${SKIP_WORDS[k] ?? k}`);
+  return `${r.sent.length} reminder${r.sent.length === 1 ? "" : "s"} sent${why.length ? `. Skipped: ${why.join(", ")}` : ""}`;
+}

@@ -9,8 +9,7 @@ import { KeyTotals } from "@smw/ui/finance/KeyTotals";
 import { PeriodPicker } from "@smw/ui/finance/PeriodPicker";
 import { parsePeriod, periodLabel } from "@smw/ui/finance/logic";
 import { METHOD_LABEL } from "../../constants";
-import { DuesService } from "../../service";
-import { DeskService } from "./desk-service";
+import { DuesService, ReceiptService } from "../../service";
 import { ReceiptsTable } from "./receipts-table";
 import { DeskNav, NoAccess, can, type Search } from "./shared";
 
@@ -28,8 +27,8 @@ export default async function ReceiptsPage({ searchParams }: { searchParams: Sea
   const period = parsePeriod({ period: typeof sp.period === "string" ? sp.period : null, from: typeof sp.from === "string" ? sp.from : null, to: typeof sp.to === "string" ? sp.to : null }, today);
   const q = listQueryFrom(sp);
   const query = { ...q, filters: { ...q.filters, from: period.from, to: period.to } };
-  const desk = new DeskService(ctx);
-  const [page, cashiers, classes] = await Promise.all([desk.register(query), desk.cashiers(), new DuesService(ctx).classOptions()]);
+  const receipts = new ReceiptService(ctx);
+  const [page, cashiers, classes] = await Promise.all([receipts.register(query), receipts.cashiers(), new DuesService(ctx).classOptions()]);
   const csv = new URLSearchParams(Object.entries(query.filters).concat(q.q ? [["q", q.q]] : [])).toString();
   const methods = Object.entries(page.byMethod);
 

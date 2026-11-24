@@ -124,7 +124,7 @@ export class SettlementService extends FeesBase {
       await tx.update(feeInvoices).set({ lateRule: null }).where(inArray(feeInvoices.id, invs.map((i) => i.id)));
       invs = await load();
     }
-    const use = async (from: "advance" | "deposit", want: number) => {
+    const spendFrom = async (from: "advance" | "deposit", want: number) => {
       if (!want) return 0;
       const have = from === "advance" ? await this.advanceOf(tx, d.studentId) : await this.depositHeld(tx, d.studentId);
       if (want > have) throw new ConflictError(`The ${from} is only ${rupees(have)}, so ${rupees(want)} cannot be used.`);
@@ -135,8 +135,8 @@ export class SettlementService extends FeesBase {
       invs = await load();
       return used;
     };
-    const advancePaise = await use("advance", d.useAdvancePaise);
-    const depositPaise = await use("deposit", d.useDepositPaise);
+    const advancePaise = await spendFrom("advance", d.useAdvancePaise);
+    const depositPaise = await spendFrom("deposit", d.useDepositPaise);
 
     const left = this.open(invs);
     if (d.finalPaise !== undefined && d.writeOffPaise) throw invalid("writeOffPaise", "Give the amount to write off or the final amount, not both.");

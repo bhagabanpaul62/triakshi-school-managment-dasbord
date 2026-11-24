@@ -42,6 +42,9 @@ describe("UPI slips", () => {
     await expect(new SlipService(fx.school.as.teacher).list()).rejects.toBeInstanceOf(ForbiddenError);
     expect((await student().list()).rows).toHaveLength(1);
     expect((await office().list({ filters: { status: "submitted" } })).rows).toHaveLength(1);
+    // What the office reads beside the slip: the bills it names, no file, no bank line to match yet.
+    expect((await office().extras([made]))[made.id]).toMatchObject({ bills: [{ id: m1!.id, openPaise: 100_000 }], fileUrl: null, hints: [] });
+    await expect(student().extras([made])).rejects.toBeInstanceOf(ForbiddenError);
     // Nothing is paid until the office verifies.
     expect((await bills(fx, fx.students.riya))[0]).toMatchObject({ paidPaise: 0 });
     await expect(student().verify(made.id)).rejects.toBeInstanceOf(ForbiddenError);

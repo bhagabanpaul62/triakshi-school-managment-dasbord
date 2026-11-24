@@ -12,9 +12,8 @@ import { Money } from "@smw/ui/finance/Money";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { depositToBank } from "../collect-actions";
 import { askDifferenceAgain, reopenCounter, withdrawDifference } from "./counter-actions";
-import { CounterService } from "../../service";
+import { CounterService, DeskService } from "../../service";
 import { CloseCounter } from "./counter-forms";
-import { DeskService } from "./desk-service";
 import { OpenCounter } from "./open-counter";
 import { todayIST } from "@smw/feature-kit/money";
 import { DeskNav, H2, NoAccess, Notice, NoticeLink, SECTION, can, day, one, type Search } from "./shared";
@@ -24,7 +23,7 @@ export const metadata = { title: "Cash counter" };
 const STATE: Record<string, string> = { pending: "Waiting for approval", recount: "Not decided", posted: "Written to cash differences", cashier: "Kept with the cashier" };
 const ASKS = "/app/finance/approvals?status=all&kind=fees.counter_difference";
 
-type Closed = Awaited<ReturnType<DeskService["counterHistory"]>>[number];
+type Closed = Awaited<ReturnType<CounterService["history"]>>[number];
 
 /** Where a counter difference stands and the one thing to do next, for the person it concerns. */
 function Difference({ h, mine, admin, approver }: { h: Closed; mine: boolean; admin: boolean; approver: boolean }) {
@@ -49,8 +48,8 @@ export default async function CounterPage({ searchParams }: { searchParams: Sear
   const ctx = await requireCtx();
   if (!can(ctx, "collect")) return <NoAccess what="The cash counter" who="cashiers, accountants and admins" />;
   const sp = await searchParams;
-  const desk = new DeskService(ctx);
-  const [cur, history, config] = await Promise.all([new CounterService(ctx).current(), desk.counterHistory(), desk.config()]);
+  const counters = new CounterService(ctx);
+  const [cur, history, config] = await Promise.all([counters.current(), counters.history(), new DeskService(ctx).config()]);
   const justClosed = history.find((h) => h.id === one(sp.closed));
   const canMove = allows(ctx, financeFeature, "journal"), approver = allows(ctx, financeFeature, "approve"), admin = ctx.role === "admin";
 

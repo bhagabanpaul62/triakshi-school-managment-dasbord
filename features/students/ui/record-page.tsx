@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { NotFoundError } from "@smw/feature-kit";
 import { allows } from "@smw/feature-kit";
@@ -35,9 +36,11 @@ const cap = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
 const kb = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 const STATUS_TONE = { active: "success", alumni: "info", left: "warning" } as const;
 
-export default async function StudentRecordPage({ params, searchParams }: {
+export default async function StudentRecordPage({ params, searchParams, slots }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
+  /** Cards other modules put on the overview. They depend on students, so the app route composes them in. */
+  slots?: { fees?: ReactNode };
 }) {
   const ctx = await requireCtx();
   const { id } = await params;
@@ -63,7 +66,7 @@ export default async function StudentRecordPage({ params, searchParams }: {
   ].filter((x): x is { label: string; href: string } => !!x) : [];
   const has = (k: string) => ctx.features.has(k);
   const related = [
-    has("fees") ? { label: "Fees", hint: "Dues and receipts", href: `/app/fees/students/${id}` } : null,
+    has("fees") && !slots?.fees ? { label: "Fees", hint: "Dues and receipts", href: `/app/fees/students/${id}` } : null,
     has("attendance") ? { label: "Attendance", hint: "Present and absent days", href: "/app/attendance" } : null,
     has("exams") ? { label: "Results", hint: "Marks and report cards", href: "/app/results" } : null,
     libraryRead(ctx) ? { label: "Library", hint: "Books borrowed and fines", href: `/app/library/members/student/${id}` } : null,
@@ -125,6 +128,7 @@ export default async function StudentRecordPage({ params, searchParams }: {
               </Panel>
             </div>
             <div className="flex flex-col gap-3 lg:col-span-4">
+              {slots?.fees}
               {todo.length ? (
                 <Panel title="To finish this record">
                   <ul className="-mx-2 flex flex-col gap-0.5">

@@ -9,7 +9,8 @@
     "typecheck": "tsgo --noEmit",
     "lint": "eslint src",
     "seed": "tsx scripts/seed.mts",
-    "bootstrap": "tsx scripts/bootstrap.mts"
+    "bootstrap": "tsx scripts/bootstrap.mts",
+    "move-fees": "tsx scripts/move-fees.mts"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.5",

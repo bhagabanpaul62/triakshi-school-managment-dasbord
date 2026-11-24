@@ -3,6 +3,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { PlanService } from "../service";
 import { PlanEditor } from "./plan-editor";
 import { planEditorBase } from "./plan-editor-data";
+import { PlanMissing } from "./plan-missing";
 import { BackLink, NoAccess, Notice, can } from "./shared";
 
 export const metadata = { title: "Edit fee plan" };
@@ -17,6 +18,7 @@ export default async function EditPlanPage({ params }: { params: Promise<{ id: s
   const { year, years, ...rest } = await planEditorBase(ctx);
   const current = years.find((y) => y.id === v.plan.yearId) ?? year;
   if (!current) return <Notice action={{ href: "/app/academics", label: "Open academics" }}>No academic year is set up yet.</Notice>;
+  if (!rest.heads.length || !rest.classes.length) return <><BackLink href={`/app/fees/plans/${id}`}>{v.plan.name}</BackLink><PlanMissing heads={rest.heads.length} classes={rest.classes.length} back={`/app/fees/plans/${id}/edit`} /></>;
   return (
     <>
       <BackLink href={`/app/fees/plans/${id}`}>{v.plan.name}</BackLink>

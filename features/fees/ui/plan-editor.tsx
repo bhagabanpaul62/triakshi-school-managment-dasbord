@@ -12,7 +12,8 @@ import { MoneyInput } from "@smw/ui/finance/MoneyInput";
 import { VarianceBar } from "@smw/ui/finance/VarianceBar";
 import type { LateRule } from "../constants";
 import { deletePlanDraft, savePlan, submitPlan } from "./actions";
-import { DEFAULT_SCHEDULE, SCHEDULES, dayLabel, generateDues, lateExample, lateRuleSentence, planProblems, planTotals, type PlanDue, type Schedule, type ScheduleOptions, type YearSpan } from "./logic";
+import { DEFAULT_SCHEDULE, SCHEDULES, dayLabel, generateDues, planProblems, planTotals, type PlanDue, type Schedule, type ScheduleOptions, type YearSpan } from "./logic";
+import { LateRuleFields, LateRuleSentence, lateFrom, lateRuleOf, type Late } from "./late-rule-fields";
 import { useUnsavedGuard } from "./use-unsaved-guard";
 import { CARD, H3, LINK, MUTED } from "./styles";
 
@@ -26,21 +27,8 @@ export interface PlanEditorProps {
 }
 
 interface L { key: string; headId: string; optional: boolean; schedule: Schedule; amountPaise: number | null; opts: ScheduleOptions; dues: PlanDue[] }
-interface Late { kind: "" | LateRule["kind"]; amountPaise: number | null; percent: string; grace: string; max: number | null; slabs: { afterDays: string; amountPaise: number | null }[] }
 const key = () => Math.random().toString(36).slice(2);
 const field = "flex flex-col gap-1.5 text-sm";
-
-function lateFrom(r: LateRule | null | undefined): Late {
-  if (!r) return { kind: "", amountPaise: null, percent: "", grace: "0", max: null, slabs: [{ afterDays: "10", amountPaise: null }] };
-  return { kind: r.kind, amountPaise: r.amountPaise ?? null, percent: r.basisPoints ? String(r.basisPoints / 100) : "", grace: String(r.graceDays), max: r.maxPaise ?? null, slabs: r.slabs?.length ? r.slabs.map((s) => ({ afterDays: String(s.afterDays), amountPaise: s.amountPaise })) : [{ afterDays: "10", amountPaise: null }] };
-}
-function lateRule(l: Late): LateRule | null {
-  if (!l.kind) return null;
-  const base = { kind: l.kind, graceDays: Math.max(0, Math.round(Number(l.grace) || 0)), maxPaise: l.max || null };
-  if (l.kind === "percent") return { ...base, basisPoints: Math.round((Number(l.percent) || 0) * 100) };
-  if (l.kind === "slabs") return { ...base, slabs: l.slabs.filter((s) => s.amountPaise && Number(s.afterDays) > 0).map((s) => ({ afterDays: Math.round(Number(s.afterDays)), amountPaise: s.amountPaise! })) };
-  return { ...base, amountPaise: l.amountPaise ?? 0 };
-}
 
 /** The plan builder: classes, the fees as rows with a schedule, dates made from the academic year, the late fee in words, and the totals as you go. */
 export function PlanEditor({ year, heads, classes, lastYear, plan }: PlanEditorProps) {
@@ -58,14 +46,14 @@ export function PlanEditor({ year, heads, classes, lastYear, plan }: PlanEditorP
   const savedSig = useRef("");
 
   const headName = (id: string) => heads.find((h) => h.id === id)?.name ?? "A fee";
-  const body = useMemo(() => ({ id: planId, yearId: year.id, rootId: plan?.rootId, name, admissionType, joinRule, lateRule: lateRule(late), note: note || undefined, classIds, lines: lines.map((l) => ({ headId: l.headId, optional: l.optional, dues: l.dues })) }), [planId, year.id, plan?.rootId, name, admissionType, joinRule, late, note, classIds, lines]);
+  const body = useMemo(() => ({ id: planId, yearId: year.id, rootId: plan?.rootId, name, admissionType, joinRule, lateRule: lateRuleOf(late), note: note || undefined, classIds, lines: lines.map((l) => ({ headId: l.headId, optional: l.optional, dues: l.dues })) }), [planId, year.id, plan?.rootId, name, admissionType, joinRule, late, note, classIds, lines]);
   const sig = JSON.stringify(body);
   if (!savedSig.current) savedSig.current = sig;
   const dirty = sig !== savedSig.current;
   useUnsavedGuard(dirty);
   const totals = planTotals(lines);
   const problems = planProblems({ name, classIds, lines: lines.map((l) => ({ headId: l.headId, headName: headName(l.headId), optional: l.optional, dues: l.dues })) });
-  const rule = lateRule(late), example = lateExample(rule);
+  const rule = lateRuleOf(late);
   const picked = lastYear.filter((c) => classIds.includes(c.classId) && c.fromPaise > 0);
 
   const setLine = (k: string, patch: Partial<L>, regen = false) => setLines((ls) => ls.map((l) => {
@@ -176,18 +164,8 @@ export function PlanEditor({ year, heads, classes, lastYear, plan }: PlanEditorP
 
         <section className={`${CARD} flex flex-col gap-3`} aria-label="Late fee">
           <h2 className={H3}>Late fee</h2>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <label className={`${field} sm:col-span-2`}>Rule<select value={late.kind} onChange={(e) => setLate({ ...late, kind: e.target.value as Late["kind"] })} className={INPUT}><option value="">No late fee</option><option value="flat">A fixed amount, once</option><option value="per_day">An amount for every day late</option><option value="percent">A percent of what is unpaid, once</option><option value="slabs">Steps by how many days late</option></select></label>
-            {late.kind ? <label className={field}>Grace days<input type="number" min={0} max={365} value={late.grace} onChange={(e) => setLate({ ...late, grace: e.target.value })} className={INPUT} /></label> : null}
-            {late.kind === "flat" || late.kind === "per_day" ? <MoneyInput label="Amount" valuePaise={late.amountPaise} onChange={(p) => setLate({ ...late, amountPaise: p })} /> : null}
-            {late.kind === "percent" ? <label className={field}>Percent<input inputMode="decimal" value={late.percent} onChange={(e) => setLate({ ...late, percent: e.target.value })} className={INPUT} /></label> : null}
-            {late.kind ? <MoneyInput label="Most it can reach (optional)" valuePaise={late.max} onChange={(p) => setLate({ ...late, max: p })} /> : null}
-          </div>
-          {late.kind === "slabs" ? (
-            <div className="flex flex-col gap-2">{late.slabs.map((s, i) => <div key={i} className="grid max-w-md grid-cols-[1fr_1fr_auto] items-end gap-2"><label className={field}>After days late<input type="number" min={1} value={s.afterDays} onChange={(e) => setLate({ ...late, slabs: late.slabs.map((x, j) => (j === i ? { ...x, afterDays: e.target.value } : x)) })} className={INPUT} /></label><MoneyInput label="Fee" valuePaise={s.amountPaise} onChange={(p) => setLate({ ...late, slabs: late.slabs.map((x, j) => (j === i ? { ...x, amountPaise: p } : x)) })} /><button type="button" aria-label="Remove step" onClick={() => setLate({ ...late, slabs: late.slabs.filter((_, j) => j !== i) })} className="h-10 w-10 rounded-full hover:bg-white/[0.08]"><IconTrash className="mx-auto h-4 w-4" aria-hidden /></button></div>)}
-              <Button type="button" variant="ghost" className="self-start rounded-full" onClick={() => setLate({ ...late, slabs: [...late.slabs, { afterDays: "", amountPaise: null }] })}>Add a step</Button></div>
-          ) : null}
-          <p className="text-sm">{lateRuleSentence(rule)} {example.sentence}</p>
+          <LateRuleFields late={late} onChange={setLate} />
+          <LateRuleSentence rule={rule} />
         </section>
 
         <section className={CARD}><label className={field}>Note for the approver (optional)<textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={300} placeholder="Why the fees changed, the committee decision" className={`${INPUT} h-auto py-2`} /></label></section>

@@ -17,7 +17,8 @@ import { HeadService, InvoiceService } from "../service";
 import { cancelInvoice, deleteInvoiceDraft, issueInvoice, remindOne, withdrawInvoiceChange, withdrawNote } from "./actions";
 import { CopyHref } from "./copy-href";
 import { invoicePaperData, paperConfig } from "./logic";
-import { FeesLookup, type ApprovalInfo } from "./lookups";
+import { FeesLookup } from "./lookups";
+import type { ApprovalInfo } from "../base";
 import { NoteDialog } from "./note-dialog";
 import { BackLink, JournalLink, Notice, PillLink, can } from "./shared";
 import { CARD, H3, MUTED } from "./styles";
@@ -43,7 +44,7 @@ async function templateConfig(ctx: Awaited<ReturnType<typeof requireCtx>>) {
 
 const Row = ({ k, children }: { k: string; children: React.ReactNode }) => <div className="flex justify-between gap-4 py-1 text-sm"><dt className="text-[var(--ds-on-surface-muted)]">{k}</dt><dd className="min-w-0 text-right">{children}</dd></div>;
 
-function ApprovalNote({ a }: { a: ApprovalInfo | undefined }) {
+function ApprovalNote({ a }: { a: ApprovalInfo | null | undefined }) {
   if (!a) return null;
   if (a.status === "rejected") return <span className="text-[var(--ds-color-danger-400)]">Not approved{a.decidedByName ? ` by ${a.decidedByName}` : ""}: {a.note ?? "no reason was written"}</span>;
   if (a.status === "pending") return <span className="text-[var(--ds-color-warning-400)]">Waiting for {a.waitingFor.length ? a.waitingFor.join(" or ") : "an admin"} to approve.</span>;
@@ -60,9 +61,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const { invoice: inv, student, notes, allocations, versions, openChange, changes } = d;
   const setup = can(ctx, "setup"), concede = can(ctx, "concede"), collect = can(ctx, "collect");
   const lookup = new FeesLookup(ctx);
-  const [config, approvals, journals, heads] = await Promise.all([
+  const [config, journals, heads] = await Promise.all([
     templateConfig(ctx),
-    lookup.approvals(["fees.invoice_change", "fees.note"], [...changes.map((c) => c.id), ...notes.map((n) => n.id)]),
     lookup.journalIds([`fees:invoice:${inv.id}`]),
     concede ? new HeadService(ctx).options() : Promise.resolve([]),
   ]);
@@ -72,7 +72,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const net = inv.grossPaise - inv.concessionPaise - inv.creditedPaise + inv.latePaise;
   const clean = issued && inv.paidPaise === 0 && inv.creditedPaise === 0 && !inv.parts.length;
   const lastChange = changes.find((c) => !c.direct);
-  const lastApproval = lastChange ? approvals.get(lastChange.id) : undefined;
+  const lastApproval = lastChange?.approval;
   const replacedBy = versions.find((v) => v.version > inv.version && v.status !== "cancelled");
   const openLines = inv.lines.filter((l) => openOf(l) > 0).map((l) => ({ id: l.id, label: l.label, openPaise: openOf(l) }));
   const receipts = [...allocations.reduce((m, a) => {
@@ -96,7 +96,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       {openChange ? (
         <Notice tone="info" action={canApprove(ctx) ? { href: "/app/finance/approvals", label: "Open approvals" } : undefined}>
-          Waiting for {approvals.get(openChange.id)?.waitingFor.join(" or ") || "an admin"} to approve: {openChange.kind === "cancel" ? "cancel this bill" : "revise this bill"} ({openChange.reason}). The bill stays as it is until then.
+          Waiting for {openChange.approval?.waitingFor.join(" or ") || "an admin"} to approve: {openChange.kind === "cancel" ? "cancel this bill" : "revise this bill"} ({openChange.reason}). The bill stays as it is until then.
         </Notice>
       ) : null}
       {lastChange && lastChange.status === "rejected" && !openChange ? (
@@ -215,7 +215,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <ul className="divide-y divide-white/[0.06] text-sm">
             {notes.map((n) => (
               <li key={n.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
-                <span className="min-w-0"><span className="block">{n.number ?? "Waiting"} · {n.kind === "credit" ? "Credit" : "Debit"} ({n.reasonType.replace("_", " ")})</span><span className={`${MUTED} block`}>{n.reason}{n.status !== "approved" ? <> · <ApprovalNote a={approvals.get(n.id)} /></> : ""}</span></span>
+                <span className="min-w-0"><span className="block">{n.number ?? "Waiting"} · {n.kind === "credit" ? "Credit" : "Debit"} ({n.reasonType.replace("_", " ")})</span><span className={`${MUTED} block`}>{n.reason}{n.status !== "approved" ? <> · <ApprovalNote a={n.approval} /></> : ""}</span></span>
                 <span className="flex items-center gap-2"><StateBadge state={n.status} /><Money paise={n.kind === "credit" ? -n.amountPaise : n.amountPaise} />
                   {n.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawNote} values={{ id: n.id }} confirm={{ title: "Take this request back?", body: "The bill stays as it is. You can send a new note later.", confirmLabel: "Withdraw" }} /> : null}</span>
               </li>

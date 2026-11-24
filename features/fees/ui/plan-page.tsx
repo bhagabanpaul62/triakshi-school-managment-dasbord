@@ -13,6 +13,7 @@ import { diffPlans, dayLabel, lateExample, lateRuleSentence, planTotals, type Pl
 import { FeesLookup } from "./lookups";
 import { CopyPlanButton, NewVersionButton } from "./plan-buttons";
 import { PlanPreview } from "./plan-preview";
+import { PlanApprovalFile } from "./plan-approval-file";
 import { PlanStudents } from "./plan-students";
 import { BackLink, NoAccess, Notice, PillLink, Tabs, can, one, type Search } from "./shared";
 import { CARD, H3, LINK, MUTED } from "./styles";
@@ -40,9 +41,14 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
   if (!v) return <><BackLink href="/app/fees/plans">Fee plans</BackLink><Notice tone="danger" action={{ href: "/app/fees/plans", label: "Back to fee plans" }}>This plan does not exist, or it belongs to another school.</Notice></>;
   const { plan } = v, tab = one(sp.tab) === "students" ? "students" : "plan";
   const before = v.versions.find((x) => x.version < plan.version);
-  const lookup = new FeesLookup(ctx);
-  const [prev, approvals, years] = await Promise.all([before ? svc.get(before.id).catch(() => null) : null, lookup.approvals(["fees.plan"], [plan.id]), lookup.years()]);
-  const ap = approvals.get(plan.id);
+  const q = one(sp.q).trim();
+  const [prev, years, overrides, optIns] = await Promise.all([
+    before ? svc.get(before.id).catch(() => null) : null, new FeesLookup(ctx).years(),
+    tab === "students" ? svc.overrides(plan.rootId, { page: 1, pageSize: 25, q: q || undefined }) : null,
+    tab === "students" ? svc.optIns(plan.rootId, { page: 1, pageSize: 25, q: q || undefined }) : null,
+  ]);
+  const needsFile = v.fileRequired && !v.approvalFile;
+  const ap = v.approval;
   const totals = planTotals(v.lines.map((l) => ({ headId: l.headId, optional: l.optional, dues: l.dues })));
   const diff = prev ? diffPlans(shape(prev), shape(v)) : null;
   const open = v.versions.find((x) => x.id !== plan.id && (x.status === "draft" || x.status === "pending"));
@@ -53,7 +59,7 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       <BackLink href="/app/fees/plans">Fee plans</BackLink>
       <PageHeader eyebrow={`Version ${plan.version}`} title={plan.name} description={`${ADMISSION[plan.admissionType]}, ${v.classes.map((c) => c.name).join(", ") || "no classes"}`}
         actions={<><StateBadge state={plan.status} />
-          {plan.status === "draft" ? <><PillLink href={`/app/fees/plans/${plan.id}/edit`}>Edit</PillLink><ActionButton label="Send for approval" variant="default" action={submitPlan} values={{ id: plan.id }} /></> : null}
+          {plan.status === "draft" ? <><PillLink href={`/app/fees/plans/${plan.id}/edit`}>Edit</PillLink>{needsFile ? null : <ActionButton label="Send for approval" variant="default" action={submitPlan} values={{ id: plan.id }} />}</> : null}
           {plan.status === "pending" ? <ActionButton label="Withdraw" action={withdrawPlan} values={{ id: plan.id }} confirm={{ title: "Take this plan back?", body: "It returns to draft and the approval request closes. You can edit it and send it again.", confirmLabel: "Withdraw" }} /> : null}
           {plan.status === "published" ? <>{open ? <PillLink href={`/app/fees/plans/${open.id}`}>Open the {open.status === "draft" ? "draft" : "waiting"} version {open.version}</PillLink> : <NewVersionButton rootId={plan.rootId} />}<PillLink href="/app/fees/invoices/issue" primary>Issue bills</PillLink></> : null}
           {plan.status !== "pending" ? <CopyPlanButton id={plan.id} name={plan.name} years={years.map((y) => ({ id: y.id, name: y.name }))} /> : null}</>} />
@@ -61,12 +67,14 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       <div className={`${CARD} mb-5`}><StatusTrack steps={track(plan.status)} label="Where this plan stands" /></div>
       {plan.status === "pending" ? <Notice tone="info" action={canApprove(ctx) ? { href: "/app/finance/approvals", label: "Open approvals" } : undefined}>Waiting for {ap?.waitingFor.length ? ap.waitingFor.join(" or ") : "an admin"} to approve and publish it. Nothing is billed until then.</Notice> : null}
       {plan.status === "draft" && ap?.status === "rejected" ? <Notice tone="danger" action={{ href: `/app/fees/plans/${plan.id}/edit`, label: "Edit and resend" }}>Not approved{ap.decidedByName ? ` by ${ap.decidedByName}` : ""}: {ap.note ?? "no reason was written"}</Notice> : null}
-      {plan.status === "draft" && !ap ? <Notice tone="info" action={{ href: `/app/fees/plans/${plan.id}/edit`, label: "Edit" }}>A draft bills nobody. Send it for approval when the fees are right.</Notice> : null}
+      {plan.status === "draft" && needsFile ? <Notice tone="warning">The school asks for the committee's approval file before a plan is sent for approval. Attach it in the box on this page, then send the plan.</Notice> : null}
+      {plan.status === "draft" && !ap && !needsFile ? <Notice tone="info" action={{ href: `/app/fees/plans/${plan.id}/edit`, label: "Edit" }}>A draft bills nobody. Send it for approval when the fees are right.</Notice> : null}
       {plan.status === "published" ? <Notice tone="info" action={{ href: "/app/fees/invoices/issue", label: "Issue bills" }}>This plan is live. Bills are made by issuing them, and each student is billed once per due.</Notice> : null}
 
       <Tabs label="Plan sections" tabs={[["plan", "The plan"], ["students", "Students"]]} current={tab} href={(t) => `/app/fees/plans/${id}${t === "students" ? "?tab=students" : ""}`} />
 
-      {tab === "students" ? <PlanStudents rootId={plan.rootId} planName={plan.name} optionalHeads={v.lines.filter((l) => l.optional).map((l) => ({ id: l.headId, name: l.headName }))} /> : (
+      {tab === "students" && overrides && optIns ? <PlanStudents rootId={plan.rootId} planName={plan.name} optionalHeads={v.lines.filter((l) => l.optional).map((l) => ({ id: l.headId, name: l.headName }))} overrides={overrides} optIns={optIns} q={q} /> : (
+
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
           <div className="flex min-w-0 flex-col gap-5">
             <section className={CARD} aria-label="Fees in this plan">
@@ -91,6 +99,7 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
             ) : null}
           </div>
           <aside className="flex min-w-0 flex-col gap-5">
+            <PlanApprovalFile planId={plan.id} file={v.approvalFile} required={v.fileRequired} editable={plan.status === "draft"} />
             <section className={CARD}><h2 className={H3}>Late fee</h2><p className="text-sm">{lateRuleSentence(plan.lateRule)}</p>{example.sentence ? <p className={`${MUTED} mt-1`}>{example.sentence}</p> : null}</section>
             <section className={CARD}><h2 className={H3}>A student who joins during the year</h2><p className="text-sm">{plan.joinRule === "full" ? "Pays every due of the year." : "Pays only the dues from the joining month on."}</p>{plan.note ? <p className={`${MUTED} mt-2`}>Note: {plan.note}</p> : null}</section>
             <section className={CARD}><h2 className={H3}>Try it for a student</h2><PlanPreview lines={v.lines.map((l) => ({ headId: l.headId, headName: l.headName, optional: l.optional, dues: l.dues.map((d) => ({ dueKey: d.dueKey, label: d.label, billOn: d.billOn, dueOn: d.dueOn, amountPaise: d.amountPaise })) }))} /></section>

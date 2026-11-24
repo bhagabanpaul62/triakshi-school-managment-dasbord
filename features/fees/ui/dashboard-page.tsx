@@ -31,10 +31,9 @@ export default async function FeesDashboardPage() {
   if (!can(ctx, "read")) return can(ctx, "self") ? <FamilyHome /> : <NoAccess what="Fees" who="the accounts team" />;
 
   const collect = can(ctx, "collect"), setup = can(ctx, "setup");
-  const [d, trend, month, steps, broken, slips, cheques, pending, pendingPlans] = await Promise.all([
+  const [d, trend, steps, broken, slips, cheques, pending, pendingPlans] = await Promise.all([
     new DuesService(ctx).overview(),
     new DuesService(ctx).trend("month", 12),
-    new FeesLookup(ctx).monthBilling(),
     new SetupService(ctx).status(),
     new PromiseService(ctx).broken(),
     new SlipService(ctx).list({ filters: { status: "submitted" }, pageSize: 1 }),
@@ -42,7 +41,7 @@ export default async function FeesDashboardPage() {
     new FeesLookup(ctx).pendingRequests(),
     setup ? new PlanService(ctx).list({ filters: { status: "pending" }, pageSize: 1 }) : null,
   ]);
-  const s = d.summary;
+  const s = d.summary, month = d.thisMonth, last = d.lastMonth;
   const waitingPlans = pendingPlans?.total ?? 0;
   const stepList = steps.steps.map((x) => ({ ...x, href: x.key === "plan" && waitingPlans ? "/app/finance/approvals" : STEP_HREF[x.key] ?? x.href }));
   const chequesOpen = cheques ? cheques[0].total + cheques[1].total : 0;
@@ -69,16 +68,16 @@ export default async function FeesDashboardPage() {
 
       <PanelGrid>
         <div className="grid gap-4 sm:grid-cols-2 lg:col-span-12 lg:grid-cols-4">
-          <StatCard label="Collected this month" value={tilePaise(s.collectedThisMonth)} icon={<MenuIconView name="money" />} meta={`${s.receiptsThisMonth} receipt${s.receiptsThisMonth === 1 ? "" : "s"}. Today ${paise(s.collectedToday)}`} href="/app/fees/receipts" />
-          <StatCard label="Billed this month" value={tilePaise(month.billedPaise)} icon={<MenuIconView name="report" />} meta={`${month.bills} bill${month.bills === 1 ? "" : "s"} issued`} href="/app/fees/invoices" />
-          <StatCard label="Conceded this month" value={tilePaise(month.concededPaise)} icon={<MenuIconView name="check" />} meta="Discounts and waivers given" href={can(ctx, "concede") ? "/app/fees/concessions" : "/app/fees/reports?by=concessions"} />
+          <StatCard label="Collected this month" value={tilePaise(s.collectedThisMonth)} icon={<MenuIconView name="money" />} meta={`${s.receiptsThisMonth} receipt${s.receiptsThisMonth === 1 ? "" : "s"}. Today ${paise(s.collectedToday)}. Last month ${paise(last.collectedPaise)}`} href="/app/fees/receipts" />
+          <StatCard label="Billed this month" value={tilePaise(month.billedPaise)} icon={<MenuIconView name="report" />} meta={`${month.bills} bill${month.bills === 1 ? "" : "s"} issued. Last month ${paise(last.billedPaise)}`} href="/app/fees/invoices" />
+          <StatCard label="Conceded this month" value={tilePaise(month.concededPaise)} icon={<MenuIconView name="check" />} meta={`Discounts and waivers given. Last month ${paise(last.concededPaise)}`} href={can(ctx, "concede") ? "/app/fees/concessions" : "/app/fees/reports?by=concessions"} />
           <StatCard label="Outstanding" value={tilePaise(s.outstanding)} icon={<MenuIconView name="clock" />} meta={s.overdueCount ? `${paise(s.overdueAmount)} overdue, ${s.overdueCount} student${s.overdueCount === 1 ? "" : "s"}` : "Nobody is overdue"} href={s.overdueCount ? "/app/fees/dues?overdue=1" : "/app/fees/dues"} />
         </div>
 
         {empty ? (
           <div className="rounded-3xl bg-[var(--ds-surface-container-low)] p-8 lg:col-span-12">
             <WidgetEmptyState title="No fees billed yet" description="Make a fee plan, publish it and issue the bills. Collection, dues and the trend show here after that." />
-            {setup ? <div className="mt-4 flex justify-center gap-2"><PillLink href="/app/fees/plans/new" primary>Make a fee plan</PillLink><PillLink href="/app/fees/invoices/new">Bill one student</PillLink></div> : null}
+            {setup ? <div className="mt-4 flex justify-center gap-2"><PillLink href="/app/fees/plans/new" primary>Make a fee plan</PillLink><PillLink href="/app/fees/invoices/new">Bill one student</PillLink></div> : <p className="mt-4 text-center text-sm text-[var(--ds-on-surface-muted)]">Fee plans are made by an admin or an accountant. Ask them to set up the fees.</p>}
           </div>
         ) : (
           <>

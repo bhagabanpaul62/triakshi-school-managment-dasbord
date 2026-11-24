@@ -90,6 +90,20 @@ export class DuesService extends FeesBase {
     });
   }
 
+  /** The few numbers on a student's own record page: what is owed now, what is overdue, the next due date and the last receipt. */
+  async card(studentId: string) {
+    return this.read("read", async (tx) => {
+      const id = asId(studentId, "Student");
+      const [out, [last], advancePaise] = await Promise.all([
+        this.rows(tx, { ids: [id], includeZero: true, limit: 1, offset: 0 }),
+        tx.select({ id: feeReceipts.id, number: feeReceipts.number, date: feeReceipts.date, amountPaise: feeReceipts.amountPaise }).from(feeReceipts).where(and(eq(feeReceipts.studentId, id), inArray(feeReceipts.status, ["valid", "clearing"]))).orderBy(desc(feeReceipts.date), desc(feeReceipts.number)).limit(1),
+        this.advanceOf(tx, id),
+      ]);
+      const r = out.rows[0];
+      return { owedPaise: (r?.due ?? 0) + (r?.accrued ?? 0), overduePaise: r?.overdue ?? 0, advancePaise, nextDueDate: r?.nextDueDate ?? null, billed: (r?.gross ?? 0) > 0, last: last ?? null };
+    });
+  }
+
   /** The family at the counter: this student and the brothers and sisters, with every open bill and the advance each holds. */
   async family(studentId: string) {
     return this.read(this.can("collect") ? "collect" : "read", async (tx) => {

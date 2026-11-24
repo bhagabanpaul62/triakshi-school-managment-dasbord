@@ -10,7 +10,6 @@ import { EmptyLine } from "@smw/ui/finance/States";
 import { ConcessionService, ConcessionTypeService, HeadService, type Suggestion } from "../service";
 import { deleteConcessionType, endConcession, proposeConcession, saveConcessionType, withdrawConcession } from "./actions";
 import { ConcessionForm, type ConcessionType } from "./concession-form";
-import { FeesLookup } from "./lookups";
 import { NoAccess, Notice, PillLink, SectionNav, Tabs, can, one, queryOf, type Search } from "./shared";
 import { CARD, MUTED } from "./styles";
 
@@ -50,10 +49,9 @@ export default async function ConcessionsPage({ searchParams }: { searchParams: 
   let body: React.ReactNode;
   if (tab === "requests") {
     const page = await svc.list(listQueryFrom(sp));
-    const ap = await new FeesLookup(ctx).approvals(["fees.concession"], page.rows.map((r) => r.id));
     const typeName = new Map(typeList.rows.map((t) => [t.id, t.auto ? KIND_LABEL[t.auto] : t.name]));
     const rows = page.rows.map((c) => {
-      const a = ap.get(c.id);
+      const a = c.approval;
       return { ...c, kind: c.typeId ? typeName.get(c.typeId) ?? c.typeName : c.typeName ?? "Other", what: `${worth(c.mode, c.value)}${c.mode === "amount" ? (c.per === "year" ? " for the year" : " per bill") : ""}`, headName: c.headName ?? "Every fee",
         note: c.status === "pending" ? `Waiting for ${a?.waitingFor.join(" or ") || "an admin"}` : c.status === "rejected" ? `Not approved${a?.decidedByName ? ` by ${a.decidedByName}` : ""}: ${a?.note ?? c.reason}` : c.status === "approved" ? c.reason : "Ended" };
     });

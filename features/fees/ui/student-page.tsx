@@ -17,6 +17,7 @@ import { ConcessionTypeService, DuesService, HeadService, PromiseService } from 
 import { addPromise, resumeReminders, settleUpLeaving, stopReminders, withdrawConcession, withdrawNote, withdrawSettlement } from "./actions";
 import { ConcessionForm } from "./concession-form";
 import { FeesLookup } from "./lookups";
+import type { ApprovalInfo } from "../base";
 import { SettlementBuilder, type SettlementPlan } from "./settlement-builder";
 import { StudentDocs } from "./student-docs";
 import { Notice, PillLink, Tabs, can, one, type Search } from "./shared";
@@ -41,11 +42,10 @@ export default async function StudentFeesPage({ params, searchParams }: { params
   const { student, balance } = a, base = `/app/fees/students/${studentId}`, today = todayIST();
   const collect = can(ctx, "collect"), setup = can(ctx, "setup"), concede = can(ctx, "concede");
   const lookup = new FeesLookup(ctx);
-  const [heads, types, approvals, stopped, broken] = await Promise.all([
+  const [heads, types, stopped, broken] = await Promise.all([
     concede ? new HeadService(ctx).options().then((h) => h.filter((x) => x.isActive).map((x) => ({ id: x.id, name: x.name }))) : [],
     concede ? new ConcessionTypeService(ctx).list({ page: 1, pageSize: 100 }).then((p) => p.rows.filter((t) => t.isActive).map((t) => ({ id: t.id, name: t.name, mode: t.mode, value: t.value, headId: t.headId, per: t.per }))) : [],
-    lookup.approvals(["fees.concession", "fees.settlement", "fees.note"], [...a.concessions, ...a.settlements, ...a.notes].map((x) => x.id)),
-    lookup.reminderStop(studentId),
+        lookup.reminderStop(studentId),
     new PromiseService(ctx).broken().then((b) => b.find((x) => x.studentId === studentId) ?? null),
   ]);
   const openBills = a.invoices.filter((i) => i.status === "issued" && i.openPaise > 0).sort((x, y) => x.dueDate.localeCompare(y.dueDate));
@@ -56,7 +56,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
   const owed = balance.openPaise + balance.accruedPaise;
 
   const timeline: TimelineItem[] = a.timeline.map((t) => ({ at: t.at, title: t.title, amountPaise: t.amountPaise || undefined, href: t.href, tone: TONE[t.kind as keyof typeof TONE] }));
-  const waiting = (id: string) => { const x = approvals.get(id); return x?.status === "pending" ? `Waiting for ${x.waitingFor.join(" or ") || "an admin"}` : x?.status === "rejected" ? `Not approved${x.decidedByName ? ` by ${x.decidedByName}` : ""}: ${x.note ?? "no reason was written"}` : ""; };
+  const waiting = (x: ApprovalInfo | null) => { return x?.status === "pending" ? `Waiting for ${x.waitingFor.join(" or ") || "an admin"}` : x?.status === "rejected" ? `Not approved${x.decidedByName ? ` by ${x.decidedByName}` : ""}: ${x.note ?? "no reason was written"}` : ""; };
 
   return (
     <>
@@ -84,7 +84,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
         <BigStat label="Deposit held" value={paise(balance.depositPaise)} hint="Refundable" />
       </StatGroup></div>
 
-      {waitingSettlement ? <div className="mt-4"><Notice tone="info" action={canApprove(ctx) ? { href: "/app/finance/approvals", label: "Open approvals" } : undefined}>A settlement for this student is waiting. {waiting(waitingSettlement.id)}. Reminders and late fees follow the new dates once it is approved.</Notice></div> : null}
+      {waitingSettlement ? <div className="mt-4"><Notice tone="info" action={canApprove(ctx) ? { href: "/app/finance/approvals", label: "Open approvals" } : undefined}>A settlement for this student is waiting. {waiting(waitingSettlement.approval)}. Reminders and late fees follow the new dates once it is approved.</Notice></div> : null}
       {broken ? <div className="mt-4"><Notice tone="danger" action={concede && openBills.length ? undefined : undefined}>Promised to pay by {shortDate(broken.promisedOn)} and still owes. {collect ? "Collect the fee, or note a new promise." : ""}</Notice></div> : null}
       {left && owed > 0 ? <div className="mt-4"><Notice>This student has left and still owes {paise(owed)}. A transfer certificate warns until it is paid or settled.</Notice></div> : null}
 
@@ -116,16 +116,16 @@ export default async function StudentFeesPage({ params, searchParams }: { params
       {tab === "deals" ? (
         <div className="grid gap-5 lg:grid-cols-2">
           <section className={CARD} aria-label="Concessions"><h2 className={H3}>Concessions</h2>
-            {a.concessions.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.concessions.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><span className="block">{worth(c.mode, c.value)} off. {c.reason}</span><span className={`${MUTED} block`}>{waiting(c.id)}</span></span><span className="flex items-center gap-2"><StateBadge state={c.status} />{c.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawConcession} values={{ id: c.id }} confirm={{ title: "Take this request back?", body: "Nothing changes on the bills.", confirmLabel: "Withdraw" }} /> : null}
+            {a.concessions.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.concessions.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><span className="block">{worth(c.mode, c.value)} off. {c.reason}</span><span className={`${MUTED} block`}>{waiting(c.approval)}</span></span><span className="flex items-center gap-2"><StateBadge state={c.status} />{c.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawConcession} values={{ id: c.id }} confirm={{ title: "Take this request back?", body: "Nothing changes on the bills.", confirmLabel: "Withdraw" }} /> : null}
               {c.status === "rejected" && concede ? <ConcessionForm types={types} heads={heads} student={{ id: studentId, label: student.name }} again={{ id: c.id, typeId: c.typeId, headId: c.headId, mode: c.mode, value: c.value, per: c.per, reason: c.reason }} label="Edit and resend" variant="ghost" /> : null}</span></li>)}</ul>
               : <EmptyLine title="No concessions" hint="A sibling, merit or need discount is given here." action={concede ? <ConcessionForm types={types} heads={heads} student={{ id: studentId, label: student.name }} label="Give a concession" /> : undefined} />}</section>
           <section className={CARD} aria-label="Settlements"><h2 className={H3}>Settlements</h2>
-            {a.settlements.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.settlements.map((s) => { const plan = s.plan as unknown as SettlementPlan; return <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><span className="block">{s.reason}</span><span className={`${MUTED} block`}>{plan.parts?.length ? `${plan.parts.length} parts` : "One payment"}{plan.waiveLate ? ", late fee waived" : ""}{plan.writeOffPaise ? `, ${rupees(plan.writeOffPaise)} written off` : ""}{plan.finalPaise !== undefined ? `, agreed ${rupees(plan.finalPaise)}` : ""}. {waiting(s.id)}</span></span>
+            {a.settlements.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.settlements.map((s) => { const plan = s.plan as unknown as SettlementPlan; return <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><span className="block">{s.reason}</span><span className={`${MUTED} block`}>{plan.parts?.length ? `${plan.parts.length} parts` : "One payment"}{plan.waiveLate ? ", late fee waived" : ""}{plan.writeOffPaise ? `, ${rupees(plan.writeOffPaise)} written off` : ""}{plan.finalPaise !== undefined ? `, agreed ${rupees(plan.finalPaise)}` : ""}. {waiting(s.approval)}</span></span>
               <span className="flex items-center gap-2"><StateBadge state={s.status} />{s.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawSettlement} values={{ id: s.id }} confirm={{ title: "Take this settlement back?", body: "The dues stay as they are. You can build a new one.", confirmLabel: "Withdraw" }} /> : null}
                 {s.status === "rejected" && concede && openBills.length ? <SettlementBuilder studentId={studentId} studentName={student.name} bills={billsForDeal} advancePaise={balance.advancePaise} depositPaise={balance.depositPaise} today={today} again={{ id: s.id, plan }} /> : null}</span></li>; })}</ul>
               : <EmptyLine title="No settlements" hint="A deal on dues: waive the late fee, write off part, or split what is left into dates." action={concede && openBills.length ? <SettlementBuilder studentId={studentId} studentName={student.name} bills={billsForDeal} advancePaise={balance.advancePaise} depositPaise={balance.depositPaise} today={today} /> : undefined} />}</section>
           <section className={`${CARD} lg:col-span-2`} aria-label="Credit and debit notes"><h2 className={H3}>Credit and debit notes</h2>
-            {a.notes.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.notes.map((n) => <li key={n.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><Link href={`/app/fees/invoices/${n.invoiceId}`} className={`${LINK} min-w-0`}>{n.number ?? "Waiting"} · {n.kind === "credit" ? "Credit" : "Debit"} ({n.reasonType.replace("_", " ")}): {n.reason}</Link><span className="flex items-center gap-2"><span className={MUTED}>{waiting(n.id)}</span><StateBadge state={n.status} />{n.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawNote} values={{ id: n.id }} /> : null}<Money paise={n.kind === "credit" ? -n.amountPaise : n.amountPaise} /></span></li>)}</ul>
+            {a.notes.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.notes.map((n) => <li key={n.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><Link href={`/app/fees/invoices/${n.invoiceId}`} className={`${LINK} min-w-0`}>{n.number ?? "Waiting"} · {n.kind === "credit" ? "Credit" : "Debit"} ({n.reasonType.replace("_", " ")}): {n.reason}</Link><span className="flex items-center gap-2"><span className={MUTED}>{waiting(n.approval)}</span><StateBadge state={n.status} />{n.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawNote} values={{ id: n.id }} /> : null}<Money paise={n.kind === "credit" ? -n.amountPaise : n.amountPaise} /></span></li>)}</ul>
               : <p className="text-sm text-[var(--ds-on-surface-muted)]">None. A note is added from a bill.</p>}</section>
         </div>
       ) : null}

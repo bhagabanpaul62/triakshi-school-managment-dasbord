@@ -180,7 +180,7 @@ export function planStudentYear(i: YearInput): YearPlan {
 
   insts.forEach((inst, n) => {
     if (!keep(inst.id, inst.dueDate)) { plan.skipped.push(inst.id); return; }
-    const lines = s!.items.flatMap((it, k): PlannedLine[] => (amounts[n]![k]! > 0 ? [{ headId: it.headId, kind: it.headType, label: it.headName, amountPaise: amounts[n]![k]!, concessionPaise: split!.perLine[n]![k]! }] : []));
+    const lines = s!.items.flatMap((it, k): PlannedLine[] => (amounts[n]![k]! > 0 ? [{ headId: it.headId, kind: it.headType === "deposit" ? "deposit" : "fee", label: it.headName, amountPaise: amounts[n]![k]!, concessionPaise: split!.perLine[n]![k]! }] : []));
     const b = bill({ ref: inst.id, kind: "plan", dueKey: dueKeyOf(inst.id), sourceKey: null, label: inst.name, dueDate: inst.dueDate, lateRule: lateRuleFor(s!, inst.id), lines, uses: split!.uses[n]!.flatMap((v, c) => (v > 0 ? [{ concessionId: i.concessions[c]!.id, amountPaise: v }] : [])) }, inst);
     plan.bills.push(b);
   });

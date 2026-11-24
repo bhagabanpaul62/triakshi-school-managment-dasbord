@@ -1,7 +1,6 @@
 import { AppError } from "@smw/feature-kit";
 import { actionCtx } from "@smw/runtime";
-import { CertificateService, ReceiptService } from "../../service";
-import { DeskService } from "./desk-service";
+import { CertificateService, ChequeService, CounterService, DeskService, ReceiptService, RefundService } from "../../service";
 import { csvCell } from "./logic";
 import { PdfBuilder } from "@smw/integrations";
 import { listQueryFrom } from "@smw/feature-kit";
@@ -19,11 +18,11 @@ export async function receiptPdf(_r: Request, { params }: Ids) {
 /** GET /app/fees/receipts/csv: the register with the same filters as the screen, up to 5,000 rows. */
 export async function receiptsCsv(req: Request) {
   try {
-    const desk = new DeskService(await actionCtx());
+    const receipts = new ReceiptService(await actionCtx());
     const q = listQueryFrom(Object.fromEntries(new URL(req.url).searchParams));
     const rows = [];
     for (let page = 1; page <= 50; page++) {
-      const r = await desk.register({ ...q, page, pageSize: 100 });
+      const r = await receipts.register({ ...q, page, pageSize: 100 });
       rows.push(...r.rows);
       if (page >= r.pageCount) break;
     }
@@ -35,15 +34,15 @@ export async function receiptsCsv(req: Request) {
 
 /** GET /app/fees/counter/[id]/slip */
 export async function counterSlip(_r: Request, { params }: Ids) {
-  try { return pdf(await new DeskService(await actionCtx()).counterSlipPdf((await params).id)); } catch (e) { return fail(e); }
+  try { return pdf(await new CounterService(await actionCtx()).slipFile((await params).id)); } catch (e) { return fail(e); }
 }
 /** GET /app/fees/cheques/slip?ids=a,b */
 export async function chequeSlip(req: Request) {
-  try { return pdf(await new DeskService(await actionCtx()).chequeSlipPdf((new URL(req.url).searchParams.get("ids") ?? "").split(",").filter(Boolean))); } catch (e) { return fail(e); }
+  try { return pdf(await new ChequeService(await actionCtx()).slipFile((new URL(req.url).searchParams.get("ids") ?? "").split(",").filter(Boolean))); } catch (e) { return fail(e); }
 }
 /** GET /app/fees/refunds/[id]/voucher */
 export async function refundVoucher(_r: Request, { params }: Ids) {
-  try { return pdf(await new DeskService(await actionCtx()).refundVoucherPdf((await params).id)); } catch (e) { return fail(e); }
+  try { return pdf(await new RefundService(await actionCtx()).refundVoucherFile((await params).id)); } catch (e) { return fail(e); }
 }
 
 /** GET /app/fees/pay/statement?student=id: the statement of account, all years. A student login gets only their own. */

@@ -31,8 +31,6 @@ export class DeskService extends FeesBase {
         usesCounters: !!anyCounter, school: { name: school?.name ?? "School", phone: school?.phone ?? null, address: [school?.address, school?.city].filter(Boolean).join(", ") || null },
         upi: upi ? { upiId: upi.upiId!, name: upi.upiName ?? school?.name ?? "School" } : null,
         banks: accounts.filter((a) => a.kind === "bank").map((a) => ({ id: a.id, name: a.name })),
-        /** Set-up the counter needs and does not have yet, so a screen can say what to do instead of failing at the first receipt. */
-        hasCashAccount: accounts.length > 0,
       };
     });
   }

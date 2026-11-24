@@ -48,7 +48,7 @@ export function lateFee(rule: LateRule | null | undefined, a: { dueOn: string; u
   if (!rule || a.openPaise <= 0) return 0;
   const late = daysBetween(a.dueOn, a.until) - rule.graceDays;
   if (late <= 0) return 0;
-  let total = 0;
+  let total: number;
   if (rule.kind === "flat") total = rule.amountPaise ?? 0;
   else if (rule.kind === "per_day") total = (rule.amountPaise ?? 0) * late;
   else if (rule.kind === "percent") total = percentOf(a.openPaise, rule.basisPoints ?? 0);

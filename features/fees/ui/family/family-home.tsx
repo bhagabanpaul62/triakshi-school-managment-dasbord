@@ -9,7 +9,7 @@ import { EmptyLine } from "@smw/ui/finance/States";
 import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { Timeline } from "@smw/ui/finance/Timeline";
-import { DeskService } from "../collect/desk-service";
+import { DeskService } from "../../service";
 import { day } from "../collect/shared";
 import { loadFamily } from "./family-data";
 import { OfficeLine } from "./office-line";
@@ -32,7 +32,7 @@ export default async function FamilyHome() {
           <Panel title="Due now">
             <BigStat label={fam.duePaise > 0 ? "To pay" : "Nothing due"} value={formatPaise(fam.duePaise)} tone={fam.bills.some((b) => b.state === "overdue") ? "danger" : "default"}
               hint={fam.next ? `Next: ${fam.next.label}, due ${day(fam.next.dueDate)}${fam.bills.some((b) => b.latePaise) ? ". Late fee included." : ""}` : "You are all paid up."} size="lg" />
-            {fam.duePaise > 0 ? (online ? <Link href="/app/fees/pay" className={buttonVariants({ className: "mt-4 rounded-full" })}>Pay now</Link> : <div className="mt-4"><OfficeLine school={cfg.school} /></div>) : null}
+            {fam.duePaise > 0 ? (online ? <Link href="/app/fees/pay" className={buttonVariants({ className: "mt-4 rounded-full" })}>Pay now</Link> : <div className="mt-4"><OfficeLine school={cfg.school} hours={cfg.officeHours} /></div>) : null}
           </Panel>
 
           {fam.bills.length ? (
@@ -66,6 +66,7 @@ export default async function FamilyHome() {
           <Panel title="All years"><Timeline items={timeline} emptyText="Nothing has happened on this account yet." /></Panel>
         </div>
       )}
+      {fam.kids.length && fam.duePaise > 0 && !online ? null : <div className="mt-4"><OfficeLine school={cfg.school} hours={cfg.officeHours} /></div>}
     </>
   );
 }

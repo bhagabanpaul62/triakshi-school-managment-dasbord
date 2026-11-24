@@ -2,11 +2,11 @@ import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { Money } from "@smw/ui/finance/Money";
-import { CounterService, ReceiptService, SetupService } from "../../service";
+import { CounterService, DeskService, ReceiptService, SetupService } from "../../service";
 import { OpenCounter } from "./open-counter";
 import { CollectDesk } from "./collect-desk";
 import { CloseCounter } from "./counter-forms";
-import { DeskService } from "./desk-service";
+import { FeesLookup } from "../lookups";
 import { DeskNav, NoAccess, Notice, NoticeLink, can, one, withNext, type Search } from "./shared";
 
 export const metadata = { title: "Collect fees" };
@@ -19,7 +19,7 @@ export default async function CollectPage({ searchParams }: { searchParams: Sear
   const sp = await searchParams;
   const studentId = UUID.test(one(sp.student)) ? one(sp.student) : "";
   const desk = new DeskService(ctx);
-  const [config, counter, setup, family] = await Promise.all([desk.config(), new CounterService(ctx).current(), new SetupService(ctx).status(), studentId ? desk.family(studentId).catch(() => null) : null]);
+  const [config, counter, setup, family, hasStudents] = await Promise.all([desk.config(), new CounterService(ctx).current(), new SetupService(ctx).status(), studentId ? desk.family(studentId).catch(() => null) : null, new FeesLookup(ctx).hasStudents()]);
   const day = studentId && !family ? null : await new ReceiptService(ctx).cashierDay();
   const cashReady = !!counter || !config.usesCounters;
   const blocking = setup.next && ["year", "cash", "heads", "plan", "issue"].includes(setup.next.key) ? setup.next : null;
@@ -41,6 +41,7 @@ export default async function CollectPage({ searchParams }: { searchParams: Sear
         )} />
       <DeskNav ctx={ctx} current="/app/fees/collect" />
       {blocking ? <Notice action={can(ctx, "setup") ? <NoticeLink href={withNext(blocking.href, "/app/fees/collect")}>Go there</NoticeLink> : undefined}>Before the first receipt: {blocking.label}.{!can(ctx, "setup") && blocking.who ? ` Ask ${blocking.who}.` : ""}</Notice> : null}
+      {hasStudents ? null : <Notice action={can(ctx, "read") ? <NoticeLink href="/app/students?next=/app/fees/collect">Add students</NoticeLink> : undefined}>There are no students in the school yet, so there is nobody to collect from.{can(ctx, "read") ? "" : " Ask an admin to add them."}</Notice>}
       {studentId && !family ? <Notice tone="danger" action={<NoticeLink href="/app/fees/collect">Find another student</NoticeLink>}>That student could not be opened. They may not exist in this school.</Notice> : null}
       <CollectDesk key={studentId || "none"} config={{ ...config, school: { name: config.school.name } }} picked={picked ? { id: picked.id, name: picked.name } : null}
         members={family?.members ?? []} bills={family?.bills ?? []} cashReady={cashReady} openCounter={<OpenCounter />} />

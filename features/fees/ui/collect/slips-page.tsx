@@ -10,9 +10,8 @@ import { CopyValue } from "@smw/ui/finance/CopyValue";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
-import { SlipService } from "../../service";
+import { DeskService, SlipService } from "../../service";
 import { rejectSlip, verifySlip } from "../collect-actions";
-import { DeskService } from "./desk-service";
 import { DeskNav, NoAccess, Notice, NoticeLink, Ref, can, day, one, type Search } from "./shared";
 
 export const metadata = { title: "UPI slips" };
@@ -21,17 +20,18 @@ export default async function SlipsPage({ searchParams }: { searchParams: Search
   const ctx = await requireCtx();
   if (!can(ctx, "collect")) return <NoAccess what="UPI slips" who="cashiers, accountants and admins" />;
   const history = one((await searchParams).tab) === "history";
-  const slips = new SlipService(ctx), desk = new DeskService(ctx);
+  const slips = new SlipService(ctx);
   const [waiting, verified, rejected, config] = await Promise.all([
-    slips.list({ filters: { status: "submitted" }, pageSize: 100 }), history ? slips.list({ filters: { status: "verified" }, pageSize: 50 }) : null, history ? slips.list({ filters: { status: "rejected" }, pageSize: 50 }) : null, desk.config(),
+    slips.list({ filters: { status: "submitted" }, pageSize: 100 }), history ? slips.list({ filters: { status: "verified" }, pageSize: 50 }) : null, history ? slips.list({ filters: { status: "rejected" }, pageSize: 50 }) : null, new DeskService(ctx).config(),
   ]);
   const rows = history ? [...verified!.rows, ...rejected!.rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()) : waiting.rows;
-  const extras = await desk.slipExtras(rows);
+  const extras = await slips.extras(rows);
 
   return (
     <>
       <PageHeader eyebrow="Fees" title="UPI slips" description="Families say they paid by UPI. Check the money in the bank, then verify: the receipt is made for them." />
       <DeskNav ctx={ctx} current="/app/fees/slips" />
+      {config.upiOn && !config.upi ? <Notice tone="warning" action={<NoticeLink href="/app/finance/accounts?next=/app/fees/slips">Add the UPI ID</NoticeLink>}>UPI is on, but no account has a UPI ID yet, so families have no code to pay to.</Notice> : null}
       {!config.upiOn ? <Notice tone="warning" action={<NoticeLink href="/app/finance/settings?next=/app/fees/slips">Turn on UPI</NoticeLink>}>UPI payments are off, so families cannot send slips. Turn it on in the finance settings and add the school's UPI ID.</Notice> : null}
       <div role="tablist" aria-label="Slips" className="mb-4 flex gap-1">
         {[["", `Waiting (${waiting.total})`], ["history", "History"]].map(([v, label]) => (

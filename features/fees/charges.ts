@@ -48,12 +48,6 @@ export async function cancelUnpaidCharges(tx: Tx, studentId: string, kind: Kind,
   return open.length;
 }
 
-/** What is on the ledger for one source key: null when nothing was posted. */
-export async function chargeFor(tx: Tx, sourceKey: string): Promise<{ id: string; status: "active" | "cancelled"; paidPaise: number } | null> {
-  const [c] = await tx.select({ id: feeInvoices.id, status: feeInvoices.status, paid: feeInvoices.paidPaise }).from(feeInvoices).where(eq(feeInvoices.sourceKey, sourceKey)).orderBy(sql`(${feeInvoices.status} = 'cancelled')`, desc(feeInvoices.createdAt)).limit(1);
-  return c ? { id: c.id, status: c.status === "cancelled" ? "cancelled" : "active", paidPaise: c.paid } : null;
-}
-
 /** Cancel one charge by its source key. Returns false when it has money against it (nothing changes). */
 export async function cancelCharge(tx: Tx, sourceKey: string): Promise<boolean> {
   const [row] = await tx.select({ id: feeInvoices.id, studentId: feeInvoices.studentId }).from(feeInvoices).where(liveBy(sourceKey));

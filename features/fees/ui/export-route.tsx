@@ -6,6 +6,7 @@ import { allPages } from "@smw/feature-finance/services/exports";
 import { schoolName } from "@smw/feature-finance/services/common";
 import { reportToCsv, reportToPdf, type Report } from "@smw/feature-finance/services/report";
 import { parsePeriod, periodLabel } from "@smw/ui/finance/logic";
+import { AGE_BANDS } from "../constants";
 import { ConcessionService, ConcessionTypeService, DuesService, InvoiceService, ReceiptService, RefundService } from "../service";
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -32,8 +33,10 @@ async function register(ctx: Ctx, kind: "concessions" | "refunds" | "reversals",
   if (kind === "refunds") {
     const svc = new RefundService(ctx);
     const rows = (await allPages((page) => svc.list({ page, pageSize: 100, filters: { status: "approved" } }))).filter((r) => r.paidOn && r.paidOn >= period.from && r.paidOn <= period.to);
-    return { title: "Refunds paid", subtitle: when, columns: [{ key: "number", label: "Voucher", kind: "mono" }, { key: "date", label: "Paid on", kind: "date" }, { key: "source", label: "From" }, { key: "method", label: "Method" }, { key: "reason", label: "Why" }, { key: "paise", label: "Amount", kind: "money" }],
-      rows: [...rows.map((r) => ({ cells: { number: r.number ?? "", date: r.paidOn, source: r.source === "advance" ? "Advance" : "Deposit", method: r.method.replace("_", " "), reason: r.reason, paise: r.amountPaise } })), { style: "total" as const, cells: { number: "Total", date: null, source: null, method: null, reason: null, paise: rows.reduce((s, r) => s + r.amountPaise, 0) } }] };
+    const cols = [{ key: "number", label: "Voucher", kind: "mono" as const }, { key: "date", label: "Paid on", kind: "date" as const }, { key: "student", label: "Student" }, { key: "adm", label: "Admission no" }, { key: "class", label: "Class" }, { key: "source", label: "From" }, { key: "method", label: "Method" }, { key: "state", label: "Approval" }, { key: "reason", label: "Why" }, { key: "paise", label: "Amount", kind: "money" as const }];
+    const blank = { number: "Total", date: null, student: null, adm: null, class: null, source: null, method: null, state: null, reason: null };
+    return { title: "Refunds paid", subtitle: when, columns: cols,
+      rows: [...rows.map((r) => ({ cells: { number: r.number ?? "", date: r.paidOn, student: r.studentName, adm: r.admissionNo, class: r.classLabel, source: r.source === "advance" ? "Advance" : "Deposit", method: r.method.replace("_", " "), state: `Approved${r.approval?.decidedByName ? ` by ${r.approval.decidedByName}` : ""}${r.approval?.note ? `: ${r.approval.note}` : ""}`, reason: r.reason, paise: r.amountPaise } })), { style: "total" as const, cells: { ...blank, paise: rows.reduce((s, r) => s + r.amountPaise, 0) } }] };
   }
   const svc = new ConcessionService(ctx);
   const rows = await allPages((page) => svc.list({ page, pageSize: 100, filters: { status: "approved" } }));
@@ -75,8 +78,8 @@ async function build(kind: string, sp: URLSearchParams, ctx: Ctx): Promise<Repor
     return {
       title: "Students' dues", subtitle: `${note(q)} As on ${todayIST()}.`,
       columns: [{ key: "student", label: "Student" }, { key: "adm", label: "Admission no" }, { key: "class", label: "Class" }, { key: "state", label: "Student" }, { key: "billed", label: "Billed", kind: "money" }, { key: "paid", label: "Paid", kind: "money" },
-        { key: "due", label: "Open", kind: "money" }, { key: "overdue", label: "Overdue", kind: "money" }, { key: "late", label: "Late fee building up", kind: "money" }, { key: "next", label: "Next due", kind: "date" }],
-      rows: rows.map((r) => ({ cells: { student: r.name, adm: r.admissionNo, class: r.classLabel, state: r.studentStatus === "active" ? "At school" : `Left${r.leftOn ? ` ${r.leftOn}` : ""}`, billed: r.gross - r.concession, paid: r.paid, due: r.due, overdue: r.overdue, late: r.accrued, next: r.nextDueDate } })),
+        { key: "due", label: "Open", kind: "money" }, { key: "overdue", label: "Overdue", kind: "money" }, { key: "late", label: "Late fee building up", kind: "money" }, { key: "next", label: "Next due", kind: "date" }, ...(q.filters.age ? [{ key: "band", label: `Open, ${AGE_BANDS.find((b) => b.key === q.filters.age)?.label ?? "this age"}`, kind: "money" as const }] : [])],
+      rows: rows.map((r) => ({ cells: { student: r.name, adm: r.admissionNo, class: r.classLabel, state: r.studentStatus === "active" ? "At school" : `Left${r.leftOn ? ` ${r.leftOn}` : ""}`, billed: r.gross - r.concession, paid: r.paid, due: r.due, overdue: r.overdue, late: r.accrued, next: r.nextDueDate, band: r.inBand } })),
     };
   }
   if (kind === "rte") {

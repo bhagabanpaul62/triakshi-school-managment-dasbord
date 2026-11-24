@@ -4,7 +4,6 @@ import { actionCtx } from "@smw/runtime";
 import { CertificateService } from "./certificates";
 import { InvoiceService } from "./invoices";
 import { ReceiptService } from "./receipts";
-import { RefundService } from "./refunds";
 
 type File = { filename: string; bytes: Uint8Array };
 type Ctx = Awaited<ReturnType<typeof actionCtx>>;
@@ -23,8 +22,6 @@ async function serve(make: (ctx: Ctx, params: Record<string, string>, url: URL) 
 
 const idsOf = (u: URL) => (u.searchParams.get("ids") ?? "").split(",").filter(Boolean);
 
-/** /app/fees/receipts/[id]/file */
-export const receiptRoute = (req: Request, p: Params) => serve((c, q) => new ReceiptService(c).receiptFile(q.id ?? q.paymentId!), req, p);
 /** /app/fees/receipts/print?ids=a,b: up to 100 receipts as one PDF, each logged as a print. */
 export const receiptsRoute = (req: Request, p: Params) => serve((c, _q, u) => new ReceiptService(c).receiptsFile(idsOf(u)), req, p);
 /** /app/fees/invoices/print?ids=a,b: up to 100 bills as one PDF. */
@@ -37,5 +34,3 @@ export const statementRoute = (req: Request, p: Params) => serve((c, q, u) => ne
 export const tuitionCertificateRoute = (req: Request, p: Params) => serve((c, q, u) => new CertificateService(c).certificateFile(q.studentId!, u.searchParams.get("fy") ?? undefined), req, p);
 /** /app/fees/students/[studentId]/no-dues */
 export const noDuesRoute = (req: Request, p: Params) => serve((c, q) => new CertificateService(c).noDuesFile(q.studentId!), req, p);
-/** /app/fees/refunds/[id]/voucher */
-export const refundVoucherRoute = (req: Request, p: Params) => serve((c, q) => new RefundService(c).refundVoucherFile(q.id!), req, p);

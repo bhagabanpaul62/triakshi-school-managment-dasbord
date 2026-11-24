@@ -2,6 +2,7 @@ import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { PlanEditor } from "./plan-editor";
 import { planEditorBase } from "./plan-editor-data";
+import { PlanMissing } from "./plan-missing";
 import { BackLink, NoAccess, Notice, can } from "./shared";
 
 export const metadata = { title: "New fee plan" };
@@ -14,7 +15,7 @@ export default async function NewPlanPage() {
     <>
       <BackLink href="/app/fees/plans">Fee plans</BackLink>
       <PageHeader eyebrow="Fees" title="New fee plan" description="Pick the classes, add the fees and how often each is charged. Dates are made from the academic year and you can change any of them." />
-      {year ? <PlanEditor year={year} {...rest} /> : <Notice action={{ href: "/app/academics", label: "Open academics" }}>No academic year is set up yet. A plan belongs to a year.</Notice>}
+      {year ? (rest.heads.length && rest.classes.length ? <PlanEditor year={year} {...rest} /> : <PlanMissing heads={rest.heads.length} classes={rest.classes.length} back="/app/fees/plans/new" />) : <Notice action={{ href: "/app/academics", label: "Open academics" }}>No academic year is set up yet. A plan belongs to a year.</Notice>}
     </>
   );
 }

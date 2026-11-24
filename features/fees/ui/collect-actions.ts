@@ -4,8 +4,7 @@ import { ValidationError } from "@smw/feature-kit";
 import { actionCtx, formToObject, runAction, serviceAction } from "@smw/runtime";
 import { services } from "@smw/integrations";
 import { CashAccountService } from "@smw/feature-finance/service";
-import { ChequeService, CounterService, ReceiptService, RefundService, SettlementService, SlipService } from "../service";
-import { DeskService } from "./collect/desk-service";
+import { ChequeService, CounterService, DeskService, ReceiptService, RefundService, SettlementService, SlipService } from "../service";
 
 const id = (fd: FormData) => String(fd.get("id") ?? "");
 const input = (fd: FormData) => formToObject(fd);

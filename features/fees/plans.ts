@@ -121,12 +121,10 @@ export class PlanService extends FeesBase {
       const dues = lines.length ? await tx.select().from(feePlanDues).where(inArray(feePlanDues.lineId, lines.map((l) => l.id))).orderBy(asc(feePlanDues.dueOn)) : [];
       const full = lines.map((l) => ({ ...l, dues: dues.filter((d) => d.lineId === l.id) }));
       const totalPaise = full.filter((l) => !l.optional).reduce((s, l) => s + l.dues.reduce((a, d) => a + d.amountPaise, 0), 0);
-      const [approval, fileUrl, { planNeedsFile }] = await Promise.all([
-        this.approvalsIn(tx, ["fees.plan"], [id]).then((m) => m.get(id) ?? null),
-        plan.approvalFileKey ? services().storage.signedUrl(plan.approvalFileKey, 3600).catch(() => null) : null,
-        this.settings(tx),
-      ]);
-      return { plan, classes: cls, lines: full, versions, totalPaise, approval, approvalFile: plan.approvalFileKey ? { name: plan.approvalFileKey.split("/").pop()!.replace(/^[0-9a-f-]{36}-/, ""), url: fileUrl } : null, fileRequired: planNeedsFile };
+      const [approval, { planNeedsFile }] = await Promise.all([this.approvalsIn(tx, ["fees.plan"], [id]).then((m) => m.get(id) ?? null), this.settings(tx)]);
+      // The file route checks the caller is signed in to this school and redirects to a short-lived signed link, so an approver can open it too.
+      const approvalFile = plan.approvalFileKey ? { name: plan.approvalFileKey.split("/").pop()!.replace(/^[0-9a-f-]{36}-/, ""), href: `/api/files/${plan.approvalFileKey}` } : null;
+      return { plan, classes: cls, lines: full, versions, totalPaise, approval, approvalFile, fileRequired: planNeedsFile };
     });
   }
 

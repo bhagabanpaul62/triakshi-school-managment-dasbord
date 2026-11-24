@@ -13,7 +13,6 @@ import { StatusTrack, type TrackStep } from "@smw/ui/finance/StatusTrack";
 import { METHOD_LABEL } from "../../constants";
 import { ReceiptService } from "../../service";
 import { requestReversal, withdrawReversal } from "../collect-actions";
-import { DeskService } from "./desk-service";
 import { BackLink, H2, NoAccess, Notice, Ref, SECTION, can, day } from "./shared";
 
 export const metadata = { title: "Receipt" };
@@ -24,11 +23,10 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   if (!can(ctx, "read") && !can(ctx, "self")) return <NoAccess what="Receipts" who="the school's accounts team and families" />;
   const { id } = await params;
   const staff = can(ctx, "read");
-  const desk = new DeskService(ctx);
-  const [got, extras, doc] = await Promise.all([new ReceiptService(ctx).get(id), desk.receiptExtras(id), desk.receiptDocument(id)]);
-  const { receipt: r, methods, cheque, allocations, journalId, collectedByName } = got;
+  const receipts = new ReceiptService(ctx);
+  const [got, doc] = await Promise.all([receipts.get(id), receipts.document(id)]);
+  const { receipt: r, methods, cheque, allocations, journalId, collectedByName, prints, reversal: ask } = got;
   const live = r.status === "valid" || r.status === "clearing";
-  const ask = extras.ask;
   const canDecide = allows(ctx, financeFeature, "approve");
   const back = staff ? { href: "/app/fees/receipts", label: "All receipts" } : { href: "/app/fees", label: "My fees" };
 
@@ -37,7 +35,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
       cheque.status === "bounced" ? { label: "Bounced", state: "failed", at: cheque.bouncedOn } : { label: "Cleared", state: cheque.status === "cleared" ? "done" : "todo", at: cheque.clearedOn }]
     : [{ label: "Received", state: "done", at: r.date }, { label: "In the books", state: journalId || !staff ? "done" : "todo" }];
   if (r.status === "reversed") steps.push({ label: "Reversed", state: "failed", at: r.reversedAt?.toISOString() ?? null });
-  else if (ask?.status === "pending") steps.push({ label: "Reversal asked", state: "now", at: ask.createdAt.toISOString() });
+  else if (ask?.status === "pending") steps.push({ label: "Reversal asked", state: "now", at: undefined });
 
   const allocated = allocations.filter((a) => !a.undoneAt);
   const nextAction = r.status === "bounced" ? { href: `/app/fees/collect?student=${r.studentId}`, label: "Collect again" } : r.status === "reversed" ? { href: `/app/fees/collect?student=${r.studentId}`, label: "Collect a new receipt" } : null;
@@ -61,8 +59,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
         <div className="flex flex-col gap-4">
           {ask?.status === "pending" ? (
             <Notice tone="warning" action={can(ctx, "collect") ? <ActionButton action={withdrawReversal} values={{ id: r.id }} label="Withdraw" variant="secondary" /> : undefined}>
-              Reversal asked by {ask.requestedByName} on {day(ask.createdAt)}: {ask.reason}. It waits for an admin who can approve.{" "}
-              {canDecide ? <Link href={ask.href ?? "/app/finance/approvals"} className="underline underline-offset-4">Decide it</Link> : <Link href="/app/finance/approvals" className="underline underline-offset-4">See the request</Link>}
+              Reversal asked by {ask.requestedByName ?? "someone"}: {ask.reason}. It waits for {ask.waitingFor.length ? ask.waitingFor.join(" or ") : "an admin who can approve"}.{" "}
+              {canDecide ? <Link href="/app/finance/approvals" className="underline underline-offset-4">Decide it</Link> : <Link href="/app/finance/approvals" className="underline underline-offset-4">See the request</Link>}
             </Notice>
           ) : null}
           {ask?.status === "rejected" && live ? <Notice tone="danger">The last reversal request was not approved{ask.note ? `: ${ask.note}` : ""}. You can ask again with a better reason.</Notice> : null}
@@ -99,7 +97,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
               <ul className="flex flex-col gap-2 text-sm">
                 <li>Ledger entry: {journalId ? <Link href={`/app/finance/journals/${journalId}`} className="underline underline-offset-4">Open the journal entry</Link> : <span className="text-[var(--ds-on-surface-muted)]">not posted</span>}</li>
                 <li>Student: <Ref href={`/app/fees/students/${r.studentId}`}>{r.snapshot.studentName}</Ref></li>
-                <li className="text-[var(--ds-on-surface-muted)]">Printed {extras.prints.length} time{extras.prints.length === 1 ? "" : "s"}{extras.prints.length ? ": " + extras.prints.map((p) => `${p.copyNo === 1 ? "original" : `copy ${p.copyNo}`} by ${p.by ?? "someone"} on ${day(p.at)}`).join("; ") : ". The first print is the original."}</li>
+                <li className="text-[var(--ds-on-surface-muted)]">Printed {prints.length} time{prints.length === 1 ? "" : "s"}{prints.length ? ": " + prints.map((p) => `${p.copyNo === 1 ? "original" : `copy ${p.copyNo}`} by ${p.by ?? "someone"} on ${day(p.at)}`).join("; ") : ". The first print is the original."}</li>
               </ul>
             </section>
           ) : null}

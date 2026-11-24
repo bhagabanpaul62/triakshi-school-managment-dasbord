@@ -20,7 +20,7 @@ export default async function EditInvoicePage({ params }: { params: Promise<{ id
       <BackLink href={`/app/fees/invoices/${id}`}>Draft bill</BackLink>
       <PageHeader eyebrow="Fees" title="Edit draft bill" description={`For ${d.student.name}. It saves itself while you type.`} />
       <InvoiceEditor mode="edit" {...(await editorBase(ctx))} student={{ id: d.student.id, label: inv.snapshot.studentName, meta: `${inv.snapshot.admissionNo} · ${inv.snapshot.classLabel}` }}
-        invoice={{ id: inv.id, number: inv.number, label: inv.label, dueDate: inv.dueDate, note: inv.note, lines: inv.lines.map((l) => ({ headId: l.headId, label: l.label, amountPaise: l.amountPaise, kind: l.kind })) }} />
+        invoice={{ id: inv.id, number: inv.number, label: inv.label, dueDate: inv.dueDate, note: inv.note, lateRule: inv.lateRule, lines: inv.lines.map((l) => ({ headId: l.headId, label: l.label, amountPaise: l.amountPaise, kind: l.kind })) }} />
     </>
   );
 }

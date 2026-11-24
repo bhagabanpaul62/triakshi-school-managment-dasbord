@@ -1,6 +1,8 @@
 "use server";
 
-import { formToObject, serviceAction } from "@smw/runtime";
+import { ValidationError } from "@smw/feature-kit";
+import { actionCtx, formToObject, runAction, serviceAction } from "@smw/runtime";
+import { services } from "@smw/integrations";
 import {
   ConcessionService, ConcessionTypeService, DuesService, HeadService, InvoiceService, NoteService, PlanService, PromiseService, ReminderService, SettlementService,
 } from "../service";
@@ -45,6 +47,8 @@ export async function proposeNote(payload: string) {
   return r.ok ? { ...r, message: r.data.status === "approved" ? "Note applied" : "Sent for approval" } : r;
 }
 export async function withdrawNote(fd: FormData) { return serviceAction(NoteService, (s) => s.withdraw(id(fd)), "Request taken back"); }
+/** The late fee a new bill for this student starts with (their plan's rule), for the bill editor. */
+export async function lateRuleOfStudent(studentId: string) { return serviceAction(InvoiceService, (s) => s.lateRuleFor(studentId)); }
 export async function previewIssue(payload: string) { return serviceAction(InvoiceService, (s) => s.previewBulk(JSON.parse(payload))); }
 export async function issueFromPlans(payload: string) { return serviceAction(InvoiceService, (s) => s.issueBulk(JSON.parse(payload))); }
 export async function importOpening(fd: FormData) {
@@ -69,6 +73,23 @@ export async function setOptIns(fd: FormData) {
   const o = body(fd);
   return serviceAction(PlanService, (s) => s.setOptIns({ ...o, headIds: ([] as unknown[]).concat(o.headIds ?? []) }), "Optional fees saved");
 }
+const PLAN_FILE_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+const PLAN_FILE_MAX = 10 * 1024 * 1024;
+/** The committee's decision on a draft plan: checked here, stored privately, then attached by the service (which checks who may). */
+export async function uploadPlanFile(fd: FormData) {
+  return runAction(async () => {
+    const ctx = await actionCtx(), file = fd.get("file");
+    if (!(file instanceof File) || file.size === 0) throw new ValidationError({ file: "Choose the file first." });
+    if (!PLAN_FILE_TYPES.includes(file.type)) throw new ValidationError({ file: "Attach a PDF, JPG or PNG." });
+    if (file.size > PLAN_FILE_MAX) throw new ValidationError({ file: "The file is larger than 10 MB." });
+    const key = `${ctx.schoolId}/fees/plan-approvals/${crypto.randomUUID()}-${file.name.toLowerCase().replace(/[^a-z0-9.]+/g, "-").slice(-50)}`;
+    await services().storage.put(key, new Uint8Array(await file.arrayBuffer()), file.type);
+    try { return await new PlanService(ctx).setApprovalFile(id(fd), key); } catch (e) { await services().storage.delete(key).catch(() => undefined); throw e; }
+  }, "File attached");
+}
+export async function removePlanFile(fd: FormData) { return serviceAction(PlanService, (s) => s.setApprovalFile(id(fd), null), "File removed"); }
+export async function removeStudentOverride(fd: FormData) { return serviceAction(PlanService, (s) => s.removeOverride(body(fd)), "Back on the class plan"); }
+export async function removeStudentOptIn(fd: FormData) { return serviceAction(PlanService, (s) => s.removeOptIn(body(fd)), "Optional fee removed"); }
 export async function saveHead(fd: FormData) { return serviceAction(HeadService, (s) => (fd.get("id") ? s.update(id(fd), body(fd)) : s.create(body(fd))), "Fee saved"); }
 export async function deleteHead(fd: FormData) { return serviceAction(HeadService, (s) => s.remove(id(fd)), "Fee deleted"); }
 

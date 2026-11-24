@@ -1,11 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { SelectableTable } from "@smw/ui/finance/SelectableTable";
 import type { DataTableProps } from "@smw/ui/shell/DataTable";
+import { toast } from "@smw/ui/shell/toast";
 
-/** The register with a checkbox per row. Print opens one page with every chosen receipt on its own sheet. */
+const MAX_PRINT = 100;
+
+/** The register with a checkbox per row. Print selected opens one PDF with every chosen receipt; each is logged as a print. */
 export function ReceiptsTable(table: DataTableProps) {
-  const router = useRouter();
-  return <SelectableTable {...table} noun="receipt" bulkActions={[{ label: "Print selected", run: (ids) => router.push(`/app/fees/receipts/print?ids=${ids.join(",")}`), clearAfter: false }]} />;
+  return <SelectableTable {...table} noun="receipt" bulkActions={[{ label: "Print selected", run: (ids) => {
+    if (ids.length > MAX_PRINT) return void toast(`Print up to ${MAX_PRINT} receipts at a time. Select fewer.`, "danger");
+    window.open(`/app/fees/receipts/print?ids=${ids.join(",")}`, "_blank", "noopener");
+  }, clearAfter: false }]} />;
 }

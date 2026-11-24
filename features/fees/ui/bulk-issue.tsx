@@ -7,10 +7,39 @@ import { INPUT } from "@smw/ui/shell/FormModal";
 import { Money } from "@smw/ui/finance/Money";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { issueFromPlans, previewIssue } from "./actions";
+import { csvCell } from "./collect/logic";
 import { CARD, H3, LINK, MUTED } from "./styles";
 
 interface Row { studentId: string; studentName: string; admissionNo: string; label: string; dueOn: string; grossPaise: number; concessionPaise: number; duePaise: number }
-interface Preview { yearId: string; count: number; grossPaise: number; concessionPaise: number; skipped: { alreadyIssued: number; noPlan: number; left: number }; rows: Row[] }
+interface Exception { studentId: string; studentName: string; admissionNo: string; reason: "no_plan" | "left" | "already_billed" | "opted_out"; detail: string; href: string; fix: string }
+interface Preview { yearId: string; count: number; grossPaise: number; concessionPaise: number; skipped: { alreadyIssued: number; noPlan: number; left: number }; rows: Row[]; exceptions: Exception[] }
+const REASON: Record<Exception["reason"], string> = { no_plan: "No fee plan", left: "Left the school", already_billed: "Already billed", opted_out: "Optional fee not taken" };
+
+/** Every student the bills pass over, with why and the link that fixes it. Filter by reason, download the list. */
+function Exceptions({ list }: { list: Exception[] }) {
+  const [reason, setReason] = useState<"" | Exception["reason"]>("");
+  const shown = reason ? list.filter((e) => e.reason === reason) : list;
+  const kinds = (Object.keys(REASON) as Exception["reason"][]).filter((k) => list.some((e) => e.reason === k));
+  const csv = () => {
+    const body = [["Student", "Admission no", "Why", "Detail", "Fix at"], ...shown.map((e) => [e.studentName, e.admissionNo, REASON[e.reason], e.detail, e.href])].map((r) => r.map(csvCell).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([`\uFEFF${body}`], { type: "text/csv;charset=utf-8" })); a.download = "students-left-out.csv"; a.click(); URL.revokeObjectURL(a.href);
+  };
+  return (
+    <div className="mt-5 flex flex-col gap-3 rounded-2xl bg-white/[0.04] p-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className={H3}>Left out ({list.length})</h3>
+        <button type="button" onClick={csv} className="text-sm underline underline-offset-4">Download CSV</button>
+      </div>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by reason">
+        {([["", "All"], ...kinds.map((k) => [k, REASON[k]])] as [string, string][]).map(([k, label]) => <button key={k} type="button" aria-pressed={reason === k} onClick={() => setReason(k as typeof reason)} className={`rounded-full px-3 py-1.5 text-sm ${reason === k ? "bg-white/[0.16]" : "bg-white/[0.05]"}`}>{label}{k ? ` (${list.filter((e) => e.reason === k).length})` : ""}</button>)}
+      </div>
+      <ul className="custom-scrollbar max-h-80 divide-y divide-white/[0.06] overflow-y-auto">
+        {shown.map((e, i) => <li key={`${e.studentId}${e.reason}${i}`} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><Link href={`/app/fees/students/${e.studentId}`} className={LINK}>{e.studentName}</Link> <span className={MUTED}>{e.admissionNo} · {REASON[e.reason]}</span><span className={`${MUTED} block`}>{e.detail}</span></span><Link href={e.href} className={LINK}>{e.fix}</Link></li>)}
+      </ul>
+    </div>
+  );
+}
 const CHUNK = 100, SHOWN = 50;
 
 /** Issue the bills the published plans call for: choose, look at exactly what will be made, then issue in steps with a count. */
@@ -93,14 +122,7 @@ export function BulkIssue({ years, classes, dueKeys }: { years: { id: string; na
             </>
           ) : <EmptyLine title="Nothing to issue" hint="Every bill the plans call for already exists, or no due is ready yet." />}
 
-          {preview.skipped.alreadyIssued || preview.skipped.noPlan || preview.skipped.left ? (
-            <div className="mt-5 flex flex-col gap-1 rounded-2xl bg-white/[0.04] p-4 text-sm">
-              <h3 className={H3}>Left out</h3>
-              {preview.skipped.alreadyIssued ? <p>{preview.skipped.alreadyIssued} already have this bill. They are never billed twice.</p> : null}
-              {preview.skipped.noPlan ? <p className="text-[var(--ds-color-warning-400)]">{preview.skipped.noPlan} student{preview.skipped.noPlan === 1 ? " has" : "s have"} no fee plan for their class. <Link href="/app/fees/plans" className={LINK}>Open the fee plans</Link> and add the class, or move the student to a plan from their fees page.</p> : null}
-              {preview.skipped.left ? <p>{preview.skipped.left} left the school before these dues, so they are not billed.</p> : null}
-            </div>
-          ) : null}
+          {preview.exceptions.length ? <Exceptions list={preview.exceptions} /> : null}
 
           {preview.count ? (
             <div className="mt-5 flex flex-wrap items-center gap-3">

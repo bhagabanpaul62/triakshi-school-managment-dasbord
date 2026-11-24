@@ -8,8 +8,8 @@ import { cn } from "@smw/ui/utils";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
+import { ChequeService, DeskService } from "../../service";
 import { bounceCheque, clearCheque, depositCheque, depositCheques } from "../collect-actions";
-import { DeskService } from "./desk-service";
 import { DeskNav, NoAccess, Notice, NoticeLink, Ref, can, day } from "./shared";
 
 export const metadata = { title: "Cheques" };
@@ -19,8 +19,7 @@ const COLUMNS = [["received", "Received", "In hand, not yet at the bank"], ["dep
 export default async function ChequesPage() {
   const ctx = await requireCtx();
   if (!can(ctx, "collect")) return <NoAccess what="The cheque register" who="cashiers, accountants and admins" />;
-  const desk = new DeskService(ctx);
-  const [board, config] = await Promise.all([desk.chequeBoard(), desk.config()]);
+  const [board, config] = await Promise.all([new ChequeService(ctx).board(), new DeskService(ctx).config()]);
   const today = config.today;
   const ready = board.received.rows.filter((r) => r.cheque.chequeDate <= today);
   const held = board.received.rows.length - ready.length;

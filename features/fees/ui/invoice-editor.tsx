@@ -13,7 +13,9 @@ import { LineItemsEditor, type Line } from "@smw/ui/finance/LineItemsEditor";
 import { Money } from "@smw/ui/finance/Money";
 import { RecordPicker, type PickerOption } from "@smw/ui/finance/RecordPicker";
 import { applyHidden } from "@smw/feature-finance/templates/config";
-import { chargeGroup, deleteInvoiceDraft, findStudents, groupOf, issueInvoice, resubmitInvoiceChange, reviseInvoice, saveInvoice } from "./actions";
+import type { LateRule } from "../constants";
+import { chargeGroup, deleteInvoiceDraft, findStudents, groupOf, issueInvoice, lateRuleOfStudent, resubmitInvoiceChange, reviseInvoice, saveInvoice } from "./actions";
+import { LateRuleFields, LateRuleSentence, lateFrom, lateRuleOf, type Late } from "./late-rule-fields";
 import { useUnsavedGuard } from "./use-unsaved-guard";
 import { invoicePaperData, paperConfig, reviseDifference } from "./logic";
 import { CARD, H3, LINK, MUTED } from "./styles";
@@ -27,7 +29,7 @@ export interface InvoiceEditorProps {
   today: string;
   classes: ClassChoice[];
   student?: PickerOption;
-  invoice?: { id: string; number: string | null; label: string; dueDate: string; note: string | null; lines: { headId: string | null; label: string; amountPaise: number; kind: string }[] };
+  invoice?: { id: string; number: string | null; label: string; dueDate: string; note: string | null; lateRule?: LateRule | null; lines: { headId: string | null; label: string; amountPaise: number; kind: string }[] };
   /** The bill being revised: what it held before, and the refused request this edit sends again, if any. */
   revise?: { oldLines: { label: string; amountPaise: number; concessionPaise: number; creditedPaise: number; paidPaise: number }[]; changeId?: string; reason?: string };
   canGroup: boolean;
@@ -52,6 +54,10 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
   const [dueDate, setDueDate] = useState(invoice?.dueDate ?? "");
   const [note, setNote] = useState(invoice?.note ?? "");
   const [reason, setReason] = useState(revise?.reason ?? "");
+  // Late fee: the student's plan rule (the school's usual), none, or a rule of its own for this bill.
+  const [lateMode, setLateMode] = useState<"plan" | "none" | "own">(mode === "new" ? "plan" : invoice?.lateRule ? "own" : "none");
+  const [late, setLate] = useState<Late>(lateFrom(invoice?.lateRule));
+  const [planRule, setPlanRule] = useState<LateRule | null | undefined>(undefined);
   const [layout, setLayout] = useState<DocumentConfig["layout"]>(config.layout);
   const headOptions = useMemo(() => [...heads, { id: "", label: "No fee head" }], [heads]);
   const [lines, setLines] = useState<Line[]>(() => invoice?.lines.length ? invoice.lines.map((l) => ({ id: uid(), headId: l.headId ?? "", label: l.label, amountPaise: l.amountPaise, kind: l.kind === "deposit" ? "deposit" : "fee" })) : [{ id: uid(), headId: heads[0]?.id ?? "", label: "", amountPaise: 0, kind: "fee" }]);
@@ -62,7 +68,10 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
   const savedSig = useRef<string>("");
 
   const body = useMemo(() => lines.filter((l) => l.amountPaise > 0).map((l) => ({ headId: l.headId || undefined, kind: l.kind, label: l.label.trim() || heads.find((h) => h.id === l.headId)?.label || "Charge", amountPaise: l.amountPaise })), [lines, heads]);
-  const sig = JSON.stringify([picked?.id, label, dueDate, note, body, reason]);
+  const effectiveRule = lateMode === "plan" ? planRule ?? null : lateMode === "own" ? lateRuleOf(late) : null;
+  // Left out = the student's plan rule (the server fills it in); null = none.
+  const lateBody = lateMode === "plan" ? planRule : lateMode === "none" ? null : lateRuleOf(late);
+  const sig = JSON.stringify([picked?.id, label, dueDate, note, body, reason, lateMode, lateMode === "plan" ? null : lateBody]);
   if (!savedSig.current) savedSig.current = sig;
   const dirty = sig !== savedSig.current;
   const total = body.reduce((s, l) => s + l.amountPaise, 0);
@@ -77,7 +86,14 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
   })); }, [config, mode, invoice?.number, dueDate, label, note, picked, groupMode, group, classes, classId, body]);
   const shown = useMemo(() => paperConfig({ ...config, watermark: mode === "revise" ? config.watermark : "DRAFT" }, layout), [config, layout, mode]);
 
-  const payload = useCallback(() => ({ id: draftId, studentId: picked?.id, label, dueDate, note: note || undefined, lines: body }), [draftId, picked, label, dueDate, note, body]);
+  const payload = useCallback(() => ({ id: draftId, studentId: picked?.id, label, dueDate, note: note || undefined, lateRule: lateBody, lines: body }), [draftId, picked, label, dueDate, note, body, lateBody]);
+
+  useEffect(() => {
+    if (!picked?.id) { setPlanRule(undefined); return; }
+    let live = true;
+    void lateRuleOfStudent(picked.id).then((r) => { if (live && r.ok) setPlanRule(r.data.rule); });
+    return () => { live = false; };
+  }, [picked?.id]);
   const ready = (groupMode ? !!group?.length : !!picked) && label.trim().length >= 2 && !!dueDate && body.length > 0 && body.length === lines.filter((l) => l.amountPaise > 0).length;
 
   /** Save the draft. Returns its id, or null when something is wrong (the screen then says what). */
@@ -114,7 +130,7 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
     setError("");
     if (mode === "revise") {
       if (reason.trim().length < 3) { setError("Say why the bill is being revised."); return; }
-      const o = { id: invoice!.id, changeId: revise?.changeId, reason, label: label.trim() || undefined, dueDate: dueDate || undefined, lines: body };
+      const o = { id: invoice!.id, changeId: revise?.changeId, reason, label: label.trim() || undefined, dueDate: dueDate || undefined, lateRule: lateBody, lines: body };
       if (!body.length) { setError("Add at least one line with an amount."); return; }
       const r = await (revise?.changeId ? resubmitInvoiceChange(JSON.stringify(o)) : reviseInvoice(JSON.stringify(o)));
       if (!r.ok) { setError(r.error); setErrors(r.fieldErrors ?? {}); return; }
@@ -125,7 +141,7 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
     }
     if (groupMode) {
       if (!ready || !group) { setError("Pick the class, name the bill, set the due date and give every line an amount."); return; }
-      const r = await chargeGroup(JSON.stringify({ studentIds: group.map((g) => g.id), label, dueDate, note: note || undefined, lines: body }));
+      const r = await chargeGroup(JSON.stringify({ studentIds: group.map((g) => g.id), label, dueDate, note: note || undefined, lateRule: lateMode === "plan" ? undefined : lateBody, lines: body }));
       if (!r.ok) { setError(r.error); setErrors(r.fieldErrors ?? {}); return; }
       savedSig.current = sig; toast(`${r.data.count} bills issued`); router.push("/app/fees/invoices?kind=custom"); return;
     }
@@ -181,6 +197,16 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
             <label className={field}>Due date<input type="date" value={dueDate} min={mode === "new" ? today : undefined} onChange={(e) => setDueDate(e.target.value)} className={INPUT} aria-invalid={errors.dueDate ? true : undefined} />{errors.dueDate ? <span role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{errors.dueDate}</span> : null}</label>
           </div>
           <label className={field}>Note on the bill (optional)<textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={300} className={`${INPUT} h-auto py-2`} /></label>
+        </section>
+
+        <section className={`${CARD} flex flex-col gap-3`} aria-label="Late fee">
+          <h2 className={H3}>Late fee</h2>
+          <SegmentedControl label="Late fee" size="sm" value={lateMode} onChange={setLateMode} options={[{ value: "plan", label: groupMode ? "Each student's plan rule" : "The plan's rule" }, { value: "none", label: "None" }, { value: "own", label: "Set one" }]} />
+          {lateMode === "own" ? <LateRuleFields late={late} onChange={setLate} /> : null}
+          {groupMode && lateMode === "plan" ? <p className="text-sm">Each student gets the late fee of the fee plan they are on.</p>
+            : lateMode === "plan" && picked && planRule === undefined ? <p className={MUTED}>Looking up the plan...</p>
+            : lateMode === "plan" && !planRule ? <p className="text-sm">{picked ? "This student's plan has no late fee, or they have no plan." : "Pick the student to see their plan's late fee."} No late fee is added.</p>
+            : <LateRuleSentence rule={effectiveRule} openPaise={total} />}
         </section>
 
         <section className={CARD} aria-label="Lines">
