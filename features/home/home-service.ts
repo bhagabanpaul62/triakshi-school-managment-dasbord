@@ -1,10 +1,9 @@
-import { and, asc, count, desc, eq, sql, sum } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import { AppError, FeatureOffError, ForbiddenError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { academicYears, classes, sections, terms } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import { attendanceHolidays, studentAttendance } from "@smw/feature-attendance/schema";
 import { attendancePercent } from "@smw/feature-attendance/stats";
-import { feePayments } from "@smw/feature-fees/schema";
 import { StudentService, type StudentCapacity } from "@smw/feature-students/service";
 import { StudentAttendanceService } from "@smw/feature-attendance/service";
 import { DuesService, type DueRow, type TrendPoint } from "@smw/feature-fees/service";
@@ -202,7 +201,7 @@ export class HomeService extends SchoolService<Perm> {
   async admin(): Promise<AdminHome> {
     const fees = this.slot("fees", async () => {
       const d = new DuesService(this.ctx);
-      const [summary, trend] = await Promise.all([this.feeSummary(), d.collectionTrend("month", 6)]);
+      const [summary, trend] = await Promise.all([this.feeSummary(), d.trend("month", 6)]);
       return { summary, trend };
     });
     const [header, capacity, attendance, feesDone, events, announcements, attention] = await Promise.all([
@@ -260,13 +259,13 @@ export class HomeService extends SchoolService<Perm> {
       }),
       this.slot("fees", async () => {
         const classOptions = await dues.classOptions();
-        const per = await Promise.all(classOptions.map(async (c) => ({ c, r: await dues.duesReport({ filters: { classId: c.id }, pageSize: 1 }) })));
+        const per = await Promise.all(classOptions.map(async (c) => ({ c, r: await dues.report({ filters: { classId: c.id }, pageSize: 1 }) })));
         // shortcut: one dues computation per class (each reads only its own students); fine up to ~20 classes.
         return per.filter((x) => x.r.total > 0).map((x) => ({ classId: x.c.id, name: x.c.name, duePaise: x.r.totals.due }));
       }),
       this.slot("fees", () => this.recentPayments(8)),
       this.slot("fees", async () => {
-        const r = await dues.duesReport({ filters: { overdue: "1" }, pageSize: 6 });
+        const r = await dues.report({ filters: { overdue: "1" }, pageSize: 6 });
         return { total: r.total, amountPaise: r.totals.overdue, rows: r.rows.map((x) => ({ id: x.id, name: x.name, classLabel: x.classLabel, overdue: x.overdue, nextDueDate: x.nextDueDate })) };
       }),
       this.announcements(4),
@@ -274,19 +273,13 @@ export class HomeService extends SchoolService<Perm> {
     return { header, money, dueByClass, recent, overdue, announcements };
   }
 
-  /** Money received on one day: valid payments only. */
+  /** Money received on one day: live receipts only (a reversed or bounced one is not money). */
   protected collectedOn(date: string): Promise<{ paise: number; n: number }> {
-    return this.read("view", async (tx) => {
-      const [r] = await tx.select({ paise: sum(feePayments.amountPaise), n: count() }).from(feePayments).where(and(eq(feePayments.status, "valid"), eq(feePayments.paidOn, date)));
-      return { paise: Number(r?.paise ?? 0), n: Number(r?.n ?? 0) };
-    });
+    return new DuesService(this.ctx).collected(date);
   }
 
   protected recentPayments(limit: number): Promise<RecentPayment[]> {
-    return this.read("view", (tx) => tx.select({
-      id: feePayments.id, student: students.name, amountPaise: feePayments.amountPaise, method: feePayments.method, receiptNo: feePayments.receiptNo, paidOn: feePayments.paidOn,
-    }).from(feePayments).innerJoin(students, eq(students.id, feePayments.studentId)).where(eq(feePayments.status, "valid"))
-      .orderBy(desc(feePayments.paidOn), desc(feePayments.createdAt)).limit(limit));
+    return new DuesService(this.ctx).recentReceipts(limit);
   }
 
   // ---------- teacher ----------

@@ -6,5 +6,5 @@ import { listQueryOf } from "../../_lib";
 export const GET = apiHandler(async (req) => {
   const ctx = await bearerCtx(req);
   const svc = new DuesService(ctx);
-  return ctx.role === "student" ? { dues: await svc.mine() } : svc.duesReport(listQueryOf(req));
+  return ctx.role === "student" ? { dues: await svc.mine() } : svc.report(listQueryOf(req));
 });

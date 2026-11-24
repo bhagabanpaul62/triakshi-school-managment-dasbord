@@ -1,9 +1,10 @@
 import { Panel } from "@smw/ui/kit/Panel";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT } from "@smw/ui/tone";
 import { Button } from "@smw/ui/ui/button";
 import { shortDate } from "@smw/ui/format";
-import { ToneBadge, WidgetEmptyState, ROW_HOVER } from "@smw/ui/widgets/WidgetPrimitives";
+import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { ROW_HOVER } from "@smw/ui/tone";
 import type { CatalogueRow, HoldRow } from "../service";
 import { cancelHold, placeHold } from "./actions";
 

@@ -7,9 +7,9 @@ export function attendanceNav(canRead: boolean, canManage: boolean, canApprove =
   return [
     ...(canMark ? [{ href: "/app/attendance/periods", label: "My classes" }] : []),
     ...(canRead ? [{ href: "/app/attendance", label: "Mark" }, { href: "/app/attendance/register", label: "Register" }, { href: "/app/attendance/eligibility", label: "Eligibility" }] : []),
-    ...(canApprove ? [{ href: "/app/attendance/leave-requests", label: "Leave requests" }] : []),
+    ...(canApprove ? [{ href: "/app/attendance/leave-requests", label: "Leave requests" }, { href: "/app/attendance/leave-calendar", label: "Who is away" }] : []),
     ...(canLeave ? [{ href: "/app/attendance/my-leave", label: "My leave" }] : []),
-    ...(canManage ? [{ href: "/app/attendance/staff", label: "Staff" }, { href: "/app/attendance/staff/register", label: "Staff register" }, { href: "/app/attendance/holidays", label: "Holidays" }] : []),
+    ...(canManage ? [{ href: "/app/attendance/staff", label: "Staff" }, { href: "/app/attendance/leave-balances", label: "Leave balances" }, { href: "/app/attendance/leave-types", label: "Leave types" }, { href: "/app/attendance/staff/register", label: "Staff register" }, { href: "/app/attendance/holidays", label: "Holidays" }] : []),
   ];
 }
 

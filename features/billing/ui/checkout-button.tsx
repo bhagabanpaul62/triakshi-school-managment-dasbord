@@ -24,6 +24,7 @@ export function CheckoutButton({ action, values, label, variant = "default", dis
     const r = await action(fd);
     if (!r.ok) { toast(r.error, "danger"); return; }
     const d = r.data as { kind?: string; checkoutUrl?: string; planName?: string; effectiveAt?: string } | undefined;
+    if (d?.kind === "paid") { toast("Paid from your account credit. Nothing more to pay."); router.refresh(); return; }
     if (d?.kind === "checkout" && d.checkoutUrl) { window.location.assign(d.checkoutUrl); return; }
     if (d?.kind === "scheduled") { toast(`${d.planName} will start at your next renewal on ${shortDate(d.effectiveAt)}.`); router.refresh(); }
   });

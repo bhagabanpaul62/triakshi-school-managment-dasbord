@@ -10,6 +10,10 @@
     "./ui/*": "./src/components/ui/*.tsx",
     "./utils": "./src/lib/utils.ts",
     "./money": "./src/lib/hooks/useCurrency.ts",
+    "./finance/document-types": "./src/components/finance/document-types.ts",
+    "./finance/logic": "./src/components/finance/logic.ts",
+    "./finance/*": "./src/components/finance/*.tsx",
+    "./tone": "./src/lib/tone.ts",
     "./format": "./src/lib/format.ts",
     "./shell/*": "./src/shell/*.tsx",
     "./styles/*": "./src/styles/*"

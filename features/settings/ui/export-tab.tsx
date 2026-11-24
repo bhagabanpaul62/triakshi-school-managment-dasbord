@@ -1,7 +1,6 @@
 import type { Ctx } from "@smw/feature-kit";
 import { relative } from "@smw/ui/format";
 import { IconChip, Inset, Panel } from "@smw/ui/kit/Panel";
-import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { PanelGrid } from "@smw/ui/shell/PageHeader";
@@ -28,8 +27,9 @@ export async function ExportTab({ ctx }: { ctx: Ctx }) {
                   <p className="text-sm text-[var(--ds-on-surface)]">Whole school</p>
                   <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Students, parents, staff, classes, attendance, fees, marks, messages and settings: everything the school has stored.</p>
                   <div className="mt-3">
-                    <ActionButton variant="default" label="Export all school data" action={exportSchoolData} successMessage="Export ready. Download it under Your exports."
-                      confirm={{ title: "Export all school data?", body: "This builds one file with every student, fee, mark and message. It contains personal data, so keep it safe. The export is logged.", confirmLabel: "Export" }} />
+                    <FormModal title="Export all school data" icon="upload" description="One file with every student, fee, mark and message. It holds personal data, so keep it safe. The export is logged."
+                      fields={[{ name: "includePayroll", label: "Payroll", type: "checkbox", placeholder: "Include salaries and payslips", hint: "PAN and bank numbers are never exported.", wide: true }]}
+                      action={exportSchoolData} submitLabel="Export" successMessage="Export ready. Download it under Your exports." trigger={{ label: "Export all school data", variant: "default" }} />
                   </div>
                 </div>
               </div>

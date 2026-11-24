@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, max, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { Passwords } from "@smw/auth";
 import { nextSequence, schools, users, uuidv7, type Tx } from "@smw/db";
-import { ConflictError, CrudService, ForbiddenError, LimitError, ValidationError, rethrowUnique, type Ctx, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, CrudService, by, countIn, ForbiddenError, LimitError, ValidationError, rethrowUnique, type Ctx, type ListQuery } from "@smw/feature-kit";
 import { services } from "@smw/integrations";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import studentsFeature from "./feature";
@@ -329,7 +329,18 @@ export class StudentService extends CrudService<typeof students, Perm> {
     return next;
   }
 
+  /** Money records outlive the student's page: a student with bills, receipts, advances or UPI slips is never deleted (mark them left instead). */
+  protected async usage(tx: Tx, s: Student): Promise<[string, number][]> {
+    const n = (table: string) => countIn(tx, table, by("student_id", s.id));
+    // Old receipts stay until a school is moved, and they cascade on delete: count them too.
+    const [bills, receipts, advances, slips, old] = await Promise.all([n("fee_invoices"), n("fee_receipts"), n("fee_advances"), n("fee_upi_slips"), n("fee_payments")]);
+    return [["fee bills", bills], ["fee receipts", receipts + old], ["advances or deposits", advances], ["UPI slips", slips]];
+  }
+
   protected async beforeRemove(tx: Tx, existing: Student) {
+    // The base class checks `usage` after this hook, but this hook deletes files first, so check here as well.
+    const used = (await this.usage(tx, existing)).filter(([, n]) => n > 0);
+    if (used.length) throw this.inUse(`${used.map(([what, n]) => `${n} ${what}`).join(", ")}. Mark the student as left instead`);
     const files = await tx.select({ key: studentDocuments.fileKey }).from(studentDocuments).where(eq(studentDocuments.studentId, existing.id));
     const keys = [...files.map((f) => f.key), ...(existing.photoKey ? [existing.photoKey] : [])];
     // shortcut: files are removed before the row; a failed delete leaves an orphan object, never a broken record.

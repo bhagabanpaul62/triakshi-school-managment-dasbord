@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PdfBuilder } from "./pdf";
+import { PDFDocument } from "pdf-lib";
+import { PdfBuilder, mergePdfs } from "./pdf";
 
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
 export const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEklEQVQImWM4ISd3Qk6OAUIBAB8mBBGFRCvEAAAAAElFTkSuQmCC";
@@ -18,5 +19,14 @@ describe("PdfBuilder.image", () => {
     const b = await PdfBuilder.create();
     expect(await b.image(new Uint8Array([1, 2, 3]), { x: 0, top: 100, w: 10, h: 10 })).toBe(false);
     expect(images(await b.save())).toBe(0);
+  });
+});
+
+describe("mergePdfs", () => {
+  it("joins documents page by page in the order given", async () => {
+    const make = async (pages: number) => { const b = await PdfBuilder.create(); for (let i = 1; i < pages; i++) b.text("x".repeat(10)).space(900); return b.save(); };
+    const [a, b] = [await make(1), await make(2)];
+    const pagesOf = async (f: Uint8Array) => (await PDFDocument.load(f)).getPageCount();
+    expect(await pagesOf(await mergePdfs([a, b, a]))).toBe((await pagesOf(a)) * 2 + (await pagesOf(b)));
   });
 });

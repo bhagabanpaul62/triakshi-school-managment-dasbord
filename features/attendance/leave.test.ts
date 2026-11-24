@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { closeDb, withSchool } from "@smw/db";
+import { closeDb, withSchool, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryEmailSender, MemoryStorage, useServices } from "@smw/integrations";
@@ -10,6 +10,7 @@ import { students } from "@smw/feature-students/schema";
 import { buildSchoolData, type Fixture } from "./test-fixture";
 import { EligibilityService } from "./eligibility";
 import { LeaveService } from "./leave-service";
+import { LeaveTypeService } from "./leave-types";
 import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "./service";
 import { registerCsv, registerPdf } from "./register-export";
 import { absenceAlerts, attendanceSettings } from "./schema";
@@ -24,6 +25,8 @@ const base = (() => { let x = addDays(todayIST(), -14); while (new Date(`${x}T00
 const d = (n: number) => addDays(base, n);
 const M = d(2).slice(0, 7);
 
+/** Staff must pick a leave type; Casual is one of the defaults. */
+const casual = async () => (await new LeaveTypeService(a.as.admin).all()).find((t) => t.code === "CL")!.id;
 const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
 
 beforeAll(async () => {
@@ -153,7 +156,7 @@ describe("leave requests", () => {
     await expect(teacher.decide({ id: parentApply.id, decision: "approved" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new LeaveService(a.as.admin).decide({ id: parentApply.id, decision: "approved" })).resolves.toMatchObject({ status: "approved" });
 
-    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(8), toDate: d(9), reason: "Training" });
+    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(8), toDate: d(9), reason: "Training", typeId: await casual() });
     expect(staffReq.kind).toBe("staff");
     await expect(teacher.decide({ id: staffReq.id, decision: "approved" })).rejects.toBeInstanceOf(ForbiddenError);
   });
@@ -162,7 +165,7 @@ describe("leave requests", () => {
     const custom = { ...a.as.teacher, role: "staff" as const, grants: new Set(["attendance:approve", "attendance:leave"]) };
     const svc = new LeaveService(custom);
     const student = await new LeaveService(a.as.student).apply({ fromDate: d(20), toDate: d(20), reason: "Cold" });
-    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(21), toDate: d(21), reason: "Course" });
+    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(21), toDate: d(21), reason: "Course", typeId: await casual() });
     const ids = (await svc.inbox("pending")).map((r) => r.id);
     expect(ids).toContain(student.id); // teacher user is class teacher of "own"
     expect(ids).not.toContain(staffReq.id);
@@ -204,6 +207,35 @@ describe("leave requests", () => {
     await expect(new LeaveService(a.as.admin).decide({ id: req.id, decision: "approved" })).resolves.toMatchObject({ marked: 1 });
     expect((await staff.staffSheet(d(8))).rows.find((r) => r.userId === a.users.teacher)?.status).toBe("leave");
     expect((await staff.staffSheet(d(9))).rows.find((r) => r.userId === a.users.teacher)?.status).toBe("present");
+  });
+
+  it("staff leave keeps late and half-day marks, only fills absent or unmarked days", async () => {
+    const staff = new StaffAttendanceService(a.as.admin);
+    await staff.mark({ date: d(10), entries: [{ userId: a.users.teacher, status: "late" }] });
+    await staff.mark({ date: d(11), entries: [{ userId: a.users.teacher, status: "absent" }] });
+    const req = await new LeaveService(a.as.teacher).apply({ fromDate: d(10), toDate: d(11), reason: "Course", typeId: await casual() });
+    await new LeaveService(a.as.admin).decide({ id: req.id, decision: "approved" });
+    const on = async (day: string) => (await staff.staffSheet(day)).rows.find((r) => r.userId === a.users.teacher)?.status;
+    expect([await on(d(10)), await on(d(11))]).toEqual(["late", "leave"]);
+  });
+
+  it("nobody decides their own leave, except the only admin with a reason", async () => {
+    const mine = { ...a.as.teacher, grants: new Set(["attendance:approve", "attendance:leave", "attendance:manage"]) };
+    const req = await new LeaveService(mine).apply({ fromDate: d(49), toDate: d(49), reason: "Own", typeId: await casual() });
+    await expect(new LeaveService(mine).decide({ id: req.id, decision: "approved" })).rejects.toBeInstanceOf(ForbiddenError);
+    const adminReq = await new LeaveService(a.as.admin).apply({ fromDate: d(50), toDate: d(50), reason: "Own", typeId: await casual() });
+    await expect(new LeaveService(a.as.admin).decide({ id: adminReq.id, decision: "approved" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(new LeaveService(a.as.admin).decide({ id: adminReq.id, decision: "approved", note: "Only admin" })).resolves.toMatchObject({ status: "approved" });
+    await expect(new LeaveService(a.as.admin).reverse({ id: adminReq.id })).rejects.toBeInstanceOf(ValidationError);
+    await new LeaveService(a.as.admin).decide({ id: req.id, decision: "approved" });
+    await expect(new LeaveService(mine).reverse({ id: req.id })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("refuses staff leave in a month whose salary is already approved", async () => {
+    const req = await new LeaveService(a.as.teacher).apply({ fromDate: d(56), toDate: d(56), reason: "Course", typeId: await casual() });
+    class PaidMonth extends LeaveService { protected override async payMonthClosed(_tx: Tx, month: string) { return month === d(56).slice(0, 7); } }
+    await expect(new PaidMonth(a.as.admin).decide({ id: req.id, decision: "approved" })).rejects.toThrow(/Salary for .* is already approved; ask for a recall or adjust next month/);
+    await expect(new PaidMonth(a.as.admin).decide({ id: req.id, decision: "rejected" })).resolves.toMatchObject({ status: "rejected" });
   });
 
   it("permissions and isolation: accountants cannot approve, school B sees and decides nothing of A's", async () => {

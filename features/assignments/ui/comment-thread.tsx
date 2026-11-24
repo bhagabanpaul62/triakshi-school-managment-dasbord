@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
-import { FormModal } from "@smw/ui/shell/FormModal";
+import { FormModal, keepValues } from "@smw/ui/shell/FormModal";
 import { ModalField } from "@smw/ui/kit/Modal";
 import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
 import { Button } from "@smw/ui/ui/button";
@@ -39,7 +39,7 @@ export function CommentThread({ submissionId, messages, action, editAction, dele
           ))}
         </ul>
       )}
-      <form action={submit} className="flex flex-col gap-2" noValidate>
+      <form onSubmit={keepValues(submit)} className="flex flex-col gap-2" noValidate>
         <input type="hidden" name="submissionId" value={submissionId} />
         <ModalField label="Message" htmlFor={`comment-${submissionId}`} error={errors.body}>
           <textarea ref={ref} id={`comment-${submissionId}`} name="body" rows={2} placeholder="Write a comment" aria-invalid={errors.body ? true : undefined} className={cn(INPUT, "h-auto py-2")} />

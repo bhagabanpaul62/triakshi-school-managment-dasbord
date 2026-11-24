@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { buttonVariants } from "@smw/ui/ui/button";
 import { requireCtx } from "@smw/runtime";
 import { EntityHeader } from "@smw/ui/kit/EntityHeader";
@@ -8,7 +7,8 @@ import { KpiRow } from "@smw/ui/shell/PageHeader";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { MenuIconView } from "@smw/ui/shell/icons";
-import { ToneBadge, WidgetEmptyState, ROW_HOVER, type Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { ROW_HOVER, type Tone } from "@smw/ui/tone";
 import { shortDate } from "@smw/ui/format";
 import { BookService, LoanService } from "../service";
 import { addCopies, deleteBook, issueBook, markCopy, returnLoan, updateBook } from "./actions";
@@ -38,7 +38,8 @@ export default async function BookPage({ params }: { params: Promise<{ id: strin
         chips={<ToneBadge label={book.category} />}
         meta={[book.author, book.publisher, book.language, book.isbn ? `ISBN ${book.isbn}` : null]}
         actions={canManage ? <>
-          <Link href={`/app/library/labels?book=${book.id}`} target="_blank" className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Print labels</Link>
+          {/* a file: a plain link, so Next never prefetches the PDF route as a page */}
+          <a href={`/app/library/labels?book=${book.id}`} target="_blank" rel="noopener" className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Print labels</a>
           <FormModal title="Add copies" icon="library" fields={copiesFields} hidden={{ bookId: book.id }} values={{ copies: 1 }} action={addCopies} submitLabel="Add copies" trigger={{ label: "Add copies", variant: "secondary", plus: true }} />
           <FormModal title="Edit book" icon="library" fields={bookFields(false)} values={book} hidden={{ id: book.id }} action={updateBook} trigger={{ label: "Edit", variant: "secondary" }} />
           <ActionButton variant="icon-delete" label="Delete book" action={deleteBook} values={{ id: book.id }} redirectTo="/app/library/books"

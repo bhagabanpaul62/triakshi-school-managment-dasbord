@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Panel } from "@smw/ui/kit/Panel";
 import { MenuIconView } from "@smw/ui/shell/icons";
-import { ROW_HOVER, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { ROW_HOVER } from "@smw/ui/tone";
 import type { StaffHome } from "../home-service";
 import { Rows, SlotPanel } from "./layout";
 import { AnnouncementsBody, open } from "./parts";

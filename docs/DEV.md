@@ -27,6 +27,7 @@ Every seeded account uses the password `demo12345`.
 |---|---|---|
 | either school | `admin` | Administrator |
 | either school | `accounts` | Accountant |
+| either school | `cashier`, `bursar`, `auditor` | Ready-made money roles |
 | either school | `teacher` | Teacher (more teachers come from the staff seed) |
 | either school | admission number, e.g. `GR0001` (password: date of birth as DDMMYYYY) | Student (created by the students seed) |
 
@@ -49,6 +50,8 @@ TypeScript 7 (`tsgo`, from `@typescript/native-preview`) runs every `typecheck` 
 | `node scripts/new-feature.mjs <key> <requires>` | Scaffold a feature package |
 
 ## Email
+
+Finance: the guide is [FINANCE](FINANCE.md). `DATA_KEY` (32+ random characters) encrypts PAN, bank and ID numbers; keep a copy and never change it. `CASHFREE_SUBSCRIPTIONS=true` turns on Triakshi's own recurring billing.
 
 Mail goes out over SMTP, set only by env values. Locally it is Mailpit (`SMTP_HOST=127.0.0.1`, `SMTP_PORT=1025`, no login); read it at http://localhost:8025. The demo server and early production use a free SMTP account:
 

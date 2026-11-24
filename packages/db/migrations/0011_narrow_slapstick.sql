@@ -1,0 +1,1 @@
+ALTER TABLE "pay_items" ADD COLUMN "unmarked_ok" integer;

@@ -6,7 +6,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { IconChevronRight } from "@tabler/icons-react";
 import { rise, stagger } from "../motion";
 import { IconChip } from "./Panel";
-import { TONE, type Tone } from "../widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../../lib/tone";
 import { cn } from "../../../lib/utils";
 
 export type SummaryRow = {

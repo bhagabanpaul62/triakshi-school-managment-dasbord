@@ -6,18 +6,21 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconChevronLeft, IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
 import { initials, paise, shortDate } from "../lib/format";
-import { ToneBadge, type Tone } from "../components/dashboard/widgets/WidgetPrimitives";
+import { ToneBadge } from "../components/dashboard/widgets/WidgetPrimitives";
+import { type Tone } from "../lib/tone";
+import { StateBadge } from "../components/finance/StateBadge";
 
 /**
  * How a value renders, chosen by its type (kit rule 12). Columns are plain data, so server pages can pass them.
  * - person: value is the name; `metaKey` adds a second line; avatar initials on the left
  * - badge: value is a status; `tones` maps each value to a tone; `labels` renames it
+ * - state: a finance state (paid, overdue, pending...), one badge map for every screen
  * - money: integer paise, right-aligned · date: short absolute · number: right-aligned tabular
  */
 export type Column = {
   key: string;
   label: string;
-  type?: "text" | "person" | "badge" | "money" | "date" | "number" | "mono";
+  type?: "text" | "person" | "badge" | "state" | "money" | "date" | "number" | "mono";
   metaKey?: string;
   tones?: Record<string, Tone>;
   labels?: Record<string, string>;
@@ -40,6 +43,8 @@ export interface DataTableProps {
   empty: { title: string; description: string; action?: ReactNode };
   /** Per-row actions (edit, delete) rendered on the right. Keyed by row id. */
   rowActions?: Record<string, ReactNode>;
+  /** A first cell per row (a checkbox), keyed by row id, with its header cell. */
+  leading?: { header: ReactNode; cells: Record<string, ReactNode> };
   toolbar?: ReactNode;
   /** false for short fixed lists (a ledger's installments): hides search, filters and the total. */
   searchable?: boolean;
@@ -52,6 +57,7 @@ function Cell({ col, row }: { col: Column; row: Record<string, unknown> }) {
   const v = row[col.key];
   if (v == null || v === "") return <span className="text-[var(--ds-on-surface-muted)]">-</span>;
   switch (col.type) {
+    case "state": return <StateBadge state={String(v)} />;
     case "person": {
       const meta = col.metaKey ? row[col.metaKey] : null;
       return (
@@ -74,7 +80,7 @@ function Cell({ col, row }: { col: Column; row: Record<string, unknown> }) {
 }
 
 /** URL-driven list: search, filters and page live in the query string, so the server page re-renders with the data. */
-export function DataTable({ columns, rows, total, page, pageCount, rowHref, searchPlaceholder = "Search", filters = [], empty, rowActions, toolbar, searchable = true }: DataTableProps) {
+export function DataTable({ columns, rows, total, page, pageCount, rowHref, searchPlaceholder = "Search", filters = [], empty, rowActions, leading, toolbar, searchable = true }: DataTableProps) {
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
@@ -99,7 +105,7 @@ export function DataTable({ columns, rows, total, page, pageCount, rowHref, sear
   return (
     <section className="rounded-3xl bg-[var(--ds-surface-container-low)] p-4 sm:p-6" aria-busy={pending}>
       {searchable ? <div className="mb-4 flex flex-wrap items-center gap-2">
-        <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full bg-white/[0.05] px-4 sm:max-w-xs">
+        <label className="flex h-10 min-w-44 flex-1 items-center gap-2 rounded-full bg-white/[0.05] px-4 sm:max-w-xs">
           <IconSearch className="h-4 w-4 shrink-0 text-[var(--ds-on-surface-muted)]" aria-hidden />
           <span className="sr-only">{searchPlaceholder}</span>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={searchPlaceholder} className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--ds-on-surface-muted)]" />
@@ -126,9 +132,11 @@ export function DataTable({ columns, rows, total, page, pageCount, rowHref, sear
       ) : (
         // relative: the sr-only Actions header is absolutely positioned; without a positioned ancestor here it escapes the scroll box and widens the whole page on phones.
         <div className={cn("custom-scrollbar relative -mx-4 overflow-x-auto sm:-mx-6 transition-opacity", pending && "opacity-60")}>
-          <table className="w-full min-w-[640px] text-sm">
-            <thead>
+          {/* On a phone each row becomes a card: identity on top, the rest under it with their labels. */}
+          <table className="w-full text-sm max-sm:block sm:min-w-[640px]">
+            <thead className="max-sm:hidden">
               <tr>
+                {leading ? <th className="w-px pl-4 sm:pl-6">{leading.header}</th> : null}
                 {columns.map((c) => (
                   <th key={c.key} scope="col" style={c.width ? { width: c.width } : undefined}
                     className={cn("px-4 pb-3 font-mono text-[11px] font-normal uppercase tracking-[0.05em] text-[var(--ds-on-surface-muted)] first:pl-4 sm:first:pl-6", right(c.type) ? "text-right" : "text-left", c.hideOnMobile && "hidden md:table-cell")}>
@@ -138,18 +146,20 @@ export function DataTable({ columns, rows, total, page, pageCount, rowHref, sear
                 {rowActions ? <th className="w-px pr-4 sm:pr-6"><span className="sr-only">Actions</span></th> : null}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="max-sm:block">
               {rows.map((row) => {
                 const id = String(row.id ?? "");
                 const href = rowHref ? fill(rowHref, row) : null;
                 return (
-                  <tr key={id} className="group transition-colors duration-150 hover:bg-white/[0.04]">
+                  <tr key={id} className="group transition-colors duration-150 hover:bg-white/[0.04] max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:gap-x-4 max-sm:gap-y-1 max-sm:px-4 max-sm:py-3">
+                    {leading ? <td className="w-px sm:pl-6">{leading.cells[id]}</td> : null}
                     {columns.map((c, i) => (
-                      <td key={c.key} className={cn("px-4 py-3 first:pl-4 sm:first:pl-6", right(c.type) && "text-right", c.hideOnMobile && "hidden md:table-cell")}>
+                      <td key={c.key} data-label={c.label} className={cn("sm:px-4 sm:py-3 sm:first:pl-6", right(c.type) && "sm:text-right", c.hideOnMobile && "hidden md:table-cell",
+                        i === 0 ? cn("max-sm:min-w-0 max-sm:flex-1", leading ? "max-sm:basis-[calc(100%-3rem)]" : "max-sm:basis-full") : c.type === "state" || c.type === "badge" || c.type === "person" ? "" : "max-sm:text-[13px] max-sm:before:mr-1.5 max-sm:before:text-xs max-sm:before:text-[var(--ds-on-surface-muted)] max-sm:before:content-[attr(data-label)]")}>
                         {href && i === 0 ? <Link href={href} className="block rounded focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]"><Cell col={c} row={row} /></Link> : <Cell col={c} row={row} />}
                       </td>
                     ))}
-                    {rowActions ? <td className="whitespace-nowrap py-2 pr-4 text-right sm:pr-6">{rowActions[id]}</td> : null}
+                    {rowActions ? <td className="whitespace-nowrap text-right max-sm:basis-full max-sm:text-left sm:py-2 sm:pr-6">{rowActions[id]}</td> : null}
                   </tr>
                 );
               })}

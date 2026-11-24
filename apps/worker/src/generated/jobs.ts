@@ -3,10 +3,13 @@ import assignments from "@smw/feature-assignments/jobs";
 import attendance from "@smw/feature-attendance/jobs";
 import billing from "@smw/feature-billing/jobs";
 import domains from "@smw/feature-domains/jobs";
+import expenses from "@smw/feature-expenses/jobs";
 import fees from "@smw/feature-fees/jobs";
+import finance from "@smw/feature-finance/jobs";
 import library from "@smw/feature-library/jobs";
 import notifications from "@smw/feature-notifications/jobs";
+import payroll from "@smw/feature-payroll/jobs";
 import timetable from "@smw/feature-timetable/jobs";
 import transport from "@smw/feature-transport/jobs";
 
-export const FEATURE_JOBS = [assignments, attendance, billing, domains, fees, library, notifications, timetable, transport];
+export const FEATURE_JOBS = [assignments, attendance, billing, domains, expenses, fees, finance, library, notifications, payroll, timetable, transport];

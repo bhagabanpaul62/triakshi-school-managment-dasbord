@@ -7,7 +7,7 @@ import { StudentAttendanceService } from "@smw/feature-attendance/service";
 import { todayIST } from "@smw/feature-attendance/stats";
 import { buildSchoolData, type Fixture } from "@smw/feature-attendance/test-fixture";
 import { academicYears, terms } from "@smw/feature-academics/schema";
-import { feePayments } from "@smw/feature-fees/schema";
+import { feeReceiptMethods, feeReceipts } from "@smw/feature-fees/schema";
 import { students } from "@smw/feature-students/schema";
 import { HomeService, type Slot } from "./home-service";
 
@@ -144,10 +144,10 @@ describe("accountant home", () => {
   it("counts today's valid receipts only and lists the newest payments with a receipt link id", async () => {
     const today = todayIST();
     await withSchool(a.id, async (tx) => {
-      const [year] = await tx.select().from(academicYears);
-      const row = (receiptNo: string, amountPaise: number, status: "valid" | "cancelled") =>
-        ({ schoolId: a.id, studentId: fx.kids[0]!, yearId: year!.id, receiptNo, amountPaise, method: "upi" as const, paidOn: today, status });
-      await tx.insert(feePayments).values([row("R-1", 2_500_000, "valid"), row("R-2", 100_000, "valid"), row("R-3", 999_900, "cancelled")]);
+      const snapshot = { studentName: "Home Student", admissionNo: "H1", classLabel: "5-A", guardian: null };
+      const row = (number: string, amountPaise: number, status: "valid" | "reversed") => ({ schoolId: a.id, number, studentId: fx.kids[0]!, date: today, amountPaise, status, snapshot, verifyToken: `tok-${number}` });
+      const made = await tx.insert(feeReceipts).values([row("R-1", 2_500_000, "valid"), row("R-2", 100_000, "valid"), row("R-3", 999_900, "reversed")]).returning();
+      await tx.insert(feeReceiptMethods).values(made.map((r) => ({ schoolId: a.id, receiptId: r.id, method: "upi" as const, amountPaise: r.amountPaise })));
     });
     const home = await new HomeService(a.as.accountant).accountant();
     const money = ok(home.money);

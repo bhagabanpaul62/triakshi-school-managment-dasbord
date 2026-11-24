@@ -2,8 +2,9 @@
 // Run with `pnpm db:fresh` (rebuilds the local database first). Refuses non-local databases.
 import { env } from "@smw/config";
 import { Passwords } from "@smw/auth";
-import { closeDb, platformStaff, schoolDomains, schools, users, withConsole, type SchoolRole } from "@smw/db";
+import { closeDb, eq, platformStaff, schoolDomains, schoolRoles, schools, users, withConsole, withSchool, type SchoolRole } from "@smw/db";
 import type { Ctx } from "@smw/feature-kit";
+import { RoleService } from "@smw/feature-settings/service";
 import { FEATURES } from "../src/generated/features";
 import { SEEDS } from "../src/generated/seeds";
 import { PLAN_DEFS, syncCatalog } from "./catalog.mjs";
@@ -14,9 +15,11 @@ export const DEMO_PASSWORD = "demo12345";
 /** Fixed TOTP secret for the local console owner, so tests can compute codes. Local only. */
 export const DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
-const SCHOOLS = [
-  { slug: "greenvalley", name: "Green Valley Public School", status: "active" as const, plan: "growth", board: "CBSE", state: "Karnataka", city: "Bengaluru", preset: "ocean" },
+const SCHOOLS: { slug: string; name: string; status: "active" | "trial"; plan: string; board: string; state: string; city: string; preset: string; bare?: boolean }[] = [
+  { slug: "greenvalley", name: "Green Valley Public School", status: "active" as const, plan: "pro", board: "CBSE", state: "Karnataka", city: "Bengaluru", preset: "ocean" },
   { slug: "sunrise", name: "Sunrise International School", status: "trial" as const, plan: "starter", board: "ICSE", state: "Maharashtra", city: "Pune", preset: "maroon" },
+  // First day: a school with an admin and an accountant and nothing else.
+  { slug: "riverside", name: "Riverside School", status: "active" as const, plan: "pro", board: "CBSE", state: "Kerala", city: "Kochi", preset: "ocean", bare: true },
 ];
 
 const ROLE_USERS: { role: SchoolRole; loginId: string; name: string }[] = [
@@ -52,13 +55,23 @@ async function main() {
   });
 
   for (const s of ids) {
+    if (SCHOOLS.find((x) => x.slug === s.slug)?.bare) continue;
     const ctx: Ctx = { schoolId: s.id, userId: s.adminId, role: "admin", name: "Seed", features: new Set(FEATURES.map((f) => f.key)), readOnly: false };
     const state: Record<string, unknown> = { slug: s.slug, password: DEMO_PASSWORD, passwordHash: hash };
-    for (const f of FEATURES) {
+    // The books first: what the other modules spend and collect posts into them.
+    for (const f of [...FEATURES].sort((a, b) => Number(b.key === "finance") - Number(a.key === "finance"))) {
       const seed = SEEDS[f.key];
       if (!seed) continue;
       try { await seed(ctx, state); } catch (e) { console.error(`seed ${f.key} failed for ${s.slug}:`, e); throw e; }
     }
+    // One login per ready-made money role, after the feature seeds so payroll and attendance do not count them.
+    await new RoleService(ctx).ensureTemplates(FEATURES);
+    await withSchool(s.id, async (tx) => {
+      for (const [loginId, name, role] of [["cashier", "Suresh Cashier", "Cashier"], ["bursar", "Leela Bursar", "Bursar"], ["auditor", "Ajit Auditor", "Auditor"]] as const) {
+        const [r] = await tx.select({ id: schoolRoles.id }).from(schoolRoles).where(eq(schoolRoles.name, role));
+        await tx.insert(users).values({ schoolId: s.id, role: "staff", roleId: r!.id, loginId, name, email: `${loginId}@${s.slug}.test`, passwordHash: hash });
+      }
+    });
   }
   console.log(`seeded ${ids.length} schools, ${FEATURES.length} modules. Logins are in docs/DEV.md.`);
 }

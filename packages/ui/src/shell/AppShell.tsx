@@ -23,14 +23,14 @@ export interface AppShellProps {
   children: ReactNode;
 }
 
-function isActive(path: string, href: string, home: string) {
-  return href === home ? path === href : path === href || path.startsWith(href + "/");
-}
+const matches = (path: string, href: string, home: string) => (href === home ? path === href : path === href || path.startsWith(href + "/"));
 
 /** The panel frame shared by the school app and the console: sidebar, top bar, mobile drawer. */
 export function AppShell({ brand, groups, user, logout, topbar, banner, children }: AppShellProps) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
+  // One item lights up: the closest one ("Fee bills", not also "Fees" above it).
+  const current = groups.flatMap((g) => g.items).filter((it) => matches(path, it.href, brand.homeHref)).sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   const nav = (
     <nav aria-label="Main" className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 pb-6">
@@ -38,7 +38,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
         <div key={g.label} className="flex flex-col gap-0.5">
           <p className="px-3 pb-1.5 font-mono text-[11px] uppercase tracking-[0.05em] text-[var(--ds-on-surface-muted)]">{g.label}</p>
           {g.items.map((it) => {
-            const active = isActive(path, it.href, brand.homeHref);
+            const active = it.href === current;
             return (
               <Link
                 key={it.href}
@@ -117,7 +117,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
           </button>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">{topbar}</div>
         </header>
-        <main className="min-w-0 flex-1 px-4 pb-12 sm:px-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 pb-12 sm:px-8">{/* A block of auto height: a panel that fills its grid cell must not stretch over the page when it stands alone. */}<div>{children}</div></main>
       </div>
     </div>
   );

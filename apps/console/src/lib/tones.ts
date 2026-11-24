@@ -1,4 +1,4 @@
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 
 export const SCHOOL_TONES: Record<string, Tone> = { pending: "warning", rejected: "danger", trial: "info", active: "success", past_due: "warning", read_only: "warning", suspended: "danger", cancelled: "default" };
 export const SCHOOL_LABELS: Record<string, string> = { pending: "Awaiting approval", rejected: "Rejected", trial: "Trial", active: "Active", past_due: "Past due", read_only: "Read-only", suspended: "Suspended", cancelled: "Cancelled" };

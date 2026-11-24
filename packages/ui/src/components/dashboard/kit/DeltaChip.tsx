@@ -1,5 +1,5 @@
 import { IconTrendingDown, IconTrendingUp } from "@tabler/icons-react";
-import { TONE } from "../widgets/WidgetPrimitives";
+import { TONE } from "../../../lib/tone";
 import { cn } from "../../../lib/utils";
 
 /** "▲ 12%" pill. Direction sets the arrow; tone (not direction) sets the colour, since "down" is sometimes good. */

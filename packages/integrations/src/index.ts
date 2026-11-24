@@ -14,6 +14,8 @@ export * from "./mail";
 export * from "./sms";
 export * from "./dns";
 export * from "./pdf";
+export * from "./fonts";
+export * from "./qr";
 export * from "./payments";
 
 export interface Services { storage: FileStorage; email: EmailSender; sms: SmsSender; dns: DnsResolver; payments: PaymentGateway }

@@ -168,7 +168,7 @@ test("1. custom Librarian role: access link, set up account, Library yes, Fees n
   const body = await p.locator("body").innerText();
   await shot(p, "librarian-fees-refused");
   console.log(`librarian GET /app/fees -> status ${status}, final path ${path}, body: ${body.slice(0, 160).replace(/\s+/g, " ")}`);
-  expect(status === 403 || status === 404 || path !== "/app/fees" || /page not found|not allowed|forbidden|no access|permission|do not have|don.t have/i.test(body), `fees was reachable: status ${status} path ${path}`).toBe(true);
+  expect(status === 403 || status === 404 || path !== "/app/fees" || /ask an admin if you need access|page not found|not allowed|forbidden|no access|permission|do not have|don.t have/i.test(body), `fees was reachable: status ${status} path ${path}`).toBe(true);
   // the library itself opens
   await p.goto(`${SCHOOL(SLUG)}/app/library`);
   await expect(p.getByRole("heading", { name: /library/i }).first()).toBeVisible({ timeout: 90_000 });

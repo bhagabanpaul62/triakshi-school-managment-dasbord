@@ -29,7 +29,8 @@
     "@smw/auth": "workspace:*",
     "@smw/config": "workspace:*",
     "@tabler/icons-react": "^3.52.0",
-    "@smw/feature-notifications": "workspace:*"
+    "@smw/feature-notifications": "workspace:*",
+    "@smw/feature-finance": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

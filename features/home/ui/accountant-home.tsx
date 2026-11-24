@@ -22,7 +22,7 @@ export function AccountantHomeView({ d }: { d: AccountantHome }) {
         {m ? <StatCard label="Collected today" value={tile(m.todayPaise)} icon={<MenuIconView name="money" />} meta={m.todayCount ? plural(m.todayCount, "receipt") : "Nothing received yet"} href="/app/fees" /> : null}
         {m ? <StatCard label="Collected this month" value={tile(m.summary.collectedThisMonth)} icon={<MenuIconView name="receipt" />} meta={plural(m.summary.receiptsThisMonth, "receipt")} href="/app/fees" /> : null}
         {m ? <StatCard label="Outstanding" value={tile(m.summary.outstanding)} icon={<MenuIconView name="chart" />} meta={plural(m.summary.studentsWithDues, "student") + " with dues"} href="/app/fees" /> : null}
-        {m ? <StatCard label="Overdue students" value={String(m.summary.overdueCount)} icon={<MenuIconView name="clock" />} meta={m.summary.overdueCount ? `${paise(m.summary.overdueAmount)} overdue` : "Nobody is behind"} href="/app/fees?overdue=1" /> : null}
+        {m ? <StatCard label="Overdue students" value={String(m.summary.overdueCount)} icon={<MenuIconView name="clock" />} meta={m.summary.overdueCount ? `${paise(m.summary.overdueAmount)} overdue` : "Nobody is behind"} href="/app/fees/dues?overdue=1" /> : null}
       </KpiRow>
       <Rows>
         <PanelRow cells={[
@@ -47,7 +47,7 @@ export function AccountantHomeView({ d }: { d: AccountantHome }) {
             </SlotPanel>
           ) },
           { slot: d.overdue, size: 5, node: (
-            <SlotPanel slot={d.overdue} title="Overdue" action={open("/app/fees?overdue=1", "All overdue")}>
+            <SlotPanel slot={d.overdue} title="Overdue" action={open("/app/fees/dues?overdue=1", "All overdue")}>
               {(o) => o.rows.length === 0 ? (
                 <WidgetEmptyState title="Nobody is overdue." description="Students show here the day an installment passes its due date unpaid." />
               ) : (
@@ -60,7 +60,7 @@ export function AccountantHomeView({ d }: { d: AccountantHome }) {
                       subtitle: `${r.classLabel}${r.nextDueDate ? ` · next due ${shortDate(r.nextDueDate)}` : ""}`, meta: paise(r.overdue), href: `/app/fees/students/${r.id}`,
                     }))}
                   />
-                  {o.total > o.rows.length ? <Link href="/app/fees?overdue=1" className="mt-3 text-sm text-[var(--ds-color-primary-300)] underline-offset-4 hover:underline">See all {o.total} ({paise(o.amountPaise)})</Link> : null}
+                  {o.total > o.rows.length ? <Link href="/app/fees/dues?overdue=1" className="mt-3 text-sm text-[var(--ds-color-primary-300)] underline-offset-4 hover:underline">See all {o.total} ({paise(o.amountPaise)})</Link> : null}
                 </>
               )}
             </SlotPanel>
@@ -73,7 +73,7 @@ export function AccountantHomeView({ d }: { d: AccountantHome }) {
                 <WidgetEmptyState title="No dues to show." description="Set up a fee structure for a class and what it owes appears here." />
               ) : (
                 <HatchedBars height={220} items={rows.map((r) => ({
-                  key: r.classId, label: r.name.replace(/^Class\s+/i, ""), value: r.duePaise / 100, display: formatMoneyCompact(r.duePaise / 100), href: `/app/fees?classId=${r.classId}`,
+                  key: r.classId, label: r.name.replace(/^Class\s+/i, ""), value: r.duePaise / 100, display: formatMoneyCompact(r.duePaise / 100), href: `/app/fees/dues?classId=${r.classId}`,
                 }))} />
               )}
             </SlotPanel>

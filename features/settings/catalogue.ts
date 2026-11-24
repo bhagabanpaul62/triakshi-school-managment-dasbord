@@ -8,11 +8,13 @@ const LABELS: Record<string, string> = {
   read: "View", view: "View", write: "Add and edit", manage: "Manage", mark: "Mark attendance", marks: "Enter marks",
   enquiries: "Website enquiries", public: "Publish pages", use: "Use", send: "Send", audit: "View audit log",
   export: "Export data", run: "Run", self: "Own records", submit: "Submit work",
+  collect: "Collect money", setup: "Set up plans and bills", concede: "Propose concessions and corrections", claim: "Claim own expenses",
+  journal: "Manual entries and transfers", reconcile: "Match bank statements", approve: "Approve requests", close: "Close months and years",
 };
 export const permissionLabel = (key: string) => LABELS[key] ?? key.replace(/[-_]/g, " ").replace(/^./, (c) => c.toUpperCase());
 
 /** What every signed-in staff member needs to use the app at all: always granted, never shown in the matrix. */
-export const BASELINE_GRANTS = ["home:view", "notifications:read", "messages:use", "settings:read"] as const;
+export const BASELINE_GRANTS = ["home:view", "notifications:read", "messages:use", "settings:read", "payroll:self"] as const;
 
 /**
  * A custom role may never hold the school-control powers: settings (except the baseline settings:read that only opens
@@ -40,7 +42,7 @@ export function matrixFor(catalogue: Catalogue, enabled: ReadonlySet<string>, al
   return catalogue.filter((f) => enabled.has(f.key) && !PLUMBING.has(f.key)).map((f) => ({
     key: f.key, name: f.name,
     permissions: Object.entries(f.permissions).filter(([, roles]) => all || roles.some((r) => STAFF_SIDE.includes(r)))
-      .filter(([key]) => all || !adminOnly.has(`${f.key}:${key}`))
+      .filter(([key]) => all || (!adminOnly.has(`${f.key}:${key}`) && !(BASELINE_GRANTS as readonly string[]).includes(`${f.key}:${key}`)))
       .map(([key]) => ({ key, label: permissionLabel(key), grant: `${f.key}:${key}` })),
   })).filter((m) => m.permissions.length);
 }
@@ -60,7 +62,10 @@ export const SYSTEM_ROLES = [
 
 /** Ready-made roles, seeded into every school as editable custom roles. */
 export const ROLE_TEMPLATES: readonly { name: string; description: string; grants: string[] }[] = [
-  { name: "Fee accountant", description: "Collects fees and sees billing.", grants: ["fees:read", "fees:manage", "billing:read"] },
+  { name: "Fee accountant", description: "Sets up fees, collects and proposes concessions.", grants: ["fees:read", "fees:collect", "fees:setup", "fees:concede", "finance:read", "students:read", "attendance:leave", "expenses:claim"] },
+  { name: "Cashier", description: "Takes money at the counter and prints receipts. Cannot change bills.", grants: ["fees:read", "fees:collect", "students:read", "attendance:leave", "expenses:claim"] },
+  { name: "Bursar", description: "Approves money requests and closes months.", grants: ["finance:read", "finance:approve", "finance:close", "fees:read", "expenses:read", "payroll:read", "attendance:leave", "expenses:claim"] },
+  { name: "Auditor", description: "Reads every book and report. Changes nothing.", grants: ["finance:read", "fees:read", "expenses:read", "payroll:read", "attendance:leave", "expenses:claim"] },
   { name: "Librarian", description: "Runs the library desk.", grants: ["library:read", "library:manage"] },
   { name: "Transport in-charge", description: "Manages routes, stops and vehicles.", grants: ["transport:read", "transport:manage"] },
   { name: "Front office", description: "Looks up students, answers enquiries and posts notices.", grants: ["students:read", "website:enquiries", "announcements:read", "announcements:write"] },

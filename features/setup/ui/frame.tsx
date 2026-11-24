@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { IconCheck } from "@tabler/icons-react";
 import { requireCtx } from "@smw/runtime";
 import { Panel } from "@smw/ui/kit/Panel";
-import { LABEL } from "@smw/ui/widgets/WidgetPrimitives";
+import { LABEL } from "@smw/ui/tone";
 import { SetupService, type SetupProgress } from "../service";
 import { DONE_HREF, stepHref, stepMeta, type StepKey } from "../steps";
 

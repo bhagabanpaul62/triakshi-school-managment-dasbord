@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT, keepValues } from "@smw/ui/shell/FormModal";
 import { Button } from "@smw/ui/ui/button";
 import { changeMyPassword } from "./profile-actions";
 
@@ -18,7 +18,7 @@ export function ChangePasswordForm() {
     setError(r.error);
   });
   return (
-    <form action={submit} className="mt-6 flex flex-col gap-4">
+    <form onSubmit={keepValues(submit)} className="mt-6 flex flex-col gap-4">
       {([
         ["current", "Current password", "current-password"],
         ["next", "New password", "new-password"],

@@ -1,5 +1,7 @@
 import type { FeatureSeed } from "@smw/feature-kit";
 import type { AttendanceStatus } from "./constants";
+import { withSchool } from "@smw/db";
+import { ensureCredit } from "./leave-ledger";
 import { StaffAttendanceService, StudentAttendanceService } from "./service";
 import { addDays, isSunday, todayIST } from "./stats";
 
@@ -50,6 +52,9 @@ const seed: FeatureSeed = async (ctx, state) => {
       return { userId: p.userId, status: r < 0.93 ? "present" : r < 0.96 ? "late" : r < 0.98 ? "half_day" : "leave" };
     }) });
   }
+
+  // Leave types and this year's balances for everyone on the team.
+  await withSchool(ctx.schoolId, (tx) => ensureCredit(tx, ctx.schoolId, todayIST()));
 
   state.attendance = { from: days.at(-1), to: days[0], days: days.length };
 };

@@ -1,5 +1,5 @@
 import type { Field } from "@smw/ui/shell/FormModal";
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 import { toInputValue } from "../dates";
 import type { SchoolEvent } from "../service";
 

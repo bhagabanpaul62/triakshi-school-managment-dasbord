@@ -11,10 +11,12 @@ export function useActionForm(action: (fd: FormData) => Promise<FormResult>, onD
   const [pending, start] = useTransition();
   const router = useRouter();
 
-  const submit = (fd: FormData) => start(async () => {
+  /** Use as `onSubmit={keepValues(submit)}`: typed values survive a refusal, and the form clears only on success. */
+  const submit = (fd: FormData, reset?: () => void) => start(async () => {
     const r = await action(fd);
     if (r.ok) {
       setErrors({});
+      reset?.();
       toast(r.message ?? "Saved");
       onDone?.();
       router.refresh();

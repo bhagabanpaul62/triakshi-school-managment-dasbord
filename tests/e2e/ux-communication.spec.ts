@@ -11,6 +11,14 @@ function sql(q: string): string | null {
 const OUT = "test-results/ux-communication";
 const SLUG = "greenvalley";
 const STAMP = Date.now().toString().slice(-6);
+/** A section and subject priya teaches in GR0001's own section, read from the seed (its rotation decides who teaches what). */
+const TAUGHT = (() => {
+  const row = sql(`select c.name || '-' || s.name || '|' || sub.name from students st join section_teachers t on t.section_id = st.section_id
+    join users u on u.id = t.teacher_id join sections s on s.id = st.section_id join classes c on c.id = s.class_id join subjects sub on sub.id = t.subject_id
+    join schools sc on sc.id = st.school_id where sc.slug = '${SLUG}' and st.admission_no = 'GR0001' and u.login_id = 'priya' order by sub.name limit 1`);
+  const [section, subject] = (row ?? "Nursery-A|English").split("|");
+  return { section: section!, subject: subject! };
+})();
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 
@@ -70,15 +78,15 @@ test("teacher posts an assignment with a file, sees progress, grades", async ({ 
   await fillAndPost(page, /new assignment/i, /post assignment/i, async (dialog) => {
     await expect(dialog.getByLabel(/due by/i)).not.toHaveValue(""); // smart default
     await dialog.getByLabel(/^title/i).fill(`Chapter review ${STAMP}`);
-    await dialog.getByLabel(/^section/i).selectOption({ label: "Class 2-B" }); // priya teaches EVS to Class 2-B
-    await dialog.getByLabel(/^subject/i).selectOption({ label: "EVS" });
+    await dialog.getByLabel(/^section/i).selectOption({ label: TAUGHT.section });
+    await dialog.getByLabel(/^subject/i).selectOption({ label: TAUGHT.subject });
     await dialog.getByLabel(/^instructions/i).fill("Read the chapter and answer questions 1 to 5 in your notebook.");
     await dialog.getByLabel(/worksheet or reference/i).setInputFiles({ name: "worksheet.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 test") });
     await shot(page, "t2-new-form");
   });
   await expect(page.getByText(`Chapter review ${STAMP}`).first()).toBeVisible({ timeout: 200_000 });
 
-  await openRow(page, page.locator("tbody tr", { hasText: `Chapter review ${STAMP}` }).first(), /assignments\/.+/);
+  await openRow(page, page.locator("tbody tr", { hasText: `Chapter review ${STAMP}` }).first().getByRole("link", { name: `Chapter review ${STAMP}` }), /assignments\/.+/);
   await expect(page.getByText("worksheet.pdf")).toBeVisible({ timeout: 200_000 });
   await shot(page, "t3-detail");
   await phone(page, "t3-detail");
@@ -88,7 +96,7 @@ test("teacher posts an assignment with a file, sees progress, grades", async ({ 
   const rows = page.locator("tbody tr");
   const n = await rows.count();
   for (let i = 0; i < n; i++) {
-    await openRow(page, rows.nth(i), /assignments\/.+/);
+    await openRow(page, rows.nth(i).getByRole("link").first(), /assignments\/.+/); // the title link opens it; the row itself does not
     const grade = page.getByRole("button", { name: /^(grade|edit grade)$/i }).first();
     if (await grade.count()) {
       await grade.click();

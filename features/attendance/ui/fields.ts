@@ -8,7 +8,11 @@ export const holidayFields: Field[] = [
 ];
 
 /** Applying for leave and editing a waiting request share these; only applying takes a file and (for a family login) a student. */
-export const leaveFields = (opts: { kids?: { id: string; name: string }[]; file?: boolean } = {}): Field[] => [
+export const leaveFields = (opts: { kids?: { id: string; name: string }[]; file?: boolean; types?: { id: string; name: string; halfDayAllowed: boolean }[] } = {}): Field[] => [
+  ...(opts.types ? [
+    { name: "typeId", label: "Leave type", type: "select" as const, required: true, options: opts.types.map((t) => ({ value: t.id, label: t.name })) },
+    { name: "halfDay", label: "Half day (one day only)", type: "select" as const, options: [{ value: "first", label: "First half" }, { value: "second", label: "Second half" }], hint: "Leave empty for whole days." },
+  ] : []),
   ...(opts.kids && opts.kids.length > 1 ? [{ name: "studentId", label: "Student", type: "select" as const, required: true, options: opts.kids.map((k) => ({ value: k.id, label: k.name })) }] : []),
   { name: "fromDate", label: "First day", type: "date", required: true },
   { name: "toDate", label: "Last day", type: "date", required: true },
@@ -34,4 +38,24 @@ export const settingFields: Field[] = [
 
 export const reverseFields: Field[] = [
   { name: "note", label: "Note to the requester", type: "textarea", wide: true, hint: "Approved becomes not approved and its leave days are cleared. Not approved becomes approved and the days are marked as leave." },
+];
+
+export const leaveTypeFields: Field[] = [
+  { name: "name", label: "Name", required: true },
+  { name: "code", label: "Short code", required: true, hint: "Up to 8 letters, such as CL." },
+  { name: "yearlyDays", label: "Days each year", type: "number", min: 0, step: 0.5, required: true, hint: "Credited on the first day of the leave year; joiners get the months left." },
+  { name: "carryDays", label: "Most days carried to next year", type: "number", min: 0, step: 0.5, required: true },
+  { name: "needsFileAfterDays", label: "Needs a document after (days)", type: "number", min: 0, hint: "Leave empty for never." },
+  { name: "sort", label: "Order", type: "number", min: 0 },
+  { name: "paid", label: "Paid leave", type: "checkbox", placeholder: "Paid (unpaid leave is cut from salary)", wide: true },
+  { name: "halfDayAllowed", label: "Half days", type: "checkbox", placeholder: "Can be taken as half days", wide: true },
+  { name: "encashable", label: "Encashment", type: "checkbox", placeholder: "Unused days can be paid out when someone leaves", wide: true },
+  { name: "isActive", label: "In use", type: "checkbox", placeholder: "Staff can pick this type", wide: true },
+];
+
+export const adjustFields = (people: { id: string; name: string }[], types: { id: string; name: string }[]): Field[] => [
+  { name: "userId", label: "Person", type: "select", required: true, options: people.map((p) => ({ value: p.id, label: p.name })) },
+  { name: "typeId", label: "Leave type", type: "select", required: true, options: types.map((t) => ({ value: t.id, label: t.name })) },
+  { name: "days", label: "Days to add (negative to take away)", type: "number", step: 0.5, required: true },
+  { name: "reason", label: "Reason", type: "textarea", required: true, wide: true, hint: "Kept in the audit log." },
 ];

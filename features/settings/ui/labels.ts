@@ -1,4 +1,4 @@
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 
 /** How roles, account states and modules read and look, shared by every settings screen. */
 export const ROLE_LABELS: Record<string, string> = { admin: "Admin", accountant: "Accountant", teacher: "Teacher", student: "Student", staff: "Staff" };

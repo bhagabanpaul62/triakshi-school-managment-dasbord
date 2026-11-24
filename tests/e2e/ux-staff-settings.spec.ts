@@ -133,7 +133,7 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
       await p.getByRole("button", { name: "Change password" }).click();
       const d = p.getByRole("dialog");
       await d.getByLabel(/current password/i).fill("not-my-password");
-      await d.getByLabel("New password", { exact: true }).fill("second-pass-9");
+      await d.getByLabel(/^new password\s*\*?$/i).fill("second-pass-9"); // the label text ends in the required " *"
       await d.getByLabel(/new password again/i).fill("second-pass-9");
       await d.getByRole("button", { name: "Change password" }).click();
       await expect(d.getByText("That is not your current password")).toBeVisible();
@@ -187,9 +187,12 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
     await page.getByPlaceholder("Search by name, email or login").fill(run);
     const row = page.getByRole("row", { name: new RegExp(NAME) });
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "Role" }).click();
-    await expect(page.getByRole("dialog").getByText(/Teacher: classes, attendance, marks/)).toBeAttached();
+    // Role sits in the person's Manage dialog, next to password, access link and sign-out.
+    await row.getByRole("button", { name: "Manage" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Change role" }).click();
+    await expect(page.getByRole("dialog").last().getByLabel(/^role/i).locator("option", { hasText: /^Teacher$/ })).toBeAttached();
     await shot(page, "settings-role-modal");
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Escape");
   });
 

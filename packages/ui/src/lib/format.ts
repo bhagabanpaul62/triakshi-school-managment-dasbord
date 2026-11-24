@@ -5,7 +5,7 @@ const IST = "Asia/Kolkata";
 type DateLike = Date | string | number | null | undefined;
 const toDate = (d: DateLike) => (d == null || d === "" ? null : d instanceof Date ? d : new Date(d));
 
-/** "Sep 29" (adds the year when it is not this year: "Sep 29, 2025"). */
+/** "29 Sep", the Indian order (adds the year when it is not this year: "29 Sep 2025"). */
 export function shortDate(d: DateLike, tz = IST): string {
   const x = toDate(d);
   if (!x || Number.isNaN(x.getTime())) return "-";
@@ -44,3 +44,6 @@ export const initials = (name: string) =>
 
 /** Money for a tile, from paise: whole rupees below a lakh ("₹86,500"), compact above ("₹1.2L") so it fits a phone. */
 export const tilePaise = (p: number) => (Math.abs(p) >= 10_000_000 ? formatMoneyCompact(p / 100) : paise(Math.round(p / 100) * 100));
+
+/** "Nov" from "2026-11-01". */
+export const monthName = (day: string) => new Date(`${day.slice(0, 10).padEnd(10, "-01")}T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" });

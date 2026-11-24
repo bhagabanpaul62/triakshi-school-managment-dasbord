@@ -1,7 +1,7 @@
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT } from "@smw/ui/tone";
 import { Panel } from "@smw/ui/kit/Panel";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { Button } from "@smw/ui/ui/button";

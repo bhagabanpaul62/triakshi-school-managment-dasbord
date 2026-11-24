@@ -9,7 +9,8 @@
     "typecheck": "tsgo --noEmit",
     "lint": "eslint src",
     "seed": "tsx scripts/seed.mts",
-    "bootstrap": "tsx scripts/bootstrap.mts"
+    "bootstrap": "tsx scripts/bootstrap.mts",
+    "move-fees": "tsx scripts/move-fees.mts"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.5",
@@ -47,7 +48,10 @@
     "@smw/feature-transport": "workspace:*",
     "@smw/feature-website": "workspace:*",
     "@smw/feature-home": "workspace:*",
-    "@smw/feature-setup": "workspace:*"
+    "@smw/feature-setup": "workspace:*",
+    "@smw/feature-expenses": "workspace:*",
+    "@smw/feature-finance": "workspace:*",
+    "@smw/feature-payroll": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

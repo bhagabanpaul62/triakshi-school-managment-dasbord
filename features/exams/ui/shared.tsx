@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { AppError, NotFoundError } from "@smw/feature-kit";
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 import { Panel } from "@smw/ui/kit/Panel";
 import { WidgetErrorState } from "@smw/ui/widgets/WidgetPrimitives";
 import type { Field } from "@smw/ui/shell/FormModal";

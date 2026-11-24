@@ -26,6 +26,8 @@ export default defineFeature({
     { label: "Staff attendance", href: "/app/attendance/staff", icon: "teacher", permission: "manage", group: "people", order: 30 },
     { label: "Leave requests", href: "/app/attendance/leave-requests", icon: "check", permission: "approve", group: "academics", order: 23 },
     { label: "My leave", href: "/app/attendance/my-leave", icon: "calendar", permission: "leave", group: "academics", order: 24 },
+    { label: "Leave balances", href: "/app/attendance/leave-balances", icon: "calendar", permission: "manage", group: "people", order: 31 },
+    { label: "Who is away", href: "/app/attendance/leave-calendar", icon: "calendar", permission: "approve", group: "academics", order: 26 },
     { label: "Board eligibility", href: "/app/attendance/eligibility", icon: "check", permission: "read", group: "academics", order: 25 },
     { label: "Holidays", href: "/app/attendance/holidays", icon: "calendar", permission: "manage", group: "academics", order: 22 },
   ],

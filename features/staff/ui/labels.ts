@@ -1,4 +1,4 @@
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 
 /** How roles and account states read and look, shared by the list and the record page. */
 export const ROLE_LABELS: Record<string, string> = { admin: "Admin", accountant: "Accountant", teacher: "Teacher", staff: "Staff" };

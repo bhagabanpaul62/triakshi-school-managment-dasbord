@@ -4,6 +4,14 @@
  * @module @smw/billing
  */
 export * from "./feature";
+export * from "./amounts";
+export * from "./credits";
+export * from "./credit-notes";
+export * from "./credit-note-pdf";
+export * from "./statement";
+export * from "./statement-pdf";
+export * from "./tds";
+export * from "./contact";
 export * from "./gst";
 export * from "./invoice-number";
 export * from "./proration";

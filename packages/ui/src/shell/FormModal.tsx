@@ -1,9 +1,10 @@
 "use client";
 
-import { useId, useState, useTransition, type ReactNode } from "react";
+import { useId, useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { IconPlus } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
+import { INPUT } from "../lib/tone";
 import { Modal, ModalField, ModalFooter, ModalSection } from "../components/dashboard/kit/Modal";
 import { IconChip } from "../components/dashboard/kit/Panel";
 import { Button } from "../components/ui/button";
@@ -11,6 +12,17 @@ import { toast } from "./toast";
 import { MenuIconView } from "./icons";
 
 /** What every server action returns (same shape as @smw/runtime ActionResult). */
+/**
+ * `<form onSubmit={keepValues(submit)}>` in place of `action={submit}`: React resets a form after every `action`,
+ * so a server-side "no" (wrong password, a field error) wiped everything the person typed. This sends the same
+ * FormData without that reset; `submit` gets `reset` to call on success when the form should clear.
+ */
+export const keepValues = (submit: (fd: FormData, reset: () => void) => void) => (e: FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  const form = e.currentTarget;
+  submit(new FormData(form, (e.nativeEvent as SubmitEvent).submitter), () => form.reset());
+};
+
 export type FormResult = { ok: true; data?: unknown; message?: string } | { ok: false; error: string; code?: string; fieldErrors?: Record<string, string> };
 
 /** One form field, as plain data, so server pages can describe forms. */
@@ -50,7 +62,7 @@ async function reencodeAsJpeg(input: HTMLInputElement) {
   } catch { /* the browser cannot read it: upload the original, the server decides */ }
 }
 
-export const INPUT = "h-10 w-full rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)] outline-none placeholder:text-[var(--ds-on-surface-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)] aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-[var(--ds-color-danger-500)]";
+export { INPUT } from "../lib/tone";
 
 function Control({ f, id, value, invalid }: { f: Field; id: string; value: unknown; invalid: boolean }) {
   const common = { id, name: f.name, required: f.required, "aria-invalid": invalid || undefined, placeholder: f.placeholder };
@@ -79,7 +91,7 @@ function Control({ f, id, value, invalid }: { f: Field; id: string; value: unkno
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" id={id} name={f.name} value="true" defaultChecked={value === true || value === "true"} className="h-4 w-4 accent-[var(--ds-primary)]" />{f.placeholder ?? "Yes"}</label>
     );
     case "money": return <input {...common} type="number" step="0.01" min="0" defaultValue={value == null ? undefined : Number(value) / 100} className={INPUT} />;
-    case "file": return <input id={id} name={f.name} type="file" accept={f.accept} required={f.required} onChange={f.asJpeg ? (e) => void reencodeAsJpeg(e.currentTarget) : undefined} className={cn(INPUT, "py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]")} />;
+    case "file": return <input id={id} name={f.name} type="file" accept={f.accept} required={f.required} onChange={f.asJpeg ? (e) => void reencodeAsJpeg(e.currentTarget) : undefined} className={INPUT} />;
     default: return <input {...common} type={f.type ?? "text"} min={f.min} max={f.max} step={f.step} defaultValue={v?.slice(0, f.type === "date" ? 10 : undefined)} className={INPUT} />;
   }
 }
@@ -160,7 +172,7 @@ export function FormModal({ title, description, icon = "users", fields, values, 
       <Modal open={open} onOpenChange={setOpen} size={size ?? (fields.length > 6 ? "lg" : "md")} title={title} description={description}
         icon={<IconChip className="h-10 w-10"><MenuIconView name={icon} /></IconChip>} dismissOnOutsideClick={false}
         footer={<ModalFooter summary={summary} secondary={{ onClick: () => setOpen(false) }} primary={{ label: submitLabel, type: "submit", form: formId, loading: pending }} />}>
-        <form id={formId} action={submit} className="pt-2" noValidate>
+        <form id={formId} onSubmit={keepValues(submit)} className="pt-2" noValidate>
           <FieldGrid fields={fields} values={values} errors={errors} />
         </form>
       </Modal>

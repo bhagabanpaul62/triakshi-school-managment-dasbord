@@ -3,8 +3,9 @@
 import { useId, useState, type ReactNode } from "react";
 import { Modal, ModalFooter, ModalSection } from "@smw/ui/kit/Modal";
 import { IconChip } from "@smw/ui/kit/Panel";
-import { ToneBadge, type Tone } from "@smw/ui/widgets/WidgetPrimitives";
-import { FieldGrid, type Field, type FormResult } from "@smw/ui/shell/FormModal";
+import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
+import { type Tone } from "@smw/ui/tone";
+import { FieldGrid, type Field, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { Button } from "@smw/ui/ui/button";
 import { useActionForm } from "./use-action-form";
@@ -61,7 +62,7 @@ export function GradeDialog(p: GradeDialogProps) {
           </ModalSection>
         }
         footer={<ModalFooter secondary={{ onClick: () => setOpen(false) }} primary={{ label: "Save", type: "submit", form: formId, loading: pending }} />}>
-        <form id={formId} action={submit} className="pt-2" noValidate>
+        <form id={formId} onSubmit={keepValues(submit)} className="pt-2" noValidate>
           <input type="hidden" name="id" value={p.submissionId} />
           <FieldGrid fields={p.fields} values={p.values} errors={errors} columns={1} />
         </form>
