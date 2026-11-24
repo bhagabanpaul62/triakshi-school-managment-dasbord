@@ -51,6 +51,7 @@ export async function statementPdf(req: Request) {
   try {
     const ctx = await actionCtx();
     const studentId = new URL(req.url).searchParams.get("student") ?? "";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId)) return Response.json({ error: "Student not found" }, { status: 404 });
     const [st, school] = await Promise.all([new CertificateService(ctx).statement(studentId), new DeskService(ctx).config()]);
     const money = PdfBuilder.money, doc = await PdfBuilder.create();
     doc.header({ title: "STATEMENT OF ACCOUNT", orgName: school.school.name, rightLines: [`Date: ${school.today}`] });

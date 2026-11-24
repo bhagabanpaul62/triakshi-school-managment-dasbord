@@ -5,6 +5,7 @@ import { addDays, rupees, todayIST } from "@smw/feature-kit/money";
 import { schools, users } from "@smw/db";
 import { services, PdfBuilder } from "@smw/integrations";
 import { finCashAccounts, finApprovals, finBankLines, finPrints } from "@smw/feature-finance/schema";
+import { logPrint, withCopyMark } from "@smw/feature-finance/templates/prints";
 import { defaultConfig } from "@smw/feature-finance/templates/config";
 import { TemplateService } from "@smw/feature-finance/templates/service";
 import { FeesBase, type Perm } from "../../base";
@@ -154,6 +155,17 @@ export class DeskService extends FeesBase {
     });
   }
 
+  /** Several receipts for one print job. Each print is logged, so a receipt printed before comes out stamped DUPLICATE. */
+  async printSheets(ids: string[]) {
+    const sheets = [];
+    for (const id of [...new Set(ids)].slice(0, 50)) {
+      const doc = await this.receiptDocument(id);
+      const copyNo = await this.read(this.perm(), (tx) => logPrint(tx, { docType: "fee_receipt", docId: id, userId: this.ctx.userId }));
+      sheets.push({ id, config: doc.config, data: withCopyMark(doc.data, copyNo) });
+    }
+    return sheets;
+  }
+
   // ---------- cheques ----------
 
   /** Count and total per state, over every cheque. */
@@ -167,7 +179,8 @@ export class DeskService extends FeesBase {
   /** The four columns of the cheque board (post-dated ones sit in "received" until their date). */
   async chequeBoard() {
     const svc = new ChequeService(this.ctx);
-    const [received, deposited, cleared, bounced] = await Promise.all((["received", "deposited", "cleared", "bounced"] as const).map((status) => svc.list({ filters: { status }, pageSize: 100 })));
+    const of = (status: string) => svc.list({ filters: { status }, pageSize: 100 });
+    const [received, deposited, cleared, bounced] = await Promise.all([of("received"), of("deposited"), of("cleared"), of("bounced")]);
     return { received, deposited, cleared, bounced, totals: await this.chequeTotals() };
   }
 

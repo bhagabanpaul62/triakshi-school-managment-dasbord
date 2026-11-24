@@ -39,6 +39,12 @@ export class FeesLookup extends FeesBase {
     });
   }
 
+  /** One student as a picker option, or null when the id is not a student of this school. */
+  async studentOption(studentId: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(studentId)) return null;
+    return this.read("read", async (tx) => { const [s] = await this.studentLines(tx, eq(students.id, studentId)); return s ? { id: s.id, label: s.name, meta: `${s.admissionNo} · ${s.classLabel}` } : null; });
+  }
+
   /** Classes with their sections, for the filters and for billing a whole class. */
   async classes() {
     return this.read("read", async (tx) => {

@@ -78,7 +78,7 @@ export async function submitSlip(fd: FormData) {
       o.fileKey = key;
     }
     delete o.file;
-    o.invoiceIds = ([] as unknown[]).concat(o.invoiceIds ?? []);
+    o.invoiceIds = ([] as unknown[]).concat(o.invoiceIds ?? []).flatMap((v) => String(v).split(",")).filter(Boolean);
     const slip = await new SlipService(ctx).submit(o);
     return { id: slip.id };
   }, "Sent. The school will check it and send your receipt.");

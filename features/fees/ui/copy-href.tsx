@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { IconCheck, IconLink } from "@tabler/icons-react";
-import { PILL_BTN } from "@smw/ui/finance/ui";
+import { PILL as PILL_BTN } from "./styles";
 
 /** Copies the full address of a page in this app, so staff can send a family straight to their bill. */
 export function CopyHref({ path, label = "Copy link" }: { path: string; label?: string }) {
