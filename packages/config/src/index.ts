@@ -46,6 +46,9 @@ const schema = z.object({
   PLATFORM_STATE: z.string().default("Karnataka"),
   PLATFORM_LEGAL_NAME: z.string().default("Triakshi Technologies Pvt Ltd"),
 
+  /** 32+ random characters. Encrypts salary, bank and identity numbers; losing it loses them. Needed before payroll is used off localhost. */
+  DATA_KEY: z.preprocess((v) => v || undefined, z.string().min(32).optional()),
+
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 

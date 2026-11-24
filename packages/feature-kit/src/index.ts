@@ -9,3 +9,4 @@ export * from "./resolver";
 export * from "./context";
 export * from "./service";
 export * from "./fields";
+export * from "./money";

@@ -7,17 +7,19 @@ import { IconChevronLeft, IconChevronRight, IconSearch } from "@tabler/icons-rea
 import { cn } from "../lib/utils";
 import { initials, paise, shortDate } from "../lib/format";
 import { ToneBadge, type Tone } from "../components/dashboard/widgets/WidgetPrimitives";
+import { StateBadge } from "../components/finance/StateBadge";
 
 /**
  * How a value renders, chosen by its type (kit rule 12). Columns are plain data, so server pages can pass them.
  * - person: value is the name; `metaKey` adds a second line; avatar initials on the left
  * - badge: value is a status; `tones` maps each value to a tone; `labels` renames it
+ * - state: a finance state (paid, overdue, pending...), one badge map for every screen
  * - money: integer paise, right-aligned · date: short absolute · number: right-aligned tabular
  */
 export type Column = {
   key: string;
   label: string;
-  type?: "text" | "person" | "badge" | "money" | "date" | "number" | "mono";
+  type?: "text" | "person" | "badge" | "state" | "money" | "date" | "number" | "mono";
   metaKey?: string;
   tones?: Record<string, Tone>;
   labels?: Record<string, string>;
@@ -40,6 +42,8 @@ export interface DataTableProps {
   empty: { title: string; description: string; action?: ReactNode };
   /** Per-row actions (edit, delete) rendered on the right. Keyed by row id. */
   rowActions?: Record<string, ReactNode>;
+  /** A first cell per row (a checkbox), keyed by row id, with its header cell. */
+  leading?: { header: ReactNode; cells: Record<string, ReactNode> };
   toolbar?: ReactNode;
   /** false for short fixed lists (a ledger's installments): hides search, filters and the total. */
   searchable?: boolean;
@@ -52,6 +56,7 @@ function Cell({ col, row }: { col: Column; row: Record<string, unknown> }) {
   const v = row[col.key];
   if (v == null || v === "") return <span className="text-[var(--ds-on-surface-muted)]">-</span>;
   switch (col.type) {
+    case "state": return <StateBadge state={String(v)} />;
     case "person": {
       const meta = col.metaKey ? row[col.metaKey] : null;
       return (
@@ -74,7 +79,7 @@ function Cell({ col, row }: { col: Column; row: Record<string, unknown> }) {
 }
 
 /** URL-driven list: search, filters and page live in the query string, so the server page re-renders with the data. */
-export function DataTable({ columns, rows, total, page, pageCount, rowHref, searchPlaceholder = "Search", filters = [], empty, rowActions, toolbar, searchable = true }: DataTableProps) {
+export function DataTable({ columns, rows, total, page, pageCount, rowHref, searchPlaceholder = "Search", filters = [], empty, rowActions, leading, toolbar, searchable = true }: DataTableProps) {
   const router = useRouter();
   const path = usePathname();
   const params = useSearchParams();
@@ -129,6 +134,7 @@ export function DataTable({ columns, rows, total, page, pageCount, rowHref, sear
           <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr>
+                {leading ? <th className="w-px pl-4 sm:pl-6">{leading.header}</th> : null}
                 {columns.map((c) => (
                   <th key={c.key} scope="col" style={c.width ? { width: c.width } : undefined}
                     className={cn("px-4 pb-3 font-mono text-[11px] font-normal uppercase tracking-[0.05em] text-[var(--ds-on-surface-muted)] first:pl-4 sm:first:pl-6", right(c.type) ? "text-right" : "text-left", c.hideOnMobile && "hidden md:table-cell")}>
@@ -144,6 +150,7 @@ export function DataTable({ columns, rows, total, page, pageCount, rowHref, sear
                 const href = rowHref ? fill(rowHref, row) : null;
                 return (
                   <tr key={id} className="group transition-colors duration-150 hover:bg-white/[0.04]">
+                    {leading ? <td className="w-px pl-4 sm:pl-6">{leading.cells[id]}</td> : null}
                     {columns.map((c, i) => (
                       <td key={c.key} className={cn("px-4 py-3 first:pl-4 sm:first:pl-6", right(c.type) && "text-right", c.hideOnMobile && "hidden md:table-cell")}>
                         {href && i === 0 ? <Link href={href} className="block rounded focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]"><Cell col={c} row={row} /></Link> : <Cell col={c} row={row} />}

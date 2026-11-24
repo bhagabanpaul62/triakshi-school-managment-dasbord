@@ -1,51 +1,137 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { FontBook } from "./fonts";
+import { qrCode, qrFromSvg } from "./qr";
 
 export interface PdfHeader { title: string; orgName: string; orgLines?: string[]; rightLines?: string[] }
 export interface PdfTable { columns: { label: string; width: number; align?: "left" | "right" }[]; rows: string[][] }
+export type Rgb = [number, number, number];
+export interface PdfOptions {
+  /** Noto Sans with ₹ and the Indian scripts instead of Helvetica. Call `need()` with every string before drawing. */
+  unicode?: boolean;
+  /** Page size in points; default A4. */
+  size?: [number, number];
+  margin?: number;
+}
+
+const INK: Rgb = [0.1, 0.1, 0.12];
 
 /**
- * One A4 document builder for receipts, GST invoices, report cards and exports.
+ * One document builder for receipts, GST invoices, report cards and exports.
  * Flow layout: each call draws below the last and starts a new page when full.
- * Standard fonts only cover Latin-1, so "₹" is written as "Rs." (see `money`).
+ * Default fonts are the standard ones, which only cover Latin-1, so "₹" is written as "Rs." there.
+ * With `unicode: true` the text is Noto Sans (₹, Hindi, Bengali, Tamil, Telugu, Kannada), shaped per script.
  */
 export class PdfBuilder {
+  static readonly W = 595.28;
+  static readonly H = 841.89;
+  static readonly M = 48;
   private doc!: PDFDocument;
   private page!: PDFPage;
   private font!: PDFFont;
   private bold!: PDFFont;
+  private fonts: FontBook | null = null;
   private y = 0;
-  static readonly W = 595.28;
-  static readonly H = 841.89;
-  static readonly M = 48;
+  private pw = PdfBuilder.W;
+  private ph = PdfBuilder.H;
+  private m = PdfBuilder.M;
+  private floor = PdfBuilder.M;
+  private framed = false;
+  private spilled = false;
 
-  static async create() {
+  static async create(o: PdfOptions = {}) {
     const b = new PdfBuilder();
     b.doc = await PDFDocument.create();
-    b.font = await b.doc.embedFont(StandardFonts.Helvetica);
-    b.bold = await b.doc.embedFont(StandardFonts.HelveticaBold);
+    if (o.size) [b.pw, b.ph] = o.size;
+    if (o.margin !== undefined) b.m = b.floor = o.margin;
+    if (o.unicode) { b.fonts = new FontBook(b.doc); await b.fonts.prepare([]); }
+    else {
+      b.font = await b.doc.embedFont(StandardFonts.Helvetica);
+      b.bold = await b.doc.embedFont(StandardFonts.HelveticaBold);
+    }
     b.newPage();
     return b;
   }
 
-  /** "Rs. 1,23,456.00" from paise. */
+  /** "₹1,23,456.00" from paise. The standard-font builder prints it as "Rs. 1,23,456.00". */
   static money(paise: number) {
-    return `Rs. ${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₹${(paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 
-  private newPage() { this.page = this.doc.addPage([PdfBuilder.W, PdfBuilder.H]); this.y = PdfBuilder.H - PdfBuilder.M; }
-  private ensure(h: number) { if (this.y - h < PdfBuilder.M) this.newPage(); }
-  private clean(s: string) { return s.replace(/₹/g, "Rs.").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?"); }
+  /** Embed the fonts the given strings need (unicode builders only). */
+  async need(texts: Iterable<string>) { await this.fonts?.prepare(texts); return this; }
 
-  text(s: string, opts: { size?: number; bold?: boolean; color?: [number, number, number]; x?: number; gap?: number } = {}) {
+  get width() { return this.pw; }
+  get height() { return this.ph; }
+  get left() { return this.m; }
+  get right() { return this.pw - this.m; }
+  get pageCount() { return this.doc.getPageCount(); }
+  /** True after a framed block ran past its bottom edge. */
+  get overflowed() { return this.spilled; }
+
+  private newPage() { this.page = this.doc.addPage([this.pw, this.ph]); this.y = this.ph - this.m; }
+  /** Make room for `h` points. Starts a new page and returns true when the page was full; inside a frame it only notes the spill. */
+  ensure(h: number) {
+    if (this.y - h >= this.floor) return false;
+    if (this.framed) { this.spilled = true; return false; }
+    this.newPage();
+    return true;
+  }
+  /** Draw inside a fixed area (one half of a sheet): no new pages, `overflowed` says if it did not fit. */
+  frame(top: number, bottom: number) { this.y = top; this.floor = bottom; this.framed = true; this.spilled = false; return this; }
+  unframe() { this.floor = this.m; this.framed = false; return this; }
+
+  private clean(s: string) { return s.replace(/₹\s?/g, "Rs. ").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?"); }
+
+  /** Width of a string in points. */
+  measure(s: string, size = 10, bold = false) {
+    return this.fonts ? this.fonts.width(s, size, bold) : (bold ? this.bold : this.font).widthOfTextAtSize(this.clean(s), size);
+  }
+
+  /** Break text into lines no wider than `max` points; a word longer than a line is cut. */
+  wrap(s: string, max: number, size = 10, bold = false): string[] {
+    const lines: string[] = [];
+    for (const para of s.split("\n")) {
+      let line = "";
+      for (const word of para.split(/\s+/).filter(Boolean)) {
+        const next = line ? `${line} ${word}` : word;
+        if (this.measure(next, size, bold) <= max) { line = next; continue; }
+        if (line) lines.push(line);
+        line = "";
+        let rest = word;
+        while (this.measure(rest, size, bold) > max && [...rest].length > 1) {
+          const chars = [...rest];
+          let n = chars.length - 1;
+          while (n > 1 && this.measure(chars.slice(0, n).join(""), size, bold) > max) n--;
+          lines.push(chars.slice(0, n).join(""));
+          rest = chars.slice(n).join("");
+        }
+        line = rest;
+      }
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  /** Draw one line with its baseline at `y` (PDF coordinates). Does not move the cursor. Returns the width. */
+  textAt(s: string, o: { x: number; y: number; size?: number; bold?: boolean; color?: Rgb; angle?: number }) {
+    const size = o.size ?? 10;
+    if (this.fonts) return this.fonts.draw(this.page, s, { x: o.x, y: o.y, size, bold: o.bold, color: o.color ?? INK, angle: o.angle ? (o.angle * Math.PI) / 180 : 0 });
+    const t = this.clean(s), f = o.bold ? this.bold : this.font;
+    this.page.drawText(t, { x: o.x, y: o.y, size, font: f, color: rgb(...(o.color ?? INK)) });
+    return f.widthOfTextAtSize(t, size);
+  }
+
+  text(s: string, opts: { size?: number; bold?: boolean; color?: Rgb; x?: number; gap?: number } = {}) {
     const size = opts.size ?? 10;
     this.ensure(size + 4);
-    this.page.drawText(this.clean(s), { x: opts.x ?? PdfBuilder.M, y: this.y - size, size, font: opts.bold ? this.bold : this.font, color: rgb(...(opts.color ?? [0.1, 0.1, 0.12])) });
+    this.textAt(s, { x: opts.x ?? this.m, y: this.y - size, size, bold: opts.bold, color: opts.color });
     this.y -= size + (opts.gap ?? 4);
     return this;
   }
 
   /** Current flow position (PDF coordinates, distance from the page bottom). */
   get cursor() { return this.y; }
+  set cursor(y: number) { this.y = y; }
 
   /** Draw a PNG or JPEG with its top edge at `top` (PDF coordinates). Does not move the cursor. False if the bytes are not a readable image; never throws. */
   async image(bytes: Uint8Array, r: { x: number; top: number; w: number; h: number }) {
@@ -57,19 +143,49 @@ export class PdfBuilder {
     } catch { return false; }
   }
 
+  /**
+   * A QR code, square, top edge at `top`. `source` is the text to encode, or the markup `qrSvg` made. White quiet zone included
+   * in `size`. Does not move the cursor.
+   */
+  qr(source: string, r: { x: number; top: number; size: number }) {
+    const code = source.startsWith("<svg") ? qrFromSvg(source) : qrCode(source);
+    if (!code) return false;
+    const quiet = 4;
+    const unit = r.size / (code.size + quiet * 2);
+    this.page.drawRectangle({ x: r.x, y: r.top - r.size, width: r.size, height: r.size, color: rgb(1, 1, 1) });
+    for (const run of code.runs) {
+      this.page.drawRectangle({ x: r.x + (run.x + quiet) * unit, y: r.top - (run.y + quiet + 1) * unit, width: run.w * unit, height: unit, color: rgb(0, 0, 0) });
+    }
+    return true;
+  }
+
+  /** A filled rectangle, top edge at `top`. */
+  fill(r: { x: number; top: number; w: number; h: number }, color: Rgb) {
+    this.page.drawRectangle({ x: r.x, y: r.top - r.h, width: r.w, height: r.h, color: rgb(...color) });
+    return this;
+  }
+
   /** An outlined box with an optional small centred label; top edge at `top`. */
   box(r: { x: number; top: number; w: number; h: number }, label?: string) {
     this.page.drawRectangle({ x: r.x, y: r.top - r.h, width: r.w, height: r.h, borderColor: rgb(0.7, 0.7, 0.74), borderWidth: 0.5 });
-    if (label) { const w = this.font.widthOfTextAtSize(this.clean(label), 7); this.page.drawText(this.clean(label), { x: r.x + (r.w - w) / 2, y: r.top - r.h / 2, size: 7, font: this.font, color: rgb(0.5, 0.5, 0.55) }); }
+    if (label) this.textAt(label, { x: r.x + (r.w - this.measure(label, 7)) / 2, y: r.top - r.h / 2, size: 7, color: [0.5, 0.5, 0.55] });
     return this;
   }
 
   space(h = 10) { this.y -= h; return this; }
 
-  rule() {
+  rule(color: Rgb = [0.8, 0.8, 0.82]) {
     this.ensure(8);
-    this.page.drawLine({ start: { x: PdfBuilder.M, y: this.y }, end: { x: PdfBuilder.W - PdfBuilder.M, y: this.y }, thickness: 0.5, color: rgb(0.8, 0.8, 0.82) });
+    this.page.drawLine({ start: { x: this.m, y: this.y }, end: { x: this.pw - this.m, y: this.y }, thickness: 0.5, color: rgb(...color) });
     this.y -= 8;
+    return this;
+  }
+
+  /** Cut the last page to the height used so far (receipt rolls). Make the page tall at `create` and call this once at the end. */
+  fitHeight() {
+    const h = Math.max(this.ph - this.y + this.m, 60);
+    this.page.translateContent(0, -(this.ph - h));
+    this.page.setSize(this.pw, h);
     return this;
   }
 
@@ -79,7 +195,7 @@ export class PdfBuilder {
     for (const l of h.orgLines ?? []) this.text(l, { size: 9, color: [0.4, 0.4, 0.45] });
     const leftEnd = this.y;
     this.y = top;
-    const rightX = PdfBuilder.W - PdfBuilder.M - 200;
+    const rightX = this.pw - this.m - 200;
     this.text(h.title, { size: 14, bold: true, x: rightX });
     for (const l of h.rightLines ?? []) this.text(l, { size: 9, x: rightX });
     this.y = Math.min(leftEnd, this.y) - 6;
@@ -92,7 +208,7 @@ export class PdfBuilder {
       const row = this.y;
       const [a, b] = [pairs[i]!, pairs[i + 1]];
       this.text(`${a[0]}: ${a[1]}`, { size: 9 });
-      if (b) { this.y = row; this.text(`${b[0]}: ${b[1]}`, { size: 9, x: PdfBuilder.W / 2 }); }
+      if (b) { this.y = row; this.text(`${b[0]}: ${b[1]}`, { size: 9, x: this.pw / 2 }); }
     }
     return this.space(4);
   }
@@ -100,13 +216,11 @@ export class PdfBuilder {
   table(t: PdfTable) {
     const draw = (cells: string[], bold: boolean) => {
       this.ensure(16);
-      let x = PdfBuilder.M;
+      let x = this.m;
       cells.forEach((c, i) => {
         const col = t.columns[i]!;
-        const s = this.clean(c);
-        const f = bold ? this.bold : this.font;
-        const w = f.widthOfTextAtSize(s, 9);
-        this.page.drawText(s, { x: col.align === "right" ? x + col.width - w - 4 : x + 4, y: this.y - 11, size: 9, font: f });
+        const w = this.measure(c, 9, bold);
+        this.textAt(c, { x: col.align === "right" ? x + col.width - w - 4 : x + 4, y: this.y - 11, size: 9, bold });
         x += col.width;
       });
       this.y -= 16;
@@ -121,11 +235,9 @@ export class PdfBuilder {
   totals(lines: [string, string, boolean?][]) {
     for (const [label, value, strong] of lines) {
       const row = this.y;
-      this.text(label, { size: 10, bold: strong, x: PdfBuilder.W - PdfBuilder.M - 220 });
+      this.text(label, { size: 10, bold: strong, x: this.pw - this.m - 220 });
       this.y = row;
-      const f = strong ? this.bold : this.font;
-      const s = this.clean(value);
-      this.text(s, { size: 10, bold: strong, x: PdfBuilder.W - PdfBuilder.M - f.widthOfTextAtSize(s, 10) });
+      this.text(value, { size: 10, bold: strong, x: this.pw - this.m - this.measure(value, 10, strong) });
     }
     return this;
   }
