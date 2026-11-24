@@ -1,155 +1,85 @@
-# Build status (2026-11-20, 01:30)
+# Build status (2026-11-24)
 
-## Academics group build (docs/ACADEMICS-PRD.md), 2026-11-20. Built, uncommitted
-| Module | Shipped | Unit tests |
-|---|---|---|
-| academics | electives/streams, `subjectsForStudent`, rollover copies teachers, default terms, houses + points, class CSV, allocation PDF | 29 |
-| attendance | absence alerts (once per day), student and staff leave with class-teacher approval, register PDF/CSV, staff register, board eligibility + condonation, settings | 35 |
-| timetable | whole-school generator (wizard, solver, draft/review/lock/re-run/publish versions), substitutions with covers, print PDFs, copy week, room clash, special days | 61 |
-| assignments | due reminders, extensions, marks CSV, bulk grade, comments, scheduled publish, quick publish/close, orphan-file fix | 50 |
-| exams | scale editor + presets (CBSE/ICSE), co-scholastic entry by term, components (80+20), term weights, term report cards, attendance + remarks on the card, electives, date sheet, admit cards | 76 |
-| library | settings, Code128 labels, scan desk, member history, renew, holds, OPAC, weekly overdue reminders, fines to the fee ledger | 54 |
-| transport | fee lines on the ledger from the next month, monthly fee sync, vehicle documents + expiry alerts, safety checklist, route notices, tracking link | 42 |
-| fees | `fee_charges` (transport, library fine) in the ledger, dues and receipts, with the student lock against payment races | 61 |
+Git, CI and the demo server were checked on 2026-11-24. Test results are from the commit and PR they belong to; nothing was re-run that day.
 
-- **Totals:** 32 packages and 914 unit tests pass. Typecheck and lint are clean.
-- **Migrations 0004 and 0005:** applied locally. 0005 holds the data steps for timetable live versions and term-keyed co-scholastic grades. It was deduped after review and checked on a scratch DB.
-- **Worker schedules:** assignments (15 and 5 min), library overdue (daily), transport document expiry (daily), transport fee sync (the 1st of each month).
-- **Independent review:** 11 findings. Fixed:
-  - the fee waiver/payment race
-  - the 0005 duplicate rows
-  - the staff-base role scoping for leave approval and assignments
-  - the leave decision race
-  - co-scholastic edits after publish
-  - the student term-card visibility
-  - student-readable rosters
-  - the timetable re-run race
-  - covers carried over on publish
-  - file handling
+## Where things stand
+| What | State |
+|---|---|
+| Code | All 21 features, sign-in and roles, People, the Academics group and onboarding are built and committed. The working tree was clean before this file was edited. |
+| `origin/main` (bhagabanpaul62) | Has everything through PR #3 (`cf3ae29`), merged 2026-11-20. |
+| `fork/feat/school-platform` | One commit ahead: `63f18d5` (forms keep what was typed after a refusal; e2e fixes). **PR open to `main`; not on the demo.** |
+| CI | Passes for PR #2, PR #3 and `63f18d5`. |
+| Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
+| Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
+| Migrations | 0000–0008 in `packages/db/migrations`. 0005, 0006 and 0008 hold hand-written data steps: never regenerate them. |
 
-  Accepted as is: emails are at-most-once (sent after commit by design).
-- **e2e (prod build):** tests/e2e/academics-group.spec.ts passes 4/4. The full suite is the next check.
-**Round 2 (same day):**
-- **Elective blocks in the timetable:** `tt_blocks`, `tt_block_options` and `tt_block_slots`. The generator places a block at one slot for every section of the class. Students see only their chosen subject, and covers work for each option. Timetable tests: 84.
-- **Admit card photos:** `PdfBuilder.image` draws the photo from `students.photoKey`; a missing photo falls back to the box. WebP shows the box too, because pdf-lib can't embed it.
-- **Academics:** full create, list, edit and delete for every entity, plus new fields:
-  - class: stage, display order
-  - section: medium, shift, stream
-  - subject: short name, type, max marks, board code, colour, language flag
-  - year: status (a closed year is read-only)
-  - term: order
+PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
 
-  Academics tests: 42.
-- **Assignments:** edit or revoke an extension, edit or delete a comment within 15 minutes, re-grade with history, withdraw a submission. Extensions count in the progress numbers. Assignments tests: 56.
-- **Attendance:**
-  - Period-wise mode: the teacher marks their own period or a cover from "My classes", and blocks list students across sections.
-  - The day rolls up from the periods.
-  - Subject-wise % and CSV.
-  - Leave can be edited and reversed. Condonations can be edited. Holidays have a guard.
+## Next
+1. Merge the PR for `63f18d5`, then deploy it to the demo. Both need the owner's go-ahead.
+2. Get the approved demo schools signed in; resend their sign-in email from the console school page where needed.
+3. Prove email delivery to outside inboxes. A sender on a domain of our own, verified in Brevo, is the likely fix (not confirmed).
+4. Add browser tests for `/app/staff/import` and for the school-record panels on My profile (student and teacher). They have unit tests only. Student import has a browser test.
+5. Finish the UX review of the fees, students and communication screens (wave B stopped early).
+6. Make the Deploy workflow pass or stop running on push: it needs the EC2 host and its secrets. Add required reviewers to `production` **before** the secrets, or the next push to `main` deploys by itself.
+7. Do the owner-only launch items (last section).
 
-  Period mode needs the timetable module; without it the school stays daily. Attendance tests: 59.
-- **Shared pattern:** `CrudService.usage()` plus `countIn`/`by` in @smw/feature-kit give every module a friendly in-use guard on delete, and a 23503 foreign-key error becomes a ConflictError.
-- **Migration 0006:** applied locally, with backfills for `classes.display_order` and `terms.sort_order`.
+## Test results
+- **e2e, production build, fresh DB (`63f18d5`):** 84 passed and 4 failed in one run. The 4 were in the two onboarding signup specs, which hit the in-memory signup limit; both specs passed (5 of 5) after a marketing restart. 20 spec files.
+- **Unit (CI on `63f18d5`):** all 32 test tasks pass, 999 tests counted in the log. Typecheck 37/37, lint 0 errors.
+- **Reviews:** 10 auth findings and 11 Academics findings from independent reviews were fixed. One was accepted: emails are sent at most once, after the commit.
 
-**Round 3 (same day): the known gaps, closed**
-- **Elective picks:** the class page roster has a "Picks" button per student (own electives outside a group). The roster returns `picks`.
-- **Teacher limits in the cell editor:** `slotOptions().limits` carries each limited teacher's day and week count across the version. The editor marks "over their limit" and warns, but still lets the admin save. Helper: `features/timetable/limits.ts` (tested).
-- **Scheduled publish:** a draft can get a "Go live on" day (`tt_versions.publish_on`, migration 0007). One draft is scheduled at a time, it stays editable, and there's an Unschedule button. The worker job `timetable.publish-due` runs at 00:15 IST and publishes it; an emptied draft is unscheduled, not published.
-- **Homework into internal marks:** `MarksService.homeworkMarks(paperId)` gives each student's graded-homework share in the paper's subject over the exam's term. Marks entry on a split paper shows "Fill <part> from homework", which fills the column for review; nothing saves until Save.
-- **WebP photos:** student and profile photo uploads are re-encoded to JPEG in the browser (`Field.asJpeg`), so admit cards can print them. Photos uploaded as WebP before this still show the box until re-uploaded.
-- Tests: timetable 90, exams 79, academics 13 in crud, students 40, settings 48.
+## What is built
+Plans: [PRD](PRD.md), [AUTH-PRD](AUTH-PRD.md), [PEOPLE-PRD](PEOPLE-PRD.md), [ACADEMICS-PRD](ACADEMICS-PRD.md). Setup and demo logins: [DEV](DEV.md).
 
-**Round 4 (same day): line-by-line PRD audit.** All 52 must and should rows were checked for a service AND a screen. 48 were fully built. These 4 were partial and are now finished:
-- **Absence alerts batch after marking settles:** saving queues the alert (`absence_alerts.queued_at`). The worker job `attendance.send-alerts` runs every 10 minutes and sends alerts older than 30 minutes, only if the student is still absent or late (a corrected mistake is dropped). Migration 0008 marks old alerts as sent.
-- **Room clash for typed-in rooms:** any room text clashes, matched ignoring case and spaces at the ends, not only rooms from the room list.
-- **RTE-quota flag:** `students.rte_quota` (migration 0008). It's a Yes/No select on the student form, shown as a chip and a fact on the record.
-- **Library history from both records:** a link from the student record (related links) and the staff record (header). It is gated by the library read rule, so accountants don't get a link to a refusal.
-- **Seed fix found by the e2e:** the demo `teacher` login had no staff profile, so it was missing from Staff and its page returned 404. It now gets T000.
-- **e2e:** 3 new tests in `tests/e2e/academics-group.spec.ts` drive every round-3 and round-4 screen on the prod build: elective picks, RTE flag, library links, scheduled publish and unschedule, the over-limit warning, and the homework fill. All pass.
-- Unit tests: all 32 packages pass (attendance 60, students 41). Typecheck 37/37, lint 0 errors.
+**Sign-in and roles**
+- Student, teacher and admin logins, plus custom staff roles from a module × permission matrix. No parent logins: the student login is the family login.
+- Forced password change on default passwords; forgot password by link or 6-digit code; sign-in by code; verify my email; access links; printable login slips; devices list.
+- Custom roles can never hold settings (except the My profile baseline), billing, domains or setup grants.
 
-- **Known limits:**
-  - Homework share counts graded work only; missing or ungraded homework is not counted as zero.
-  - Old WebP photos need a re-upload to print.
+**People**
+- Student and staff records with contact, emergency and (students) medical fields. Students and staff edit their own contact details; official fields stay with the office.
+- Import of students and staff from `.xlsx` or `.csv`, with a dry run and then all-or-nothing.
 
-## Resume here (auth + RBAC + People work, all uncommitted)
-Specs: docs/AUTH-PRD.md (sign-in, roles, email OTP) and docs/PEOPLE-PRD.md (profiles, self-edit, sheet onboarding).
+**Onboarding (PR #3)**
+- One email, one account: signup refuses an email that already signs in to a school or the console.
+- The approval email opens "Set up your account" when the admin has no password yet, otherwise sign-in with the email filled in. The console can resend it.
 
-Done and passing:
-- Typecheck 37/37 and lint 0 errors.
-- Unit tests: every package passes. People adds students 40 and staff 31. Integrations parseSheet passes 2/2.
-- Security review findings: all fixed, with tests.
-- Prod bug fixed: "School not found" after any server-action redirect. The fix is `requestHost()` in packages/runtime/src/host.ts.
-- Local DB has migrations 0001 (roles, must-change, parent logins off), 0002 (people columns) and 0003 (email_verified_at). It was applied by hand with psql because the local DB was built by push.
+**Academics group**
+| Module | Shipped |
+|---|---|
+| academics | electives and streams, houses and points, default terms, rollover, class CSV, allocation PDF, full create/edit/delete for every entity |
+| attendance | daily and period-wise marking, leave with approval, absence alerts (sent 30 min after marking settles), register PDF/CSV, board eligibility and condonation |
+| timetable | whole-school generator with draft, review, lock and publish; scheduled publish; elective blocks; covers; print; room clash; teacher limits |
+| assignments | reminders, extensions, scheduled publish, bulk grade and re-grade, comments, marks CSV |
+| exams | grade scales (CBSE/ICSE presets), co-scholastic, components, term report cards, date sheet, admit cards, homework into internal marks |
+| library | settings, barcode labels, scan desk, holds, member history, overdue reminders, fines to the fee ledger |
+| transport | fees on the ledger from the next full month, vehicle documents and expiry alerts, safety checklist, route notices |
+| fees | `fee_charges` (transport, library fine) in the ledger, dues and receipts |
 
-Not finished:
-1. Full e2e on the prod build was cut off at about 45/80 by a shutdown. Re-run it:
-   - `pnpm --filter @smw/school build && pnpm --filter @smw/console build && pnpm --filter @smw/marketing build`
-   - `pnpm db:fresh`
-   - start `school-prod`, `console-prod` and `marketing-prod` from .claude/launch.json
-   - `npx playwright test --project=desktop --workers=4`
-   - The auth spec alone (tests/e2e/auth-rbac.spec.ts) was at 11/14 before the fixes; re-check it.
-2. The People pages have no e2e yet: My profile (student and teacher), the student import with .xlsx, and /app/staff/import. Add a spec for docs/PEOPLE-PRD.md section 4.
-3. "Verify my email" is done: users.email_verified_at (migration 0003, applied locally). It is set by the verify code or a confirmed email change, and cleared when an admin changes the email.
-   Brevo SMTP credentials are in .env.local as a commented block; the login was checked OK. Local mail stays on Mailpit.
-4. Speed-ups are in place:
-   - dev Postgres runs with fsync off (infra/docker-compose.dev.yml)
-   - turbo typecheck runs fully parallel
-   - `pnpm test` runs at concurrency 4
-   - e2e runs on the prod build
-   Seeding still takes about 150 s; it runs one transaction per row.
-5. Nothing is committed. Commit only when the owner says so.
+## Known limits
+- Homework share in internal marks counts graded work only.
+- Photos uploaded as WebP before the JPEG change need a re-upload to print on admit cards.
+- Login and signup limits are per process, in memory; a restart resets them.
 
-# Earlier status (2026-11-19, 06:20)
-
-Nothing is committed yet. Everything below is in the working tree.
-
-## Done
-- All 21 features built and wired. 37 packages typecheck clean on TypeScript 7 (`tsgo`); ESLint 0 errors.
-- Production builds pass: school 18 s, console 10 s, marketing 7 s. Pages answer in 0.003–0.02 s on `next start`.
-- UX polish: wave A (12 areas) and most of wave B done. Wave B was stopped early; fees and students lost their final review and communication is unreviewed. The prod-build E2E run covers them.
-- New white-theme landing page (`apps/marketing/src/components/landing/`), reviewed at desktop and 375 px.
-- Root fixes this session:
-  - DataTable phone overflow (shared).
-  - Duplicate unpaid invoices on re-checkout.
-  - ToneBadge sentence case; 40 px tap area on small buttons.
-  - Admission form: kept typed data and reported failed sends.
-  - The demo `teacher` now owns a class (staff seed).
-  - `isLocal()` / `secureCookies()` in `@smw/config`, replacing `NODE_ENV` checks for ports, dev-only pages, the Mailpit link and cookie `secure`.
-  - Setup loader phone overflow.
-
-## Resume here
-Update 06:28: all three apps are rebuilt with every fix. Another chat's dev server holds port 4100, so the prod set runs
-with school on **4110**: launch.json `school-prod-4110`, `console-prod-4110` and `marketing-prod-4110` (all three need `SCHOOL_PORT=4110`
-so their links point at 4110). The tests read `SCHOOL_PORT`: `SCHOOL_PORT=4110 npx playwright test ...`.
-
-Re-run against 4110 (cut off at 500 s, so partial):
-- approval-setup "owner flow": the verify link now works (port fix confirmed). It fails later, on a `toHaveValue` check in the setup step. Look at `/private/tmp/claude-501/pw-prod2/ux-approval-setup-approval-02540*/`.
-- attendance "past day": test-side strict-mode miss. `getByText("Past day")` matches the badge and the sentence; use `{ exact: true }`.
-- attendance "teacher mark" and "admin register": open the screenshots in `/private/tmp/claude-501/pw-prod2/ux-attendance-*/`.
-- billing and academics: they did not report before the cut-off, so re-run them.
-
-1. Stop the prod servers, rebuild (the last fixes are not in the build yet), then restart:
-   `pnpm --filter @smw/school build && pnpm --filter @smw/console build && pnpm --filter @smw/marketing build`.
-   Then start `school-prod`, `console-prod` and `marketing-prod` from `.claude/launch.json`.
-2. Re-run the specs that failed on the first prod run (expected fixed by the changes above):
-   `npx playwright test tests/e2e/ux-approval-setup.spec.ts tests/e2e/ux-attendance.spec.ts tests/e2e/ux-billing-support-notify.spec.ts tests/e2e/ux-academics-timetable.spec.ts --project=desktop --workers=4`
-   - approval-setup ×3: the verify-email link had no port, and the setup loader overflowed on phones. Both are fixed.
-   - attendance ×2: the status locator was ambiguous (fixed). The demo teacher had no class (seed fixed, and the local DB was patched).
-   - billing: the fake checkout returned 404 under `next start` (fixed via `isLocal()`).
-   - academics-timetable "now and next" (student view): timed out in `waitForURL` after sign-in. This is likely the same port-less URL bug, now fixed. If it still fails after the rebuild, check the student login redirect.
-3. Run the full suite, then all unit tests one after another: `pnpm turbo run test --concurrency=2`.
-4. Run `pnpm db:fresh` before a clean demo; test runs leave data behind ("Asha Rao" teachers, paid sunrise invoices).
-5. Generate the production migration: `pnpm --filter @smw/db generate`.
+## Test and run locally
+- `colima start`, then `pnpm db:up` (Postgres on 5433, RustFS, Mailpit at http://localhost:8025). Local DBs built by push cannot use `migrate`; apply new migration SQL with psql, or run `pnpm db:fresh`, which wipes local data and takes about 150 s.
+- e2e runs on the **production build**, never the dev server:
+  1. `pnpm --filter @smw/school build && pnpm --filter @smw/console build && pnpm --filter @smw/marketing build`
+  2. `pnpm db:fresh`
+  3. start `school-prod`, `console-prod` and `marketing-prod` from `.claude/launch.json` (or the `*-prod-4110` set with `SCHOOL_PORT=4110` when 4100 is taken)
+  4. `npx playwright test --project=desktop --workers=4`
+- Unit tests: `pnpm test`. Typecheck: `pnpm typecheck`.
+- Colima has 3 GB and 2 CPUs (raised to 6 GB and 4 on 2026-11-20, but `~/supabase-local/up.sh` starts it at 3 GB): keep only one Supabase stack running next to this Postgres. The local hr-app (Kaamsetu) containers were stopped for this; bring them back with `supabase start` in `~/supabase-local`.
 
 ## Temporary deployment on free-vm (until EC2 + S3)
 - URLs:
   - marketing: `https://161-118-163-201.sslip.io`
   - console: `https://console.161-118-163-201.sslip.io`
   - schools: `https://<slug>.161-118-163-201.sslip.io` (a certificate is issued on first visit, only for real schools)
+- **Running:** `378e90f`. Before migrations 0001–0008 the DB was backed up to `/opt/triakshi/backup-20261120-1124-before-0001-0008.sql.gz` (`pg_dumpall`, mode 600).
 - Everything runs locally on the VM: Postgres, RustFS (in place of S3), and the test checkout (`FAKE_PAYMENTS=true`: anyone can "pay", so never on a real launch). WAL archiving is off.
-- **Email is real since 2026-11-20:** Brevo SMTP (`smtp-relay.brevo.com:587`, 300 a day free), sent from `Triakshi AI <bhagabanpaulofficial@gmail.com>`. The Mailpit container still runs but nothing sends to it. Before the switch, the old `.env` was saved as `/opt/triakshi/.env.bak-20261120-1124`.
-- **Deployed 2026-11-20:** `d724564` (Academics group, auth and People, migrations 0001–0008). Before migrating, the DB was backed up to `/opt/triakshi/backup-20261120-1124-before-0001-0008.sql.gz` (`pg_dumpall`, mode 600). The worker runs 12 jobs, including `attendance.send-alerts` and `timetable.publish-due`.
+- **Email is real:** Brevo SMTP (`smtp-relay.brevo.com:587`, 300 a day free), sent from `Triakshi AI <bhagabanpaulofficial@gmail.com>`. The Mailpit container still runs but nothing sends to it. The `.env` from before the switch is `/opt/triakshi/.env.bak-20261120-1124`.
 - Files on the VM:
   - `/opt/triakshi/repo`: the fork's `feat/school-platform` branch
   - `/opt/triakshi/.env`: secrets, mode 600
@@ -158,19 +88,16 @@ Re-run against 4110 (cut off at 500 s, so partial):
   - `/opt/triakshi/superadmin.txt`: the console owner's one-time password and TOTP secret, mode 600
 - The host Caddy (systemd) serves other sites too. The Triakshi part is `/etc/caddy/triakshi.caddy`, imported at the end of `/etc/caddy/Caddyfile`, plus an `on_demand_tls { ask … }` global block at the top. A backup is `Caddyfile.bak-triakshi-*`.
 - Deploy an update:
-  `cd /opt/triakshi/repo && git pull`, then start the build in the background with the guard:
-  `cd /opt/triakshi && : > build.log && nohup ./build.sh > build.log 2>&1 & echo $! > build.pid; nohup ./mem-guard.sh &`.
-  `build.sh` builds worker, school, console and marketing one at a time (pass names to build only some). It is done when `build.log` ends with `BUILD_EXIT=0`. Back up the DB before migrating.
-  then `docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml -f /opt/triakshi/compose.freevm.yml` with `run --rm migrate`, `run --rm worker pnpm --filter @smw/school bootstrap` and `up -d`.
+  1. Back up the DB.
+  2. `cd /opt/triakshi/repo && git pull`
+  3. Build in the background with the guard:
+     `cd /opt/triakshi && : > build.log && nohup ./build.sh > build.log 2>&1 & echo $! > build.pid; nohup ./mem-guard.sh &`
+     `build.sh` builds worker, school, console and marketing one at a time (pass names to build only some). It is done when `build.log` ends with `BUILD_EXIT=0`.
+  4. From `/opt/triakshi/repo`, run `docker compose --env-file /opt/triakshi/.env -f infra/docker-compose.yml -f /opt/triakshi/compose.freevm.yml` with `run --rm migrate`, then `run --rm worker pnpm --filter @smw/school bootstrap`, then `up -d`.
 - Remove it completely:
   1. Run `down -v` with the same compose command.
   2. Delete the `triakshi-*` images and `rm -rf /opt/triakshi`.
   3. Restore `/etc/caddy/Caddyfile` from `Caddyfile.bak-triakshi-*`, delete `triakshi.caddy`, then `sudo systemctl reload caddy`.
 
-## Local environment notes
-- The local hr-app (Kaamsetu) Supabase containers were stopped to free Colima RAM (production Kaamsetu is untouched).
-  Bring them back with `supabase start` in `~/supabase-local`.
-- Colima has only 2.9 GB RAM. Keep only one Supabase stack running next to this project's Postgres.
-
 ## Owner-only before launch
-Cashfree KYC and keys, the AWS account (EC2, S3, SES), the domain and Cloudflare DNS, DLT registration for SMS, a legal review of the terms and privacy pages, and approval to commit and deploy.
+Cashfree KYC and keys, the AWS account (EC2, S3, SES) and the deploy secrets, the domain and Cloudflare DNS, DLT registration for SMS, a new Brevo key, and a legal review of the terms and privacy pages.
