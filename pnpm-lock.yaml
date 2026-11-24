@@ -253,9 +253,15 @@ importers:
       '@smw/feature-exams':
         specifier: workspace:*
         version: link:../../features/exams
+      '@smw/feature-expenses':
+        specifier: workspace:*
+        version: link:../../features/expenses
       '@smw/feature-fees':
         specifier: workspace:*
         version: link:../../features/fees
+      '@smw/feature-finance':
+        specifier: workspace:*
+        version: link:../../features/finance
       '@smw/feature-home':
         specifier: workspace:*
         version: link:../../features/home
@@ -271,6 +277,9 @@ importers:
       '@smw/feature-notifications':
         specifier: workspace:*
         version: link:../../features/notifications
+      '@smw/feature-payroll':
+        specifier: workspace:*
+        version: link:../../features/payroll
       '@smw/feature-settings':
         specifier: workspace:*
         version: link:../../features/settings
@@ -444,9 +453,15 @@ importers:
       '@smw/feature-exams':
         specifier: workspace:*
         version: link:../../features/exams
+      '@smw/feature-expenses':
+        specifier: workspace:*
+        version: link:../../features/expenses
       '@smw/feature-fees':
         specifier: workspace:*
         version: link:../../features/fees
+      '@smw/feature-finance':
+        specifier: workspace:*
+        version: link:../../features/finance
       '@smw/feature-home':
         specifier: workspace:*
         version: link:../../features/home
@@ -462,6 +477,9 @@ importers:
       '@smw/feature-notifications':
         specifier: workspace:*
         version: link:../../features/notifications
+      '@smw/feature-payroll':
+        specifier: workspace:*
+        version: link:../../features/payroll
       '@smw/feature-settings':
         specifier: workspace:*
         version: link:../../features/settings
@@ -571,6 +589,9 @@ importers:
       '@smw/feature-fees':
         specifier: workspace:*
         version: link:../../features/fees
+      '@smw/feature-finance':
+        specifier: workspace:*
+        version: link:../../features/finance
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
@@ -1388,6 +1409,15 @@ importers:
       '@smw/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@smw/feature-academics':
+        specifier: workspace:*
+        version: link:../academics
+      '@smw/feature-attendance':
+        specifier: workspace:*
+        version: link:../attendance
+      '@smw/feature-expenses':
+        specifier: workspace:*
+        version: link:../expenses
       '@smw/feature-finance':
         specifier: workspace:*
         version: link:../finance

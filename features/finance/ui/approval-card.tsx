@@ -25,6 +25,8 @@ export interface ApprovalCardData {
   selfApproved: boolean;
   /** You asked for this yourself. */
   mine: boolean;
+  /** Names this request waits for. */
+  waitingFor: string[];
   /** The lines of a manual entry, so the approver reads what will post. */
   lines?: { code: string; account: string; debitPaise: number; creditPaise: number }[];
 }
@@ -32,7 +34,7 @@ export interface ApprovalCardData {
 type Action = (fd: FormData) => Promise<FormResult>;
 
 /** One decision: what, how much, why, who asked, and the two buttons. The note is for the maker; rejecting needs one. */
-export function ApprovalCard({ a, approve, reject }: { a: ApprovalCardData; approve: Action; reject: Action }) {
+export function ApprovalCard({ a, approve, reject, withdraw, canDecide }: { a: ApprovalCardData; approve: Action; reject: Action; withdraw: Action; canDecide: boolean }) {
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -44,6 +46,12 @@ export function ApprovalCard({ a, approve, reject }: { a: ApprovalCardData; appr
     if (r.ok) { toast(label); router.refresh(); } else toast(r.error, "danger");
   });
   const open = a.status === "pending";
+  const takeBack = () => start(async () => {
+    const fd = new FormData();
+    fd.set("id", a.id);
+    const r = await withdraw(fd);
+    if (r.ok) { toast("Request withdrawn"); router.refresh(); } else toast(r.error, "danger");
+  });
   return (
     <article className="flex flex-col gap-4 rounded-3xl bg-[var(--ds-surface-container-low)] p-5" aria-label={a.title}>
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -73,9 +81,12 @@ export function ApprovalCard({ a, approve, reject }: { a: ApprovalCardData; appr
         </table>
       ) : null}
       {a.note ? <p className="rounded-2xl bg-white/[0.035] p-3 text-sm"><span className="text-[var(--ds-on-surface-muted)]">Note: </span>{a.note}</p> : null}
-      {open ? (
+      {open ? <p className="text-xs text-[var(--ds-on-surface-muted)]">{!a.mine ? "Waiting for you." : a.waitingFor.length ? `Waiting for ${a.waitingFor.join(", ")}.` : "Waiting for an admin. You are the only one, so approving it yourself needs a written reason."}</p> : null}
+      {open && a.mine ? <div><Button type="button" variant="ghost" className="rounded-full" isLoading={pending} onClick={takeBack}>Withdraw request</Button></div> : null}
+      {a.status === "rejected" && a.mine && a.href ? <p className="text-sm">Fix what was asked, then <Link href={a.href} className="underline">open the document</Link> and send it again.</p> : null}
+      {open && canDecide ? (
         <div className="flex flex-col gap-3">
-          {a.mine ? <p className="text-xs text-[var(--ds-on-surface-muted)]">You asked for this. Another admin should decide it. If you are the only admin, write why you approve it yourself.</p> : null}
+          
           <label className="flex flex-col gap-1.5 text-[13px] text-[var(--ds-on-surface-variant)]">
             Note (needed to reject)
             <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} className="h-10 w-full rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]" />

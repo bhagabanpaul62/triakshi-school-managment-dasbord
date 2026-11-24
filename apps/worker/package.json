@@ -34,6 +34,7 @@
     "@smw/feature-library": "workspace:*",
     "@smw/feature-transport": "workspace:*",
     "@smw/feature-timetable": "workspace:*",
-    "@smw/feature-attendance": "workspace:*"
+    "@smw/feature-attendance": "workspace:*",
+    "@smw/feature-finance": "workspace:*"
   }
 }

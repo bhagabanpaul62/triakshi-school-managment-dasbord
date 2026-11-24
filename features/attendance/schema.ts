@@ -1,10 +1,10 @@
 import { sql } from "drizzle-orm";
-import { boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, date, type AnyPgColumn, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { schoolColumns, tenant, users } from "@smw/db";
 import { academicYears, sections, subjects } from "@smw/feature-academics/schema";
 import { periods, timetableSlots, ttBlockOptions, ttBlockSlots } from "@smw/feature-timetable/schema";
 import { students } from "@smw/feature-students/schema";
-import { ATTENDANCE_MODES, ATTENDANCE_STATUSES, CONDONATION_REASONS, LEAVE_KINDS, LEAVE_STATUSES, STAFF_STATUSES } from "./constants";
+import { ATTENDANCE_MODES, ATTENDANCE_STATUSES, CONDONATION_REASONS, HALF_DAY_SLOTS, LEAVE_KINDS, LEAVE_STATUSES, LEDGER_KINDS, STAFF_STATUSES } from "./constants";
 
 export { ATTENDANCE_STATUSES, STAFF_STATUSES };
 
@@ -110,6 +110,10 @@ export const leaveRequests = pgTable("leave_requests", {
   /** Set when an approver turned an earlier decision around; the audit log holds the before and after. */
   reversedBy: uuid("reversed_by").references(() => users.id, { onDelete: "set null" }),
   reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  /** Staff requests only. Null on old requests and on students': those count as paid leave. */
+  typeId: uuid("type_id").references((): AnyPgColumn => leaveTypes.id, { onDelete: "restrict" }),
+  /** A half day is a single day: its first or second half. */
+  halfDay: text("half_day").$type<(typeof HALF_DAY_SLOTS)[number]>(),
 }, (t) => [
   ...tenant(t, "leave_requests"),
   index("leave_requests_status").on(t.schoolId, t.status, t.fromDate),
@@ -127,3 +131,37 @@ export const attendanceCondonations = pgTable("attendance_condonations", {
   fileName: text("file_name"),
   createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
 }, (t) => [...tenant(t, "attendance_condonations"), uniqueIndex("attendance_condonations_student_year").on(t.studentId, t.yearId)]);
+
+/** A kind of staff leave. Days are half-days (integers): 24 = 12 days. */
+export const leaveTypes = pgTable("leave_types", {
+  ...schoolColumns(),
+  name: text("name").notNull(),
+  code: text("code").notNull(),
+  paid: boolean("paid").notNull().default(true),
+  yearlyHalfDays: integer("yearly_half_days").notNull().default(0),
+  carryForwardHalfDays: integer("carry_forward_half_days").notNull().default(0),
+  encashable: boolean("encashable").notNull().default(false),
+  halfDayAllowed: boolean("half_day_allowed").notNull().default(true),
+  /** A supporting file is needed when the request has more working days than this. */
+  needsFileAfterDays: integer("needs_file_after_days"),
+  isActive: boolean("is_active").notNull().default(true),
+  sort: integer("sort").notNull().default(0),
+}, (t) => [...tenant(t, "leave_types"), uniqueIndex("leave_types_code").on(t.schoolId, sql`lower(${t.code})`)]);
+
+/** Every change of a staff member's leave balance, signed half-days. The balance is the sum; nothing is edited. */
+export const leaveLedger = pgTable("leave_ledger", {
+  ...schoolColumns(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  typeId: uuid("type_id").notNull().references(() => leaveTypes.id, { onDelete: "restrict" }),
+  /** Credit and carry: the first day of the leave year. Used: the first leave day of that month. */
+  date: date("date").notNull(),
+  halfDays: integer("half_days").notNull(),
+  kind: text("kind").$type<(typeof LEDGER_KINDS)[number]>().notNull(),
+  requestId: uuid("request_id").references((): AnyPgColumn => leaveRequests.id, { onDelete: "set null" }),
+  note: text("note"),
+}, (t) => [
+  ...tenant(t, "leave_ledger"),
+  uniqueIndex("leave_ledger_yearly").on(t.userId, t.typeId, t.date, t.kind).where(sql`${t.kind} in ('credit','carry')`),
+  index("leave_ledger_person").on(t.schoolId, t.userId, t.typeId, t.date),
+  index("leave_ledger_request").on(t.requestId),
+]);

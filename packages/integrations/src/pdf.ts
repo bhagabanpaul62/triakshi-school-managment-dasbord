@@ -68,7 +68,14 @@ export class PdfBuilder {
   /** True after a framed block ran past its bottom edge. */
   get overflowed() { return this.spilled; }
 
-  private newPage() { this.page = this.doc.addPage([this.pw, this.ph]); this.y = this.ph - this.m; }
+  /** Runs after every page the flow adds, so a watermark or running header can be drawn on each. */
+  onPage?: (b: PdfBuilder) => void;
+
+  private newPage() { this.page = this.doc.addPage([this.pw, this.ph]); this.y = this.ph - this.m; this.onPage?.(this); }
+  /** Start a new page now. */
+  pageBreak() { this.newPage(); return this; }
+  /** Lowest point the flow may reach on this page or frame. */
+  get bottom() { return this.floor; }
   /** Make room for `h` points. Starts a new page and returns true when the page was full; inside a frame it only notes the spill. */
   ensure(h: number) {
     if (this.y - h >= this.floor) return false;
@@ -133,12 +140,17 @@ export class PdfBuilder {
   get cursor() { return this.y; }
   set cursor(y: number) { this.y = y; }
 
-  /** Draw a PNG or JPEG with its top edge at `top` (PDF coordinates). Does not move the cursor. False if the bytes are not a readable image; never throws. */
-  async image(bytes: Uint8Array, r: { x: number; top: number; w: number; h: number }) {
+  /**
+   * Draw a PNG or JPEG with its top edge at `top` (PDF coordinates). Does not move the cursor. False if the bytes are not a readable image; never throws.
+   * `fit` keeps the picture's proportions inside the box (a logo); otherwise it fills the box.
+   */
+  async image(bytes: Uint8Array, r: { x: number; top: number; w: number; h: number; fit?: boolean }) {
     try {
       const png = bytes[0] === 0x89 && bytes[1] === 0x50;
       const img = await (png ? this.doc.embedPng(bytes) : this.doc.embedJpg(bytes));
-      this.page.drawImage(img, { x: r.x, y: r.top - r.h, width: r.w, height: r.h });
+      const k = r.fit ? Math.min(r.w / img.width, r.h / img.height) : 0;
+      const [w, h] = r.fit ? [img.width * k, img.height * k] : [r.w, r.h];
+      this.page.drawImage(img, { x: r.x, y: r.top - h, width: w, height: h });
       return true;
     } catch { return false; }
   }

@@ -43,7 +43,7 @@ export class PeriodService extends FinanceService {
       const [now] = await tx.select().from(finPeriods).where(eq(finPeriods.month, raw)).for("update");
       const was = now?.status ?? "open";
       if (was === status) throw new ConflictError(`That month is already ${status === "soft" ? "soft closed" : status}.`);
-      if (status === "soft" && was === "closed") throw new ConflictError("That month is closed. Reopen it first.");
+      if (status === "soft" && was === "closed") throw new ConflictError("That month is closed. Reopen it first, with a reason, from Finance setup, Periods.");
       await tx.insert(finPeriods).values({ schoolId: this.ctx.schoolId, month: raw, status, reason: reason ?? null, changedBy: this.ctx.userId })
         .onConflictDoUpdate({ target: [finPeriods.schoolId, finPeriods.month], set: { status, reason: reason ?? null, changedBy: this.ctx.userId } });
       return { month: raw, status, was };

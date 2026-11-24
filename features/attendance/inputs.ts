@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { f } from "@smw/feature-kit";
-import { ATTENDANCE_MODES, ATTENDANCE_STATUSES, CONDONATION_REASONS, STAFF_STATUSES } from "./constants";
+import { ATTENDANCE_MODES, ATTENDANCE_STATUSES, CONDONATION_REASONS, HALF_DAY_SLOTS, STAFF_STATUSES } from "./constants";
 
 /** A grid posts its rows as one JSON field. */
 const json = (v: unknown) => { if (typeof v !== "string") return v; try { return JSON.parse(v); } catch { return undefined; } };
@@ -34,10 +34,17 @@ export const leaveApplyInput = z.object({
   fromDate: f.date("Pick the first day"),
   toDate: f.date("Pick the last day"),
   reason: f.text(3, 500, "Tell the school why"),
+  /** Staff only (required for them): the leave type, a half day, and taking the days beyond the balance as unpaid. */
+  typeId: f.optId(),
+  halfDay: z.enum(["", ...HALF_DAY_SLOTS]).transform((v) => v || undefined).optional(),
+  split: f.bool(),
 });
 
+/** What the apply form shows before sending: the same dates and type, nothing else. */
+export const leavePreviewInput = leaveApplyInput.pick({ fromDate: true, toDate: true, typeId: true, halfDay: true });
+
 /** Edit a waiting request: same dates and reason as applying (the student and the file stay as they were). */
-export const leaveEditInput = leaveApplyInput.omit({ studentId: true }).extend({ id: f.id() });
+export const leaveEditInput = leaveApplyInput.omit({ studentId: true, split: true }).extend({ id: f.id() });
 
 export const leaveReverseInput = z.object({ id: f.id(), note: f.optText(300) });
 
@@ -58,3 +65,26 @@ export const settingsInput = z.object({
 const condonationBody = { reason: z.enum(CONDONATION_REASONS, { message: "Pick a reason" }), note: f.optText(300) };
 export const condonationInput = z.object({ studentId: f.id("Pick a student"), ...condonationBody });
 export const condonationEditInput = z.object({ id: f.id(), ...condonationBody });
+
+/** A half-day count from days in steps of a half. */
+const halfSteps = (max: number) => z.coerce.number().min(0).max(max).refine((v) => Number.isInteger(v * 2), "Use whole or half days");
+
+export const leaveTypeInput = z.object({
+  name: f.text(2, 40, "Name the leave type"),
+  code: f.text(1, 8, "Give it a short code").transform((v) => v.toUpperCase()),
+  paid: f.bool(),
+  yearlyDays: halfSteps(366),
+  carryDays: halfSteps(366),
+  encashable: f.bool(),
+  halfDayAllowed: f.bool(),
+  needsFileAfterDays: f.optInt(0, 60),
+  isActive: f.bool(),
+  sort: f.optInt(0, 99),
+}).transform(({ yearlyDays, carryDays, sort, ...r }) => ({ ...r, yearlyHalfDays: yearlyDays * 2, carryForwardHalfDays: carryDays * 2, sort: sort ?? 0 }));
+
+export const leaveAdjustInput = z.object({
+  userId: f.id("Pick a person"),
+  typeId: f.id("Pick a leave type"),
+  days: z.coerce.number().refine((v) => v !== 0 && Number.isInteger(v * 2), "Use whole or half days, not zero").refine((v) => Math.abs(v) <= 366, "Too many days"),
+  reason: f.text(3, 200, "Say why"),
+});

@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, ne, sql, sum, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError, type Ctx } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError, type Ctx } from "@smw/feature-kit";
 import { todayIST } from "@smw/feature-kit/money";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { MoneyService } from "@smw/feature-finance/base";
 import type { PostLine } from "@smw/feature-finance/posting";
-import { finJournals } from "@smw/feature-finance/schema";
+import { finApprovals, finJournals } from "@smw/feature-finance/schema";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
@@ -171,6 +171,14 @@ export abstract class FeesBase extends MoneyService<Perm> {
     await tx.update(feeAllocations).set({ undoneAt: new Date() }).where(inArray(feeAllocations.id, rows.map((r) => r.id)));
     await this.bump(tx, "paid_paise", rows.map((r) => ({ lineId: r.lineId, amountPaise: -r.amountPaise })));
     return rows.map(({ id: _id, lineId, ...s }) => ({ ...s, lineId }));
+  }
+
+  /** Take back a request that waits for approval. Only who asked (or an admin) may; the request stays on file as withdrawn. */
+  protected async withdrawRequest(tx: Tx, kind: string, refId: string) {
+    const [a] = await tx.select().from(finApprovals).where(and(eq(finApprovals.kind, kind), eq(finApprovals.refId, refId), eq(finApprovals.status, "pending"))).for("update");
+    if (!a) throw new ConflictError("This is not waiting for approval any more, so there is nothing to withdraw. Open the request to see what happened.");
+    if (a.requestedBy !== this.ctx.userId && this.ctx.role !== "admin") throw new ForbiddenError("Only the person who asked can withdraw this.");
+    await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(eq(finApprovals.id, a.id));
   }
 
   // ---------- posting ----------

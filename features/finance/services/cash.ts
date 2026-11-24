@@ -93,9 +93,9 @@ export class CashAccountService extends FinanceService {
       const [row] = await tx.select().from(finCashAccounts).where(eq(finCashAccounts.id, id)).for("update");
       if (!row) throw new NotFoundError("Cash account");
       if (!active) {
-        if (await balanceOf(tx, [row.accountId])) throw new ConflictError("It still holds money. Transfer it out first so the balance is zero.");
+        if (await balanceOf(tx, [row.accountId])) throw new ConflictError("It still holds money. Use Banking, Move money, to transfer it to another account so the balance is zero, then switch it off.");
         const others = await tx.select({ id: finCashAccounts.id }).from(finCashAccounts).where(and(eq(finCashAccounts.kind, row.kind), eq(finCashAccounts.isActive, true), sql`${finCashAccounts.id} <> ${id}`)).limit(1);
-        if (!others.length) throw new ConflictError(`This is the only ${row.kind} account in use.`);
+        if (!others.length) throw new ConflictError(`This is the only ${row.kind} account in use. Add another one in Finance setup, Cash accounts and UPI, first.`);
       }
       const [r] = await tx.update(finCashAccounts).set({ isActive: active, ...(active ? {} : { isDefault: false }) }).where(eq(finCashAccounts.id, id)).returning();
       await tx.update(finAccounts).set({ isActive: active }).where(eq(finAccounts.id, row.accountId));

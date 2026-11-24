@@ -8,11 +8,14 @@ import billing from "@smw/feature-billing/feature";
 import domains from "@smw/feature-domains/feature";
 import events from "@smw/feature-events/feature";
 import exams from "@smw/feature-exams/feature";
+import expenses from "@smw/feature-expenses/feature";
 import fees from "@smw/feature-fees/feature";
+import finance from "@smw/feature-finance/feature";
 import home from "@smw/feature-home/feature";
 import library from "@smw/feature-library/feature";
 import messages from "@smw/feature-messages/feature";
 import notifications from "@smw/feature-notifications/feature";
+import payroll from "@smw/feature-payroll/feature";
 import settings from "@smw/feature-settings/feature";
 import setup from "@smw/feature-setup/feature";
 import staff from "@smw/feature-staff/feature";
@@ -23,4 +26,4 @@ import transport from "@smw/feature-transport/feature";
 import website from "@smw/feature-website/feature";
 
 /** Every feature, in dependency order. */
-export const FEATURES = orderFeatures([academics, announcements, assignments, attendance, billing, domains, events, exams, fees, home, library, messages, notifications, settings, setup, staff, students, support, timetable, transport, website]);
+export const FEATURES = orderFeatures([academics, announcements, assignments, attendance, billing, domains, events, exams, expenses, fees, finance, home, library, messages, notifications, payroll, settings, setup, staff, students, support, timetable, transport, website]);

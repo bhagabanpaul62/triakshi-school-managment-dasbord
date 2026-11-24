@@ -6,6 +6,8 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import type { FormResult } from "@smw/ui/shell/FormModal";
 import { cn } from "@smw/ui/utils";
 import { ApprovalService, type ApprovalHandlers } from "../approvals";
+import { ApprovalDeskService } from "../services/approval-desk";
+import { withdrawRequest } from "./actions";
 import { JournalService } from "../services/journals";
 import { ApprovalCard, type ApprovalCardData } from "./approval-card";
 import { kindLabel } from "./labels";
@@ -28,6 +30,7 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
   const sp = await searchParams;
   const status = one(sp.status) ?? "pending", page = Math.max(1, Number(one(sp.page)) || 1);
   const { rows, total, pageCount } = await svc.list({ page, pageSize: PAGE, filters: { status, kind: one(sp.kind) } });
+  const waitingFor = await new ApprovalDeskService(ctx).approvers(ctx.userId);
   const drafts = await new JournalService(ctx).drafts(rows.filter((r) => r.kind === "finance.journal").map((r) => r.refId));
 
   const cards = new Map<string, ApprovalCardData[]>();
@@ -36,7 +39,7 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
     const list = cards.get(r.kind) ?? [];
     list.push({
       id: r.id, title: r.title, amountPaise: r.amountPaise, reason: r.reason, href: r.href, status: r.status, requestedByName: r.requestedByName, decidedByName: r.decidedByName,
-      createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null, note: r.note, selfApproved: r.selfApproved, mine: r.requestedBy === ctx.userId, lines: draft?.lines,
+      createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null, note: r.note, selfApproved: r.selfApproved, mine: r.requestedBy === ctx.userId, waitingFor, lines: draft?.lines,
     });
     cards.set(r.kind, list);
   }
@@ -58,7 +61,7 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
           {[...cards].map(([kind, items]) => (
             <section key={kind} aria-labelledby={`k-${kind}`}>
               <h2 id={`k-${kind}`} className="mb-3 text-[15px] font-medium">{kindLabel(kind)} <span className="ml-1 text-sm font-normal text-[var(--ds-on-surface-muted)]">{items.length}</span></h2>
-              <div className="flex flex-col gap-3">{items.map((a) => <ApprovalCard key={a.id} a={a} approve={approve} reject={reject} />)}</div>
+              <div className="flex flex-col gap-3">{items.map((a) => <ApprovalCard key={a.id} a={a} approve={approve} reject={reject} withdraw={withdrawRequest} canDecide />)}</div>
             </section>
           ))}
           {pageCount > 1 ? (

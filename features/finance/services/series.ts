@@ -40,7 +40,7 @@ export class SeriesService extends FinanceService {
     await this.write("settings", async (tx) => {
       const [s] = await tx.select().from(finSeries).where(eq(finSeries.key, key)).for("update");
       const [used] = await tx.select({ n: sql<number>`count(*)::int` }).from(sequences).where(sql`${sequences.key} like ${`${key}:%`}`);
-      if (s?.locked || Number(used?.n ?? 0) > 0) throw new ConflictError("A number from this series was already used, so it can no longer change.");
+      if (s?.locked || Number(used?.n ?? 0) > 0) throw new ConflictError("A number from this series was already used, so it can no longer change. Start a new series prefix only at the next financial year, with the auditor's say.");
       await tx.insert(finSeries).values({ schoolId: this.ctx.schoolId, key, ...d }).onConflictDoUpdate({ target: [finSeries.schoolId, finSeries.key], set: d });
     }, () => ({ action: "update", entity: "Number series", summary: `Changed the ${SERIES_DEFAULTS[key]!.label.toLowerCase()} numbering to ${d.prefix}, ${d.width} digits, from ${d.startAt}`, meta: { key, ...d } }));
     return (await this.list()).find((r) => r.key === key)!;

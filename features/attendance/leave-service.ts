@@ -8,8 +8,11 @@ import attendanceFeature from "./feature";
 import { notice, sendMails, type AlertMail } from "./alerts";
 import { FileStore, type StoredRef, type UploadedFile } from "./files";
 import { leaveApplyInput, leaveDecisionInput, leaveEditInput, leaveReverseInput } from "./inputs";
-import { attendanceHolidays, leaveRequests, staffAttendance, studentAttendance } from "./schema";
-import { addDays, isDate, isSunday, todayIST } from "./stats";
+import { LeaveBalanceService } from "./leave-balances";
+import { workingDays } from "./leave-days";
+import { assertBalance, ensureCredit, ensureTypes, holidaySet, lockPerson, requestMonths, writeReversed, writeUsed } from "./leave-ledger";
+import { leaveRequests, leaveTypes, staffAttendance, studentAttendance } from "./schema";
+import { addDays, isDate, todayIST } from "./stats";
 
 type Perm = keyof typeof attendanceFeature.permissions;
 export type LeaveRow = {
@@ -19,6 +22,10 @@ export type LeaveRow = {
   canReverse: boolean;
   /** The requester may still change a waiting request. */
   canEdit: boolean;
+  /** Staff requests: the leave type; null on old ones, which count as paid. */
+  typeName: string | null; halfDay: "first" | "second" | null;
+  /** Who decides a waiting request, in words. */
+  waitingFor: string | null;
 };
 
 const MAX_DAYS = 60;
@@ -72,6 +79,7 @@ export class LeaveService extends SchoolService<Perm> {
 
   private applyTx(data: ReturnType<typeof leaveApplyInput.parse>, ref: StoredRef | null) {
     return this.write("leave", async (tx) => {
+      await ensureTypes(tx, this.ctx.schoolId);
       let studentId: string | null = null, userId: string | null = null;
       if (this.ctx.role === "student") {
         const mine = await this.myStudentIds(tx);
@@ -83,12 +91,30 @@ export class LeaveService extends SchoolService<Perm> {
       } else userId = this.ctx.userId;
 
       await this.assertNoClash(tx, { studentId, userId }, data.fromDate, data.toDate);
+      const base = { schoolId: this.ctx.schoolId, kind: studentId ? "student" as const : "staff" as const, studentId, userId, requestedBy: this.ctx.userId, reason: data.reason, fileKey: ref?.fileKey ?? null, fileName: ref?.fileName ?? null };
+      if (studentId) {
+        const [row] = await tx.insert(leaveRequests).values({ ...base, fromDate: data.fromDate, toDate: data.toDate }).returning();
+        return row!;
+      }
 
-      const [row] = await tx.insert(leaveRequests).values({
-        schoolId: this.ctx.schoolId, kind: studentId ? "student" : "staff", studentId, userId, requestedBy: this.ctx.userId,
-        fromDate: data.fromDate, toDate: data.toDate, reason: data.reason, fileKey: ref?.fileKey ?? null, fileName: ref?.fileName ?? null,
-      }).returning();
-      return row!;
+      if (!data.typeId) throw new ValidationError({ typeId: "Pick a leave type" });
+      await ensureCredit(tx, this.ctx.schoolId, todayIST(), this.ctx.userId);
+      const plan = await LeaveBalanceService.plan(tx, userId!, { typeId: data.typeId, fromDate: data.fromDate, toDate: data.toDate, halfDay: data.halfDay });
+      if (plan.needsFile && !ref) throw new ValidationError({ file: `${plan.type.name} leave over ${plan.type.needsFileAfterDays} days needs a note or document` });
+      if (plan.unpaidDays.length === 0) {
+        const [row] = await tx.insert(leaveRequests).values({ ...base, fromDate: data.fromDate, toDate: data.toDate, typeId: plan.type.id, halfDay: data.halfDay ?? null }).returning();
+        return row!;
+      }
+      // Short of balance: the person must say yes to taking the rest as unpaid, and sees the split before sending.
+      const unpaid = await LeaveBalanceService.unpaidType(tx);
+      const days = (n: number) => `${n / (data.halfDay ? 1 : 2)} day${n / (data.halfDay ? 1 : 2) === 1 ? "" : "s"}`;
+      if (!data.split || !unpaid) throw new ValidationError({ split: unpaid
+        ? `You have ${days(plan.halfDays - plan.short)} of ${plan.type.name} leave for these dates. Tick "Take the other ${days(plan.short)} as unpaid leave" to send it in two parts.`
+        : `Not enough ${plan.type.name} leave and the school has no unpaid leave type. Ask the admin to add one under Leave types.` });
+      const lastPaid = plan.paidDays.at(-1), firstUnpaid = plan.unpaidDays[0]!;
+      const paid = lastPaid ? (await tx.insert(leaveRequests).values({ ...base, fromDate: data.fromDate, toDate: lastPaid, typeId: plan.type.id, halfDay: data.halfDay ?? null }).returning())[0] : null;
+      const [rest] = await tx.insert(leaveRequests).values({ ...base, fromDate: firstUnpaid, toDate: data.toDate, typeId: unpaid.id, halfDay: data.halfDay ?? null }).returning();
+      return paid ?? rest!;
     }, (r) => ({ action: "apply", entity: "Leave request", entityId: r.id, summary: `Leave ${r.fromDate} to ${r.toDate}` }));
   }
 
@@ -114,15 +140,22 @@ export class LeaveService extends SchoolService<Perm> {
       if (!r) throw new NotFoundError("Leave request");
       if (r.status !== "pending") throw new ValidationError({ id: "Only a waiting request can be changed" });
       await this.assertNoClash(tx, r, data.fromDate, data.toDate, r.id);
-      const [row] = await tx.update(leaveRequests).set({ fromDate: data.fromDate, toDate: data.toDate, reason: data.reason }).where(eq(leaveRequests.id, r.id)).returning();
+      const typeId = r.kind === "staff" ? (data.typeId ?? r.typeId) : null;
+      if (r.kind === "staff" && !typeId && !r.typeId) throw new ValidationError({ typeId: "Pick a leave type" });
+      if (typeId) {
+        const plan = await LeaveBalanceService.plan(tx, r.userId!, { typeId, fromDate: data.fromDate, toDate: data.toDate, halfDay: data.halfDay }, r.id);
+        if (plan.unpaidDays.length) throw new ValidationError({ typeId: `Not enough ${plan.type.name} leave for these dates. Send a new request to take the rest as unpaid.` });
+      }
+      const [row] = await tx.update(leaveRequests).set({ fromDate: data.fromDate, toDate: data.toDate, reason: data.reason, typeId, halfDay: r.kind === "staff" ? data.halfDay ?? null : null }).where(eq(leaveRequests.id, r.id)).returning();
       return row!;
     }, (r) => ({ action: "update", entity: "Leave request", entityId: r.id, summary: `Changed leave to ${r.fromDate} to ${r.toDate}` }));
   }
 
   private async rows(tx: Tx, where: SQL | undefined, canAct: (r: { kind: string; sectionId: string | null }) => boolean): Promise<LeaveRow[]> {
     const rows = await tx.select({
-      r: leaveRequests, student: students.name, sectionId: students.sectionId, section: sections.name, cls: classes.name, staff: users.name,
+      r: leaveRequests, student: students.name, sectionId: students.sectionId, section: sections.name, cls: classes.name, staff: users.name, typeName: leaveTypes.name,
     }).from(leaveRequests)
+      .leftJoin(leaveTypes, eq(leaveTypes.id, leaveRequests.typeId))
       .leftJoin(students, eq(students.id, leaveRequests.studentId))
       .leftJoin(sections, eq(sections.id, students.sectionId))
       .leftJoin(classes, eq(classes.id, sections.classId))
@@ -134,6 +167,7 @@ export class LeaveService extends SchoolService<Perm> {
       fileName: x.r.fileName, fileUrl: await this.files.url(x.r.fileKey),
       canDecide: x.r.status === "pending" && canAct({ kind: x.r.kind, sectionId: x.sectionId }),
       canReverse: (x.r.status === "approved" || x.r.status === "rejected") && canAct({ kind: x.r.kind, sectionId: x.sectionId }), canEdit: false,
+      typeName: x.typeName, halfDay: x.r.halfDay, waitingFor: x.r.status === "pending" ? (x.r.kind === "staff" ? "the admin" : "the class teacher or the admin") : null,
     })));
   }
 
@@ -175,6 +209,7 @@ export class LeaveService extends SchoolService<Perm> {
       const won = await tx.update(leaveRequests).set({ status: data.decision, decidedBy: this.ctx.userId, decidedAt: new Date(), note: data.note ?? null })
         .where(and(eq(leaveRequests.id, r.id), eq(leaveRequests.status, "pending"))).returning({ id: leaveRequests.id });
       if (won.length === 0) throw new ConflictError("This request was just decided by someone else");
+      if (data.decision === "approved") await this.useBalance(tx, r);
       const marked = data.decision === "approved" ? await this.markDays(tx, r) : 0;
 
       const verdict = data.decision === "approved" ? "approved" : "not approved";
@@ -209,6 +244,7 @@ export class LeaveService extends SchoolService<Perm> {
       const won = await tx.update(leaveRequests).set({ status: to, decidedBy: this.ctx.userId, decidedAt: now, reversedBy: this.ctx.userId, reversedAt: now, note: data.note ?? null })
         .where(and(eq(leaveRequests.id, r.id), eq(leaveRequests.status, r.status))).returning({ id: leaveRequests.id });
       if (won.length === 0) throw new ConflictError("This request was just changed by someone else");
+      if (to === "approved") await this.useBalance(tx, r); else await writeReversed(tx, this.ctx.schoolId, r);
       const days = to === "approved" ? await this.markDays(tx, r) : await this.clearDays(tx, r);
 
       const title = `Leave ${r.fromDate} to ${r.toDate} is now ${to === "approved" ? "approved" : "not approved"}`;
@@ -222,9 +258,20 @@ export class LeaveService extends SchoolService<Perm> {
     return { id: out.request.id, status: out.to, days: out.days };
   }
 
+  /** A typed staff request takes its days from the balance when approved. The person's lock makes two approvals line up. */
+  private async useBalance(tx: Tx, r: typeof leaveRequests.$inferSelect) {
+    if (r.kind !== "staff" || !r.typeId || !r.userId) return;
+    const [type] = await tx.select().from(leaveTypes).where(eq(leaveTypes.id, r.typeId)).limit(1);
+    if (!type) return;
+    await lockPerson(tx, r.userId, type.id);
+    const months = await requestMonths(tx, r);
+    await assertBalance(tx, r.userId, type, months, { withHeld: false });
+    await writeUsed(tx, this.ctx.schoolId, r, months);
+  }
+
   /** Remove the leave days an approval wrote (only those: a day a teacher marked another way stays). */
   private async clearDays(tx: Tx, r: typeof leaveRequests.$inferSelect): Promise<number> {
-    const same = (t: typeof staffAttendance | typeof studentAttendance) => and(eq(t.status, "leave"), eq(t.note, LEAVE_NOTE), gte(t.date, r.fromDate), lte(t.date, r.toDate));
+    const same = (t: typeof staffAttendance | typeof studentAttendance) => and(inArray(t.status, ["leave", "half_day"]), eq(t.note, LEAVE_NOTE), gte(t.date, r.fromDate), lte(t.date, r.toDate));
     const gone = r.kind === "staff"
       ? await tx.delete(staffAttendance).where(and(eq(staffAttendance.userId, r.userId!), same(staffAttendance))).returning({ id: staffAttendance.id })
       : await tx.delete(studentAttendance).where(and(eq(studentAttendance.studentId, r.studentId!), same(studentAttendance))).returning({ id: studentAttendance.id });
@@ -241,16 +288,14 @@ export class LeaveService extends SchoolService<Perm> {
 
   /** Mark each school day of the request as leave: skips holidays and Sundays, never overwrites a day marked present. */
   private async markDays(tx: Tx, r: typeof leaveRequests.$inferSelect): Promise<number> {
-    const holidays = new Set((await tx.select({ date: attendanceHolidays.date }).from(attendanceHolidays)
-      .where(and(gte(attendanceHolidays.date, r.fromDate), lte(attendanceHolidays.date, r.toDate)))).map((h) => h.date));
-    const days: string[] = [];
-    for (let d = r.fromDate; d <= r.toDate; d = addDays(d, 1)) if (!holidays.has(d) && !isSunday(d)) days.push(d);
+    const days = workingDays(r.fromDate, r.toDate, await holidaySet(tx, r.fromDate, r.toDate));
     if (days.length === 0) return 0;
+    const status = r.halfDay ? "half_day" as const : "leave" as const;
     const note = LEAVE_NOTE;
 
     if (r.kind === "staff") {
-      const done = await tx.insert(staffAttendance).values(days.map((date) => ({ schoolId: this.ctx.schoolId, userId: r.userId!, date, status: "leave" as const, note, markedBy: this.ctx.userId })))
-        .onConflictDoUpdate({ target: [staffAttendance.userId, staffAttendance.date], set: { status: "leave", note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${staffAttendance.status} <> 'present'` })
+      const done = await tx.insert(staffAttendance).values(days.map((date) => ({ schoolId: this.ctx.schoolId, userId: r.userId!, date, status, note, markedBy: this.ctx.userId })))
+        .onConflictDoUpdate({ target: [staffAttendance.userId, staffAttendance.date], set: { status, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${staffAttendance.status} <> 'present'` })
         .returning({ id: staffAttendance.id });
       return done.length;
     }

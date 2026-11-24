@@ -48,7 +48,10 @@
     "@smw/feature-transport": "workspace:*",
     "@smw/feature-website": "workspace:*",
     "@smw/feature-home": "workspace:*",
-    "@smw/feature-setup": "workspace:*"
+    "@smw/feature-setup": "workspace:*",
+    "@smw/feature-expenses": "workspace:*",
+    "@smw/feature-finance": "workspace:*",
+    "@smw/feature-payroll": "workspace:*"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",

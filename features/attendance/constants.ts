@@ -32,3 +32,15 @@ export type LeaveStatus = (typeof LEAVE_STATUSES)[number];
 export const DEFAULT_THRESHOLD = 75;
 /** Classes whose students sit board exams. */
 export const BOARD_GRADES = [10, 12] as const;
+
+export const LEDGER_KINDS = ["credit", "carry", "used", "reversed", "adjust", "encash"] as const;
+export type LedgerKind = (typeof LEDGER_KINDS)[number];
+export const HALF_DAY_SLOTS = ["first", "second"] as const;
+
+/** Created for a school the first time anyone opens leave. Days are stored in half-days (24 = 12 days). */
+export const DEFAULT_LEAVE_TYPES = [
+  { code: "CL", name: "Casual", paid: true, yearlyHalfDays: 24, carryForwardHalfDays: 0, encashable: false, halfDayAllowed: true, needsFileAfterDays: null, sort: 1 },
+  { code: "SL", name: "Sick", paid: true, yearlyHalfDays: 20, carryForwardHalfDays: 0, encashable: false, halfDayAllowed: true, needsFileAfterDays: 2, sort: 2 },
+  { code: "EL", name: "Earned", paid: true, yearlyHalfDays: 30, carryForwardHalfDays: 60, encashable: true, halfDayAllowed: true, needsFileAfterDays: null, sort: 3 },
+  { code: "LOP", name: "Unpaid", paid: false, yearlyHalfDays: 0, carryForwardHalfDays: 0, encashable: false, halfDayAllowed: true, needsFileAfterDays: null, sort: 4 },
+] as const;

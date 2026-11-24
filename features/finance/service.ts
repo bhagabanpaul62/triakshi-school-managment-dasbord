@@ -1,4 +1,5 @@
 export * from "./services/accounts";
+export * from "./services/approval-desk";
 export * from "./services/cash";
 export * from "./services/common";
 export * from "./services/control";
