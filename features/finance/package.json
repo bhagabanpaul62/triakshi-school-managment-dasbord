@@ -10,6 +10,7 @@
     "./seed": "./seed.ts",
     "./jobs": "./jobs.ts",
     "./ui/*": "./ui/*.tsx",
+    "./templates/ui/*": "./templates/ui/*.tsx",
     "./*": "./*.ts"
   },
   "scripts": {

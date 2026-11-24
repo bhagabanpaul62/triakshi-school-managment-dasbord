@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@smw/db";
 import { ConflictError, CrudService, NotFoundError, ValidationError, listQuerySchema, toPage, type Ctx, type ListQuery } from "@smw/feature-kit";
-import { addDays, rupees } from "@smw/feature-kit/money";
+import { rupees } from "@smw/feature-kit/money";
 import { finAccounts } from "@smw/feature-finance/schema";
 import { classes } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
@@ -228,6 +228,16 @@ export class PlanService extends FeesBase {
     }, (p) => ({ action: "submit", entity: "Fee plan", entityId: p.id, summary: `Sent fee plan ${p.name} for approval` }));
   }
 
+  /** Take a plan back from approval: it becomes a draft again, to edit and send again. */
+  async withdraw(id: string) {
+    this.authorize("setup", "write");
+    return this.write("setup", async (tx) => {
+      await this.withdrawRequest(tx, "fees.plan", id);
+      await this.rejectIn(tx, id);
+      return { id };
+    }, () => ({ action: "withdraw", entity: "Fee plan", entityId: id, summary: "Withdrew a fee plan from approval" }));
+  }
+
   async archive(id: string) {
     return this.write("setup", async (tx) => {
       const [p] = await tx.update(feePlans).set({ status: "archived" }).where(and(eq(feePlans.id, id), eq(feePlans.status, "published"))).returning();
@@ -323,4 +333,3 @@ export class PlanService extends FeesBase {
   }
 }
 
-export { addDays };

@@ -13,7 +13,7 @@ export class OfflinePaymentService extends PlatformService {
       const [inv] = await tx.select().from(invoices).where(eq(invoices.id, data.invoiceId)).for("update");
       if (!inv) throw new NotFoundError("Invoice");
       if (inv.status !== "issued") throw new ConflictError(inv.status === "paid" ? "This invoice is already paid." : "This invoice was cancelled.");
-      if (data.amountPaise !== inv.totalPaise) throw new ValidationError({ amountPaise: `Enter the full invoice amount, ${PdfBuilder.money(inv.totalPaise).replace("Rs.", "₹")}.` });
+      if (data.amountPaise !== inv.totalPaise) throw new ValidationError({ amountPaise: `Enter the full invoice amount, ${PdfBuilder.money(inv.totalPaise)}.` });
       const paidAt = data.paidOn ? new Date(`${data.paidOn}T12:00:00+05:30`) : new Date();
       const [pay] = await tx.insert(payments).values({
         schoolId: inv.schoolId, invoiceId: inv.id, amountPaise: data.amountPaise, method: data.method, status: "created",

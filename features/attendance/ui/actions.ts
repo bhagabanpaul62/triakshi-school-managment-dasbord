@@ -3,7 +3,9 @@
 import { formToObject, serviceAction } from "@smw/runtime";
 import { EligibilityService } from "../eligibility";
 import type { UploadedFile } from "../files";
+import { LeaveBalanceService } from "../leave-balances";
 import { LeaveService } from "../leave-service";
+import { LeaveTypeService } from "../leave-types";
 import { PeriodAttendanceService } from "../period-service";
 import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "../service";
 
@@ -59,4 +61,20 @@ export async function removeCondonation(fd: FormData) {
 }
 export async function updateCondonation(fd: FormData) {
   return serviceAction(EligibilityService, (s) => s.updateCondonation(formToObject(fd)), "Condonation updated");
+}
+
+export async function previewLeave(fd: FormData) {
+  return serviceAction(LeaveBalanceService, (s) => s.preview(formToObject(fd)));
+}
+export async function adjustLeave(fd: FormData) {
+  return serviceAction(LeaveBalanceService, (s) => s.adjust(formToObject(fd)), "Balance changed");
+}
+export async function createLeaveType(fd: FormData) {
+  return serviceAction(LeaveTypeService, (s) => s.create(formToObject(fd)), "Leave type added");
+}
+export async function updateLeaveType(fd: FormData) {
+  return serviceAction(LeaveTypeService, (s) => s.update(String(fd.get("id")), formToObject(fd)), "Leave type updated");
+}
+export async function deleteLeaveType(fd: FormData) {
+  return serviceAction(LeaveTypeService, (s) => s.remove(String(fd.get("id"))), "Leave type removed");
 }

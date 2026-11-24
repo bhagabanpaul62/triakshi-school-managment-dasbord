@@ -186,3 +186,32 @@ export const finJournalDrafts = pgTable("fin_journal_drafts", {
   lines: jsonb("lines").$type<{ accountId: string; debitPaise: number; creditPaise: number; costCentreId?: string | null; memo?: string }[]>().notNull(),
   createdBy: uuid("created_by").notNull(),
 }, (t) => [...tenant(t, "fin_journal_drafts")]);
+
+/** A bank line that settles several journal lines at once (one deposit slip for many receipts). A one-to-one match stays on fin_bank_lines.journal_line_id. */
+export const finBankMatches = pgTable("fin_bank_matches", {
+  ...schoolColumns(),
+  bankLineId: uuid("bank_line_id").notNull().references(() => finBankLines.id, { onDelete: "restrict" }),
+  journalLineId: uuid("journal_line_id").notNull().references(() => finJournalLines.id, { onDelete: "restrict" }),
+}, (t) => [...tenant(t, "fin_bank_matches"), uniqueIndex("fin_bank_matches_line").on(t.journalLineId), index("fin_bank_matches_bank").on(t.bankLineId)]);
+
+/** "Record as other entry" from a bank line: the draft entry waiting for approval. Approving posts it and matches the bank line. */
+export const finBankDrafts = pgTable("fin_bank_drafts", {
+  ...schoolColumns(),
+  bankLineId: uuid("bank_line_id").notNull().references(() => finBankLines.id, { onDelete: "restrict" }),
+  draftId: uuid("draft_id").notNull().references(() => finJournalDrafts.id, { onDelete: "restrict" }),
+}, (t) => [...tenant(t, "fin_bank_drafts"), uniqueIndex("fin_bank_drafts_line").on(t.bankLineId)]);
+
+/** One row per year-close run. Reopening marks the run `reopened`; closing again makes run + 1. */
+export const finYearCloses = pgTable("fin_year_closes", {
+  ...schoolColumns(),
+  fy: text("fy").notNull(),
+  run: integer("run").notNull().default(1),
+  /** The closing entry; null when the year had no income or expense to carry. */
+  journalId: uuid("journal_id").references(() => finJournals.id, { onDelete: "restrict" }),
+  status: text("status").$type<"closed" | "reopened">().notNull().default("closed"),
+  surplusPaise: paise("surplus_paise").notNull().default(0),
+  closedBy: uuid("closed_by"),
+  reopenReason: text("reopen_reason"),
+  reopenedBy: uuid("reopened_by"),
+  reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+}, (t) => [...tenant(t, "fin_year_closes"), uniqueIndex("fin_year_closes_run").on(t.schoolId, t.fy, t.run)]);

@@ -256,3 +256,10 @@ export class PdfBuilder {
 
   save() { return this.doc.save(); }
 }
+
+/** Page count and first page size of a PDF; throws if the bytes are not a readable PDF. */
+export async function pdfInfo(bytes: Uint8Array) {
+  const doc = await PDFDocument.load(bytes);
+  return { pages: doc.getPageCount(), width: doc.getPage(0).getWidth(), height: doc.getPage(0).getHeight() };
+}
+export const pdfPageCount = async (bytes: Uint8Array) => (await pdfInfo(bytes)).pages;

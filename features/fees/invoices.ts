@@ -12,7 +12,7 @@ import { OpeningImport } from "./opening";
 import { PlanBilling } from "./plan-billing";
 import { feeAllocations, feeDueParts, feeInvoiceLines, feeInvoices, feeNotes, feeReceipts } from "./schema";
 
-type LineIn = { headId?: string | null; kind: "fee" | "deposit" | "opening"; label: string; amountPaise: number; concessionPaise?: number };
+type LineIn = { headId?: string | null; kind: "fee" | "deposit" | "opening" | "bounce"; label: string; amountPaise: number; concessionPaise?: number };
 const CHUNK = 400;
 
 /** Bills: drafts, issuing (one, many, or from the plans), cancel and revise. Issuing is the one place a bill gets its number and posts. */
@@ -140,7 +140,7 @@ export class InvoiceService extends FeesBase {
   private async writeLines(tx: Tx, invoiceId: string, lines: LineIn[]) {
     const heads = await this.headMap(tx, lines.map((l) => l.headId ?? null));
     if (lines.some((l) => l.headId && !heads.has(l.headId))) throw new NotFoundError("Fee head");
-    await tx.insert(feeInvoiceLines).values(lines.map((l, i) => ({ schoolId: this.ctx.schoolId, invoiceId, headId: l.headId ?? null, kind: l.kind === "opening" ? "opening" as const : l.kind === "deposit" || (l.headId && heads.get(l.headId)?.type === "deposit") ? "deposit" as const : "fee" as const, label: l.label, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise ?? 0, sort: i })));
+    await tx.insert(feeInvoiceLines).values(lines.map((l, i) => ({ schoolId: this.ctx.schoolId, invoiceId, headId: l.headId ?? null, kind: l.kind === "opening" || l.kind === "bounce" ? l.kind : l.kind === "deposit" || (l.headId && heads.get(l.headId)?.type === "deposit") ? "deposit" as const : "fee" as const, label: l.label, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise ?? 0, sort: i })));
     await this.refreshInvoiceTotals(tx, [invoiceId]);
   }
 

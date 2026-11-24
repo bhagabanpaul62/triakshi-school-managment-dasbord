@@ -23,7 +23,7 @@ export type LeaveRow = {
   /** The requester may still change a waiting request. */
   canEdit: boolean;
   /** Staff requests: the leave type; null on old ones, which count as paid. */
-  typeName: string | null; halfDay: "first" | "second" | null;
+  typeName: string | null; typeId: string | null; halfDay: "first" | "second" | null;
   /** Who decides a waiting request, in words. */
   waitingFor: string | null;
 };
@@ -167,7 +167,7 @@ export class LeaveService extends SchoolService<Perm> {
       fileName: x.r.fileName, fileUrl: await this.files.url(x.r.fileKey),
       canDecide: x.r.status === "pending" && canAct({ kind: x.r.kind, sectionId: x.sectionId }),
       canReverse: (x.r.status === "approved" || x.r.status === "rejected") && canAct({ kind: x.r.kind, sectionId: x.sectionId }), canEdit: false,
-      typeName: x.typeName, halfDay: x.r.halfDay, waitingFor: x.r.status === "pending" ? (x.r.kind === "staff" ? "the admin" : "the class teacher or the admin") : null,
+      typeName: x.typeName, typeId: x.r.typeId, halfDay: x.r.halfDay, waitingFor: x.r.status === "pending" ? (x.r.kind === "staff" ? "the admin" : "the class teacher or the admin") : null,
     })));
   }
 

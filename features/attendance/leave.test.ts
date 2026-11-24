@@ -10,6 +10,7 @@ import { students } from "@smw/feature-students/schema";
 import { buildSchoolData, type Fixture } from "./test-fixture";
 import { EligibilityService } from "./eligibility";
 import { LeaveService } from "./leave-service";
+import { LeaveTypeService } from "./leave-types";
 import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "./service";
 import { registerCsv, registerPdf } from "./register-export";
 import { absenceAlerts, attendanceSettings } from "./schema";
@@ -24,6 +25,8 @@ const base = (() => { let x = addDays(todayIST(), -14); while (new Date(`${x}T00
 const d = (n: number) => addDays(base, n);
 const M = d(2).slice(0, 7);
 
+/** Staff must pick a leave type; Casual is one of the defaults. */
+const casual = async () => (await new LeaveTypeService(a.as.admin).all()).find((t) => t.code === "CL")!.id;
 const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
 
 beforeAll(async () => {
@@ -153,7 +156,7 @@ describe("leave requests", () => {
     await expect(teacher.decide({ id: parentApply.id, decision: "approved" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new LeaveService(a.as.admin).decide({ id: parentApply.id, decision: "approved" })).resolves.toMatchObject({ status: "approved" });
 
-    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(8), toDate: d(9), reason: "Training" });
+    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(8), toDate: d(9), reason: "Training", typeId: await casual() });
     expect(staffReq.kind).toBe("staff");
     await expect(teacher.decide({ id: staffReq.id, decision: "approved" })).rejects.toBeInstanceOf(ForbiddenError);
   });
@@ -162,7 +165,7 @@ describe("leave requests", () => {
     const custom = { ...a.as.teacher, role: "staff" as const, grants: new Set(["attendance:approve", "attendance:leave"]) };
     const svc = new LeaveService(custom);
     const student = await new LeaveService(a.as.student).apply({ fromDate: d(20), toDate: d(20), reason: "Cold" });
-    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(21), toDate: d(21), reason: "Course" });
+    const staffReq = await new LeaveService(a.as.teacher).apply({ fromDate: d(21), toDate: d(21), reason: "Course", typeId: await casual() });
     const ids = (await svc.inbox("pending")).map((r) => r.id);
     expect(ids).toContain(student.id); // teacher user is class teacher of "own"
     expect(ids).not.toContain(staffReq.id);

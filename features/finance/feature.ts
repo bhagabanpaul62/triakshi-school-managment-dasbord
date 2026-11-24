@@ -22,5 +22,6 @@ export default defineFeature({
     { label: "Banking", href: "/app/finance/banking", icon: "inbox", permission: "reconcile", group: "finance", order: 51 },
     { label: "Statements", href: "/app/finance/statements", icon: "report", permission: "read", group: "finance", order: 52 },
     { label: "Finance setup", href: "/app/finance/settings", icon: "settings", permission: "settings", group: "finance", order: 60 },
+    { label: "Document layouts", href: "/app/finance/templates", icon: "receipt", permission: "read", group: "finance", order: 61 },
   ],
 });

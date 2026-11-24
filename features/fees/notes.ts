@@ -6,7 +6,7 @@ import type { PostLine } from "@smw/feature-finance/posting";
 import { FeesBase, type Head } from "./base";
 import { openOf } from "./calc";
 import { noteInput } from "./inputs";
-import { feeHeads, feeInvoiceLines, feeInvoices, feeNotes } from "./schema";
+import { feeInvoiceLines, feeInvoices, feeNotes } from "./schema";
 
 export type Note = typeof feeNotes.$inferSelect;
 type NoteLine = { lineId: string; amountPaise: number; headId?: string | null; label?: string };
@@ -30,6 +30,25 @@ export class NoteService extends FeesBase {
       await this.askApproval(tx, { kind: "fees.note", refType: "fee_note", refId: note.id, title: `${data.kind === "credit" ? "Credit" : "Debit"} note ${rupees(note.amountPaise)} on ${inv?.number ?? inv?.label}`, amountPaise: note.amountPaise, reason: data.reason, href: `/app/fees/invoices/${note.invoiceId}` });
       return note;
     }, (n) => ({ action: "propose", entity: "Fee note", entityId: n.id, summary: `${n.kind} note of ${rupees(n.amountPaise)} (${n.reasonType})` }));
+  }
+
+  /** Take a waiting note back. It stays on file as not approved and can be sent again with `resubmit`. */
+  async withdraw(id: string): Promise<Note> {
+    this.authorize("concede", "write");
+    return this.write("concede", async (tx) => {
+      await this.withdrawRequest(tx, "fees.note", id);
+      const [n] = await tx.update(feeNotes).set({ status: "rejected" }).where(eq(feeNotes.id, id)).returning();
+      return n!;
+    }, (n) => ({ action: "withdraw", entity: "Fee note", entityId: n.id, summary: "Withdrew a note request" }));
+  }
+
+  /** Send a refused or withdrawn note again, edited. The old request stays on file. */
+  async resubmit(id: string, input: unknown): Promise<Note> {
+    this.authorize("concede", "write");
+    const [old] = await this.read("concede", (tx) => tx.select({ status: feeNotes.status }).from(feeNotes).where(eq(feeNotes.id, id)));
+    if (!old) throw new NotFoundError("Note");
+    if (old.status !== "rejected") throw new ConflictError("Only a note that was not approved can be edited and sent again.");
+    return this.propose(input);
   }
 
   async list(query: ListQuery = {}) {
@@ -127,4 +146,3 @@ export class NoteService extends FeesBase {
   }
 }
 
-export { feeHeads };

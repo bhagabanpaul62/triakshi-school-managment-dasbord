@@ -45,7 +45,7 @@ export async function balanceHalfDays(tx: Tx, userId: string, typeId: string, st
 }
 
 /** The working days of a request, as half-days per calendar month (a month never crosses a leave year). */
-export async function requestMonths(tx: Tx, r: Pick<Request, "fromDate" | "toDate" | "halfDay">): Promise<Month[]> {
+export async function requestMonths(tx: Tx, r: { fromDate: string; toDate: string; halfDay: string | null }): Promise<Month[]> {
   const days = workingDays(r.fromDate, r.toDate, await holidaySet(tx, r.fromDate, r.toDate));
   const by = new Map<string, Month>();
   for (const d of days) {
