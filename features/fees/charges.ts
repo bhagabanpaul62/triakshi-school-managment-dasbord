@@ -1,80 +1,70 @@
-// The API other features use to put a due on a student's fee ledger (transport, library fines).
-// It runs inside the caller's transaction and checks no permission: the calling service already did.
+// The API other features use to put a due on a student's fee ledger (transport, library fines). Same signatures as before,
+// now on invoices. It runs inside the caller's transaction and checks no permission: the calling service already did.
 // Fees never imports those features; they import this.
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
+import { systemCtx } from "@smw/feature-kit";
 import { academicYears } from "@smw/feature-academics/schema";
-import { students } from "@smw/feature-students/schema";
-import { feeCharges, feePaymentAllocations, feePayments, type CHARGE_KINDS } from "./schema";
+import { InvoiceService } from "./invoices";
+import { feeInvoices } from "./schema";
 
-type Kind = (typeof CHARGE_KINDS)[number];
-
+type Kind = "transport" | "library_fine";
 export interface ChargeRow { studentId: string; kind: Kind; label: string; dueDate: string; amountPaise: number; sourceKey: string }
 
 /** The year the ledger shows now, or null when the school has none yet (then nothing can be billed). */
 export async function ledgerYear(tx: Tx) {
-  const [y] = await tx.select({ id: academicYears.id, startsOn: academicYears.startsOn, endsOn: academicYears.endsOn }).from(academicYears)
-    .orderBy(desc(academicYears.isCurrent), desc(academicYears.startsOn)).limit(1);
+  const [y] = await tx.select({ id: academicYears.id, startsOn: academicYears.startsOn, endsOn: academicYears.endsOn }).from(academicYears).orderBy(desc(academicYears.isCurrent), desc(academicYears.startsOn)).limit(1);
   return y ?? null;
 }
 
-/** Paise received (valid payments only) against each charge. */
-async function paidOn(tx: Tx, chargeIds: string[]): Promise<Map<string, number>> {
-  if (!chargeIds.length) return new Map();
-  const rows = await tx.select({ id: feePaymentAllocations.chargeId, paid: sql<number>`coalesce(sum(${feePaymentAllocations.amountPaise}), 0)::bigint` })
-    .from(feePaymentAllocations).innerJoin(feePayments, eq(feePayments.id, feePaymentAllocations.paymentId))
-    .where(and(inArray(feePaymentAllocations.chargeId, chargeIds), eq(feePayments.status, "valid"))).groupBy(feePaymentAllocations.chargeId);
-  return new Map(rows.map((r) => [r.id!, Number(r.paid)]));
-}
+const bills = (schoolId: string) => new InvoiceService(systemCtx(schoolId, ["fees"]));
+const schoolOf = async (tx: Tx) => (await tx.execute<{ s: string }>(sql`select current_setting('app.school_id', true) s`))[0]!.s;
+
+/** A live (not cancelled) bill for a source key. */
+const liveBy = (key: string) => and(eq(feeInvoices.sourceKey, key), sql`${feeInvoices.status} <> 'cancelled'`);
 
 /**
- * Add charges. One that already exists and is active stays as it is (so a paid month never changes);
- * one that was cancelled comes back with the new amount. Returns how many are active because of this call.
+ * Add charges as issued bills. One that already exists and is live stays as it is (so a paid month never changes);
+ * one that was cancelled comes back as a new bill. Returns how many bills this call made.
  */
 export async function postCharges(tx: Tx, schoolId: string, yearId: string, rows: ChargeRow[]): Promise<number> {
-  let n = 0;
+  const svc = bills(schoolId);
+  const made: string[] = [];
   for (const r of rows) {
-    const got = await tx.insert(feeCharges).values({ schoolId, yearId, ...r }).onConflictDoUpdate({
-      target: [feeCharges.schoolId, feeCharges.sourceKey],
-      set: { status: "active", cancelledAt: null, label: r.label, dueDate: r.dueDate, amountPaise: r.amountPaise, yearId },
-      setWhere: eq(feeCharges.status, "cancelled"),
-    }).returning({ id: feeCharges.id });
-    n += got.length;
+    const [have] = await tx.select({ id: feeInvoices.id }).from(feeInvoices).where(liveBy(r.sourceKey));
+    if (have) continue;
+    made.push(await svc.createDraft(tx, { studentId: r.studentId, yearId, kind: r.kind, label: r.label, dueDate: r.dueDate, sourceKey: r.sourceKey, lines: [{ kind: "fee", label: r.label, amountPaise: r.amountPaise }] }));
   }
-  return n;
-}
-
-/** Same lock PaymentService.record takes: a payment and a cancel on one student cannot interleave. */
-async function lockStudent(tx: Tx, studentId: string) {
-  await tx.select({ id: students.id }).from(students).where(eq(students.id, studentId)).for("update");
+  await svc.issueIn(tx, made);
+  return made.length;
 }
 
 /** Cancel a student's unpaid charges of one kind due on or after `from`. Paid ones stay. Returns how many were cancelled. */
 export async function cancelUnpaidCharges(tx: Tx, studentId: string, kind: Kind, from: string): Promise<number> {
-  await lockStudent(tx, studentId);
-  const open = await tx.select({ id: feeCharges.id }).from(feeCharges)
-    .where(and(eq(feeCharges.studentId, studentId), eq(feeCharges.kind, kind), eq(feeCharges.status, "active"), gte(feeCharges.dueDate, from)));
-  const paid = await paidOn(tx, open.map((c) => c.id));
-  const ids = open.filter((c) => !paid.get(c.id)).map((c) => c.id);
-  if (ids.length) await tx.update(feeCharges).set({ status: "cancelled", cancelledAt: new Date() }).where(inArray(feeCharges.id, ids));
-  return ids.length;
+  const svc = bills(await schoolOf(tx));
+  await tx.execute(sql`select id from students where id = ${studentId}::uuid for update`);
+  const open = await tx.select({ id: feeInvoices.id }).from(feeInvoices).where(and(eq(feeInvoices.studentId, studentId), eq(feeInvoices.kind, kind), eq(feeInvoices.status, "issued"), gte(feeInvoices.dueDate, from), eq(feeInvoices.paidPaise, 0)));
+  for (const o of open) await svc.cancelIn(tx, o.id, "Charge no longer applies");
+  return open.length;
 }
 
 /** What is on the ledger for one source key: null when nothing was posted. */
 export async function chargeFor(tx: Tx, sourceKey: string): Promise<{ id: string; status: "active" | "cancelled"; paidPaise: number } | null> {
-  const [c] = await tx.select({ id: feeCharges.id, status: feeCharges.status }).from(feeCharges).where(eq(feeCharges.sourceKey, sourceKey)).limit(1);
-  if (!c) return null;
-  return { ...c, paidPaise: (await paidOn(tx, [c.id])).get(c.id) ?? 0 };
+  const [c] = await tx.select({ id: feeInvoices.id, status: feeInvoices.status, paid: feeInvoices.paidPaise }).from(feeInvoices).where(eq(feeInvoices.sourceKey, sourceKey)).orderBy(sql`(${feeInvoices.status} = 'cancelled')`, desc(feeInvoices.createdAt)).limit(1);
+  return c ? { id: c.id, status: c.status === "cancelled" ? "cancelled" : "active", paidPaise: c.paid } : null;
 }
 
 /** Cancel one charge by its source key. Returns false when it has money against it (nothing changes). */
 export async function cancelCharge(tx: Tx, sourceKey: string): Promise<boolean> {
-  const [row] = await tx.select({ studentId: feeCharges.studentId }).from(feeCharges).where(eq(feeCharges.sourceKey, sourceKey)).limit(1);
+  const [row] = await tx.select({ id: feeInvoices.id, studentId: feeInvoices.studentId }).from(feeInvoices).where(liveBy(sourceKey));
   if (!row) return true;
-  await lockStudent(tx, row.studentId);
-  const c = await chargeFor(tx, sourceKey);
-  if (!c || c.status === "cancelled") return true;
-  if (c.paidPaise > 0) return false;
-  await tx.update(feeCharges).set({ status: "cancelled", cancelledAt: new Date() }).where(eq(feeCharges.id, c.id));
+  const svc = bills(await schoolOf(tx));
+  // Wait for a payment that holds the student, then look at the money.
+  await tx.execute(sql`select id from students where id = ${row.studentId}::uuid for update`);
+  const [now] = await tx.select({ paid: feeInvoices.paidPaise, status: feeInvoices.status }).from(feeInvoices).where(eq(feeInvoices.id, row.id));
+  if (now!.status === "cancelled") return true;
+  if (now!.paid > 0) return false;
+  await svc.cancelIn(tx, row.id, "Charge cancelled");
   return true;
 }
+

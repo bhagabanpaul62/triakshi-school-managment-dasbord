@@ -177,15 +177,15 @@ export class DuesService extends FeesBase {
 
   private async summaryIn(tx: Tx) {
     const today = todayIST(), month = `${today.slice(0, 7)}-01`;
-    const [[a], [now], [mon], [year]] = await Promise.all([
+    const [[a], now, mon, year] = await Promise.all([
       tx.execute<{ open: string; overdue: string; students: string; overdue_students: string }>(sql`with ${SLICES} select coalesce(sum(open_paise), 0) open, coalesce(sum(open_paise) filter (where due_on < ${today}::date), 0) overdue, count(distinct student_id) students, count(distinct student_id) filter (where due_on < ${today}::date) overdue_students from slices where open_paise > 0`).then(asRows),
       this.collectedIn(tx, today, today), this.collectedIn(tx, month, today), this.collectedIn(tx, `${(await this.currentYear(tx)).startsOn}`, today),
     ]);
     const [billed] = asRows(await tx.execute<{ v: string }>(sql`select coalesce(sum(gross_paise - concession_paise - credited_paise + late_paise), 0) v from fee_invoices where status = 'issued'`));
     return {
-      collectedToday: now!.paise, receiptsToday: now!.n, collectedThisMonth: mon!.paise, receiptsThisMonth: mon!.n,
+      collectedToday: now.paise, receiptsToday: now.n, collectedThisMonth: mon.paise, receiptsThisMonth: mon.n,
       outstanding: num(a?.open), overdueAmount: num(a?.overdue), overdueCount: num(a?.overdue_students), studentsWithDues: num(a?.students),
-      collectedThisYear: year!.paise, billedThisYear: num(billed?.v),
+      collectedThisYear: year.paise, billedThisYear: num(billed?.v),
     };
   }
 

@@ -68,6 +68,7 @@ export class LeaveBalanceService extends SchoolService<Perm> {
     const data = this.parse(leavePreviewInput, input);
     if (!data.typeId) throw new ValidationError({ typeId: "Pick a leave type" });
     return this.write("leave", async (tx) => {
+      await ensureCredit(tx, this.ctx.schoolId, todayIST(), this.ctx.userId);
       const p = await LeaveBalanceService.plan(tx, this.ctx.userId, { ...data, typeId: data.typeId! });
       const unpaid = p.short ? await LeaveBalanceService.unpaidType(tx) : null;
       return {
@@ -102,7 +103,7 @@ export class LeaveBalanceService extends SchoolService<Perm> {
       out.set(id, types.map((t) => {
         const mine = sums.filter((s) => s.userId === id && s.typeId === t.id);
         const sum = (kinds: string[]) => mine.filter((s) => kinds.includes(s.kind)).reduce((a, s) => a + s.n, 0);
-        const used = -sum(["used", "reversed", "encash"]), entitled = sum(["credit", "carry", "adjust"]);
+        const used = 0 - sum(["used", "reversed", "encash"]), entitled = sum(["credit", "carry", "adjust"]);
         return { typeId: t.id, code: t.code, name: t.name, paid: t.paid, entitled, used, pending: held.get(`${id}:${t.id}`) ?? 0, left: entitled - used };
       }));
     }

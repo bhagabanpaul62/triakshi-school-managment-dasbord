@@ -25,8 +25,8 @@ export class OpeningImport extends FeesBase {
     if (missing.length) throw new ValidationError({ file: `The sheet needs a column called ${missing.join(", ")}. Download the template and use its first row.` });
     return this.write("setup", async (tx) => {
       const year = await this.currentYear(tx);
-      const nos = sheet.rows.map((r) => r.admission_no);
-      const found = await tx.select({ id: students.id, no: students.admissionNo }).from(students).where(inArray(students.admissionNo, nos));
+      const nos = sheet.rows.map((r) => r.admission_no ?? "");
+      const found = nos.length ? await tx.select({ id: students.id, no: students.admissionNo }).from(students).where(inArray(students.admissionNo, nos)) : [];
       const byNo = new Map(found.map((s) => [s.no, s.id]));
       const done = new Set((await tx.select({ k: feeInvoices.sourceKey }).from(feeInvoices).where(and(eq(feeInvoices.kind, "opening"), eq(feeInvoices.status, "issued")))).map((r) => r.k));
       const errors: { line: number; message: string }[] = [];
@@ -35,17 +35,18 @@ export class OpeningImport extends FeesBase {
       sheet.rows.forEach((r, i) => {
         const line = sheet.lines[i]!;
         const err = (message: string) => errors.push({ line, message });
-        const studentId = byNo.get(r.admission_no);
+        const studentId = byNo.get(r.admission_no ?? "");
         const [dues, advance, deposit] = [money(r.dues ?? ""), money(r.advance ?? ""), money(r.deposit ?? "")];
         const asOf = r.as_of || year.startsOn;
-        if (!studentId) return err(`No student with admission number ${r.admission_no || "(blank)"}.`);
-        if (seen.has(studentId)) return err(`${r.admission_no} is on the sheet twice.`);
+        const no = r.admission_no ?? "";
+        if (!studentId) return err(`No student with admission number ${no || "(blank)"}.`);
+        if (seen.has(studentId)) return err(`${no} is on the sheet twice.`);
         seen.add(studentId);
         if (dues === null || advance === null || deposit === null) return err("Dues, advance and deposit must be amounts in rupees, like 12500 or 12,500.50.");
         if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) return err("as_of must be a date like 2026-04-01.");
-        if (done.has(`opening:${studentId}`)) return err(`${r.admission_no} already has opening balances. They are not entered twice.`);
+        if (done.has(`opening:${studentId}`)) return err(`${no} already has opening balances. They are not entered twice.`);
         if (dues + advance + deposit === 0) return err("This row has no amount.");
-        rows.push({ studentId, dues, advance, deposit, asOf, no: r.admission_no });
+        rows.push({ studentId, dues, advance, deposit, asOf, no });
       });
       const totals = { students: rows.length, duesPaise: rows.reduce((s, r) => s + r.dues, 0), advancePaise: rows.reduce((s, r) => s + r.advance, 0), depositPaise: rows.reduce((s, r) => s + r.deposit, 0) };
       if (dryRun || errors.length) return { applied: false, errors, totals };

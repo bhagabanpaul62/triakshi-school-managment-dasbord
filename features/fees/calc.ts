@@ -119,7 +119,7 @@ export function concessionsOn(lines: { headId?: string | null; kind?: string; am
     const base = idx.reduce((s, i) => s + room(i), 0);
     const want = c.mode === "percent" ? percentOf(idx.reduce((s, i) => s + lines[i]!.amountPaise, 0), c.value) : c.value;
     const give = Math.min(want, base);
-    apportion(give, idx.map(room)).forEach((p, k) => { out[idx[k]!] += p; });
+    apportion(give, idx.map(room)).forEach((p, k) => { out[idx[k]!] = out[idx[k]!]! + p; });
   }
   return out;
 }
