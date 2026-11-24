@@ -286,6 +286,8 @@ describe("the counter", () => {
     await expect(c.close({ countedPaise: 130_000 })).rejects.toThrow(/Say why it is short/);
     const closed = await c.close({ countedPaise: 130_000, differenceReason: "Change given twice", denominations: { "50000": 2, "10000": 3 } });
     expect(closed).toMatchObject({ expectedPaise: 140_000, differencePaise: -10_000 });
+    expect(await ledger(f3, "cash_difference")).toBe(0); // waits for an approver
+    await decide(f3, "fees.counter_difference", closed.counter.id);
     expect(await ledger(f3, "cash_difference")).toBe(10_000);
     // A closed day takes no more, and cannot be opened again.
     await expect(rc.collect({ studentId: f3.students.kabir, methods: cash(100) })).rejects.toThrow(/is closed/);

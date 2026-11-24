@@ -11,6 +11,7 @@ export const SYSTEM_ACCOUNTS = [
   { key: "student_dues", code: "1100", name: "Student dues", type: "asset", group: "Receivables" },
   { key: "govt_due", code: "1110", name: "Government reimbursement due", type: "asset", group: "Receivables" },
   { key: "staff_loans", code: "1120", name: "Staff loans and advances", type: "asset", group: "Receivables" },
+  { key: "cashier_dues", code: "1140", name: "Cash short with cashiers", type: "asset", group: "Receivables" },
   { key: "petty_cash", code: "1130", name: "Petty cash with staff", type: "asset", group: "Cash and bank" },
   { key: "fixed_assets", code: "1500", name: "Fixed assets", type: "asset", group: "Fixed assets" },
   { key: "deposits_payable", code: "2000", name: "Student deposits", type: "liability", group: "Payables" },

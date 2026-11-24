@@ -43,6 +43,9 @@ export async function journalIdOf(tx: Tx, sourceKey: string): Promise<string | n
   const [j] = await tx.select({ id: finJournals.id }).from(finJournals).where(eq(finJournals.sourceKey, sourceKey)).limit(1);
   return j?.id ?? null;
 }
+/** `?id=<uuid>` on a list shows exactly that record; an id that is not a uuid matches nothing (never a database error). */
+export const onlyId = (col: Parameters<typeof eq>[0], id: string | undefined) =>
+  id === undefined ? undefined : /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? eq(col, id) : sql`false`;
 export const journalIdSql = (prefix: string, idCol: unknown) => sql<string | null>`(select j.id from fin_journals j where j.source_key = ${prefix} || ${idCol}::text limit 1)`;
 
 /** People who decide money here: active admins and accountants. */

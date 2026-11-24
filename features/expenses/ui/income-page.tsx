@@ -10,7 +10,7 @@ import { ConfirmMoney } from "@smw/ui/finance/ConfirmMoney";
 import { OUT_METHODS } from "../constants";
 import { IncomeService, LookupService } from "../service";
 import { recordIncome, requestIncomeReversal } from "./actions";
-import { JournalLink, NoAccess, SectionNav, can, type Search } from "./shared";
+import { JournalLink, NoAccess, OneRecord, SectionNav, can, one, type Search } from "./shared";
 
 export const metadata = { title: "Other income" };
 
@@ -41,6 +41,7 @@ export default async function IncomePage({ searchParams }: { searchParams: Searc
       <PageHeader eyebrow="Expenses" title="Other income" description="Money in that is not fees: hall rent, donations, scrap, interest."
         actions={<><Link href={`/app/expenses/income/csv${qs ? `?${qs}` : ""}`} prefetch={false} className={buttonVariants({ variant: "ghost", className: "rounded-full" })}>Download CSV</Link>{add}</>} />
       <SectionNav ctx={ctx} current="/app/expenses/income" />
+      {one(sp.id) ? <OneRecord all="/app/expenses/income" /> : null}
       <DataTable columns={columns} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount} searchPlaceholder="Search receipt, name or purpose"
         filters={[{ key: "status", label: "State", options: [{ value: "valid", label: "Valid" }, { value: "reversed", label: "Reversed" }] }]}
         rowActions={Object.fromEntries(rows.map((r) => [r.id, (

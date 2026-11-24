@@ -99,3 +99,11 @@ export async function newStudent(fx: Fixture, name: string, o: { issue?: boolean
   if (o.issue !== false) await issueAll(fx);
   return id;
 }
+
+/** Send an opening balance sheet and have the admin approve it, the way it goes in a school. */
+export async function openingApproved(fx: Fixture, file: { name: string; bytes: Uint8Array }) {
+  const sent = await new InvoiceService(fx.school.as.accountant).importOpening(file, false);
+  if (!sent.batchId) return sent;
+  await decide(fx, "fees.opening", sent.batchId);
+  return { ...sent, applied: true };
+}

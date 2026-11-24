@@ -244,6 +244,9 @@ export const feeCounters = pgTable("fee_counters", {
   denominations: jsonb("denominations").$type<Record<string, number>>(),
   differenceReason: text("difference_reason"),
   closedAt: timestamp("closed_at", { withTimezone: true }),
+  /** Null = no difference. pending = waits for approval; recount = the approval ended without posting (refused extra cash, or withdrawn); posted = in Cash differences; cashier = a shortage kept as owed by the cashier. */
+  differenceState: text("difference_state").$type<"pending" | "recount" | "posted" | "cashier">(),
+  differenceApprovalId: uuid("difference_approval_id"),
 }, (t) => [...tenant(t, "fee_counters"), uniqueIndex("fee_counters_open").on(t.schoolId, t.userId).where(sql`closed_at is null`), uniqueIndex("fee_counters_day").on(t.schoolId, t.userId, t.day)]);
 
 /** Money received. Never edited; a wrong one is reversed with approval and keeps its number. May pay siblings' bills too. */
@@ -404,3 +407,15 @@ export const feeInvoiceChanges = pgTable("fee_invoice_changes", {
   direct: boolean("direct").notNull().default(false),
   createdBy: uuid("created_by"),
 }, (t) => [...tenant(t, "fee_invoice_changes"), index("fee_invoice_changes_invoice").on(t.invoiceId), index("fee_invoice_changes_student").on(t.schoolId, t.studentId)]);
+
+// ---------- opening balances waiting for approval ----------
+
+/** A parsed opening-balance sheet. Nothing is posted until the approval `fees.opening` is granted; then every row posts, or none. */
+export const feeOpeningBatches = pgTable("fee_opening_batches", {
+  ...schoolColumns(),
+  fileName: text("file_name").notNull(),
+  rows: jsonb("rows").$type<{ studentId: string; no: string; dues: number; advance: number; deposit: number; asOf: string }[]>().notNull(),
+  totals: jsonb("totals").$type<{ students: number; duesPaise: number; advancePaise: number; depositPaise: number }>().notNull(),
+  status: text("status").$type<(typeof REQUEST_STATUSES)[number]>().notNull().default("pending"),
+  createdBy: uuid("created_by").notNull(),
+}, (t) => [...tenant(t, "fee_opening_batches"), index("fee_opening_batches_status").on(t.schoolId, t.status)]);

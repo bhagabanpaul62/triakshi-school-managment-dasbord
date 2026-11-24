@@ -17,6 +17,8 @@ export const financeConfig = z.object({
   reminderDays: z.array(z.coerce.number().int().min(-60).max(365)).max(10).default([-7, 0, 3, 10, 30]),
   /** Warn when one person pays this much cash in a day. */
   cashLimitPaise: z.coerce.number().int().min(0).default(20_000_000),
+  /** A counter that is short or over by more than this closes without a second person. 0 = every difference needs approval. */
+  counterDifferenceLimitPaise: z.coerce.number().int().min(0).default(0),
   bounceChargePaise: z.coerce.number().int().min(0).default(0),
   /** The families' pay page shows the UPI QR and takes UTR slips. */
   upiOn: z.boolean().default(false),

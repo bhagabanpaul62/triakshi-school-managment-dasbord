@@ -1,8 +1,10 @@
 import type { ApprovalHandlers } from "@smw/feature-finance/approvals";
 import { ChangeService } from "./changes";
+import { CounterService } from "./counter";
 import { ConcessionService } from "./concessions";
 import { InvoiceService } from "./invoices";
 import { NoteService } from "./notes";
+import { OpeningImport } from "./opening";
 import { PlanService } from "./plans";
 import { ReceiptService } from "./receipts";
 import { RefundService } from "./refunds";
@@ -28,6 +30,8 @@ export const feesApprovals: ApprovalHandlers = {
     },
     reject: (tx, a, actor) => new ChangeService(actor).rejectIn(tx, a.refId),
   },
+  "fees.opening": { approve: (tx, a, actor) => new OpeningImport(actor).approveIn(tx, a.refId, new InvoiceService(actor)), reject: (tx, a, actor) => new OpeningImport(actor).rejectIn(tx, a.refId) },
+  "fees.counter_difference": { approve: (tx, a, actor) => new CounterService(actor).decideIn(tx, a.refId, true), reject: (tx, a, actor) => new CounterService(actor).decideIn(tx, a.refId, false) },
   // A refused reversal changes nothing: the receipt stands, and the request keeps the reason.
   "fees.reversal": { approve: (tx, a, actor) => new ReceiptService(actor).reverseIn(tx, a.refId, a.reason) },
 };

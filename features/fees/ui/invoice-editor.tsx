@@ -14,6 +14,7 @@ import { Money } from "@smw/ui/finance/Money";
 import { RecordPicker, type PickerOption } from "@smw/ui/finance/RecordPicker";
 import { applyHidden } from "@smw/feature-finance/templates/config";
 import { chargeGroup, deleteInvoiceDraft, findStudents, groupOf, issueInvoice, resubmitInvoiceChange, reviseInvoice, saveInvoice } from "./actions";
+import { useUnsavedGuard } from "./use-unsaved-guard";
 import { invoicePaperData, paperConfig, reviseDifference } from "./logic";
 import { CARD, H3, LINK, MUTED } from "./styles";
 
@@ -100,17 +101,7 @@ export function InvoiceEditor({ mode, heads, config, today, classes, student, in
     return () => clearTimeout(t);
   }, [sig, mode, groupMode, dirty, ready]);
 
-  // Unsaved changes: the browser asks on reload and close; a click on a link inside the app asks first.
-  useEffect(() => {
-    if (!dirty) return;
-    const leave = (e: BeforeUnloadEvent) => { e.preventDefault(); };
-    const click = (e: MouseEvent) => {
-      const a = (e.target as HTMLElement).closest?.("a[href]") as HTMLAnchorElement | null;
-      if (a && a.origin === window.location.origin && !a.target && !e.defaultPrevented && !window.confirm("You have changes that are not saved yet. Leave this page?")) { e.preventDefault(); e.stopPropagation(); }
-    };
-    window.addEventListener("beforeunload", leave); document.addEventListener("click", click, true);
-    return () => { window.removeEventListener("beforeunload", leave); document.removeEventListener("click", click, true); };
-  }, [dirty]);
+  useUnsavedGuard(dirty);
 
   useEffect(() => {
     if (!classId) { setGroup(null); return; }

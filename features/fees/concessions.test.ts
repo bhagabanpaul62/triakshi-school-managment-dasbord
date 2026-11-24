@@ -12,7 +12,7 @@ import { ReceiptService } from "./receipts";
 import { RefundService } from "./refunds";
 import { SettlementService } from "./settlements";
 import { feeConcessions } from "./schema";
-import { LATE, TODAY, bills, config, decide, due, issueAll, ledger, makeSchool, newStudent, publish, type Fixture } from "./testing";
+import { LATE, TODAY, bills, config, decide, due, issueAll, ledger, makeSchool, newStudent, openingApproved, publish, type Fixture } from "./testing";
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 });
 let fx: Fixture;
@@ -97,7 +97,7 @@ describe("opening balances, deposits and refunds", () => {
     expect((await account(id)).balance.openPaise).toBe(0);
     expect((await inv.importOpening(csv([[no, "5000", "200", "300", ""]]), true))).toMatchObject({ applied: false, errors: [], totals: { students: 1, duesPaise: 500_000, advancePaise: 20_000, depositPaise: 30_000 } });
     expect((await account(id)).balance.openPaise).toBe(0);
-    expect(await inv.importOpening(csv([[no, "5000", "200", "300", ""]]), false)).toMatchObject({ applied: true });
+    expect(await openingApproved(fx, csv([[no, "5000", "200", "300", ""]]))).toMatchObject({ applied: true });
     expect((await account(id)).balance).toMatchObject({ openPaise: 500_000, advancePaise: 20_000, depositPaise: 30_000 });
     expect(await ledger(fx, "opening", id)).toBe(0); // opening postings carry no student party on the equity side
     expect(await ledger(fx, "student_dues", id)).toBe(500_000);
@@ -129,7 +129,7 @@ describe("opening balances, deposits and refunds", () => {
 
   it("a refund request can be withdrawn, edited and sent again", async () => {
     const id = await newStudent(fx, "Refund Kid", { issue: false });
-    await new InvoiceService(accountant()).importOpening(csv([[await admissionNo(id), "", "100", "", ""]]), false);
+    await openingApproved(fx, csv([[await admissionNo(id), "", "100", "", ""]]));
     const refunds = new RefundService(accountant());
     const r = await refunds.propose({ studentId: id, source: "advance", amountPaise: 10_000, method: "bank_transfer", reason: "Overpaid" });
     await refunds.withdraw(r.id);
@@ -145,7 +145,7 @@ describe("settlements", () => {
     await issueAll(fx, undefined);
     await config(fx, { autoUseAdvance: false }); // keep the advance so the settlement can use it
     const id = await newStudent(fx, "Hard Case", { issue: false });
-    await new InvoiceService(accountant()).importOpening(csv([[await admissionNo(id), "", "200", "300", ""]]), false);
+    await openingApproved(fx, csv([[await admissionNo(id), "", "200", "300", ""]]));
     await issueAll(fx, undefined);
     await config(fx, { autoUseAdvance: true });
     const owed = (await account(id)).balance.openPaise; // M1 + exam + M2 = 220,000
@@ -190,7 +190,7 @@ describe("settlements", () => {
 describe("a student who leaves", () => {
   it("advance and deposit go against the dues, the rest is asked back as a refund, and the balance ends at zero", async () => {
     const id = await newStudent(fx, "Leaving Kid", { issue: false });
-    await new InvoiceService(accountant()).importOpening(csv([[await admissionNo(id), "250", "200", "300", ""]]), false);
+    await openingApproved(fx, csv([[await admissionNo(id), "250", "200", "300", ""]]));
     const svc = new SettlementService(accountant());
     const out = await svc.settleUp({ studentId: id, reason: "Moving to another city", method: "cash" });
     expect(out).toMatchObject({ advancePaise: 20_000, depositPaise: 5_000, stillOwedPaise: 0 });

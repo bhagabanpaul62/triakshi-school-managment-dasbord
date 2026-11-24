@@ -137,11 +137,17 @@ export class PettyCashService extends ExpenseService {
     }, (e) => ({ action: "reverse", entity: "Petty cash", entityId: e.id, summary: `Reversed petty cash entry ${e.label}` }));
   }
 
-  async entries(floatId: string) {
+  /** The float an entry sits in, so `?id=<entry>` can open the right float. */
+  async floatOfEntry(entryId: string): Promise<string | null> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entryId)) return null;
+    return this.read(this.can("read") ? "read" : "claim", async (tx) => (await tx.select({ f: expPettyEntries.floatId }).from(expPettyEntries).where(eq(expPettyEntries.id, entryId)))[0]?.f ?? null);
+  }
+
+  async entries(floatId: string, onlyEntry?: string) {
     return this.read(this.can("read") ? "read" : "claim", async (tx) => {
       const f = need((await tx.select().from(expPettyFloats).where(eq(expPettyFloats.id, floatId)))[0], "Float");
       if (!this.can("read") && f.holderId !== this.ctx.userId) throw new NotFoundError("Float");
-      const rows = await tx.select({ e: expPettyEntries, accountName: finAccounts.name, journalId: journalIdSql("expenses:petty:", expPettyEntries.id) }).from(expPettyEntries).leftJoin(finAccounts, eq(finAccounts.id, expPettyEntries.accountId)).where(eq(expPettyEntries.floatId, floatId)).orderBy(desc(expPettyEntries.date), desc(expPettyEntries.createdAt));
+      const rows = await tx.select({ e: expPettyEntries, accountName: finAccounts.name, journalId: journalIdSql("expenses:petty:", expPettyEntries.id) }).from(expPettyEntries).leftJoin(finAccounts, eq(finAccounts.id, expPettyEntries.accountId)).where(and(eq(expPettyEntries.floatId, floatId), onlyEntry ? eq(expPettyEntries.id, onlyEntry) : undefined)).orderBy(desc(expPettyEntries.date), desc(expPettyEntries.createdAt));
       return Promise.all(rows.map(async ({ e, accountName, journalId }) => ({ ...e, accountName, journalId, fileUrl: await this.files.url(e.fileKey) })));
     });
   }

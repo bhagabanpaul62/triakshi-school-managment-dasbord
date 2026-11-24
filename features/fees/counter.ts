@@ -1,7 +1,8 @@
 import { and, desc, eq, inArray, sql, sum } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { cashAccount } from "@smw/feature-finance/posting";
 import { finCashAccounts } from "@smw/feature-finance/schema";
 import { FeesBase, invalid } from "./base";
@@ -48,7 +49,11 @@ export class CounterService extends FeesBase {
     });
   }
 
-  /** Close the day. A difference needs a reason and is posted to Cash differences; the day then takes no more. */
+  /**
+   * Close the day. A difference needs a reason. Within the school's limit it is posted to Cash differences at once; above it
+   * the session still closes with the counted cash, the difference waits as `pending` and approval
+   * `fees.counter_difference` decides where it goes. Until then the cash account stays at what the box should hold.
+   */
   async close(input: unknown) {
     this.authorize("collect", "write");
     const d = this.parse(closeCounterInput, input);
@@ -62,15 +67,91 @@ export class CounterService extends FeesBase {
       }
       const diff = d.countedPaise - expectedPaise;
       if (diff !== 0 && !d.differenceReason) throw invalid("differenceReason", `The box should hold ${rupees(expectedPaise)} but you counted ${rupees(d.countedPaise)}. Say why it is ${diff < 0 ? "short" : "over"}.`);
-      const [row] = await tx.update(feeCounters).set({ expectedPaise, countedPaise: d.countedPaise, denominations: d.denominations ?? null, differenceReason: d.differenceReason ?? null, closedAt: new Date() }).where(eq(feeCounters.id, c.id)).returning();
-      if (diff !== 0) {
-        const [cash] = await tx.select().from(finCashAccounts).where(eq(finCashAccounts.id, c.cashAccountId));
-        const side = { account: { id: cash!.accountId } };
-        await this.post(tx, { date: todayIST(), sourceKey: `fees:counter-diff:${c.id}`, sourceType: "fee_counter", sourceId: c.id, memo: `Counter difference: ${d.differenceReason}`,
-          lines: diff < 0 ? [{ account: "cash_difference", debit: -diff }, { ...side, credit: -diff }] : [{ ...side, debit: diff }, { account: "cash_difference", credit: diff }] });
+      const waits = diff !== 0 && Math.abs(diff) > (await this.settings(tx)).counterDifferenceLimitPaise;
+      const [row] = await tx.update(feeCounters).set({ expectedPaise, countedPaise: d.countedPaise, denominations: d.denominations ?? null, differenceReason: d.differenceReason ?? null, closedAt: new Date(), differenceState: diff === 0 ? null : waits ? "pending" : "posted" }).where(eq(feeCounters.id, c.id)).returning();
+      if (diff !== 0 && !waits) await this.postDifferenceIn(tx, row!, "difference");
+      if (waits) {
+        const ask = await this.askApproval(tx, this.differenceRequest(row!));
+        await tx.update(feeCounters).set({ differenceApprovalId: ask.id }).where(eq(feeCounters.id, c.id));
+        row!.differenceApprovalId = ask.id;
       }
       return { counter: row!, expectedPaise, differencePaise: diff };
     }, (r) => ({ action: "close", entity: "Counter", entityId: r.counter.id, summary: `Closed the counter: expected ${rupees(r.expectedPaise)}, counted ${rupees(r.counter.countedPaise ?? 0)}` }));
+  }
+
+  private differenceRequest(c: Counter) {
+    const diff = (c.countedPaise ?? 0) - (c.expectedPaise ?? 0);
+    return { kind: "fees.counter_difference", refType: "fee_counter", refId: c.id, title: `Counter of ${c.day} is ${rupees(Math.abs(diff))} ${diff < 0 ? "short" : "over"}`, amountPaise: Math.abs(diff),
+      reason: c.differenceReason ?? "", href: "/app/fees/counter" };
+  }
+
+  /** The one posting of a counter difference. Both outcomes share one source key, so the books can never hold two. */
+  private async postDifferenceIn(tx: Tx, c: Counter, to: "difference" | "cashier") {
+    const diff = (c.countedPaise ?? 0) - (c.expectedPaise ?? 0);
+    const [cash] = await tx.select().from(finCashAccounts).where(eq(finCashAccounts.id, c.cashAccountId));
+    const box = { account: { id: cash!.accountId } };
+    const other = to === "cashier" ? { account: "cashier_dues" as const, party: { type: "staff" as const, id: c.userId } } : { account: "cash_difference" as const };
+    await this.post(tx, { date: todayIST(), sourceKey: `fees:counter-diff:${c.id}`, sourceType: "fee_counter", sourceId: c.id, memo: to === "cashier" ? `Counter shortage kept with the cashier: ${c.differenceReason}` : `Counter difference: ${c.differenceReason}`,
+      lines: diff < 0 ? [{ ...other, debit: -diff }, { ...box, credit: -diff }] : [{ ...box, debit: diff }, { ...other, credit: diff }] });
+  }
+
+  /**
+   * The approval handler. Approved: the difference goes to Cash differences. Refused: a shortage stays with the cashier
+   * (Staff loans, in their name); extra cash stays unbooked until they count again.
+   */
+  async decideIn(tx: Tx, id: string, approved: boolean) {
+    const [c] = await tx.select().from(feeCounters).where(eq(feeCounters.id, id)).for("update");
+    if (!c) throw new NotFoundError("Counter");
+    if (c.differenceState !== "pending") throw new ConflictError("This difference was already decided.");
+    const short = (c.countedPaise ?? 0) < (c.expectedPaise ?? 0);
+    const state = approved ? "posted" : short ? "cashier" : "recount";
+    if (approved || short) await this.postDifferenceIn(tx, c, approved ? "difference" : "cashier");
+    await tx.update(feeCounters).set({ differenceState: state }).where(eq(feeCounters.id, id));
+    const body = approved ? `The difference of ${rupees(Math.abs((c.countedPaise ?? 0) - (c.expectedPaise ?? 0)))} on ${c.day} was approved and written to Cash differences.`
+      : short ? `The shortage on ${c.day} was not approved. It now shows as owed by you (Staff loans) until it is settled.` : `The extra cash on ${c.day} was not approved. Count again: ask your admin to reopen it, or send it for approval again.`;
+    await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: c.userId, kind: "fee_due" as const, title: approved ? "Counter difference approved" : "Counter difference not approved", body, href: "/app/fees/counter" }]);
+  }
+
+  /** Take the request back. The difference stays unbooked; ask again or count again. */
+  async withdraw(id: string) {
+    this.authorize("collect", "write");
+    return this.write("collect", async (tx) => {
+      const c = await this.mineIn(tx, id, "pending");
+      await this.withdrawRequest(tx, "fees.counter_difference", id);
+      const [row] = await tx.update(feeCounters).set({ differenceState: "recount" }).where(eq(feeCounters.id, c.id)).returning();
+      return row!;
+    }, (c) => ({ action: "withdraw", entity: "Counter", entityId: c.id, summary: "Withdrew the counter difference request" }));
+  }
+
+  /** Ask for approval again after a refusal (extra cash) or a withdrawal. */
+  async askAgain(id: string) {
+    this.authorize("collect", "write");
+    return this.write("collect", async (tx) => {
+      const c = await this.mineIn(tx, id, "recount");
+      const ask = await this.askApproval(tx, this.differenceRequest(c));
+      const [row] = await tx.update(feeCounters).set({ differenceState: "pending", differenceApprovalId: ask.id }).where(eq(feeCounters.id, c.id)).returning();
+      return row!;
+    }, (c) => ({ action: "resubmit", entity: "Counter", entityId: c.id, summary: "Sent the counter difference for approval again" }));
+  }
+
+  /** Count again: the person's own session, same day only, and only while the difference has no decision. */
+  async reopen(id: string) {
+    this.authorize("collect", "write");
+    return this.write("collect", async (tx) => {
+      const c = await this.mineIn(tx, id, "recount");
+      if (c.userId !== this.ctx.userId) throw new ForbiddenError("Only the cashier can reopen their own counter.");
+      if (c.day !== todayIST()) throw new ConflictError("A counter can only be reopened on its own day. Send the difference for approval instead.");
+      const [row] = await tx.update(feeCounters).set({ closedAt: null, expectedPaise: null, countedPaise: null, denominations: null, differenceReason: null, differenceState: null, differenceApprovalId: null }).where(eq(feeCounters.id, c.id)).returning();
+      return row!;
+    }, (c) => ({ action: "reopen", entity: "Counter", entityId: c.id, summary: "Reopened the counter to count again" }));
+  }
+
+  private async mineIn(tx: Tx, id: string, state: "pending" | "recount"): Promise<Counter> {
+    const [c] = await tx.select().from(feeCounters).where(eq(feeCounters.id, id)).for("update");
+    if (!c) throw new NotFoundError("Counter");
+    if (c.userId !== this.ctx.userId && this.ctx.role !== "admin") throw new ForbiddenError("Only the cashier or an admin can do this.");
+    if (c.differenceState !== state) throw new ConflictError(state === "pending" ? "This difference is not waiting for approval." : "This difference is not waiting for a recount or a new request.");
+    return c;
   }
 
   /** Past sessions, newest first. */

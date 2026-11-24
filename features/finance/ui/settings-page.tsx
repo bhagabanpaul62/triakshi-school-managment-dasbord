@@ -64,6 +64,7 @@ async function Rules({ svc }: { svc: SettingsService }) {
     { name: "concessionLimitPaise", label: "Concessions without approval, up to", type: "money", hint: "0 means every one needs approval.", section: "Approvals" },
     { name: "billLimitPaise", label: "Vendor bills without approval, up to", type: "money", section: "Approvals" },
     { name: "cashLimitPaise", label: "Warn when one person takes this much cash in a day", type: "money", section: "Approvals" },
+    { name: "counterDifferenceLimitPaise", label: "Counter difference allowed without approval", type: "money", section: "Fees" },
     { name: "bounceChargePaise", label: "Charge for a bounced cheque", type: "money", section: "Fees" },
     { name: "lateFeeFirst", label: "Late fee first", type: "checkbox", placeholder: "A payment clears the late fee before the fee itself", section: "Fees" },
     { name: "autoUseAdvance", label: "Advances", type: "checkbox", placeholder: "Use extra money on the next invoice by itself", section: "Fees" },

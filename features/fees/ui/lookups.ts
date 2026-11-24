@@ -5,7 +5,7 @@ import { academicYears, classes, sections } from "@smw/feature-academics/schema"
 import { students } from "@smw/feature-students/schema";
 import { todayIST, monthStart } from "@smw/feature-kit/money";
 import { FeesBase } from "../base";
-import { feeInvoices, feeNotes } from "../schema";
+import { feeInvoices, feeNotes, feeReminderStops } from "../schema";
 
 export interface ApprovalInfo {
   id: string;
@@ -37,6 +37,19 @@ export class FeesLookup extends FeesBase {
         .where(or(ilike(students.name, like), ilike(students.admissionNo, like))).orderBy(asc(students.name)).limit(8);
       return rows.map((r) => ({ id: r.id, label: r.name, meta: `${r.admissionNo} · ${r.classLabel}${r.status === "active" ? "" : ` · ${r.status}`}` }));
     });
+  }
+
+  /** Transport routes, when the transport module is installed (its table may not exist). */
+  async routes() {
+    return this.read("read", async (tx) => {
+      const [t] = [...(await tx.execute<{ r: string | null }>(sql`select to_regclass('routes') r`))];
+      return t?.r ? [...(await tx.execute<{ id: string; name: string }>(sql`select id, name from routes order by name`))] : [];
+    });
+  }
+
+  /** Why this student's reminders are stopped, or null when they are not. */
+  async reminderStop(studentId: string) {
+    return this.read("read", async (tx) => (await tx.select({ reason: feeReminderStops.reason }).from(feeReminderStops).where(eq(feeReminderStops.studentId, studentId)))[0]?.reason ?? null);
   }
 
   /** One student as a picker option, or null when the id is not a student of this school. */

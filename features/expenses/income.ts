@@ -7,7 +7,7 @@ import type { DocumentData } from "@smw/ui/finance/document-types";
 import { finApprovals, finCashAccounts } from "@smw/feature-finance/schema";
 import { PdfBuilder } from "@smw/integrations";
 import { LookupService } from "./lookups";
-import { ExpenseService, cashFor, checkAccount, checkCentre, journalIdOf, journalIdSql, need } from "./base";
+import { ExpenseService, cashFor, checkAccount, checkCentre, journalIdOf, journalIdSql, need, onlyId } from "./base";
 import { day, method, note, optionalId, paiseAmount } from "./inputs";
 import { expIncome } from "./schema";
 
@@ -46,6 +46,7 @@ export class IncomeService extends ExpenseService {
   async list(query: ListQuery = {}): Promise<Page<Income & { journalId: string | null; reversalPending: boolean }>> {
     const q = listQuerySchema.parse(query), f = q.filters;
     const where = and(
+      onlyId(expIncome.id, f.id),
       q.q ? or(ilike(expIncome.number, `%${q.q}%`), ilike(expIncome.fromName, `%${q.q}%`), ilike(expIncome.label, `%${q.q}%`)) : undefined,
       f.status ? eq(expIncome.status, f.status as Income["status"]) : undefined, f.accountId ? eq(expIncome.accountId, f.accountId) : undefined,
       f.from ? sql`${expIncome.date} >= ${f.from}` : undefined, f.to ? sql`${expIncome.date} <= ${f.to}` : undefined,

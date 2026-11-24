@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { FeesBase } from "./base";
 
-export interface Mismatch { check: "totals" | "paid" | "dues" | "advances" | "deposits" | "journals"; studentId?: string; invoiceId?: string; expectedPaise: number; actualPaise: number; message: string }
+export interface Mismatch { check: "totals" | "paid" | "dues" | "advances" | "deposits" | "journals" | "counters"; studentId?: string; invoiceId?: string; expectedPaise: number; actualPaise: number; message: string }
 
 /** Controls that must always hold. They run nightly and in tests; a mismatch is shown to the admin, never fixed silently. */
 export class ChecksService extends FeesBase {
@@ -41,6 +41,12 @@ export class ChecksService extends FeesBase {
       union all select student_id, amount_paise from fee_advances where kind = 'deposit') x group by 1`, "The deposit", -1);
     for (const r of await q<{ journal_id: string }>(sql`select journal_id, sum(debit_paise) d, sum(credit_paise) c from fin_journal_lines group by 1 having sum(debit_paise) <> sum(credit_paise) limit 20`)) {
       out.push({ check: "journals", expectedPaise: n(r.d), actualPaise: n(r.c), message: `Journal entry ${r.journal_id} does not balance.` });
+    }
+    // A counter difference is in the books only when it was decided (or small enough to need no decision); while it waits the cash account stays at what the box should hold.
+    for (const r of await q<{ id: string; day: string; diff: string; state: string | null; booked: boolean }>(sql`select c.id, c.day, abs(c.counted_paise - c.expected_paise) diff, c.difference_state state,
+      exists (select 1 from fin_journals j where j.source_key = 'fees:counter-diff:' || c.id::text) booked from fee_counters c where c.closed_at is not null and c.counted_paise <> c.expected_paise`)) {
+      const waiting = r.state === "pending" || r.state === "recount";
+      if (waiting === r.booked) out.push({ check: "counters", expectedPaise: waiting ? 0 : n(r.diff), actualPaise: r.booked ? n(r.diff) : 0, message: waiting ? `The counter of ${r.day} still waits for a decision but its difference is already in the books.` : `The counter of ${r.day} has a decided difference that is not in the books.` });
     }
     return out;
   }

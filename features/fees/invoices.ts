@@ -341,6 +341,6 @@ export class InvoiceService extends FeesBase {
   /** Opening balances from the old system: dues, advances and deposits per student. `dryRun` checks every row and writes nothing. */
   async importOpening(file: { name: string; bytes: Uint8Array }, dryRun: boolean) {
     this.authorize("setup", "write");
-    return new OpeningImport(this.ctx).run(file, dryRun, this);
+    return new OpeningImport(this.ctx).run(file, dryRun);
   }
 }

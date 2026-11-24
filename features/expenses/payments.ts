@@ -9,7 +9,7 @@ import { balanceOf, postJournal, reverseJournal, type PostLine, type Poster } fr
 import { finApprovals, finCashAccounts, finJournals } from "@smw/feature-finance/schema";
 import { CASH_NOTE_PAISE } from "./constants";
 import { LookupService } from "./lookups";
-import { ExpenseService, cashFor, journalIdOf, journalIdSql, need } from "./base";
+import { ExpenseService, cashFor, journalIdOf, journalIdSql, need, onlyId } from "./base";
 import { netOf, openOf } from "./bills";
 import { day, method, note, paiseAmount } from "./inputs";
 import { expBillLines, expBills, expPaymentBills, expPayments, expVendors } from "./schema";
@@ -123,6 +123,7 @@ export class PaymentService extends ExpenseService {
   async list(query: ListQuery = {}): Promise<Page<Payment & { vendorName: string; billNos: string; journalId: string | null; reversalPending: boolean }>> {
     const q = listQuerySchema.parse(query), f = q.filters;
     const where = and(
+      onlyId(expPayments.id, f.id),
       q.q ? or(ilike(expPayments.number, `%${q.q}%`), ilike(expVendors.name, `%${q.q}%`), ilike(expPayments.reference, `%${q.q}%`)) : undefined,
       f.vendorId ? eq(expPayments.vendorId, f.vendorId) : undefined, f.method ? eq(expPayments.method, f.method as Payment["method"]) : undefined,
       f.status ? eq(expPayments.status, f.status as Payment["status"]) : undefined,

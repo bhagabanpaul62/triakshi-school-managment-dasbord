@@ -5,7 +5,7 @@ import { rupees, todayIST } from "@smw/feature-kit/money";
 import { users, type Tx } from "@smw/db";
 import { postJournal, type Poster } from "@smw/feature-finance/posting";
 import { finAccounts, finApprovals } from "@smw/feature-finance/schema";
-import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, managers, need, tell } from "./base";
+import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, managers, need, onlyId, tell } from "./base";
 import { ExpenseFiles, type UploadedFile } from "./files";
 import { day, method, optionalId, paiseAmount } from "./inputs";
 import { expClaims } from "./schema";
@@ -67,6 +67,7 @@ export class ClaimService extends ExpenseService {
     const mine = !this.all || f.scope === "mine";
     return this.read(this.all ? "manage" : "claim", async (tx) => {
       const where = and(
+        onlyId(expClaims.id, f.id),
         mine ? eq(expClaims.userId, this.ctx.userId) : undefined, f.status ? eq(expClaims.status, f.status as Claim["status"]) : undefined,
         q.q ? or(ilike(expClaims.title, `%${q.q}%`), ilike(users.name, `%${q.q}%`)) : undefined,
         f.from ? sql`${expClaims.spentOn} >= ${f.from}` : undefined, f.to ? sql`${expClaims.spentOn} <= ${f.to}` : undefined,

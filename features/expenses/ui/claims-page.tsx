@@ -11,7 +11,7 @@ import { cn } from "@smw/ui/utils";
 import { todayIST } from "@smw/feature-kit/money";
 import { ClaimService, LookupService } from "../service";
 import { approveClaim, payClaim, rejectClaim, saveClaim, withdrawClaim } from "./actions";
-import { JournalLink, NoAccess, SectionNav, can, one, type Search } from "./shared";
+import { JournalLink, NoAccess, OneRecord, SectionNav, can, one, type Search } from "./shared";
 
 export const metadata = { title: "Claims" };
 
@@ -21,7 +21,7 @@ const everyone: Column[] = [{ key: "userName", label: "Person", type: "person", 
 export default async function ClaimsPage({ searchParams }: { searchParams: Search }) {
   const ctx = await requireCtx();
   if (!can(ctx, "claim")) return <NoAccess ctx={ctx} what="Claims" who="staff" />;
-  const manage = can(ctx, "manage"), sp = await searchParams, tab = manage && one(sp.tab) ? one(sp.tab) : "mine";
+  const manage = can(ctx, "manage"), sp = await searchParams, tab = manage ? one(sp.tab) || (one(sp.id) ? "all" : "mine") : "mine";
   const svc = new ClaimService(ctx), look = new LookupService(ctx);
   const query = listQueryFrom(sp);
   const page = await svc.list({ ...query, filters: { ...query.filters, scope: tab === "mine" ? "mine" : "all", ...(tab === "decide" ? { status: "submitted" } : {}) } });
@@ -60,6 +60,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Searc
           ))}
         </div>
       ) : null}
+      {one(sp.id) ? <OneRecord all={`/app/expenses/claims${manage ? "?tab=all" : ""}`} /> : null}
       <DataTable columns={tab === "mine" ? mine : everyone} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount} searchPlaceholder="Search claims"
         rowActions={Object.fromEntries(rows.map((r) => [r.id, (
           <span key={r.id} className="inline-flex flex-wrap items-center justify-end gap-1">

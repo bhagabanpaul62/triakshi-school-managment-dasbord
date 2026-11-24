@@ -19,7 +19,7 @@ import { SettlementService } from "./settlements";
 import { feesVerifyLookups } from "./verify";
 import { receiptData } from "./documents";
 import { feeConcessionUses, feeInvoices, feeReceipts } from "./schema";
-import { TODAY, bills, config, decide, due, issueAll, makeSchool, publish, type Fixture } from "./testing";
+import { TODAY, bills, config, decide, due, issueAll, makeSchool, openingApproved, publish, type Fixture } from "./testing";
 import { readFileSync } from "node:fs";
 
 vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 });
@@ -280,8 +280,8 @@ describe("opening balances from a spreadsheet, and the dues report filters", () 
     const [a, b] = [await inv.importOpening(xlsx, true), await inv.importOpening(csv, true)];
     expect(a).toEqual(b);
     expect(a.totals).toEqual({ students: 2, duesPaise: 625_050, advancePaise: 20_000, depositPaise: 30_000 });
-    await inv.importOpening(xlsx, false);
-    await inv.importOpening(csv, false);
+    await openingApproved(fx, xlsx);
+    await openingApproved(fx, csv);
     const dues = new DuesService(fx.school.as.admin);
     const bal = async (name: string) => { const row = (await dues.report({ q: name })).rows[0]!; return [row.due, row.gross]; };
     expect(await bal("Sheet XL1")).toEqual(await bal("Sheet CS1"));

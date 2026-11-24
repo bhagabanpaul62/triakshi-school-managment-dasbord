@@ -12,6 +12,8 @@ export const APPROVAL_KIND_LABEL: Record<string, string> = {
   "fees.note": "Credit and debit notes",
   "fees.settlement": "Settlements",
   "fees.reversal": "Receipt reversals",
+  "fees.opening": "Opening balances",
+  "fees.counter_difference": "Counter differences",
   "fees.invoice_change": "Bill changes",
   "fees.refund": "Refunds",
   "expenses.bill": "Vendor bills",

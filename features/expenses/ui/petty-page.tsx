@@ -12,7 +12,7 @@ import { paise } from "@smw/ui/format";
 import { OUT_METHODS } from "../constants";
 import { LookupService, PettyCashService } from "../service";
 import { reversePettyEntry, returnFloat, saveFloat, spendFloat, topUpFloat } from "./actions";
-import { JournalLink, NoAccess, SectionNav, can, one, type Search } from "./shared";
+import { JournalLink, NoAccess, OneRecord, SectionNav, can, one, type Search } from "./shared";
 
 export const metadata = { title: "Petty cash" };
 const methods = OUT_METHODS.filter((m) => m !== "cheque").map((m) => ({ value: m, label: m.replace(/_/g, " ") }));
@@ -23,8 +23,9 @@ export default async function PettyPage({ searchParams }: { searchParams: Search
   const manage = can(ctx, "manage"), sp = await searchParams, svc = new PettyCashService(ctx), look = new LookupService(ctx);
   const floats = await svc.floats();
   const [accounts, centres, people] = await Promise.all([look.accounts(), look.centres(), manage ? look.people() : []]);
-  const pick = floats.find((f) => f.id === one(sp.float)) ?? floats[0];
-  const entries = pick ? await svc.entries(pick.id) : [];
+  const entryId = one(sp.id), entryFloat = entryId ? await svc.floatOfEntry(entryId) : null;
+  const pick = floats.find((f) => f.id === (entryFloat ?? one(sp.float))) ?? floats[0];
+  const entries = pick ? await svc.entries(pick.id, entryId || undefined) : [];
   const spendFields = [
     { name: "amountPaise", label: "Amount", type: "money" as const, required: true }, { name: "label", label: "What for", required: true, wide: true },
     { name: "accountId", label: "Spent on", type: "select" as const, required: true, options: accounts.map((a) => ({ value: a.id, label: a.name })) },
@@ -40,6 +41,7 @@ export default async function PettyPage({ searchParams }: { searchParams: Search
           { name: "limitPaise", label: "Most it may hold", type: "money", required: true, hint: "Top-ups stop at this amount." },
         ]} action={saveFloat} submitLabel="Open float" trigger={{ label: "New float", plus: true }} /> : null} />
       <SectionNav ctx={ctx} current="/app/expenses/petty" />
+      {entryId ? <OneRecord all={`/app/expenses/petty${pick ? `?float=${pick.id}` : ""}`} /> : null}
       {!floats.length ? (
         <div className="rounded-3xl bg-[var(--ds-surface-container-low)] p-8"><WidgetEmptyState title="No petty cash float yet" description={manage ? "Open a float for the office or a department. Top it up from the cash box, and the person spends it against slips." : "An accountant opens a float for you. Until then, use a claim to get money back."} />
           {!manage ? <div className="mt-3 text-center"><Link href="/app/expenses/claims" className="underline underline-offset-4">Make a claim instead</Link></div> : null}</div>

@@ -137,7 +137,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                 <ActionButton label="Delete draft" variant="ghost" action={deleteInvoiceDraft} values={{ id: inv.id }} redirectTo="/app/fees/invoices" confirm={{ title: "Delete this draft?", body: "Nothing was posted, so nothing else changes. A draft has no number.", danger: true, confirmLabel: "Delete" }} />
               </> : null}
               {draft && !setup ? <p className="text-sm text-[var(--ds-on-surface-muted)]">This draft waits for an accountant or admin to issue it.</p> : null}
-              {issued && d.openPaise > 0 && collect ? <PillLink href={`/app/fees/collect?studentId=${student.id}&invoiceId=${inv.id}`} primary>Collect {`₹${(d.openPaise / 100).toLocaleString("en-IN")}`}</PillLink> : null}
+              {issued && d.openPaise > 0 && collect ? <PillLink href={`/app/fees/collect?student=${student.id}`} primary>Collect {`₹${(d.openPaise / 100).toLocaleString("en-IN")}`}</PillLink> : null}
               {issued && d.openPaise > 0 && !collect ? <p className="text-sm text-[var(--ds-on-surface-muted)]">Fees are collected by the cashier or accountant.</p> : null}
               {issued && d.openPaise === 0 ? (receipts.find((r) => r.id) ? <PillLink href={`/app/fees/receipts/${receipts.find((r) => r.id)!.id}`} primary>Open the receipt</PillLink> : <p className="text-sm text-[var(--ds-on-surface-muted)]">Paid in full from advance or deposit.</p>) : null}
               {issued && setup && !openChange && d.openPaise > 0 ? <PillLink href={`/app/fees/invoices/${inv.id}/revise`}>Revise</PillLink> : null}

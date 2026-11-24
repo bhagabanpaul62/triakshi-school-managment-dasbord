@@ -30,7 +30,7 @@ export function CloseCounter({ expectedPaise, counterId, primary = false }: { ex
     setError("");
     const r = await closeCounter({ countedPaise: counted, denominations: byTotal ? undefined : nonZero(counts), differenceReason: reason.trim() || undefined });
     if (!r.ok) { setError(r.error); toast(r.error, "danger"); return; }
-    toast(r.data.differencePaise === 0 ? "Counter closed. The box matches." : "Counter closed. The difference is recorded.");
+    toast(r.data.differencePaise === 0 ? "Counter closed. The box matches." : "Counter closed. The difference is recorded; an approver may need to confirm it.");
     setOpen(false);
     router.push(`/app/fees/counter?closed=${r.data.id}`);
     router.refresh();
@@ -69,6 +69,7 @@ export function CloseCounter({ expectedPaise, counterId, primary = false }: { ex
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="diff-reason" className="text-[13px] font-medium text-[var(--ds-on-surface-variant)]">Why is it {diff < 0 ? "short" : "over"}?</label>
                 <textarea id="diff-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className={`${INPUT} h-auto py-2`} placeholder="For example: Rs. 100 given back as change twice" />
+                <p className="text-xs text-[var(--ds-on-surface-muted)]">The day closes with what you counted. An approver may need to confirm the difference before it is written off.</p>
               </div>
             ) : null}
             {error ? <p role="alert" className="text-sm text-[var(--ds-color-danger-400)]">{error}</p> : null}

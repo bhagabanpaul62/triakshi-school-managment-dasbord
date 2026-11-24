@@ -9,7 +9,7 @@ import { OUT_METHODS } from "../constants";
 import { PaymentService } from "../service";
 import { requestPaymentReversal } from "./actions";
 import { PaymentsTable } from "./payments-table";
-import { JournalLink, NoAccess, SectionNav, can, type Search } from "./shared";
+import { JournalLink, NoAccess, OneRecord, SectionNav, can, one, type Search } from "./shared";
 
 export const metadata = { title: "Payments" };
 
@@ -34,6 +34,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Sea
           {manage ? <Link href="/app/expenses/payments/new" className={buttonVariants({ className: "rounded-full" })}>Pay a vendor</Link> : null}
         </>} />
       <SectionNav ctx={ctx} current="/app/expenses/payments" />
+      {one(sp.id) ? <OneRecord all="/app/expenses/payments" /> : null}
       <PaymentsTable canManage={manage} columns={columns} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount} searchPlaceholder="Search voucher, vendor or reference"
         filters={[{ key: "method", label: "Method", options: OUT_METHODS.map((m) => ({ value: m, label: m.replace(/_/g, " ") })) }, { key: "status", label: "State", options: [{ value: "valid", label: "Valid" }, { value: "reversed", label: "Reversed" }] }]}
         rowActions={Object.fromEntries(rows.map((r) => [r.id, (

@@ -6,7 +6,7 @@ import { allPages } from "@smw/feature-finance/services/exports";
 import { schoolName } from "@smw/feature-finance/services/common";
 import { reportToCsv, reportToPdf, type Report } from "@smw/feature-finance/services/report";
 import { parsePeriod, periodLabel } from "@smw/ui/finance/logic";
-import { ConcessionService, ConcessionTypeService, DuesService, InvoiceService } from "../service";
+import { ConcessionService, ConcessionTypeService, DuesService, InvoiceService, ReceiptService, RefundService } from "../service";
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 /** Every filter on the screen (and nothing else) rides along, so the file is the list the person was looking at. */
@@ -15,13 +15,43 @@ const note = (q: ReturnType<typeof listQueryFrom>) => [q.q && `Search: ${q.q}`, 
 export const REPORT_BY = ["head", "class", "method", "cashier", "day"] as const;
 export type ReportBy = (typeof REPORT_BY)[number];
 export const BY_LABEL: Record<ReportBy, string> = { head: "Fee head", class: "Class", method: "Payment method", cashier: "Cashier", day: "Day" };
+/** Every report on the reports screen: the five ways money is grouped, then the three registers. */
+export const REPORT_KINDS = [...REPORT_BY, "concessions", "refunds", "reversals"] as const;
+export type ReportKind = (typeof REPORT_KINDS)[number];
+export const KIND_LABEL: Record<ReportKind, string> = { ...BY_LABEL, concessions: "Concessions", refunds: "Refunds", reversals: "Reversals" };
+
+/** The three registers of a period: concessions given, refunds paid, receipts reversed. */
+async function register(ctx: Ctx, kind: "concessions" | "refunds" | "reversals", sp: Record<string, string | null | undefined>): Promise<Report> {
+  const period = parsePeriod({ period: sp.period, from: sp.from, to: sp.to }, todayIST()), when = periodLabel(period);
+  if (kind === "reversals") {
+    const svc = new ReceiptService(ctx);
+    const rows = await allPages((page) => svc.list({ page, pageSize: 100, filters: { status: "reversed", from: period.from, to: period.to } }));
+    return { title: "Receipts reversed", subtitle: when, columns: [{ key: "number", label: "Receipt", kind: "mono" }, { key: "date", label: "Date", kind: "date" }, { key: "student", label: "Student" }, { key: "paise", label: "Amount", kind: "money" }],
+      rows: [...rows.map((r) => ({ cells: { number: r.number, date: r.date, student: r.studentName, paise: r.amountPaise } })), { style: "total" as const, cells: { number: "Total", date: null, student: null, paise: rows.reduce((s, r) => s + r.amountPaise, 0) } }] };
+  }
+  if (kind === "refunds") {
+    const svc = new RefundService(ctx);
+    const rows = (await allPages((page) => svc.list({ page, pageSize: 100, filters: { status: "approved" } }))).filter((r) => r.paidOn && r.paidOn >= period.from && r.paidOn <= period.to);
+    return { title: "Refunds paid", subtitle: when, columns: [{ key: "number", label: "Voucher", kind: "mono" }, { key: "date", label: "Paid on", kind: "date" }, { key: "source", label: "From" }, { key: "method", label: "Method" }, { key: "reason", label: "Why" }, { key: "paise", label: "Amount", kind: "money" }],
+      rows: [...rows.map((r) => ({ cells: { number: r.number ?? "", date: r.paidOn, source: r.source === "advance" ? "Advance" : "Deposit", method: r.method.replace("_", " "), reason: r.reason, paise: r.amountPaise } })), { style: "total" as const, cells: { number: "Total", date: null, source: null, method: null, reason: null, paise: rows.reduce((s, r) => s + r.amountPaise, 0) } }] };
+  }
+  const svc = new ConcessionService(ctx);
+  const rows = await allPages((page) => svc.list({ page, pageSize: 100, filters: { status: "approved" } }));
+  return { title: "Concessions given", subtitle: "Approved concessions of this academic year.", columns: [{ key: "student", label: "Student" }, { key: "type", label: "Kind" }, { key: "what", label: "Discount" }, { key: "head", label: "On" }, { key: "reason", label: "Why" }],
+    rows: rows.map((c) => ({ cells: { student: c.studentName, type: c.typeName ?? "Other", what: c.mode === "percent" ? `${c.value / 100}%` : `${rupees(c.value)}${c.per === "year" ? " for the year" : " per bill"}`, head: c.headName ?? "Every fee", reason: c.reason } })) };
+}
+
+/** Any report of the reports screen, as one Report the screen, the CSV and the PDF all read. */
+export async function periodReport(ctx: Ctx, kind: ReportKind, sp: Record<string, string | null | undefined>): Promise<Report> {
+  return (REPORT_BY as readonly string[]).includes(kind) ? collectionReport(ctx, kind as ReportBy, sp) : register(ctx, kind as "concessions" | "refunds" | "reversals", sp);
+}
 
 /** The collection report for a period: the screen and the file read the same rows. */
-export async function collectionReport(ctx: Ctx, by: ReportBy, sp: Record<string, string | null | undefined>): Promise<Report & { totalPaise: number }> {
+export async function collectionReport(ctx: Ctx, by: ReportBy, sp: Record<string, string | null | undefined>): Promise<Report> {
   const period = parsePeriod({ period: sp.period, from: sp.from, to: sp.to }, todayIST());
   const out = await new DuesService(ctx).collection({ from: period.from, to: period.to, by });
   return {
-    title: `Fees collected by ${BY_LABEL[by].toLowerCase()}`, subtitle: periodLabel(period), totalPaise: out.totalPaise,
+    title: `Fees collected by ${BY_LABEL[by].toLowerCase()}`, subtitle: periodLabel(period),
     columns: [{ key: "label", label: BY_LABEL[by] }, { key: "receipts", label: "Receipts" }, { key: "paise", label: "Collected", kind: "money" }],
     rows: [...out.rows.map((r) => ({ cells: { label: r.label, receipts: r.receipts, paise: r.paise } })), { style: "total" as const, cells: { label: "Total", receipts: out.rows.reduce((s, r) => s + r.receipts, 0), paise: out.totalPaise } }],
   };
@@ -60,7 +90,7 @@ async function build(kind: string, sp: URLSearchParams, ctx: Ctx): Promise<Repor
       rows: rows.map((c) => ({ cells: { student: c.studentName, concession: c.mode === "percent" ? `${c.value / 100}%` : rupees(c.value), head: c.headName ?? "All fees", reason: c.reason } })),
     };
   }
-  if ((REPORT_BY as readonly string[]).includes(kind)) return collectionReport(ctx, kind as ReportBy, Object.fromEntries(sp));
+  if ((REPORT_KINDS as readonly string[]).includes(kind)) return periodReport(ctx, kind as ReportKind, Object.fromEntries(sp));
   throw new NotFoundError("Export");
 }
 
@@ -78,4 +108,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ kind: st
     if (err instanceof AppError) return Response.json({ error: err.message }, { status: err.status });
     throw err;
   }
+}
+
+/** GET /app/fees/opening/template: the empty sheet for opening balances, with one example row. */
+export async function openingTemplate() {
+  return new Response("admission_no,dues,advance,deposit,as_of\r\nA-1001,12500,0,2000,2026-04-01\r\n", { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="opening-balances-template.csv"', "cache-control": "private, no-store" } });
 }
