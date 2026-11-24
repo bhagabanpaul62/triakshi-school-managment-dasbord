@@ -74,7 +74,7 @@ async function build(kind: string, sp: URLSearchParams, ctx: Ctx): Promise<Repor
   }
   if (kind === "dues") {
     const svc = new DuesService(ctx);
-    const rows = await allPages((page) => svc.report({ ...q, page, pageSize: 100 }));
+    const rows = await svc.reportAll(q);
     return {
       title: "Students' dues", subtitle: `${note(q)} As on ${todayIST()}.`,
       columns: [{ key: "student", label: "Student" }, { key: "adm", label: "Admission no" }, { key: "class", label: "Class" }, { key: "state", label: "Student" }, { key: "billed", label: "Billed", kind: "money" }, { key: "paid", label: "Paid", kind: "money" },

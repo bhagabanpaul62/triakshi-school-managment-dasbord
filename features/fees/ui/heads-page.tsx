@@ -15,7 +15,7 @@ const KIND: Record<(typeof FEE_HEAD_KINDS)[number], string> = { tuition: "Tuitio
 const fields = (editing: boolean): Field[] => [
   { name: "name", label: "Name", required: true, placeholder: "Tuition, Transport, Lab fee", wide: true },
   { name: "kind", label: "Kind", type: "select", required: true, options: FEE_HEAD_KINDS.map((k) => ({ value: k, label: KIND[k] })) },
-  { name: "type", label: "Is it income?", type: "select", required: true, options: [{ value: "income", label: "Income of the school" }, { value: "deposit", label: "Refundable deposit (money held for the family)" }], hint: "A deposit is owed back, so it is never counted as income." },
+  { name: "type", label: "Is it income?", type: "select", required: true, options: [{ value: "income", label: "Income of the school" }, { value: "deposit", label: "Refundable deposit (money held for the family)" }], hint: "A deposit is owed back, so it is never counted as income. Once a bill uses this fee, this cannot change: turn it off and add a new fee instead." },
   { name: "isTuition", label: "Tuition certificate", type: "checkbox", placeholder: "Counts as tuition on the tuition fee certificate" },
   ...(editing ? [{ name: "isActive", label: "In use", type: "checkbox" as const, placeholder: "Offer it when making plans and bills" }] : []),
 ];

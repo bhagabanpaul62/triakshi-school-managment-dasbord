@@ -75,7 +75,7 @@ export class DuesService extends FeesBase {
       ]);
       const rows = invoices.map((i) => ({ ...i, openPaise: i.status === "issued" ? openOf(i) : 0, state: dueState(i, today), accruedLatePaise: i.status === "issued" ? invoiceLateFee(i.lateRule, calcOf(i), today) : 0 }));
       const openPaise = rows.reduce((s, r) => s + r.openPaise, 0), accruedPaise = rows.reduce((s, r) => s + r.accruedLatePaise, 0);
-      const [advancePaise, depositPaise] = [await this.advanceOf(tx, studentId), await this.depositHeld(tx, studentId)];
+      const [advancePaise, depositPaise, waiting] = [await this.advanceOf(tx, studentId), await this.depositHeld(tx, studentId), await this.waitingOf(tx, studentId)];
       const timeline = [
         ...rows.filter((r) => r.issueDate).map((r) => ({ at: r.issueDate!, kind: "invoice", title: `Bill ${r.number}: ${r.label}`, amountPaise: r.grossPaise - r.concessionPaise, href: `/app/fees/invoices/${r.id}` })),
         ...receipts.map((r) => ({ at: r.date, kind: "receipt", title: `Receipt ${r.number}${r.status === "valid" ? "" : ` (${r.status})`}`, amountPaise: r.amountPaise, href: `/app/fees/receipts/${r.id}` })),
@@ -86,7 +86,7 @@ export class DuesService extends FeesBase {
         ...reminders.map((r) => ({ at: r.sentOn, kind: "reminder", title: "Reminder sent", amountPaise: 0, href: `/app/fees/invoices/${r.invoiceId}` })),
       ].sort((a, b) => b.at.localeCompare(a.at));
       const [notesWith, concessionsWith, settlementsWith] = await Promise.all([this.withApproval(tx, ["fees.note"], notes), this.withApproval(tx, ["fees.concession"], concessions), this.withApproval(tx, ["fees.settlement"], settlements)]);
-      return { student, balance: { openPaise, accruedPaise, advancePaise, depositPaise, netPaise: openPaise + accruedPaise - advancePaise }, invoices: rows, receipts, notes: notesWith, concessions: concessionsWith, settlements: settlementsWith, advances, deposits: { heldPaise: depositPaise }, refunds, slips, promises, timeline };
+      return { student, balance: { openPaise, accruedPaise, advancePaise, depositPaise, waitingAdvancePaise: waiting.advancePaise, waitingDepositPaise: waiting.depositPaise, netPaise: openPaise + accruedPaise - advancePaise }, invoices: rows, receipts, notes: notesWith, concessions: concessionsWith, settlements: settlementsWith, advances, deposits: { heldPaise: depositPaise }, refunds, slips, promises, timeline };
     });
   }
 
@@ -113,7 +113,7 @@ export class DuesService extends FeesBase {
       const open = await this.loadInvoices(tx, and(inArray(feeInvoices.studentId, ids), eq(feeInvoices.status, "issued")));
       const members = await Promise.all(kids.map(async (k) => {
         const bills = open.filter((i) => i.studentId === k.id && openOf(i) > 0).map((i) => ({ id: i.id, number: i.number, label: i.label, dueDate: i.dueDate, openPaise: openOf(i), accruedLatePaise: invoiceLateFee(i.lateRule, calcOf(i), today), state: dueState(i, today) }));
-        return { student: k, bills, advancePaise: await this.advanceOf(tx, k.id), openPaise: bills.reduce((s, b) => s + b.openPaise + b.accruedLatePaise, 0) };
+        return { student: k, bills, advancePaise: await this.advanceOf(tx, k.id), waitingAdvancePaise: (await this.waitingOf(tx, k.id)).advancePaise, openPaise: bills.reduce((s, b) => s + b.openPaise + b.accruedLatePaise, 0) };
       }));
       return { members: members.sort((a, b) => (a.student.id === studentId ? -1 : b.student.id === studentId ? 1 : a.student.name.localeCompare(b.student.name))), totalPaise: members.reduce((s, m) => s + m.openPaise, 0) };
     });
@@ -128,10 +128,20 @@ export class DuesService extends FeesBase {
   async report(query: ListQuery = {}) {
     const q = listQuerySchema.parse(query);
     return this.read("read", async (tx) => {
-      const f = q.filters;
-      const out = await this.rows(tx, { q: q.q, classId: f.classId, headId: f.headId, routeId: f.routeId, overdueOnly: f.overdue === "1", age: f.age, status: f.status, limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
+      const out = await this.reportRows(tx, q, q.pageSize, (q.page - 1) * q.pageSize);
       return { rows: out.rows, total: out.total, page: q.page, pageSize: q.pageSize, pageCount: Math.max(1, Math.ceil(out.total / q.pageSize)), totals: out.totals };
     });
+  }
+
+  /** The same list for a download: every matching student (up to `max`) from one run of the dues query, not one run per page. */
+  async reportAll(query: ListQuery = {}, max = 20_000) {
+    const q = listQuerySchema.parse(query);
+    return this.read("read", async (tx) => (await this.reportRows(tx, q, max, 0)).rows);
+  }
+
+  private reportRows(tx: Tx, q: ReturnType<typeof listQuerySchema.parse>, limit: number, offset: number) {
+    const f = q.filters;
+    return this.rows(tx, { q: q.q, classId: f.classId, headId: f.headId, routeId: f.routeId, overdueOnly: f.overdue === "1", age: f.age, status: f.status, limit, offset });
   }
 
   private async rows(tx: Tx, o: { ids?: string[]; q?: string; classId?: string; headId?: string; routeId?: string; overdueOnly?: boolean; age?: string; status?: string; includeZero?: boolean; limit: number; offset: number }) {
@@ -307,9 +317,10 @@ export class DuesService extends FeesBase {
           where a.undone_at is null and r.status in ${LIVE} and r.date between ${from}::date and ${to}::date group by 1, 2 order by 3 desc`)
         : o.by === "method" ? await run(sql`select m.method key, m.method label, sum(m.amount_paise) paise, count(distinct r.id) n from fee_receipts r join fee_receipt_methods m on m.receipt_id = r.id
           where r.status in ${LIVE} and m.method <> 'advance' and r.date between ${from}::date and ${to}::date group by 1, 2 order by 3 desc`)
-        : o.by === "cashier" ? await run(sql`select coalesce(u.id::text, 'none') key, coalesce(u.name, 'Unknown') label, sum(r.amount_paise) paise, count(*) n from fee_receipts r left join users u on u.id = r.collected_by
+        // New money only: the part paid from the advance was counted when the advance came in.
+        : o.by === "cashier" ? await run(sql`select coalesce(u.id::text, 'none') key, coalesce(u.name, 'Unknown') label, sum(m.amount_paise) paise, count(distinct r.id) n from fee_receipts r join fee_receipt_methods m on m.receipt_id = r.id and m.method <> 'advance' left join users u on u.id = r.collected_by
           where r.status in ${LIVE} and r.date between ${from}::date and ${to}::date group by 1, 2 order by 3 desc`)
-        : await run(sql`select r.date::text key, r.date::text label, sum(r.amount_paise) paise, count(*) n from fee_receipts r where r.status in ${LIVE} and r.date between ${from}::date and ${to}::date group by 1, 2 order by 1`);
+        : await run(sql`select r.date::text key, r.date::text label, sum(m.amount_paise) paise, count(distinct r.id) n from fee_receipts r join fee_receipt_methods m on m.receipt_id = r.id and m.method <> 'advance' where r.status in ${LIVE} and r.date between ${from}::date and ${to}::date group by 1, 2 order by 1`);
       const out = rows.map((r) => ({ key: r.key ?? "", label: o.by === "method" ? METHOD_LABEL[r.label as PayMethod] ?? String(r.label) : r.label ?? "", paise: num(r.paise), receipts: num(r.n) }));
       return { rows: out, totalPaise: out.reduce((s, r) => s + r.paise, 0) };
     });

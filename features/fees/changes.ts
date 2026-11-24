@@ -20,9 +20,13 @@ export class ChangeService extends FeesBase {
     return Number(r?.v ?? 0);
   }
 
-  /** May this much be taken off alone? Zero or less is never a reduction; a limit of 0 means every reduction needs approval. */
+  /**
+   * May this much be taken off alone? Zero or less is never a reduction; a limit of 0 means every reduction needs approval.
+   * The student is locked first, so two requests at once cannot both read the same total and each slip under the limit.
+   */
   async mayApplyAloneIn(tx: Tx, studentId: string | undefined, lowersPaise: number): Promise<boolean> {
     if (lowersPaise <= 0) return true;
+    if (studentId) await this.lockStudents(tx, [studentId]);
     const { concessionLimitPaise: limit } = await this.settings(tx);
     return limit > 0 && (studentId ? await this.loweredAloneIn(tx, studentId) : 0) + lowersPaise <= limit;
   }

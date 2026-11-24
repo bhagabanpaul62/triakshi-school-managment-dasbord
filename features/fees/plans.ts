@@ -35,17 +35,27 @@ export class HeadService extends CrudService<typeof feeHeads, Perm> {
   protected searchColumns() { return [feeHeads.name]; }
   protected sortColumns() { return { name: feeHeads.name, createdAt: feeHeads.createdAt }; }
 
-  /** Names are unique ignoring case, and an income account must be this school's own (foreign keys ignore RLS). */
-  private async check(tx: Tx, data: Record<string, unknown>, exceptId?: string) {
-    const [dup] = await tx.select({ id: feeHeads.id }).from(feeHeads).where(and(sql`lower(${feeHeads.name}) = lower(${String(data.name)})`, exceptId ? ne(feeHeads.id, exceptId) : undefined)).limit(1);
+  /**
+   * Names are unique ignoring case. The income account must be this school's own (foreign keys ignore RLS), an active income
+   * account that no system, cash or bank entry owns: money booked there would be counted twice or in the wrong place.
+   * A deposit is held for the family, so it has no income account. Once bills use a fee, its type and account stay.
+   */
+  private async check(tx: Tx, data: Record<string, unknown>, existing?: FeeHead) {
+    const [dup] = await tx.select({ id: feeHeads.id }).from(feeHeads).where(and(sql`lower(${feeHeads.name}) = lower(${String(data.name)})`, existing ? ne(feeHeads.id, existing.id) : undefined)).limit(1);
     if (dup) throw new ConflictError(`A fee called "${data.name}" already exists.`);
     if (data.accountId) {
-      const [a] = await tx.select({ id: finAccounts.id }).from(finAccounts).where(eq(finAccounts.id, String(data.accountId))).limit(1);
+      if (data.type === "deposit") throw invalid("accountId", "A deposit is held for the family, so it goes to Deposits payable. Leave the income account empty.");
+      const [a] = await tx.select({ type: finAccounts.type, isActive: finAccounts.isActive, systemKey: finAccounts.systemKey, name: finAccounts.name, cash: sql<boolean>`exists (select 1 from fin_cash_accounts c where c.account_id = ${finAccounts.id})` }).from(finAccounts).where(eq(finAccounts.id, String(data.accountId))).limit(1);
       if (!a) throw new NotFoundError("Account");
+      if (a.type !== "income" || !a.isActive || a.systemKey || a.cash) throw invalid("accountId", `${a.name} cannot take fee income. Pick an income account that is in use and is not a system, cash or bank account, or leave it empty for Fee income.`);
+    }
+    const changesAccount = data.accountId !== undefined && (data.accountId ?? null) !== existing?.accountId;
+    if (existing && (data.type !== existing.type || changesAccount) && (await this.usage(tx, existing))[1]![1] > 0) {
+      throw new ConflictError(`Bills already use ${existing.name}, so its type and income account cannot change. Turn it off with Edit and add a new fee for the new type.`);
     }
   }
   protected async beforeCreate(tx: Tx, data: Record<string, unknown>) { await this.check(tx, data); return data; }
-  protected async beforeUpdate(tx: Tx, existing: FeeHead, data: Record<string, unknown>) { await this.check(tx, data, existing.id); return data; }
+  protected async beforeUpdate(tx: Tx, existing: FeeHead, data: Record<string, unknown>) { await this.check(tx, data, existing); return data; }
   protected async usage(tx: Tx, h: FeeHead): Promise<[string, number][]> {
     const [[p], [l]] = await Promise.all([
       tx.select({ n: sql<number>`count(*)::int` }).from(feePlanLines).where(eq(feePlanLines.headId, h.id)),

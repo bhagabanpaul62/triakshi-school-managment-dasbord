@@ -1,13 +1,15 @@
 // What approving, recalling and paying a run does to the books. Plain functions: the approval handlers and the services both call them.
-import { and, eq, inArray, sql } from "drizzle-orm";
-import type { Tx } from "@smw/db";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { users, type Tx } from "@smw/db";
 import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { monthEnd, todayIST } from "@smw/feature-kit/money";
 import { nextNumber, postJournal, reverseJournal, type PostLine, type Poster } from "@smw/feature-finance/posting";
-import { finTemplates } from "@smw/feature-finance/schema";
+import { finJournals, finTemplates } from "@smw/feature-finance/schema";
 import { defaultSources, type Sources } from "./sources";
 import { ratesOf, repaid, type ItemRow, type LineRow } from "./compute";
-import { payComponents, payItems, payLines, payLoanRepayments, payLoans, payRuns } from "./schema";
+import { bankOf } from "./bank";
+import { reviewBlockers } from "./review";
+import { payComponents, payItems, payLines, payLoanRepayments, payLoans, payProfiles, payRuns } from "./schema";
 
 export type RunRow = typeof payRuns.$inferSelect;
 const PF = ["pf_employee", "pf_employer", "eps_employer", "edli", "pf_admin"];
@@ -32,6 +34,17 @@ export async function runWithItems(tx: Tx, runId: string, lock = false) {
   const items = await tx.select().from(payItems).where(eq(payItems.runId, runId)).orderBy(payItems.createdAt);
   const lines = items.length ? await tx.select().from(payLines).where(inArray(payLines.itemId, items.map((i) => i.id))).orderBy(payLines.sort) : [];
   return { run, items, lines };
+}
+
+/** A run's accrual posts once per approval: the first under the plain key, each later one (after a recall) under `:n`. A document key posts only once, so a second approval needs its own. */
+const accrualKey = (runId: string, n: number) => (n <= 1 ? `payroll:run:${runId}` : `payroll:run:${runId}:${n - 1}`);
+export async function accrualCount(tx: Tx, runId: string): Promise<number> {
+  const [r] = await tx.select({ n: sql<number>`count(*)::int` }).from(finJournals).where(and(eq(finJournals.sourceType, "payroll_run"), eq(finJournals.sourceId, runId), ne(finJournals.kind, "reversal")));
+  return r?.n ?? 0;
+}
+/** Reverse the accrual of the current approval of a run. */
+export async function reverseAccrual(tx: Tx, poster: Poster, runId: string, memo: string) {
+  return reverseJournal(tx, poster, accrualKey(runId, await accrualCount(tx, runId)), { date: todayIST(), memo });
 }
 
 /** The accrual of a run (PRD 5.2): salaries and employer cost against each person's net pay, the statutory payables and loans recovered. */
@@ -63,7 +76,7 @@ export async function accrue(tx: Tx, poster: Poster, run: RunRow, items: ItemRow
   const top = Number(run.totals.pfAdminTopUp ?? 0);
   if (top) { debit("employer_contrib", null, top); credit("pf", { account: "pf_payable", credit: top }); }
   return postJournal(tx, poster, {
-    date, sourceKey: `payroll:run:${run.id}`, sourceType: "payroll_run", sourceId: run.id, memo: `Payroll: ${run.label}`,
+    date, sourceKey: accrualKey(run.id, (await accrualCount(tx, run.id)) + 1), sourceType: "payroll_run", sourceId: run.id, memo: `Payroll: ${run.label}`,
     lines: [...dr.values(), ...out, ...cr.values()],
   });
 }
@@ -96,13 +109,21 @@ export async function approveRun(tx: Tx, poster: Poster, runId: string, approved
   if (!allowed.includes(run.status)) throw new ConflictError(`This run is ${run.status}, so it cannot be approved now.`);
   const live = items.filter((i) => !i.skippedReason);
   if (!live.length) throw new ConflictError("There is nobody in this run.");
-  if (live.some((i) => Number(i.netPaise) < 0)) throw new ConflictError("Someone's pay is below zero. Fix it first.");
+  // The same checks as review, once more: bank details, typed amounts and rates can change between review and approval.
+  const [profiles, names] = await Promise.all([
+    tx.select().from(payProfiles).where(inArray(payProfiles.userId, live.map((i) => i.userId))),
+    tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, live.map((i) => i.userId))),
+  ]);
+  const blockers = reviewBlockers(run, live, new Map(names.map((n) => [n.id, n.name])), lines, profiles);
+  if (blockers.length) throw new ConflictError(`${blockers.length} thing${blockers.length === 1 ? "" : "s"} must be fixed first: ${blockers[0]!.message} Withdraw the request and reopen the run to fix it.`);
   const today = todayIST(), date = run.kind === "monthly" && monthEnd(run.month) < today ? monthEnd(run.month) : today;
   const [tpl] = await tx.select({ v: finTemplates.version }).from(finTemplates).where(and(eq(finTemplates.kind, "payslip"), eq(finTemplates.isCurrent, true)));
   for (const i of live) {
     if (i.payslipNo) continue;
     await tx.update(payItems).set({ payslipNo: await nextNumber(tx, run.schoolId, "payslip", date), templateVersion: tpl?.v ?? 0 }).where(eq(payItems.id, i.id));
   }
+  // Freeze how each person is paid: payouts and the bank file use this, whatever the profile says later.
+  for (const i of live) await tx.update(payItems).set({ snapshot: { ...i.snapshot, bank: bankOf(profiles.find((p) => p.userId === i.userId)) } }).where(eq(payItems.id, i.id));
   const liveIds = new Set(live.map((i) => i.id));
   await recoverLoans(tx, run.schoolId, lines.filter((l) => liveIds.has(l.itemId)), today, 1);
   await accrue(tx, poster, run, items, lines, date);
@@ -118,7 +139,7 @@ export async function recallRun(tx: Tx, poster: Poster, runId: string, reason: s
   if (run.status !== "approved") throw new ConflictError(run.status === "paid" ? "This run is paid, so it cannot be recalled." : "Only an approved run can be recalled.");
   if (run.kind === "exit") throw new ConflictError("A final settlement is undone from the exit page.");
   if (items.some((i) => i.payout === "paid")) throw new ConflictError("Some people are already paid, so this run cannot be recalled.");
-  await reverseJournal(tx, poster, `payroll:run:${runId}`, { date: todayIST(), memo: `Payroll recalled: ${run.label}. ${reason}` });
+  await reverseAccrual(tx, poster, runId, `Payroll recalled: ${run.label}. ${reason}`);
   const liveIds = new Set(items.filter((i) => !i.skippedReason).map((i) => i.id));
   await recoverLoans(tx, run.schoolId, lines.filter((l) => liveIds.has(l.itemId)), todayIST(), -1);
   await sources.claims.unmark(tx, runId);

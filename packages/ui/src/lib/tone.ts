@@ -42,4 +42,4 @@ export const LABEL = "font-mono text-[11px] uppercase tracking-[0.05em] text-[va
 export const ROW_HOVER = "transition-colors duration-150 hover:bg-white/[0.04] focus-visible:bg-white/[0.04] focus-visible:outline-none";
 
 /** The one text-input look. */
-export const INPUT = "h-10 w-full rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)] outline-none placeholder:text-[var(--ds-on-surface-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)] aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-[var(--ds-color-danger-500)]";
+export const INPUT = "h-10 w-full rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)] outline-none placeholder:text-[var(--ds-on-surface-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)] aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-[var(--ds-color-danger-500)] file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)] [&[type=file]]:py-2";

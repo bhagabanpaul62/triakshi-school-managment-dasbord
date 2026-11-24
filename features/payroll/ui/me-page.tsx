@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
 import { fyOf, todayIST } from "@smw/feature-kit/money";
 import { Panel } from "@smw/ui/kit/Panel";
+import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
@@ -48,7 +49,11 @@ export default async function MePage() {
         </div>
         <div className="lg:col-span-7">
           <Panel title={`Tax declaration ${fy}`} className="h-full">
-            <p className="mb-4 text-sm text-[var(--ds-on-surface-muted)]">What you tell payroll so tax is deducted correctly. Deductions count only under the old regime.</p>
+            <p className="mb-2 text-sm text-[var(--ds-on-surface-muted)]">What you tell payroll so tax is deducted correctly. Deductions count only under the old regime.</p>
+            <p className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+              {!decl ? <ToneBadge label="Not sent" tone="default" /> : decl.acceptedAt ? <><ToneBadge label="Accepted" tone="success" /><span className="text-[var(--ds-on-surface-muted)]">It counts for your tax. Changing it asks the office to accept it again.</span></>
+                : decl.returnedNote ? <><ToneBadge label="Sent back" tone="warning" /><span>{decl.returnedNote}. Fix it and save again.</span></> : <><ToneBadge label="Waiting for the office" tone="info" /><span className="text-[var(--ds-on-surface-muted)]">It does not change your tax until the office accepts it.</span></>}
+            </p>
             <InlineForm action={saveDeclaration} submitLabel="Save declaration" hidden={{ fy }} values={decl ?? {}}
               fields={[{ name: "otherIncomePaise", label: "Other income this year", type: "money" }, { name: "deductionsPaise", label: "Deductions you will claim (80C and others)", type: "money" }, { name: "previousSalaryPaise", label: "Salary from a previous employer this year", type: "money" }, { name: "previousTdsPaise", label: "Tax already deducted there", type: "money" }, { name: "note", label: "Note", type: "text", wide: true }]} />
           </Panel>

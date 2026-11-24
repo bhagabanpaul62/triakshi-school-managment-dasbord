@@ -8,8 +8,10 @@ import { computeMonth, refreshTotals, saveItem, ratesOf, TYPED_CODES, type CalcE
 import { monthLabel } from "../csv";
 import type { Flag } from "../engine";
 import { PayrollService, type Person } from "../base";
+import { bankOf, describeMove, frozenBank, movedBank } from "../bank";
+import { reviewBlockers, type Blocker } from "../review";
 import { RUN_KINDS } from "../constants";
-import { payAssignments, payComponents, payItems, payLines, payProfiles, payRuns } from "../schema";
+import { payAssignments, payComponents, payExits, payItems, payLines, payProfiles, payRuns } from "../schema";
 import { recallRun, runWithItems, type RunRow } from "../ledger";
 
 export const ADJUSTMENT_CODES = { arrears: "earning", bonus: "earning", extra_classes: "earning", lop_reversal: "earning", other_earning: "earning", deduction: "deduction" } as const;
@@ -28,13 +30,15 @@ const adjustmentInput = z.object({ code: z.enum(Object.keys(ADJUSTMENT_CODES) as
 const daysInput = z.object({ unpaidDays: z.coerce.number().min(0).max(31).multipleOf(0.5).optional(), hours: z.coerce.number().min(0).max(744).optional() });
 const reason = z.string().trim().min(3, "Say why.").max(200);
 
-export interface Blocker { code: "unmarked" | "negative" | "bank" | "typed" | "empty"; message: string; itemId?: string; userId?: string; href: string; fix?: "switch_pay_by" }
+export type { Blocker };
 export interface Warning { code: string; message: string; itemId?: string; href?: string }
 export interface RunItemView {
   id: string; userId: string; name: string; employeeId: string; department: string | null;
   calendarDays: number; unpaidHalfDays: number; unmarkedDays: number; hours: number | null;
   grossPaise: number; deductionsPaise: number; employerPaise: number; netPaise: number; prevNetPaise: number | null; changeBp: number | null;
   skippedReason: string | null; payout: ItemRow["payout"]; payoutRef: string | null; failReason: string | null; paidOn: string | null; payslipNo: string | null; flags: Flag[]; payBy: string; bankLast4: string | null;
+  /** Set when the live bank details are not the ones the run was approved with: what changed, for the payouts screen. */
+  bankMoved: string | null;
 }
 export interface RunView {
   run: RunRow; items: RunItemView[]; totals: Record<string, number>; blockers: Blocker[]; warnings: Warning[];
@@ -71,16 +75,24 @@ export class RunService extends PayrollService {
       const views = items.map((i): RunItemView => {
         const p = people.get(i.userId), prof = profiles.find((x) => x.userId === i.userId), before = prev?.nets.get(i.userId) ?? null;
         const snap = i.snapshot as { flags?: Flag[] };
+        const frozen = ["approved", "paid"].includes(run.status), bank = frozen ? frozenBank(i, prof) : bankOf(prof);
+        const moved = frozen && i.payout !== "paid" ? movedBank(i, prof, this.ctx.schoolId) : null;
         return {
           id: i.id, userId: i.userId, name: p?.name ?? "Unknown", employeeId: p?.employeeId ?? "", department: p?.department ?? null, calendarDays: i.calendarDays, unpaidHalfDays: i.unpaidHalfDays, unmarkedDays: i.unmarkedDays,
           hours: i.hours == null ? null : Number(i.hours), grossPaise: Number(i.grossPaise), deductionsPaise: Number(i.deductionsPaise), employerPaise: Number(i.employerPaise), netPaise: Number(i.netPaise),
           prevNetPaise: before, changeBp: before ? Math.round(((Number(i.netPaise) - before) * 10_000) / before) : null, skippedReason: i.skippedReason, payout: i.payout, payoutRef: i.payoutRef, failReason: i.failReason,
-          paidOn: i.paidOn, payslipNo: i.payslipNo, flags: snap.flags ?? [], payBy: prof?.payBy ?? "bank", bankLast4: prof?.bankLast4 ?? null,
+          paidOn: i.paidOn, payslipNo: i.payslipNo, flags: snap.flags ?? [], payBy: bank.payBy, bankLast4: bank.last4, bankMoved: moved ? describeMove(bank, moved) : null,
         };
       });
       const live = views.filter((v) => !v.skippedReason);
-      const blockers = this.blockers(run, live, lines, profiles);
+      const names = new Map([...people].map(([id, p]) => [id, p.name]));
+      const blockers = reviewBlockers(run, items.filter((i) => !i.skippedReason), names, lines, profiles, this.attendanceOn);
       const warnings: Warning[] = [];
+      const recent = new Date(Date.now() - 30 * 86_400_000);
+      for (const v of live) {
+        const changed = profiles.find((x) => x.userId === v.userId)?.bankChangedAt;
+        if (changed && changed > recent) warnings.push({ code: "bank_changed", message: `${v.name}: the bank account was changed on ${changed.toISOString().slice(0, 10)}. Check with them that it is theirs.`, itemId: v.id });
+      }
       for (const v of live) {
         for (const f of v.flags) if (f.code !== "needs_input" && f.code !== "net_negative") warnings.push({ code: f.code, message: `${v.name}: ${f.message}`, itemId: v.id });
         if (v.changeBp !== null && Math.abs(v.changeBp) > SWING_BP) warnings.push({ code: "swing", message: `${v.name}: net pay is ${v.changeBp > 0 ? "up" : "down"} ${Math.abs(Math.round(v.changeBp / 100))}% on last month.`, itemId: v.id });
@@ -112,26 +124,8 @@ export class RunService extends PayrollService {
     const out: RunView["notIncluded"] = [];
     const missing = [...people.values()].filter((p) => !p.left && !have.has(p.id));
     const assigned = new Set(missing.length ? (await tx.selectDistinct({ id: payAssignments.userId }).from(payAssignments).where(and(inArray(payAssignments.userId, missing.map((m) => m.id)), lte(payAssignments.fromDate, run.month)))).map((r) => r.id) : []);
-    for (const p of missing) out.push({ userId: p.id, name: p.name, why: assigned.has(p.id) ? "Not added to this run" : "No pay set up", href: `/app/payroll/people/${p.id}` });
-    return out;
-  }
-
-  /** What stops this run from being reviewed, each with the place that fixes it. */
-  private blockers(run: RunRow, live: RunItemView[], lines: LineRow[], profiles: (typeof payProfiles.$inferSelect)[]): Blocker[] {
-    const out: Blocker[] = [];
-    if (!live.length) out.push({ code: "empty", message: "Nobody is in this run. Add people with pay set up.", href: "/app/payroll/people" });
-    for (const v of live) {
-      const here = `/app/payroll/runs/${run.id}?item=${v.id}`;
-      if (this.attendanceOn && v.unmarkedDays > 0) out.push({ code: "unmarked", message: `${v.name} has ${v.unmarkedDays} unmarked day${v.unmarkedDays === 1 ? "" : "s"}. Mark attendance or leave for them.`, itemId: v.id, userId: v.userId, href: `/app/attendance/staff/register?month=${run.month.slice(0, 7)}` });
-      if (v.netPaise < 0) out.push({ code: "negative", message: `${v.name}'s deductions are ${(Math.abs(v.netPaise) / 100).toLocaleString("en-IN")} rupees more than pay. Lower a deduction or pause a loan.`, itemId: v.id, userId: v.userId, href: here });
-      const prof = profiles.find((p) => p.userId === v.userId);
-      if (v.netPaise > 0 && (prof?.payBy ?? "bank") === "bank" && !(prof?.bankSealed && prof.ifsc)) out.push({ code: "bank", message: `${v.name} has no bank account. Add one or pay by cash or cheque.`, itemId: v.id, userId: v.userId, href: `/app/payroll/people/${v.userId}?next=${encodeURIComponent(`/app/payroll/runs/${run.id}`)}`, fix: "switch_pay_by" });
-    }
-    const liveIds = new Map(live.map((v) => [v.id, v]));
-    for (const l of lines) {
-      const v = liveIds.get(l.itemId);
-      if (v && !l.manual && Number(l.amountPaise) === 0 && (TYPED_CODES as readonly string[]).includes(l.code ?? "")) out.push({ code: "typed", message: `${v.name}: ${l.note ?? `${l.label} needs an amount.`}`, itemId: v.id, userId: v.userId, href: `/app/payroll/runs/${run.id}?item=${v.id}` });
-    }
+    const exits = missing.length ? await tx.select({ userId: payExits.userId, id: payExits.id }).from(payExits).where(and(inArray(payExits.userId, missing.map((m) => m.id)), inArray(payExits.status, ["pending", "approved", "paid"]))) : [];
+    for (const p of missing) { const x = exits.find((e) => e.userId === p.id); out.push({ userId: p.id, name: p.name, why: x ? "Paid in their final settlement" : assigned.has(p.id) ? "Not added to this run" : "No pay set up", href: x ? `/app/payroll/exits/${x.id}` : `/app/payroll/people/${p.id}` }); }
     return out;
   }
 
@@ -201,8 +195,10 @@ export class RunService extends PayrollService {
   private async refresh(tx: Tx, env: CalcEnv, run: RunRow, only?: string[]) {
     const { items, lines } = await runWithItems(tx, run.id);
     const existing = new Map(items.filter((i) => !only || only.includes(i.userId)).map((i) => [i.userId, { item: i, lines: lines.filter((l) => l.itemId === i.id) }]));
-    const { done } = await computeMonth(env, { userIds: [...existing.keys()], month: run.month, runId: run.id, existing, offCycle: run.kind === "off_cycle" });
+    const { done, settled } = await computeMonth(env, { userIds: [...existing.keys()], month: run.month, runId: run.id, existing, offCycle: run.kind === "off_cycle" });
     for (const c of done) await saveItem(tx, this.ctx.schoolId, run.id, c);
+    // A final settlement approved after this run was made pays them instead.
+    for (const u of settled) await tx.update(payItems).set({ skippedReason: "Paid in their final settlement" }).where(and(eq(payItems.runId, run.id), eq(payItems.userId, u)));
     await refreshTotals(env, run.id);
     const fresh = await tx.select().from(payItems).where(eq(payItems.runId, run.id));
     await tx.update(payRuns).set({ rates: ratesOf(fresh) }).where(eq(payRuns.id, run.id));
@@ -233,7 +229,8 @@ export class RunService extends PayrollService {
       const env = await this.envOf(tx);
       const [dup] = await tx.select({ id: payItems.id }).from(payItems).where(and(eq(payItems.runId, runId), eq(payItems.userId, userId)));
       if (dup) throw new ConflictError("This person is already in the run.");
-      const { done } = await computeMonth(env, { userIds: [userId], month: run.month, runId, offCycle: run.kind === "off_cycle" });
+      const { done, settled } = await computeMonth(env, { userIds: [userId], month: run.month, runId, offCycle: run.kind === "off_cycle" });
+      if (settled.length) throw new ConflictError("Their final settlement already pays this month. Open it from the Exits page.");
       if (!done.length) throw new ConflictError("This person has no pay set up. Set it up from the People page.");
       await saveItem(tx, this.ctx.schoolId, runId, done[0]!);
       if (run.kind === "monthly") await this.addArrears(tx, run, [userId]);
@@ -263,6 +260,7 @@ export class RunService extends PayrollService {
     const d = this.parse(adjustmentInput, input);
     await this.write("manage", async (tx) => {
       const { item, run } = await this.itemOf(tx, itemId);
+      await this.notSelf(tx, item.userId, "add to your own pay");
       await tx.insert(payLines).values({ schoolId: this.ctx.schoolId, itemId, kind: ADJUSTMENT_CODES[d.code], code: d.code, label: d.label || DEFAULT_LABEL[d.code], amountPaise: d.amountPaise, manual: true, note: d.note ?? null, sort: 900 });
       await this.touch(tx, run, item.userId);
     }, () => ({ action: "adjust", entity: "PayItem", entityId: itemId, summary: `Added ${DEFAULT_LABEL[d.code].toLowerCase()}`, meta: { amountPaise: d.amountPaise } }));
@@ -273,9 +271,11 @@ export class RunService extends PayrollService {
       const [l] = await tx.select().from(payLines).where(eq(payLines.id, lineId));
       if (!l || !l.manual) throw new NotFoundError("Line");
       const { item, run } = await this.itemOf(tx, l.itemId);
+      await this.notSelf(tx, item.userId, "change your own pay lines");
       await tx.delete(payLines).where(eq(payLines.id, lineId));
       await this.touch(tx, run, item.userId);
-    }, () => ({ action: "remove_adjustment", entity: "PayLine", entityId: lineId, summary: "Removed a typed line" }));
+      return item.id;
+    }, (itemId) => ({ action: "remove_adjustment", entity: "PayItem", entityId: itemId, summary: "Removed a typed line", meta: { lineId } }));
   }
 
   /** Type the amount of a statutory deduction that has no rule (professional tax, welfare fund, income tax), or replace the worked-out one. */
@@ -284,6 +284,7 @@ export class RunService extends PayrollService {
     if (!Number.isSafeInteger(amountPaise) || amountPaise < 0) throw new ValidationError({ amountPaise: "Enter an amount of zero or more." });
     await this.write("manage", async (tx) => {
       const { item, run } = await this.itemOf(tx, itemId);
+      await this.notSelf(tx, item.userId, "type your own tax or deduction amounts");
       const [have] = await tx.select().from(payLines).where(and(eq(payLines.itemId, itemId), eq(payLines.code, code)));
       if (!have) throw new ConflictError("This deduction does not apply to this person.");
       await tx.delete(payLines).where(and(eq(payLines.itemId, itemId), eq(payLines.code, code)));
@@ -297,6 +298,7 @@ export class RunService extends PayrollService {
     const d = this.parse(daysInput, input);
     await this.write("manage", async (tx) => {
       const { item, run } = await this.itemOf(tx, itemId);
+      await this.notSelf(tx, item.userId, "change your own days or hours");
       const set: Partial<typeof payItems.$inferInsert> = {};
       if (d.unpaidDays !== undefined) {
         if (this.attendanceOn) throw new ConflictError("Days come from attendance. Mark attendance or leave instead.");

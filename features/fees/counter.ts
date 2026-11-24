@@ -30,12 +30,12 @@ export class CounterService extends FeesBase {
     }, (c) => ({ action: "open", entity: "Counter", entityId: c.id, summary: `Opened the counter with a float of ${rupees(c.floatPaise)}` }));
   }
 
-  /** What should be in the cash box: float + cash taken - cash refunded. Reversed and bounced receipts are not taken. */
+  /** What should be in the cash box: float + cash taken - cash this cashier refunded. Reversed and bounced receipts are not taken; a refund someone else paid out is not this box's. */
   async expectedIn(tx: Tx, c: Counter): Promise<{ takenPaise: number; refundedPaise: number; expectedPaise: number }> {
     const [[taken], [refunded]] = await Promise.all([
       tx.select({ v: sum(feeReceiptMethods.amountPaise) }).from(feeReceiptMethods).innerJoin(feeReceipts, eq(feeReceipts.id, feeReceiptMethods.receiptId))
         .where(and(eq(feeReceipts.counterId, c.id), eq(feeReceiptMethods.method, "cash"), inArray(feeReceipts.status, ["valid", "clearing"]))),
-      tx.select({ v: sum(feeRefunds.amountPaise) }).from(feeRefunds).where(and(eq(feeRefunds.method, "cash"), eq(feeRefunds.status, "approved"), eq(feeRefunds.paidOn, c.day), eq(feeRefunds.cashAccountId, c.cashAccountId))),
+      tx.select({ v: sum(feeRefunds.amountPaise) }).from(feeRefunds).where(and(eq(feeRefunds.method, "cash"), eq(feeRefunds.status, "approved"), eq(feeRefunds.paidOn, c.day), eq(feeRefunds.cashAccountId, c.cashAccountId), eq(feeRefunds.createdBy, c.userId))),
     ]);
     const [takenPaise, refundedPaise] = [Number(taken?.v ?? 0), Number(refunded?.v ?? 0)];
     return { takenPaise, refundedPaise, expectedPaise: c.floatPaise + takenPaise - refundedPaise };
@@ -69,8 +69,11 @@ export class CounterService extends FeesBase {
       }
       const diff = d.countedPaise - expectedPaise;
       if (diff !== 0 && !d.differenceReason) throw invalid("differenceReason", `The box should hold ${rupees(expectedPaise)} but you counted ${rupees(d.countedPaise)}. Say why it is ${diff < 0 ? "short" : "over"}.`);
-      const waits = diff !== 0 && Math.abs(diff) > (await this.settings(tx)).counterDifferenceLimitPaise;
-      const [row] = await tx.update(feeCounters).set({ expectedPaise, countedPaise: d.countedPaise, denominations: d.denominations ?? null, differenceReason: d.differenceReason ?? null, closedAt: new Date(), differenceState: diff === 0 ? null : waits ? "pending" : "posted" }).where(eq(feeCounters.id, c.id)).returning();
+      // A counter that once had a difference never closes quietly: counting it again must not hide the first count.
+      const before = c.firstCountedPaise !== null;
+      const waits = before || (diff !== 0 && Math.abs(diff) > (await this.settings(tx)).counterDifferenceLimitPaise);
+      const first = diff !== 0 && !before ? { firstExpectedPaise: expectedPaise, firstCountedPaise: d.countedPaise, firstReason: d.differenceReason ?? null } : {};
+      const [row] = await tx.update(feeCounters).set({ expectedPaise, countedPaise: d.countedPaise, denominations: d.denominations ?? null, differenceReason: d.differenceReason ?? null, closedAt: new Date(), ...first, differenceState: diff === 0 && !before ? null : waits ? "pending" : "posted" }).where(eq(feeCounters.id, c.id)).returning();
       if (diff !== 0 && !waits) await this.postDifferenceIn(tx, row!, "difference");
       if (waits) {
         const ask = await this.askApproval(tx, this.differenceRequest(row!));
@@ -83,8 +86,11 @@ export class CounterService extends FeesBase {
 
   private differenceRequest(c: Counter) {
     const diff = (c.countedPaise ?? 0) - (c.expectedPaise ?? 0);
-    return { kind: "fees.counter_difference", refType: "fee_counter", refId: c.id, title: `Counter of ${c.day} is ${rupees(Math.abs(diff))} ${diff < 0 ? "short" : "over"}`, amountPaise: Math.abs(diff),
-      reason: c.differenceReason ?? "", href: "/app/fees/counter" };
+    const said = (d: number) => (d === 0 ? "matched" : `${rupees(Math.abs(d))} ${d < 0 ? "short" : "over"}`);
+    const firstDiff = c.firstCountedPaise === null ? null : c.firstCountedPaise - (c.firstExpectedPaise ?? 0);
+    const both = firstDiff === null ? "" : ` First count: the box should hold ${rupees(c.firstExpectedPaise ?? 0)}, counted ${rupees(c.firstCountedPaise ?? 0)} (${said(firstDiff)}${c.firstReason ? `: ${c.firstReason}` : ""}). Counted again: should hold ${rupees(c.expectedPaise ?? 0)}, counted ${rupees(c.countedPaise ?? 0)} (${said(diff)}).`;
+    return { kind: "fees.counter_difference", refType: "fee_counter", refId: c.id, title: `Counter of ${c.day} is ${firstDiff !== null ? `counted again, ${said(diff)}` : said(diff)}`, amountPaise: Math.abs(diff) || Math.abs(firstDiff ?? 0),
+      reason: `${c.differenceReason ?? ""}${both}`.trim(), href: "/app/fees/counter" };
   }
 
   /** The one posting of a counter difference. Both outcomes share one source key, so the books can never hold two. */
@@ -107,7 +113,7 @@ export class CounterService extends FeesBase {
     if (c.differenceState !== "pending") throw new ConflictError("This difference was already decided.");
     const short = (c.countedPaise ?? 0) < (c.expectedPaise ?? 0);
     const state = approved ? "posted" : short ? "cashier" : "recount";
-    if (approved || short) await this.postDifferenceIn(tx, c, approved ? "difference" : "cashier");
+    if ((approved || short) && c.countedPaise !== c.expectedPaise) await this.postDifferenceIn(tx, c, approved ? "difference" : "cashier");
     await tx.update(feeCounters).set({ differenceState: state }).where(eq(feeCounters.id, id));
     const body = approved ? `The difference of ${rupees(Math.abs((c.countedPaise ?? 0) - (c.expectedPaise ?? 0)))} on ${c.day} was approved and written to Cash differences.`
       : short ? `The shortage on ${c.day} was not approved. It now shows as owed by you (Cashier dues) until it is settled.` : `The extra cash on ${c.day} was not approved. Count again: ask your admin to reopen it, or send it for approval again.`;

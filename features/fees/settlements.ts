@@ -16,6 +16,9 @@ type Plan = ReturnType<typeof settlementInput.parse>;
 class Rolled { constructor(readonly result: SettlementResult) {} }
 export interface SettlementResult { openBeforePaise: number; waivedLatePaise: number; advancePaise: number; depositPaise: number; writtenOffPaise: number; remainingPaise: number; parts: { invoiceId: string; dueOn: string; amountPaise: number }[] }
 
+/** The figures of a result as one string, so two results compare whatever order jsonb stored their keys in. */
+const figures = (r: SettlementResult) => [r.openBeforePaise, r.waivedLatePaise, r.advancePaise, r.depositPaise, r.writtenOffPaise, r.remainingPaise, ...r.parts.flatMap((p) => [p.invoiceId, p.dueOn, p.amountPaise])].join("|");
+
 /**
  * One approved deal on a student's dues: waive the late fee, use the advance or deposit, write off, and split what is
  * left into dated parts. The parts drive the due state, the late fee and the reminders from then on.
@@ -44,7 +47,8 @@ export class SettlementService extends FeesBase {
   private async requestIn(tx: Tx, d: Plan, r: SettlementResult, id?: string): Promise<Settlement> {
     const [s] = await tx.select({ id: students.id, name: students.name }).from(students).where(eq(students.id, d.studentId));
     if (!s) throw new NotFoundError("Student");
-    const values = { studentId: d.studentId, reason: d.reason, plan: d as unknown as Record<string, unknown>, status: "pending" as const, createdBy: this.ctx.userId };
+    // What the person saw is kept with the deal, so approval can tell when the dues moved since.
+    const values = { studentId: d.studentId, reason: d.reason, plan: { ...d, requested: r } as unknown as Record<string, unknown>, status: "pending" as const, createdBy: this.ctx.userId };
     const [row] = id ? await tx.update(feeSettlements).set(values).where(eq(feeSettlements.id, id)).returning() : await tx.insert(feeSettlements).values({ schoolId: this.ctx.schoolId, ...values }).returning();
     await this.askApproval(tx, { kind: "fees.settlement", refType: "fee_settlement", refId: row!.id, title: `Settlement for ${s.name}: ${rupees(r.openBeforePaise)} open, ${rupees(r.remainingPaise)} to pay`, amountPaise: r.openBeforePaise - r.remainingPaise, reason: d.reason, href: `/app/fees/students/${d.studentId}` });
     return row!;
@@ -62,13 +66,30 @@ export class SettlementService extends FeesBase {
   async resubmit(id: string, input: unknown): Promise<Settlement> {
     this.authorize("concede", "write");
     const d = this.parse(settlementInput, input);
-    const result = await this.preview(d);
+    const [old] = await this.read("concede", (tx) => tx.select({ studentId: feeSettlements.studentId }).from(feeSettlements).where(eq(feeSettlements.id, id)));
+    if (!old) throw new NotFoundError("Settlement");
+    // The preview is of the settlement's own student, whatever the form says.
+    const plan = { ...d, studentId: old.studentId };
+    const result = await this.preview(plan);
     return this.write("concede", async (tx) => {
       const [cur] = await tx.select().from(feeSettlements).where(eq(feeSettlements.id, id)).for("update");
       if (!cur) throw new NotFoundError("Settlement");
       if (cur.status !== "rejected") throw new ConflictError("Only a settlement that was not approved can be edited and sent again.");
-      return this.requestIn(tx, { ...d, studentId: cur.studentId }, result, id);
+      return this.requestIn(tx, plan, result, id);
     }, (s) => ({ action: "resubmit", entity: "Settlement", entityId: s.id, summary: "Sent a settlement again" }));
+  }
+
+  /** The dues moved after this was asked: take the waiting request back and send the same deal again with today's numbers. */
+  async resend(id: string): Promise<Settlement> {
+    this.authorize("concede", "write");
+    const [old] = await this.read("concede", (tx) => tx.select().from(feeSettlements).where(eq(feeSettlements.id, id)));
+    if (!old) throw new NotFoundError("Settlement");
+    const { requested: _old, ...plan } = old.plan as unknown as Plan & { requested?: unknown };
+    const result = await this.preview(plan);
+    return this.write("concede", async (tx) => {
+      await this.withdrawRequest(tx, "fees.settlement", id);
+      return this.requestIn(tx, plan, result, id);
+    }, (s) => ({ action: "resend", entity: "Settlement", entityId: s.id, summary: "Sent a settlement again with the dues as they are now" }));
   }
 
   async list(query: ListQuery = {}) {
@@ -87,7 +108,9 @@ export class SettlementService extends FeesBase {
     const [s] = await tx.select().from(feeSettlements).where(eq(feeSettlements.id, id)).for("update");
     if (!s) throw new NotFoundError("Settlement");
     if (s.status !== "pending") throw new ConflictError("This settlement was already decided.");
-    await this.runIn(tx, s.plan as unknown as Plan);
+    const { requested, ...plan } = s.plan as unknown as Plan & { requested?: SettlementResult };
+    const result = await this.runIn(tx, plan);
+    if (requested && figures(result) !== figures(requested)) throw new ConflictError("The dues changed since this was asked. Send it again.");
     const [row] = await tx.update(feeSettlements).set({ status: "approved" }).where(eq(feeSettlements.id, id)).returning();
     await this.tell(tx, [s.studentId], "Fee settlement agreed", "The school has agreed new terms for your dues. Open your fees to see the dates.");
     return row!;

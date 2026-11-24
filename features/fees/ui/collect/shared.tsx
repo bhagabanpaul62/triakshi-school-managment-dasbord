@@ -3,6 +3,7 @@ import Link from "next/link";
 import { allows, type Ctx } from "@smw/feature-kit";
 import { buttonVariants } from "@smw/ui/ui/button";
 import { cn } from "@smw/ui/utils";
+import financeFeature from "@smw/feature-finance/feature";
 import feesFeature from "../../feature";
 
 export type Search = Promise<Record<string, string | string[] | undefined>>;
@@ -40,6 +41,10 @@ export function Notice({ tone = "warning", children, action }: { tone?: "warning
   );
 }
 
+/** To the school's cash, bank and UPI setup. Only people who may change it get the link; others are told who can. */
+export function MoneySetup({ ctx, next, children, tab = "cash" }: { ctx: Ctx; next: string; children: ReactNode; tab?: "cash" | "rules" }) {
+  return allows(ctx, financeFeature, "settings") ? <NoticeLink href={`/app/finance/settings?tab=${tab}&next=${next}`}>{children}</NoticeLink> : <span className="text-xs text-[var(--ds-on-surface-muted)]">Ask an admin to set it up.</span>;
+}
 export const NoticeLink = ({ href, children }: { href: string; children: ReactNode }) => <Link href={href} className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>{children}</Link>;
 
 /** Shown in place of a page the person may not open: a plain sentence and a way on, never a raw 403. */

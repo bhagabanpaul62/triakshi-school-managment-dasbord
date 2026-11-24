@@ -186,10 +186,13 @@ describe("a counter difference needs approval", () => {
     await counter().reopen(r.counter.id);
     expect(await row(r.counter.id)).toMatchObject({ closedAt: null, countedPaise: null, differenceState: null });
     expect(await counter().current()).toMatchObject({ expectedPaise: 100_000 });
+    // Counting right the second time does not make the first count disappear: it still goes for approval.
     const again = await counter().close({ countedPaise: 100_000 });
     expect(again.differencePaise).toBe(0);
-    expect(await row(r.counter.id)).toMatchObject({ differenceState: null });
-    expect(await checks()).toEqual([]);
+    expect(await row(r.counter.id)).toMatchObject({ differenceState: "pending", firstCountedPaise: 110_000 });
+    await decide(fx, "fees.counter_difference", r.counter.id);
+    expect(await row(r.counter.id)).toMatchObject({ differenceState: "posted" });
+    expect([await ledger(fx, "cash_difference"), await checks()]).toEqual([before, []]);
     await age(r.counter.id);
 
     const over = await session(104_000);

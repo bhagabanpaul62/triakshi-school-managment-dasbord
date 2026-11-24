@@ -2,8 +2,9 @@
 // Run with `pnpm db:fresh` (rebuilds the local database first). Refuses non-local databases.
 import { env } from "@smw/config";
 import { Passwords } from "@smw/auth";
-import { closeDb, platformStaff, schoolDomains, schools, users, withConsole, type SchoolRole } from "@smw/db";
+import { closeDb, eq, platformStaff, schoolDomains, schoolRoles, schools, users, withConsole, withSchool, type SchoolRole } from "@smw/db";
 import type { Ctx } from "@smw/feature-kit";
+import { RoleService } from "@smw/feature-settings/service";
 import { FEATURES } from "../src/generated/features";
 import { SEEDS } from "../src/generated/seeds";
 import { PLAN_DEFS, syncCatalog } from "./catalog.mjs";
@@ -60,6 +61,14 @@ async function main() {
       if (!seed) continue;
       try { await seed(ctx, state); } catch (e) { console.error(`seed ${f.key} failed for ${s.slug}:`, e); throw e; }
     }
+    // One login per ready-made money role, after the feature seeds so payroll and attendance do not count them.
+    await new RoleService(ctx).ensureTemplates(FEATURES);
+    await withSchool(s.id, async (tx) => {
+      for (const [loginId, name, role] of [["cashier", "Suresh Cashier", "Cashier"], ["bursar", "Leela Bursar", "Bursar"], ["auditor", "Ajit Auditor", "Auditor"]] as const) {
+        const [r] = await tx.select({ id: schoolRoles.id }).from(schoolRoles).where(eq(schoolRoles.name, role));
+        await tx.insert(users).values({ schoolId: s.id, role: "staff", roleId: r!.id, loginId, name, email: `${loginId}@${s.slug}.test`, passwordHash: hash });
+      }
+    });
   }
   console.log(`seeded ${ids.length} schools, ${FEATURES.length} modules. Logins are in docs/DEV.md.`);
 }

@@ -47,6 +47,7 @@ export async function setDays(fd: FormData) { return serviceAction(RunService, (
 
 // payouts
 export async function markPaid(fd: FormData) { return serviceAction(PayoutService, (s) => s.markPaid(id(fd), { ...formToObject(fd), itemIds: ids(fd).length ? ids(fd) : undefined }).then((r) => ({ paid: r.paid })), "Marked paid"); }
+export async function confirmBank(fd: FormData) { return serviceAction(PayoutService, (s) => s.confirmBank(id(fd), text(fd, "itemId")), "New account will be used"); }
 export async function markFailed(fd: FormData) { return serviceAction(PayoutService, (s) => s.markFailed(id(fd), { ...formToObject(fd), itemIds: ids(fd) }).then((n) => ({ n })), "Marked failed"); }
 export async function retryPayout(fd: FormData) { return serviceAction(PayoutService, (s) => s.retry(id(fd), ids(fd)).then((n) => ({ n })), "Set to try again"); }
 
@@ -75,6 +76,8 @@ export async function savePayConfig(fd: FormData) { return serviceAction(PayConf
 
 // me
 export async function saveDeclaration(fd: FormData) { return serviceAction(DeclarationService, (s) => s.save(formToObject(fd)).then((r) => ({ id: r.id })), "Declaration saved"); }
+export async function acceptDeclaration(fd: FormData) { return serviceAction(DeclarationService, (s) => s.accept(text(fd, "userId"), text(fd, "fy") || undefined).then((id) => ({ id })), "Declaration accepted"); }
+export async function sendBackDeclaration(fd: FormData) { return serviceAction(DeclarationService, (s) => s.sendBack(text(fd, "userId"), text(fd, "note"), text(fd, "fy") || undefined).then((id) => ({ id })), "Sent back"); }
 
 // approvals
 export async function withdrawRequest(fd: FormData) { return serviceAction(ApprovalDeskService, (s) => s.withdraw(id(fd)).then((r) => ({ id: r.id })), "Request withdrawn"); }

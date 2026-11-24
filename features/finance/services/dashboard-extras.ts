@@ -140,7 +140,7 @@ async function setupSteps(tx: Tx, a: Args): Promise<SetupStep[]> {
     { key: "cash", text: "Add the cash box.", done: a.hasCash, href: cash, needs: "settings" },
     { key: "bank", text: "Add the school bank account.", done: a.hasBank, href: cash, needs: "settings" },
     { key: "upi", text: "Add the school UPI ID so families can pay by QR.", done: a.hasUpi || !a.hasBank, href: cash, needs: "settings" },
-    { key: "opening", text: "Set what each account held when you started.", done: a.openingSet, href: "/app/finance/banking", needs: "reconcile" },
+    { key: "opening", text: "Set what each account held when you started.", done: a.openingSet, href: "/app/finance/banking", needs: "settings" },
   ];
   const count = async (table: string, where: ReturnType<typeof sql>) => ((await exists(tx, table)) ? num((await run(tx, sql`select count(*)::int as n from ${sql.raw(table)} where ${where}`))[0]?.n) : null);
   const heads = await count("fee_heads", sql`is_active`), plans = await count("fee_plans", sql`status = 'published'`), issued = await count("fee_invoices", sql`status = 'issued'`), counters = await count("fee_counters", sql`true`);

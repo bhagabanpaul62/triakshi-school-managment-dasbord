@@ -6,17 +6,44 @@ import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { unseal } from "@smw/feature-kit/secret";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
 import { day } from "@smw/feature-finance/services/common";
+import { bankOf, describeMove, frozenBank, movedBank } from "../bank";
 import { BANK_COLUMN_LABEL } from "../config";
 import { monthLabel, rupeeText, toCsv } from "../csv";
 import { PayrollService } from "../base";
 import { runWithItems } from "../ledger";
 import { payExits, payItems, payProfiles, payRuns } from "../schema";
+import type { ItemRow } from "../compute";
 
 const markInput = z.object({ itemIds: z.array(z.uuid()).optional(), date: day.optional(), reference: z.string().trim().max(80).optional(), cashAccountId: z.uuid().optional() });
 const failInput = z.object({ itemIds: z.array(z.uuid()).min(1, "Pick who failed."), reason: z.string().trim().min(3, "Say what the bank said.").max(200) });
 
-/** Paying out an approved run: the bank file, then paid or failed for each person. Each paid batch posts once: salary payable to cash or bank. */
+/** Paying out an approved run: the bank file, then paid or failed for each person. Each paid batch posts once: salary payable to cash or bank. Everyone is paid as they were when the run was approved. */
 export class PayoutService extends PayrollService {
+  /** Refuses while someone's bank details differ from the ones frozen at approval: the money must not follow a change nobody confirmed. */
+  private refuseMoved(run: { label: string }, items: ItemRow[], profiles: (typeof payProfiles.$inferSelect)[], people: Map<string, { name: string }>) {
+    const moved = items.flatMap((i) => { const p = profiles.find((x) => x.userId === i.userId), now = movedBank(i, p, this.ctx.schoolId); return now ? [`${people.get(i.userId)?.name ?? "Someone"} (${describeMove(frozenBank(i, p), now)})`] : []; });
+    if (moved.length) throw new ConflictError(`Bank details changed after ${run.label} was approved: ${moved.join("; ")}. Open the Payouts tab to confirm the new account for each, or ask for a recall.`);
+  }
+
+  /** Accept the account a person has now for this run. Someone other than that person must do it; it is logged with the old and new last four. */
+  async confirmBank(runId: string, itemId: string): Promise<void> {
+    this.authorize("manage", "write");
+    await this.write("manage", async (tx) => {
+      const { run } = await runWithItems(tx, runId, true);
+      if (run.status !== "approved") throw new ConflictError("Only an approved run that is not fully paid can take a new account.");
+      const [i] = await tx.select().from(payItems).where(and(eq(payItems.id, itemId), eq(payItems.runId, runId))).for("update");
+      if (!i) throw new NotFoundError("Person in this run");
+      if (i.payout === "paid") throw new ConflictError("This person is already paid.");
+      await this.notSelf(tx, i.userId, "confirm a new bank account for yourself");
+      const [p] = await tx.select().from(payProfiles).where(eq(payProfiles.userId, i.userId));
+      const now = movedBank(i, p, this.ctx.schoolId);
+      if (!now) throw new ConflictError("Their bank details are the same as when the run was approved.");
+      const change = describeMove(frozenBank(i, p), now);
+      await tx.update(payItems).set({ snapshot: { ...i.snapshot, bank: bankOf(p) } }).where(eq(payItems.id, i.id));
+      return { userId: i.userId, change };
+    }, (r) => ({ action: "confirm_bank", entity: "PayItem", entityId: itemId, summary: "Used a changed bank account for a run", meta: r }));
+  }
+
   /** The bank's upload file for everyone still to be paid by bank. Account numbers are opened only here, and the audit says how many, not which. */
   async bankFile(runId: string, itemIds?: string[]): Promise<{ filename: string; csv: string; count: number; totalPaise: number }> {
     this.authorize("manage", "read");
@@ -27,15 +54,16 @@ export class PayoutService extends PayrollService {
       const pick = items.filter((i) => !i.skippedReason && Number(i.netPaise) > 0 && i.payout !== "paid" && (!itemIds || itemIds.includes(i.id)));
       const people = await this.people(tx, pick.map((i) => i.userId));
       const profiles = await tx.select().from(payProfiles).where(inArray(payProfiles.userId, pick.map((i) => i.userId)));
+      this.refuseMoved(run, pick, profiles, people);
       const rows: (string | number)[][] = [config.bankColumns.map((c) => BANK_COLUMN_LABEL[c])];
       let total = 0;
       for (const i of pick) {
-        const p = profiles.find((x) => x.userId === i.userId);
-        if ((p?.payBy ?? "bank") !== "bank") continue;
-        if (!p?.bankSealed || !p.ifsc) throw new ConflictError(`${people.get(i.userId)?.name ?? "Someone"} has no bank account. Add one or pay by cash or cheque.`);
+        const p = frozenBank(i, profiles.find((x) => x.userId === i.userId));
+        if (p.payBy !== "bank") continue;
+        if (!p.sealed || !p.ifsc) throw new ConflictError(`${people.get(i.userId)?.name ?? "Someone"} has no bank account. Add one or pay by cash or cheque.`);
         const who = people.get(i.userId);
         const cells: Record<(typeof config.bankColumns)[number], string | number> = {
-          name: who?.name ?? "", employeeId: who?.employeeId ?? "", account: unseal(p.bankSealed, this.ctx.schoolId), ifsc: p.ifsc, bank: p.bankName ?? "",
+          name: who?.name ?? "", employeeId: who?.employeeId ?? "", account: unseal(p.sealed, this.ctx.schoolId), ifsc: p.ifsc, bank: p.bankName ?? "",
           amount: rupeeText(Number(i.netPaise)), narration: `Salary ${monthLabel(run.month)}`, payslipNo: i.payslipNo ?? "",
         };
         rows.push(config.bankColumns.map((c) => cells[c]));
@@ -57,15 +85,17 @@ export class PayoutService extends PayrollService {
       if (run.status !== "approved") throw new ConflictError(run.status === "paid" ? "Everyone in this run is paid." : "The run must be approved before anyone is paid.");
       const date = await this.moneyDate(tx, d.date);
       const all = await tx.select().from(payItems).where(and(eq(payItems.runId, runId), sql`${payItems.skippedReason} is null`)).orderBy(payItems.id).for("update");
-      const pick = d.itemIds ? all.filter((i) => d.itemIds!.includes(i.id)) : all.filter((i) => i.payout !== "paid");
+      const pick = d.itemIds ? all.filter((i) => d.itemIds!.includes(i.id)) : all.filter((i) => i.payout === "pending");
       if (d.itemIds && pick.length !== new Set(d.itemIds).size) throw new NotFoundError("Person in this run");
       const already = pick.filter((i) => i.payout === "paid");
       if (already.length) throw new ConflictError("Some of these people are already marked paid.");
       if (!pick.length) throw new ConflictError("Nobody is waiting to be paid.");
+      for (const i of pick.filter((x) => x.userId === this.ctx.userId)) await this.notSelf(tx, i.userId, "mark your own salary as paid");
       const profiles = await tx.select().from(payProfiles).where(inArray(payProfiles.userId, pick.map((i) => i.userId)));
+      this.refuseMoved(run, pick, profiles, await this.people(tx, pick.map((i) => i.userId)));
       const byAccount = new Map<string, { account: Awaited<ReturnType<typeof cashAccount>>; items: typeof pick }>();
       for (const i of pick) {
-        const by = profiles.find((p) => p.userId === i.userId)?.payBy ?? "bank";
+        const by = frozenBank(i, profiles.find((p) => p.userId === i.userId)).payBy;
         const account = await cashAccount(tx, this.ctx.schoolId, { id: d.cashAccountId, kind: by === "cash" ? "cash" : "bank" });
         const g = byAccount.get(account.id) ?? { account, items: [] };
         g.items.push(i); byAccount.set(account.id, g);

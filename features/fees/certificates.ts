@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ConflictError } from "@smw/feature-kit";
 import { fyOf, fyRange, rupees, todayIST } from "@smw/feature-kit/money";
 import { FeesBase, calcOf } from "./base";
@@ -25,7 +25,7 @@ export class CertificateService extends FeesBase {
     });
   }
 
-  /** Tuition fee received in a financial year ("2026-27"): only heads counted as tuition, only live receipts. */
+  /** Tuition fee received in a financial year ("2026-27"): only heads counted as tuition, only receipts whose money is cleared (a cheque counts once it clears). */
   async tuition(studentId: string, fy = fyOf(todayIST())) {
     return this.viewer(async (tx, own) => {
       this.assertVisible(own, studentId);
@@ -33,7 +33,7 @@ export class CertificateService extends FeesBase {
       const student = await this.oneStudent(tx, studentId);
       const rows = await tx.select({ number: feeReceipts.number, date: feeReceipts.date, head: feeHeads.name, amountPaise: feeAllocations.amountPaise })
         .from(feeAllocations).innerJoin(feeReceipts, eq(feeReceipts.id, feeAllocations.receiptId)).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeHeads, eq(feeHeads.id, feeInvoiceLines.headId))
-        .where(and(eq(feeAllocations.studentId, studentId), isNull(feeAllocations.undoneAt), inArray(feeReceipts.status, ["valid", "clearing"]), eq(feeHeads.isTuition, true), sql`${feeReceipts.date} between ${from}::date and ${to}::date`)).orderBy(asc(feeReceipts.date), asc(feeReceipts.number));
+        .where(and(eq(feeAllocations.studentId, studentId), isNull(feeAllocations.undoneAt), eq(feeReceipts.status, "valid"), eq(feeHeads.isTuition, true), sql`${feeReceipts.date} between ${from}::date and ${to}::date`)).orderBy(asc(feeReceipts.date), asc(feeReceipts.number));
       return { student, fy, from, to, rows, totalPaise: rows.reduce((s, r) => s + r.amountPaise, 0) };
     });
   }

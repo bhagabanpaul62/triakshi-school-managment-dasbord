@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { ForbiddenError, type Ctx } from "@smw/feature-kit";
 import { MoneyService } from "@smw/feature-finance/base";
@@ -32,6 +32,17 @@ export abstract class PayrollService extends MoneyService<PayPerm> {
       employmentType: staffProfiles.employmentType, joiningDate: staffProfiles.joiningDate, status: staffProfiles.status,
     }).from(staffProfiles).innerJoin(users, eq(users.id, staffProfiles.userId)).where(ids ? inArray(staffProfiles.userId, ids) : undefined);
     return new Map(rows.map((r) => [r.id, { id: r.id, name: r.name, email: r.email, employeeId: r.employeeId, designation: r.designation, department: r.department, employmentType: r.employmentType, joiningDate: r.joiningDate, left: r.status === "left" }]));
+  }
+
+  /**
+   * Nobody changes their own pay, bank details or typed amounts, or marks their own salary paid: a second person does it.
+   * The one exception is the school's only admin, who has nobody else; that is written to the audit log.
+   */
+  protected async notSelf(tx: Tx, userId: string, what: string) {
+    if (userId !== this.ctx.userId) return;
+    const others = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"), ne(users.id, this.ctx.userId))).limit(1);
+    if (others.length || this.ctx.role !== "admin") throw new ForbiddenError(`You cannot ${what}. Ask another admin or accountant to do it.`);
+    await this.audit(tx, { action: "self_change", entity: "PayProfile", summary: `Did this for themselves as the only admin: ${what}`, meta: { userId } });
   }
 
   /** The caller may read this person's pay: payroll:read, or it is their own. */

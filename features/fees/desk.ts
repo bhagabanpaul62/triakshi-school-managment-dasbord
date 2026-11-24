@@ -64,7 +64,7 @@ export class DeskService extends FeesBase {
         parts: full?.parts ?? [], lines: (full?.lines ?? []).map((l) => ({ id: l.id, label: l.label, kind: l.kind, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise, creditedPaise: l.creditedPaise, paidPaise: l.paidPaise, sort: l.sort })) };
     }));
     const members = fam.members.map((m) => ({
-      id: m.student.id, name: m.student.name, admissionNo: m.student.admissionNo, classLabel: m.student.classLabel, advancePaise: m.advancePaise, duePaise: m.openPaise,
+      id: m.student.id, name: m.student.name, admissionNo: m.student.admissionNo, classLabel: m.student.classLabel, advancePaise: m.advancePaise, waitingAdvancePaise: m.waitingAdvancePaise, duePaise: m.openPaise,
       overduePaise: bills.filter((b) => b.studentId === m.student.id && b.state === "overdue").reduce((s, b) => s + dueNow(b), 0),
     }));
     return { members, bills, totalPaise: fam.totalPaise };

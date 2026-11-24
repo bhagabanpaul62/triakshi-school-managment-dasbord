@@ -10,7 +10,7 @@ import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { ChequeService, DeskService } from "../../service";
 import { bounceCheque, clearCheque, depositCheque, depositCheques } from "../collect-actions";
-import { DeskNav, NoAccess, Notice, NoticeLink, Ref, can, day } from "./shared";
+import { DeskNav, NoAccess, Notice, MoneySetup, Ref, can, day } from "./shared";
 
 export const metadata = { title: "Cheques" };
 
@@ -38,7 +38,7 @@ export default async function ChequesPage() {
           </>
         ) : undefined} />
       <DeskNav ctx={ctx} current="/app/fees/cheques" />
-      {noBank ? <Notice action={<NoticeLink href="/app/finance/accounts?next=/app/fees/cheques">Add a bank account</NoticeLink>}>There is no bank account yet, so a cheque cannot be marked deposited.</Notice> : null}
+      {noBank ? <Notice action={<MoneySetup ctx={ctx} next="/app/fees/cheques">Add a bank account</MoneySetup>}>There is no bank account yet, so a cheque cannot be marked deposited.</Notice> : null}
       {held ? <Notice tone="info">{held} post-dated cheque{held === 1 ? " is" : "s are"} held until {held === 1 ? "its" : "their"} date and {held === 1 ? "is" : "are"} greyed out below.</Notice> : null}
       {!any ? (
         <EmptyLine title="No cheques yet." hint="A cheque appears here when you take one at the counter (a cheque is taken in its own receipt)." action={<Link href="/app/fees/collect" className={buttonVariants({ className: "rounded-full" })}>Collect fees</Link>} />

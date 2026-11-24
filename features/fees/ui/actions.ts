@@ -111,6 +111,7 @@ export async function resubmitSettlement(payload: string) {
   const o = JSON.parse(payload) as { settlementId: string };
   return serviceAction(SettlementService, (s) => s.resubmit(o.settlementId, o), "Sent again");
 }
+export async function resendSettlement(fd: FormData) { return serviceAction(SettlementService, (s) => s.resend(id(fd)), "Sent again with the dues as they are now"); }
 export async function withdrawSettlement(fd: FormData) { return serviceAction(SettlementService, (s) => s.withdraw(id(fd)), "Request taken back"); }
 export async function settleUpLeaving(fd: FormData) {
   const o = body(fd);

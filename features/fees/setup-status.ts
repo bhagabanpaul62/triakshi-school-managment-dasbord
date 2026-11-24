@@ -1,4 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
+import { allows } from "@smw/feature-kit";
+import financeFeature from "@smw/feature-finance/feature";
 import { finCashAccounts } from "@smw/feature-finance/schema";
 import { FeesBase } from "./base";
 import { feeCounters, feeHeads, feeInvoices, feePlans } from "./schema";
@@ -21,14 +23,16 @@ export class SetupService extends FeesBase {
         this.settings(tx),
       ]);
       const who = (perm: "setup" | "collect") => (this.can(perm) ? null : "an admin or accountant");
+      const admin = this.ctx.role === "admin" ? null : "an admin";
+      const settingsWho = allows(this.ctx, financeFeature, "settings") ? null : "an admin";
       const steps = [
-        { key: "year", label: "Set the academic year", done: !!year, href: "/app/academics", who: null },
-        { key: "cash", label: "Add the cash box and a bank account", done: cash > 0 && bank > 0, href: "/app/finance/accounts", who: null },
-        { key: "upi", label: "Add the school's UPI ID (to take UPI payments from families)", done: upi > 0 && settings.upiOn, href: "/app/finance/settings", who: null },
-        { key: "heads", label: "Add fee heads, like Tuition", done: heads > 0, href: "/app/fees/plans", who: who("setup") },
+        { key: "year", label: "Set the academic year", done: !!year, href: "/app/academics/years", who: admin },
+        { key: "cash", label: "Add the cash box and a bank account", done: cash > 0 && bank > 0, href: "/app/finance/settings?tab=cash&next=/app/fees", who: settingsWho },
+        { key: "upi", label: "Add the school's UPI ID (to take UPI payments from families)", done: upi > 0 && settings.upiOn, href: upi > 0 ? "/app/finance/settings?tab=rules&next=/app/fees" : "/app/finance/settings?tab=cash&next=/app/fees", who: settingsWho },
+        { key: "heads", label: "Add fee heads, like Tuition", done: heads > 0, href: "/app/fees/heads", who: who("setup") },
         { key: "plan", label: drafts > 0 && !published ? "Send the draft plan for approval" : "Make a fee plan and publish it", done: published > 0, href: "/app/fees/plans", who: who("setup") },
-        { key: "issue", label: "Issue the bills", done: issued > 0, href: "/app/fees/invoices", who: who("setup") },
-        { key: "counter", label: "Open your counter", done: open > 0, href: "/app/fees/collect", who: who("collect") },
+        { key: "issue", label: "Issue the bills", done: issued > 0, href: "/app/fees/invoices/issue", who: who("setup") },
+        { key: "counter", label: "Open your counter", done: open > 0, href: "/app/fees/counter", who: who("collect") },
       ];
       return { steps, next: steps.find((s) => !s.done) ?? null, complete: steps.every((s) => s.done) };
     });

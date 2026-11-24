@@ -251,14 +251,17 @@ describe("reversal", () => {
     expect(a).toBeTruthy();
   });
 
-  it("is refused, with a clear message, when the advance it made has been used", async () => {
+  it("gives back the advance it made that was put on a later bill, so the bill is open again", async () => {
     const id = await newStudent(fx, "Used Advance");
     const r = await cashier().collect({ studentId: id, methods: cash(200_000 + 30_000 + 100_000) });
     expect(r.advancePaise).toBe(100_000);
     await new InvoiceService(fx.school.as.admin).issueBulk({}, addDaysIso(15)); // M3 takes the advance
     await cashier().requestReversal(r.id, "Wrong amount");
-    await expect(decide(fx, "fees.reversal", r.id)).rejects.toThrow(/advance from this receipt has already been used/);
-    expect((await cashier().get(r.id)).receipt.status).toBe("valid");
+    expect((await open(id)).advancePaise).toBe(0);
+    await decide(fx, "fees.reversal", r.id);
+    expect((await cashier().get(r.id)).receipt.status).toBe("reversed");
+    const a = await open(id);
+    expect([a.advancePaise, a.openPaise]).toEqual([0, 300_000 + 30_000]); // M1, M2, M3 and the late fee of M1 and M2, all open again
     expect(await checks()).toEqual([]);
   });
 });

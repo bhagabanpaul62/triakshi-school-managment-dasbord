@@ -13,7 +13,7 @@ import { DeskService, RefundService } from "../../service";
 import { FeesLookup } from "../lookups";
 import { proposeRefund, resubmitRefund, settleUpLeaving, withdrawRefund } from "../collect-actions";
 import { StudentPicker } from "./student-picker";
-import { DeskNav, H2, NoAccess, Notice, NoticeLink, Ref, SECTION, can, day, one, type Search } from "./shared";
+import { DeskNav, H2, NoAccess, Notice, MoneySetup, Ref, SECTION, can, day, one, type Search } from "./shared";
 
 export const metadata = { title: "Refunds" };
 
@@ -33,7 +33,7 @@ export default async function RefundsPage({ searchParams }: { searchParams: Sear
     <>
       <PageHeader eyebrow="Fees" title="Refunds" description="Money going back to a family from an advance or a deposit. Someone else approves it, then it is paid and a voucher is made." />
       <DeskNav ctx={ctx} current="/app/fees/refunds" />
-      {config.banks.length ? null : <Notice tone="warning" action={can(ctx, "setup") ? <NoticeLink href="/app/finance/accounts?next=/app/fees/refunds">Add a bank account</NoticeLink> : undefined}>There is no bank account yet. A refund paid by transfer, cheque or UPI needs one; a cash refund does not.{can(ctx, "setup") ? "" : " Ask an admin to add it."}</Notice>}
+      {config.banks.length ? null : <Notice tone="warning" action={<MoneySetup ctx={ctx} next="/app/fees/refunds">Add a bank account</MoneySetup>}>There is no bank account yet. A refund paid by transfer, cheque or UPI needs one; a cash refund does not.{can(ctx, "setup") ? "" : " Ask an admin to add it."}</Notice>}
       {can(ctx, "collect") ? (
         <section className={`${SECTION} mb-6`} aria-label="New refund">
           <h2 className={H2}>New refund</h2>

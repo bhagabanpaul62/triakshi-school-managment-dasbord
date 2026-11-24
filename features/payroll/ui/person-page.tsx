@@ -8,17 +8,19 @@ import { EmptyLine } from "@smw/ui/finance/States";
 import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { Timeline } from "@smw/ui/finance/Timeline";
+import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { paise, shortDate } from "@smw/ui/format";
 import { todayIST } from "@smw/feature-kit/money";
 import { AssignmentService } from "../services/assignments";
+import { DeclarationService } from "../services/declarations";
 import { LoanService } from "../services/loans";
 import { PayslipService } from "../services/payslips";
 import { ProfileService } from "../services/profiles";
 import { StructureService } from "../services/structures";
 import { ExitService } from "../services/exits";
-import { assignPay, revealDetail, saveProfile } from "./actions";
+import { acceptDeclaration, assignPay, revealDetail, saveProfile, sendBackDeclaration } from "./actions";
 import { NoAccess, PILL_BTN, PRIMARY_BTN, PayNav, one, type Search } from "./common";
 import { RevealButton } from "./reveal-button";
 
@@ -38,6 +40,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   const [history, structures, loans, slips, leave, exits, centres] = await Promise.all([
     new AssignmentService(ctx).history(id), new StructureService(ctx).list(), new LoanService(ctx).list({ filters: { userId: id } }), new PayslipService(ctx).list(id), profiles.leaveBalance(id), new ExitService(ctx).list({ filters: { userId: id } }), profiles.costCentres(),
   ]);
+  const decl = manage ? await new DeclarationService(ctx).get(id) : null;
   const today = todayIST();
   const current = history.find((h) => h.fromDate <= today) ?? history[0];
   const openExit = exits.rows.find((e) => e.status !== "rejected" && e.status !== "paid");
@@ -97,6 +100,24 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
             {leave.length ? <p className="mt-4 text-sm text-[var(--ds-on-surface-muted)]">Leave that could be paid out: {leave.map((l) => `${l.name} ${l.days} days`).join(", ")}.</p> : null}
           </Panel>
         </div>
+        {decl ? (
+          <div className="lg:col-span-6">
+            <Panel title="Tax declaration" action={decl.acceptedAt ? <ToneBadge label="Accepted" tone="success" /> : decl.returnedNote ? <ToneBadge label="Sent back" tone="warning" /> : <ToneBadge label="Waiting for you" tone="info" />}>
+              <dl className="flex flex-col gap-1.5 text-sm">
+                {([["Other income", decl.otherIncomePaise], ["Deductions claimed", decl.deductionsPaise], ["Earlier salary this year", decl.previousSalaryPaise], ["Tax already deducted", decl.previousTdsPaise]] as const).map(([k, v]) => <div key={k} className="flex justify-between"><dt className="text-[var(--ds-on-surface-variant)]">{k}</dt><dd><Money paise={Number(v)} /></dd></div>)}
+              </dl>
+              {decl.acceptedAt ? <p className="mt-3 text-xs text-[var(--ds-on-surface-muted)]">Accepted. It counts for their tax.</p> : (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <p className="w-full text-xs text-[var(--ds-on-surface-muted)]">{decl.returnedNote ? `Sent back: ${decl.returnedNote}` : "It does not change their tax until you accept it. Check the figures against their proofs."}</p>
+                  {decl.returnedNote ? null : <>
+                    <ActionButton action={acceptDeclaration} values={{ userId: id, fy: decl.fy }} label="Accept" variant="secondary" />
+                    <FormModal title="Send back" description="Say what they should fix. They see this on their payslips page." icon="teacher" action={sendBackDeclaration} hidden={{ userId: id, fy: decl.fy }} trigger={{ label: "Send back", variant: "ghost", size: "sm" }} submitLabel="Send back" fields={[{ name: "note", label: "What to fix", type: "text", required: true }]} />
+                  </>}
+                </div>
+              )}
+            </Panel>
+          </div>
+        ) : null}
         <div className="lg:col-span-6">
           <Panel title="Loans" action={<Link href="/app/payroll/loans" className="text-xs text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface)]">All loans</Link>}>
             {loans.rows.length === 0 ? <EmptyLine title="No loans." /> : <ul className="flex flex-col gap-2">{loans.rows.map((l) => <li key={l.id}><Link href={`/app/payroll/loans?item=${l.id}`} className="flex min-h-11 items-center justify-between gap-3 rounded-xl px-2 text-sm hover:bg-white/[0.04]"><span>{paise(Number(l.amountPaise))}, {l.reason}</span><span className="flex items-center gap-3"><Money paise={l.balancePaise} /><StateBadge state={l.status === "active" ? "open" : l.status === "closed" ? "closed" : l.status} /></span></Link></li>)}</ul>}

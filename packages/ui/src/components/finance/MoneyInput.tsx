@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/utils";
 import { INPUT } from "../../shell/FormModal";
 import { cleanAmount, formatPaise, fromPaise, groupIndian, toPaise } from "./logic";
@@ -39,6 +39,10 @@ export function MoneyInput({ name, label, labelHidden, valuePaise, onChange, err
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valuePaise]);
 
+  // Focus drops the commas, and changing the value loses the selection: typing would then add to the old amount. Select it all again.
+  const box = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => { if (focused) box.current?.select(); }, [focused]);
+
   const tooBig = max !== undefined && paise !== null && paise > max;
   const shownError = error ?? (tooBig ? `Cannot be more than ${formatPaise(max!)}.` : undefined);
   const below = id + "-below";
@@ -53,6 +57,7 @@ export function MoneyInput({ name, label, labelHidden, valuePaise, onChange, err
       <div className="relative">
         <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--ds-on-surface-muted)]">₹</span>
         <input
+          ref={box}
           id={id}
           type="text"
           inputMode="decimal"

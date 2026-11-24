@@ -1,7 +1,8 @@
-import { and, desc, eq, lte } from "drizzle-orm";
+import { and, desc, eq, isNull, lte } from "drizzle-orm";
 import { z } from "zod";
-import { ForbiddenError } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError } from "@smw/feature-kit";
 import { fyOf, monthStart, todayIST } from "@smw/feature-kit/money";
+import type { Tx } from "@smw/db";
 import { computeMonth } from "../compute";
 import { PayrollService } from "../base";
 import { payAssignments, payDeclarations, payProfiles } from "../schema";
@@ -24,14 +25,55 @@ export class DeclarationService extends PayrollService {
     return this.read("self", async (tx) => (await tx.select().from(payDeclarations).where(and(eq(payDeclarations.userId, id), eq(payDeclarations.fy, fy))))[0] ?? null);
   }
 
+  /** Save what a person declares. It counts for tax only once the office accepts it, and any change takes the acceptance away. Payroll staff saving for someone else are the office, so theirs counts at once. */
   async save(raw: unknown) {
     const d = this.parse(input, raw);
     const userId = this.target(d.userId), fy = d.fy ?? fyOf(todayIST());
     this.authorize("self", "write");
     const { userId: _u, fy: _f, ...values } = d;
-    return this.write("self", async (tx) => (await tx.insert(payDeclarations).values({ schoolId: this.ctx.schoolId, userId, fy, ...values, note: d.note ?? null })
-      .onConflictDoUpdate({ target: [payDeclarations.userId, payDeclarations.fy], set: { ...values, note: d.note ?? null } }).returning())[0]!,
-    (r) => ({ action: "declare", entity: "PayDeclaration", entityId: r.id, summary: `Saved a tax declaration for ${fy}`, meta: { userId } }));
+    const figures = (r: { otherIncomePaise: number; deductionsPaise: number; previousSalaryPaise: number; previousTdsPaise: number } | undefined) => r && ({ otherIncomePaise: Number(r.otherIncomePaise), deductionsPaise: Number(r.deductionsPaise), previousSalaryPaise: Number(r.previousSalaryPaise), previousTdsPaise: Number(r.previousTdsPaise) });
+    return this.write("self", async (tx) => {
+      const [before] = await tx.select().from(payDeclarations).where(and(eq(payDeclarations.userId, userId), eq(payDeclarations.fy, fy)));
+      const office = userId !== this.ctx.userId;
+      const set = { ...values, note: d.note ?? null, returnedNote: null, acceptedBy: office ? this.ctx.userId : null, acceptedAt: office ? new Date() : null };
+      const [row] = await tx.insert(payDeclarations).values({ schoolId: this.ctx.schoolId, userId, fy, ...set }).onConflictDoUpdate({ target: [payDeclarations.userId, payDeclarations.fy], set }).returning();
+      await this.audit(tx, { action: "declare", entity: "PayDeclaration", entityId: row!.id, summary: `Saved a tax declaration for ${fy}${office ? " (entered by the office)" : ""}`, meta: { userId, from: figures(before) ?? null, to: figures(row!) } });
+      return row!;
+    });
+  }
+
+  /** The office takes a declaration as true: from now on it counts for tax. */
+  async accept(userId: string, fy = fyOf(todayIST())) {
+    this.authorize("manage", "write");
+    return this.write("manage", async (tx) => {
+      const row = await this.open(tx, userId, fy);
+      await this.notSelf(tx, userId, "accept your own tax declaration");
+      await tx.update(payDeclarations).set({ acceptedBy: this.ctx.userId, acceptedAt: new Date(), returnedNote: null }).where(eq(payDeclarations.id, row.id));
+      return row.id;
+    }, (id) => ({ action: "accept_declaration", entity: "PayDeclaration", entityId: id, summary: `Accepted a tax declaration for ${fy}`, meta: { userId } }));
+  }
+
+  /** The office sends a declaration back with the reason; it does not count until the person saves it again and it is accepted. */
+  async sendBack(userId: string, note: string, fy = fyOf(todayIST())) {
+    this.authorize("manage", "write");
+    const why = this.parse(z.string().trim().min(3, "Say what to fix.").max(300), note);
+    return this.write("manage", async (tx) => {
+      const row = await this.open(tx, userId, fy);
+      await tx.update(payDeclarations).set({ acceptedBy: null, acceptedAt: null, returnedNote: why }).where(eq(payDeclarations.id, row.id));
+      return row.id;
+    }, (id) => ({ action: "return_declaration", entity: "PayDeclaration", entityId: id, summary: `Sent a tax declaration back: ${why}`, meta: { userId } }));
+  }
+
+  private async open(tx: Tx, userId: string, fy: string) {
+    const [row] = await tx.select().from(payDeclarations).where(and(eq(payDeclarations.userId, userId), eq(payDeclarations.fy, fy)));
+    if (!row) throw new NotFoundError("Declaration");
+    if (row.acceptedAt) throw new ConflictError("This declaration is already accepted.");
+    return row;
+  }
+
+  /** How many declarations wait for the office, for the people page. */
+  async waiting(fy = fyOf(todayIST())): Promise<number> {
+    return this.read("manage", async (tx) => (await tx.select({ id: payDeclarations.id }).from(payDeclarations).where(and(eq(payDeclarations.fy, fy), isNull(payDeclarations.acceptedAt)))).length);
   }
 
   /** The tax picture for this year from the person's pay today and what they declared. Null when no pay is set up or the year has no slabs. */

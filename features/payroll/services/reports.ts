@@ -72,13 +72,13 @@ export class ReportService extends PayrollService {
         case "pt": return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "name", label: "Person" }, { key: "state", label: "State" }, { key: "gross", label: "Gross", type: "money" }, { key: "pt", label: "Professional tax", type: "money" }], rows: (await this.month(tx, month)).filter((r) => r.sum((c) => c === "pt") > 0).map((r) => ({ name: r.person.name, state: r.profile?.state ?? "School's state", gross: Number(r.item.grossPaise), pt: r.sum((c) => c === "pt") })) };
         case "tds": {
           const rows = (await this.month(tx, month)).filter((r) => r.sum((c) => c === "tds") > 0);
-          await this.audit(tx, { action: "export", entity: "Report", summary: "Opened the income tax register with PAN numbers", meta: { count: rows.length } });
-          return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "name", label: "Person" }, { key: "pan", label: "PAN" }, { key: "gross", label: "Gross", type: "money" }, { key: "tds", label: "Tax deducted", type: "money" }], rows: rows.map((r) => ({ name: r.person.name, pan: r.profile?.panSealed ? unseal(r.profile.panSealed, this.ctx.schoolId) : null, gross: Number(r.item.grossPaise), tds: r.sum((c) => c === "tds") })) };
+          if (this.can("manage")) await this.audit(tx, { action: "export", entity: "Report", summary: "Opened the income tax register with PAN numbers", meta: { count: rows.length } });
+          return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "name", label: "Person" }, { key: "pan", label: "PAN" }, { key: "gross", label: "Gross", type: "money" }, { key: "tds", label: "Tax deducted", type: "money" }], rows: rows.map((r) => ({ name: r.person.name, pan: this.idOf(r.profile?.panSealed, r.profile?.panLast4), gross: Number(r.item.grossPaise), tds: r.sum((c) => c === "tds") })) };
         }
         case "esi": {
           const rows = (await this.month(tx, month)).filter((r) => r.sum((c) => c === "esi_employee") > 0);
-          await this.audit(tx, { action: "export", entity: "Report", summary: "Opened the ESI sheet with ESI numbers", meta: { count: rows.length } });
-          return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "esi", label: "IP number" }, { key: "name", label: "Person" }, { key: "days", label: "Days", type: "number" }, { key: "gross", label: "Wages", type: "money" }, { key: "employee", label: "Employee share", type: "money" }, { key: "employer", label: "Employer share", type: "money" }], rows: rows.map((r) => ({ esi: r.profile?.esiSealed ? unseal(r.profile.esiSealed, this.ctx.schoolId) : null, name: r.person.name, days: r.item.paidHalfDays / 2, gross: Number((r.item.snapshot as { esiWagesPaise?: number }).esiWagesPaise ?? 0), employee: r.sum((c) => c === "esi_employee"), employer: r.sum((c) => c === "esi_employer") })) };
+          if (this.can("manage")) await this.audit(tx, { action: "export", entity: "Report", summary: "Opened the ESI sheet with ESI numbers", meta: { count: rows.length } });
+          return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "esi", label: "IP number" }, { key: "name", label: "Person" }, { key: "days", label: "Days", type: "number" }, { key: "gross", label: "Wages", type: "money" }, { key: "employee", label: "Employee share", type: "money" }, { key: "employer", label: "Employer share", type: "money" }], rows: rows.map((r) => ({ esi: this.idOf(r.profile?.esiSealed, r.profile?.esiLast4), name: r.person.name, days: r.item.paidHalfDays / 2, gross: Number((r.item.snapshot as { esiWagesPaise?: number }).esiWagesPaise ?? 0), employee: r.sum((c) => c === "esi_employee"), employer: r.sum((c) => c === "esi_employer") })) };
         }
         case "leave": {
           const day = todayIST(), people = [...(await this.people(tx)).values()].filter((x) => !x.left);
@@ -101,6 +101,12 @@ export class ReportService extends PayrollService {
     });
   }
 
+  /** A sealed number as the caller may see it: in full for payroll managers, last four for everyone else who reads registers. */
+  private idOf(sealed: string | null | undefined, last4: string | null | undefined): string | null {
+    if (!sealed) return null;
+    return this.can("manage") ? unseal(sealed, this.ctx.schoolId) : `XXXX${last4 ?? ""}`;
+  }
+
   /** One person's year of pay. Anyone may open their own; payroll staff any. */
   private async statement(userId: string, fy: string): Promise<Report> {
     this.assertCanSee(userId);
@@ -116,9 +122,9 @@ export class ReportService extends PayrollService {
 
   /** The EPFO return file for a month: one line per person, fields joined by "#~#". The wages are the ones stored with each person's pay when it was worked out. */
   async ecr(rawMonth: string): Promise<{ filename: string; text: string; count: number }> {
-    this.authorize("read", "read");
+    this.authorize("manage", "read");
     const month = monthStart(`${rawMonth.slice(0, 7)}-01`);
-    return this.write("read", async (tx) => {
+    return this.write("manage", async (tx) => {
       const rows = (await this.month(tx, month)).filter((r) => r.sum((c) => c === "pf_employee") > 0);
       const lines = rows.map((r) => {
         const w = r.item.snapshot as { epfWagesPaise?: number; epsWagesPaise?: number; edliWagesPaise?: number };

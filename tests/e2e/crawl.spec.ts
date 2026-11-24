@@ -32,7 +32,7 @@ function routes() {
     "/app/students", `/app/students/${ids.studentId}`, "/app/students/import", "/app/students/promote", "/app/parents",
     "/app/staff", `/app/staff/${ids.staffUser}`,
     "/app/attendance", "/app/attendance/register", "/app/attendance/staff", "/app/attendance/holidays",
-    "/app/fees", "/app/fees/setup", `/app/fees/students/${ids.studentId}`,
+    "/app/fees", "/app/fees/plans", "/app/fees/collect", "/app/finance", "/app/expenses", "/app/payroll", `/app/fees/students/${ids.studentId}`,
     "/app/exams", `/app/exams/${ids.examId}`, `/app/exams/${paperExam}/marks/${ids.paperId}`, "/app/results", `/app/results/${ids.examId}/${ids.studentId}`,
     "/app/timetable", "/app/timetable/periods", `/app/timetable/teachers/${ids.teacherId}`,
     "/app/assignments", `/app/assignments/${ids.assignmentId}`,

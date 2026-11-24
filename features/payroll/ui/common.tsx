@@ -26,7 +26,7 @@ export function PayNav({ active, manager }: { active: (typeof SECTIONS)[number][
 
 /** Nobody is left on a blank page: say what is missing and where to go. */
 export function NoAccess({ what = "Payroll" }: { what?: string }) {
-  return <EmptyLine title={`${what} is only for people who run payroll.`} hint="Ask an admin if you need it. You can see your own payslips under My payslips." action={<Link href="/app/payroll/me" className={PILL_BTN}>My payslips</Link>} />;
+  return <EmptyLine title={`${what} ${/s$|people$/.test(what) ? "are" : "is"} only for people who run payroll.`} hint="Ask an admin if you need it. You can see your own payslips under My payslips." action={<Link href="/app/payroll/me" className={PILL_BTN}>My payslips</Link>} />;
 }
 
 export const monthName = (m: string) => new Date(`${m.slice(0, 7)}-01T00:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });

@@ -111,7 +111,9 @@ export class InvoiceService extends FeesBase {
 
   async deleteDraft(id: string) {
     return this.write("setup", async (tx) => {
-      const gone = await tx.delete(feeInvoices).where(and(eq(feeInvoices.id, id), eq(feeInvoices.status, "draft"))).returning({ id: feeInvoices.id });
+      const [draft] = await tx.select({ id: feeInvoices.id }).from(feeInvoices).where(and(eq(feeInvoices.id, id), eq(feeInvoices.status, "draft"))).for("update");
+      if (draft) await tx.delete(feeInvoiceLines).where(eq(feeInvoiceLines.invoiceId, id));
+      const gone = draft ? await tx.delete(feeInvoices).where(eq(feeInvoices.id, id)).returning({ id: feeInvoices.id }) : [];
       if (!gone.length) throw new ConflictError("Only a draft can be deleted. An issued bill is cancelled or corrected with a note.");
       return { id };
     }, () => ({ action: "delete", entity: "Invoice", entityId: id, summary: "Deleted a draft bill" }));

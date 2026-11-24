@@ -108,6 +108,8 @@ export class ProfileService extends PayrollService {
     const d = this.parse(profileInput, input);
     return this.write("manage", async (tx) => {
       if (!(await this.people(tx, [userId])).has(userId)) throw new NotFoundError("Person");
+      await this.notSelf(tx, userId, "change your own pay details");
+      const [before] = await tx.select().from(payProfiles).where(eq(payProfiles.userId, userId));
       const set: Partial<typeof payProfiles.$inferInsert> = { payBy: d.payBy, regime: d.regime, state: d.state || null, pfApplies: d.pfApplies, esiApplies: d.esiApplies, ptApplies: d.ptApplies, pfOnFullWages: d.pfOnFullWages, paysMonthly: !d.skipMonthly, costCentreId: d.costCentreId ?? null };
       if (d.costCentreId && !(await tx.select({ id: finCostCentres.id }).from(finCostCentres).where(eq(finCostCentres.id, d.costCentreId))).length) throw new ValidationError({ costCentreId: "Pick one of this school's cost centres." });
       if (d.bankName !== undefined) set.bankName = d.bankName || null;
@@ -116,7 +118,11 @@ export class ProfileService extends PayrollService {
         const v = d[k];
         if (v) Object.assign(set, { [sealed]: seal(v, this.ctx.schoolId), [last4]: v.slice(-4) });
       }
+      // A new account number or IFSC is written to the audit log (last four only, old to new) and stamped, so runs can flag recent changes.
+      const moved = (d.bankAccount && (!before?.bankSealed || unseal(before.bankSealed, this.ctx.schoolId) !== d.bankAccount)) || (d.ifsc && d.ifsc !== before?.ifsc);
+      if (moved) set.bankChangedAt = new Date();
       const [row] = await tx.insert(payProfiles).values({ schoolId: this.ctx.schoolId, userId, ...set }).onConflictDoUpdate({ target: payProfiles.userId, set }).returning();
+      if (moved) await this.audit(tx, { action: "bank_change", entity: "PayProfile", entityId: row!.id, summary: "Changed bank details", meta: { userId, account: `${before?.bankLast4 ? `••••${before.bankLast4}` : "none"} to ${row!.bankLast4 ? `••••${row!.bankLast4}` : "none"}`, ifsc: `${before?.ifsc ?? "none"} to ${row!.ifsc ?? "none"}` } });
       return row!;
     }, (r) => ({ action: "update", entity: "PayProfile", entityId: r.id, summary: "Updated pay details", meta: { userId, changed: Object.keys(d).filter((k) => d[k as keyof typeof d] !== undefined && d[k as keyof typeof d] !== "") } })).then(view);
   }
@@ -125,6 +131,7 @@ export class ProfileService extends PayrollService {
   async switchPayBy(userId: string, payBy: "bank" | "cash" | "cheque"): Promise<void> {
     this.authorize("manage", "write");
     await this.write("manage", async (tx) => {
+      await this.notSelf(tx, userId, "change how you are paid");
       await tx.insert(payProfiles).values({ schoolId: this.ctx.schoolId, userId, payBy }).onConflictDoUpdate({ target: payProfiles.userId, set: { payBy } });
     }, () => ({ action: "update", entity: "PayProfile", summary: `Pay by ${payBy}`, meta: { userId } }));
   }

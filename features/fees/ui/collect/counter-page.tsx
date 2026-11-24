@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { allows } from "@smw/feature-kit";
+import { allows, type Ctx } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import financeFeature from "@smw/feature-finance/feature";
 import { BigStat, StatGroup } from "@smw/ui/kit/BigStat";
@@ -16,7 +16,7 @@ import { CounterService, DeskService } from "../../service";
 import { CloseCounter } from "./counter-forms";
 import { OpenCounter } from "./open-counter";
 import { todayIST } from "@smw/feature-kit/money";
-import { DeskNav, H2, NoAccess, Notice, NoticeLink, SECTION, can, day, one, type Search } from "./shared";
+import { DeskNav, H2, NoAccess, Notice, MoneySetup, NoticeLink, SECTION, can, day, one, type Search } from "./shared";
 
 export const metadata = { title: "Cash counter" };
 
@@ -56,7 +56,7 @@ export default async function CounterPage({ searchParams }: { searchParams: Sear
   return (
     <>
       <PageHeader eyebrow="Fees" title="Cash counter" description="Open with a float, take money all day, count it at the end, hand it over or bank it."
-        actions={cur ? <CloseCounter counterId={cur.counter.id} expectedPaise={cur.expectedPaise} primary /> : <OpenCounter />} />
+        actions={cur ? <CloseCounter counterId={cur.counter.id} expectedPaise={cur.expectedPaise} primary /> : justClosed ? <OpenCounter /> : null} />
       <DeskNav ctx={ctx} current="/app/fees/counter" />
 
       {justClosed ? (
@@ -70,7 +70,7 @@ export default async function CounterPage({ searchParams }: { searchParams: Sear
           {justClosed.differenceState ? <div className="mt-3"><Difference h={justClosed} mine={justClosed.userId === ctx.userId} admin={admin} approver={approver} /></div> : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <Link href={`/app/fees/counter/${justClosed.id}/slip`} target="_blank" className={buttonVariants({ className: "rounded-full" })}>Print handover slip</Link>
-            <DepositForm id={justClosed.id} from={justClosed.cashAccountId} amount={Math.max(0, (justClosed.countedPaise ?? 0) - justClosed.floatPaise)} banks={config.banks} canMove={canMove} />
+            <DepositForm id={justClosed.id} from={justClosed.cashAccountId} amount={Math.max(0, (justClosed.countedPaise ?? 0) - justClosed.floatPaise)} banks={config.banks} canMove={canMove} ctx={ctx} />
           </div>
         </section>
       ) : null}
@@ -121,22 +121,21 @@ export default async function CounterPage({ searchParams }: { searchParams: Sear
               </tbody>
             </table>
           </div>
-        ) : <EmptyLine title="No counter days yet." hint="Open your counter to start the first one." action={<OpenCounter />} />}
+        ) : <EmptyLine title="No counter days yet." hint="Open your counter to start the first one." />}
       </section>
       {!canMove && justClosed ? <p className="mt-3 text-xs text-[var(--ds-on-surface-muted)]">Only an accountant or admin can record the bank deposit.</p> : null}
-      {!cur && !justClosed && config.banks.length === 0 ? <Notice tone="warning" action={<NoticeLink href="/app/finance/accounts?next=/app/fees/counter">Add a bank account</NoticeLink>}>There is no bank account yet, so cash cannot be deposited.</Notice> : null}
+      {!cur && !justClosed && config.banks.length === 0 ? <Notice tone="warning" action={<MoneySetup ctx={ctx} next="/app/fees/counter">Add a bank account</MoneySetup>}>There is no bank account yet, so cash cannot be deposited.</Notice> : null}
     </>
   );
 }
 
-/** Cash counted less the float, moved from the cash box to a bank account. Falls back to the banking page for people who cannot post it. */
-function DepositForm({ id, from, amount, banks, canMove }: { id: string; from: string; amount: number; banks: { id: string; name: string }[]; canMove: boolean }) {
-  if (!canMove) return <Link href="/app/finance/banking?next=/app/fees/counter" className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Deposit to bank (accountant)</Link>;
-  if (!banks.length) return <NoticeLinkInline />;
+/** Cash counted less the float, moved from the cash box to a bank account. Only people who may post it see the button. */
+function DepositForm({ id, from, amount, banks, canMove, ctx }: { id: string; from: string; amount: number; banks: { id: string; name: string }[]; canMove: boolean; ctx: Ctx }) {
+  if (!canMove) return null;
+  if (!banks.length) return <MoneySetup ctx={ctx} next="/app/fees/counter">Add a bank account first</MoneySetup>;
   return (
     <FormModal title="Deposit to bank" description="Moves cash from the cash box to the bank in the ledger. Do this when the money reaches the bank." icon="money" action={depositToBank} submitLabel="Record deposit"
       trigger={{ label: "Deposit to bank", variant: "secondary", plus: false }} hidden={{ fromId: from, memo: `Counter deposit ${id.slice(0, 8)}` }} values={{ amountPaise: amount }}
       fields={[{ name: "toId", label: "Deposited in", type: "select", required: true, options: banks.map((b) => ({ value: b.id, label: b.name })) }, { name: "amountPaise", label: "Amount deposited", type: "money", required: true, hint: "Counted cash less the float you keep for tomorrow." }, { name: "date", label: "Date", type: "date" }]} />
   );
 }
-const NoticeLinkInline = () => <Link href="/app/finance/accounts?next=/app/fees/counter" className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Add a bank account first</Link>;

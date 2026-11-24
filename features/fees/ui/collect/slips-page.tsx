@@ -12,7 +12,7 @@ import { Money } from "@smw/ui/finance/Money";
 import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { DeskService, SlipService } from "../../service";
 import { rejectSlip, verifySlip } from "../collect-actions";
-import { DeskNav, NoAccess, Notice, NoticeLink, Ref, can, day, one, type Search } from "./shared";
+import { DeskNav, NoAccess, Notice, MoneySetup, Ref, can, day, one, type Search } from "./shared";
 
 export const metadata = { title: "UPI slips" };
 
@@ -31,8 +31,8 @@ export default async function SlipsPage({ searchParams }: { searchParams: Search
     <>
       <PageHeader eyebrow="Fees" title="UPI slips" description="Families say they paid by UPI. Check the money in the bank, then verify: the receipt is made for them." />
       <DeskNav ctx={ctx} current="/app/fees/slips" />
-      {config.upiOn && !config.upi ? <Notice tone="warning" action={<NoticeLink href="/app/finance/accounts?next=/app/fees/slips">Add the UPI ID</NoticeLink>}>UPI is on, but no account has a UPI ID yet, so families have no code to pay to.</Notice> : null}
-      {!config.upiOn ? <Notice tone="warning" action={<NoticeLink href="/app/finance/settings?next=/app/fees/slips">Turn on UPI</NoticeLink>}>UPI payments are off, so families cannot send slips. Turn it on in the finance settings and add the school's UPI ID.</Notice> : null}
+      {config.upiOn && !config.upi ? <Notice tone="warning" action={<MoneySetup ctx={ctx} next="/app/fees/slips">Add the UPI ID</MoneySetup>}>UPI is on, but no account has a UPI ID yet, so families have no code to pay to.</Notice> : null}
+      {!config.upiOn ? <Notice tone="warning" action={<MoneySetup ctx={ctx} tab="rules" next="/app/fees/slips">Turn on UPI</MoneySetup>}>UPI payments are off, so families cannot send slips. Turn it on in the finance settings and add the school's UPI ID.</Notice> : null}
       <div role="tablist" aria-label="Slips" className="mb-4 flex gap-1">
         {[["", `Waiting (${waiting.total})`], ["history", "History"]].map(([v, label]) => (
           <Link key={v} role="tab" aria-selected={(v === "history") === history} href={v ? `/app/fees/slips?tab=${v}` : "/app/fees/slips"}

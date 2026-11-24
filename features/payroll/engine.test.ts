@@ -317,3 +317,42 @@ describe("lines", () => {
     expect(r.employerPaise).toBe(96_200);
   });
 });
+
+describe("tax on one-off pay and on the last month", () => {
+  const tax = rates({ tax: NEW_TAX }, { tds: true });
+  const ytd = { taxableGrossPaise: 7 * 25_000_000, tdsPaise: 0 };
+  const taxOf = (income: number) => yearlyTax(Math.max(0, income - NEW_TAX.std), NEW_TAX);
+  const base = (o: Partial<PayInput> = {}) => run({ gross: 25_000_000, components: [comp({ label: "Pay", mode: "fixed", value: 25_000_000, isBasic: true })], rates: tax, ytd, ...o });
+  it("a bonus is added to the year once, not once for every month left", () => {
+    const bonus = 10_000_000, left = 5;
+    const r = base({ adjustments: [{ kind: "earning", code: "bonus", label: "Bonus", amountPaise: bonus }] });
+    expect(r.oneOffTaxablePaise).toBe(bonus);
+    expect(amount(r, "tds")).toBe(Math.round(taxOf(ytd.taxableGrossPaise + 25_000_000 * left + bonus) / left));
+  });
+  it("the last month withholds what is left of the year's tax", () => {
+    const r = base({ finalMonth: true });
+    expect(amount(r, "tds")).toBe(taxOf(ytd.taxableGrossPaise + 25_000_000));
+  });
+  it("an extra payment withholds the tax it adds to the year, and nothing else is deducted", () => {
+    const bonus = 20_000_000, months = 5, monthlyPaise = 25_000_000;
+    const r = run({ offCycle: true, assignment: { grossPaise: 0 }, components: [], rates: tax, ytd, taxBase: { monthlyPaise, months }, adjustments: [{ kind: "earning", code: "bonus", label: "Bonus", amountPaise: bonus }] });
+    const year = ytd.taxableGrossPaise + monthlyPaise * months;
+    expect(amount(r, "tds")).toBe(taxOf(year + bonus) - taxOf(year));
+    expect(amount(r, "tds")).toBeGreaterThan(0);
+    expect(r.grossPaise).toBe(bonus);
+    expect(r.deductionsPaise).toBe(amount(r, "tds"));
+  });
+});
+
+describe("a rate with no row is asked for, never taken as zero", () => {
+  it("provident fund wants its wage rule for a month before the rule exists", () => {
+    const r = run({ rates: rates({ missing: ["wage_exclusion_bp"] }, { pf: true }) });
+    expect(amount(r, "pf_employee")).toBeUndefined();
+    expect(r.flags).toContainEqual(expect.objectContaining({ code: "needs_input", line: "rates" }));
+  });
+  it("ESI wants its ceiling", () => {
+    const r = run({ rates: rates({ missing: ["esi_ceiling"], esiCeiling: 0 }, { esi: true }), gross: 1_000_000 });
+    expect(amount(r, "esi_employee")).toBeUndefined();
+    expect(r.flags.map((f) => f.code)).toContain("needs_input");
+  });
+});

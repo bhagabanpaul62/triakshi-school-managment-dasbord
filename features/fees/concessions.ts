@@ -11,7 +11,7 @@ import { PlanBilling } from "./plan-billing";
 import { concessionInput, concessionTypeInput } from "./inputs";
 import { NoteService } from "./notes";
 import { PlanService } from "./plans";
-import { feeConcessionTypes, feeConcessionUses, feeConcessions, feeHeads, feeInvoices, feePlanDues, feePlanLines } from "./schema";
+import { feeConcessionTypes, feeConcessionUses, feeConcessions, feeHeads, feeInvoiceLines, feeInvoices, feePlanDues, feePlanLines } from "./schema";
 
 export { NoteService } from "./notes";
 export { SettlementService } from "./settlements";
@@ -57,10 +57,19 @@ export class ConcessionService extends FeesBase {
     const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate }).from(students).where(eq(students.id, c.studentId));
     const plan = s ? await new PlanService(this.ctx).resolve(tx, s, c.yearId) : null;
     const dues = plan ? await tx.select({ key: feePlanDues.dueKey, amount: feePlanDues.amountPaise }).from(feePlanDues).innerJoin(feePlanLines, eq(feePlanLines.id, feePlanDues.lineId)).where(and(eq(feePlanLines.planId, plan.id), eq(feePlanLines.optional, false), c.headId ? eq(feePlanLines.headId, c.headId) : undefined)) : [];
-    const base = dues.reduce((a, d) => a + d.amount, 0);
+    // No plan covers the student: the bills already issued for the year say what the discount is worth.
+    const planned = dues.reduce((a, d) => a + d.amount, 0);
+    const base = planned || await this.issuedBaseIn(tx, c);
     if (c.mode === "percent") return percentOf(base, c.value);
     if (c.per === "year") return Math.min(base || c.value, c.value);
     return Math.min(base || c.value, c.value * Math.max(1, new Set(dues.map((d) => d.key)).size));
+  }
+
+  /** What the student's issued plan bills of the year total for the head, to value a discount when no plan can be found. */
+  private async issuedBaseIn(tx: Tx, c: { studentId: string; yearId: string; headId: string | null }) {
+    const [r] = await tx.select({ v: sql<string>`coalesce(sum(${feeInvoiceLines.amountPaise}), 0)` }).from(feeInvoiceLines).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId))
+      .where(and(eq(feeInvoices.studentId, c.studentId), eq(feeInvoices.yearId, c.yearId), eq(feeInvoices.status, "issued"), eq(feeInvoices.kind, "plan"), inArray(feeInvoiceLines.kind, ["fee"]), c.headId ? eq(feeInvoiceLines.headId, c.headId) : undefined));
+    return Number(r?.v ?? 0);
   }
 
   async propose(input: unknown): Promise<Concession> {
@@ -77,6 +86,8 @@ export class ConcessionService extends FeesBase {
       d.headId ? tx.select({ id: feeHeads.id }).from(feeHeads).where(eq(feeHeads.id, d.headId)) : Promise.resolve([]),
     ]);
     if (!s) throw new NotFoundError("Student");
+    // Lock before the row below is written: the insert takes a share lock on the student, and two requests that each hold one and want the other's would deadlock.
+    await this.lockStudents(tx, [s.id]);
     if (d.typeId && !type[0]) throw new NotFoundError("Concession type");
     if (d.headId && !head[0]) throw new NotFoundError("Fee head");
     const per = d.per ?? type[0]?.per ?? "year";
@@ -84,8 +95,8 @@ export class ConcessionService extends FeesBase {
     const [row] = id ? await tx.update(feeConcessions).set(values).where(eq(feeConcessions.id, id)).returning() : await tx.insert(feeConcessions).values({ schoolId: this.ctx.schoolId, ...values }).returning();
     const worth = await this.estimateIn(tx, { ...values });
     const changes = new ChangeService(this.ctx);
-    // Small concessions apply at once, but the limit counts what this student has had alone before.
-    if (await changes.mayApplyAloneIn(tx, s.id, worth)) {
+    // Small concessions apply at once, but the limit counts what this student has had alone before. A concession that cannot be valued at all is never small.
+    if (worth > 0 && await changes.mayApplyAloneIn(tx, s.id, worth)) {
       await changes.recordDirectIn(tx, { kind: "concession", studentId: s.id, reason: d.reason, lowersPaise: worth });
       return this.approveIn(tx, row!.id);
     }

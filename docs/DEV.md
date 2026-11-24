@@ -27,6 +27,7 @@ Every seeded account uses the password `demo12345`.
 |---|---|---|
 | either school | `admin` | Administrator |
 | either school | `accounts` | Accountant |
+| either school | `cashier`, `bursar`, `auditor` | Ready-made money roles |
 | either school | `teacher` | Teacher (more teachers come from the staff seed) |
 | either school | admission number, e.g. `GR0001` (password: date of birth as DDMMYYYY) | Student (created by the students seed) |
 

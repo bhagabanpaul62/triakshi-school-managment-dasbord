@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
-import { closeDb, withSchool } from "@smw/db";
+import { closeDb, withSchool, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryEmailSender, MemoryStorage, useServices } from "@smw/integrations";
@@ -207,6 +207,35 @@ describe("leave requests", () => {
     await expect(new LeaveService(a.as.admin).decide({ id: req.id, decision: "approved" })).resolves.toMatchObject({ marked: 1 });
     expect((await staff.staffSheet(d(8))).rows.find((r) => r.userId === a.users.teacher)?.status).toBe("leave");
     expect((await staff.staffSheet(d(9))).rows.find((r) => r.userId === a.users.teacher)?.status).toBe("present");
+  });
+
+  it("staff leave keeps late and half-day marks, only fills absent or unmarked days", async () => {
+    const staff = new StaffAttendanceService(a.as.admin);
+    await staff.mark({ date: d(10), entries: [{ userId: a.users.teacher, status: "late" }] });
+    await staff.mark({ date: d(11), entries: [{ userId: a.users.teacher, status: "absent" }] });
+    const req = await new LeaveService(a.as.teacher).apply({ fromDate: d(10), toDate: d(11), reason: "Course", typeId: await casual() });
+    await new LeaveService(a.as.admin).decide({ id: req.id, decision: "approved" });
+    const on = async (day: string) => (await staff.staffSheet(day)).rows.find((r) => r.userId === a.users.teacher)?.status;
+    expect([await on(d(10)), await on(d(11))]).toEqual(["late", "leave"]);
+  });
+
+  it("nobody decides their own leave, except the only admin with a reason", async () => {
+    const mine = { ...a.as.teacher, grants: new Set(["attendance:approve", "attendance:leave", "attendance:manage"]) };
+    const req = await new LeaveService(mine).apply({ fromDate: d(49), toDate: d(49), reason: "Own", typeId: await casual() });
+    await expect(new LeaveService(mine).decide({ id: req.id, decision: "approved" })).rejects.toBeInstanceOf(ForbiddenError);
+    const adminReq = await new LeaveService(a.as.admin).apply({ fromDate: d(50), toDate: d(50), reason: "Own", typeId: await casual() });
+    await expect(new LeaveService(a.as.admin).decide({ id: adminReq.id, decision: "approved" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(new LeaveService(a.as.admin).decide({ id: adminReq.id, decision: "approved", note: "Only admin" })).resolves.toMatchObject({ status: "approved" });
+    await expect(new LeaveService(a.as.admin).reverse({ id: adminReq.id })).rejects.toBeInstanceOf(ValidationError);
+    await new LeaveService(a.as.admin).decide({ id: req.id, decision: "approved" });
+    await expect(new LeaveService(mine).reverse({ id: req.id })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("refuses staff leave in a month whose salary is already approved", async () => {
+    const req = await new LeaveService(a.as.teacher).apply({ fromDate: d(56), toDate: d(56), reason: "Course", typeId: await casual() });
+    class PaidMonth extends LeaveService { protected override async payMonthClosed(_tx: Tx, month: string) { return month === d(56).slice(0, 7); } }
+    await expect(new PaidMonth(a.as.admin).decide({ id: req.id, decision: "approved" })).rejects.toThrow(/Salary for .* is already approved; ask for a recall or adjust next month/);
+    await expect(new PaidMonth(a.as.admin).decide({ id: req.id, decision: "rejected" })).resolves.toMatchObject({ status: "rejected" });
   });
 
   it("permissions and isolation: accountants cannot approve, school B sees and decides nothing of A's", async () => {

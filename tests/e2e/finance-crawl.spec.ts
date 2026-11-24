@@ -55,6 +55,9 @@ async function crawl(page: Page, starts: string[], role: string) {
 for (const [role, id, starts] of [
   ["admin", "admin", ["/app/finance", "/app/fees", "/app/expenses", "/app/payroll", "/app/billing"]],
   ["accountant", "accounts", ["/app/finance", "/app/fees", "/app/expenses", "/app/payroll", "/app/billing"]],
+  ["cashier", "cashier", ["/app"]],
+  ["bursar", "bursar", ["/app"]],
+  ["auditor", "auditor", ["/app"]],
   ["teacher", "teacher", ["/app/expenses/claims", "/app/payroll/me", "/app/attendance/my-leave"]],
 ] as const) {
   test(`${role}: every link works`, async ({ page }) => {

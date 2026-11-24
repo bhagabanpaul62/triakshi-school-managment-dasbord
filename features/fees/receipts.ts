@@ -268,10 +268,11 @@ export class ReceiptService extends FeesBase {
       tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
       tx.select({ bill: feeInvoices.label, late: feeInvoiceLines.kind, amountPaise: feeAllocations.amountPaise }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId))
         .where(and(eq(feeAllocations.receiptId, id), isNull(feeAllocations.undoneAt))).orderBy(asc(feeInvoices.dueDate), asc(feeInvoiceLines.sort)),
-      tx.select({ date: finJournals.date, at: finJournals.createdAt }).from(finJournals).where(eq(finJournals.sourceKey, `fees:receipt:${id}`)),
+      tx.select({ date: finJournals.date }).from(finJournals).where(eq(finJournals.sourceKey, `fees:receipt:${id}`)),
     ]);
+    // Compared inside the database: a JS Date drops the microseconds, and the receipt would then miss its own entry.
     const balance = j ? Number((await tx.execute<{ v: string }>(sql`select coalesce(sum(jl.debit_paise - jl.credit_paise), 0) v from fin_journal_lines jl join fin_journals fj on fj.id = jl.journal_id join fin_accounts a on a.id = jl.account_id
-      where a.system_key = 'student_dues' and jl.party_type = 'student' and jl.party_id = ${r.studentId}::uuid and (fj.date < ${j.date}::date or (fj.date = ${j.date}::date and fj.created_at <= ${j.at.toISOString()}::timestamptz))`))[0]!.v) : null;
+      where a.system_key = 'student_dues' and jl.party_type = 'student' and jl.party_id = ${r.studentId}::uuid and (fj.date < ${j.date}::date or (fj.date = ${j.date}::date and fj.created_at <= (select created_at from fin_journals where source_key = ${`fees:receipt:${id}`} and school_id = ${this.ctx.schoolId}::uuid)))`))[0]!.v) : null;
     const byBill = new Map<string, { bill: string; feePaise: number; latePaise: number }>();
     for (const a of allocs) { const row = byBill.get(a.bill) ?? { bill: a.bill, feePaise: 0, latePaise: 0 }; if (a.late === "late") row.latePaise += a.amountPaise; else row.feePaise += a.amountPaise; byBill.set(a.bill, row); }
     const verifyUrl = await this.verifyUrlIn(tx, "receipt", r.verifyToken);

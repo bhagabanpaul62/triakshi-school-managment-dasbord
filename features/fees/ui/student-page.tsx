@@ -14,7 +14,7 @@ import { Timeline, type TimelineItem } from "@smw/ui/finance/Timeline";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { paise, shortDate } from "@smw/ui/format";
 import { ConcessionTypeService, DuesService, HeadService, PromiseService } from "../service";
-import { addPromise, resumeReminders, settleUpLeaving, stopReminders, withdrawConcession, withdrawNote, withdrawSettlement } from "./actions";
+import { addPromise, resumeReminders, settleUpLeaving, stopReminders, withdrawConcession, resendSettlement, withdrawNote, withdrawSettlement } from "./actions";
 import { ConcessionForm } from "./concession-form";
 import { FeesLookup } from "./lookups";
 import type { ApprovalInfo } from "../base";
@@ -80,7 +80,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
       <div className="mt-6"><StatGroup columns={4}>
         <BigStat label={owed > 0 ? "Owes" : "Owes nothing"} value={paise(owed)} size="lg" tone={overdue.length ? "danger" : "default"} hint={overdue.length ? `${overdue.length} bill${overdue.length === 1 ? " is" : "s are"} overdue` : openBills.length ? `${openBills.length} open bill${openBills.length === 1 ? "" : "s"}` : "All bills are paid"} />
         <BigStat label="Late fee building up" value={paise(balance.accruedPaise)} hint="Added when they pay" />
-        <BigStat label="Advance" value={paise(balance.advancePaise)} hint="Used on the next bill" />
+        <BigStat label="Advance" value={paise(balance.advancePaise)} hint={balance.waitingAdvancePaise ? `${paise(balance.waitingAdvancePaise)} more waits for a cheque to clear` : "Used on the next bill"} />
         <BigStat label="Deposit held" value={paise(balance.depositPaise)} hint="Refundable" />
       </StatGroup></div>
 
@@ -121,7 +121,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
               : <EmptyLine title="No concessions" hint="A sibling, merit or need discount is given here." action={concede ? <ConcessionForm types={types} heads={heads} student={{ id: studentId, label: student.name }} label="Give a concession" /> : undefined} />}</section>
           <section className={CARD} aria-label="Settlements"><h2 className={H3}>Settlements</h2>
             {a.settlements.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.settlements.map((s) => { const plan = s.plan as unknown as SettlementPlan; return <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span className="min-w-0"><span className="block">{s.reason}</span><span className={`${MUTED} block`}>{plan.parts?.length ? `${plan.parts.length} parts` : "One payment"}{plan.waiveLate ? ", late fee waived" : ""}{plan.writeOffPaise ? `, ${rupees(plan.writeOffPaise)} written off` : ""}{plan.finalPaise !== undefined ? `, agreed ${rupees(plan.finalPaise)}` : ""}. {waiting(s.approval)}</span></span>
-              <span className="flex items-center gap-2"><StateBadge state={s.status} />{s.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawSettlement} values={{ id: s.id }} confirm={{ title: "Take this settlement back?", body: "The dues stay as they are. You can build a new one.", confirmLabel: "Withdraw" }} /> : null}
+              <span className="flex items-center gap-2"><StateBadge state={s.status} />{s.status === "pending" && concede ? <ActionButton label="Send again with today's dues" variant="ghost" action={resendSettlement} values={{ id: s.id }} /> : null}{s.status === "pending" && concede ? <ActionButton label="Withdraw" variant="ghost" action={withdrawSettlement} values={{ id: s.id }} confirm={{ title: "Take this settlement back?", body: "The dues stay as they are. You can build a new one.", confirmLabel: "Withdraw" }} /> : null}
                 {s.status === "rejected" && concede && openBills.length ? <SettlementBuilder studentId={studentId} studentName={student.name} bills={billsForDeal} advancePaise={balance.advancePaise} depositPaise={balance.depositPaise} today={today} again={{ id: s.id, plan }} /> : null}</span></li>; })}</ul>
               : <EmptyLine title="No settlements" hint="A deal on dues: waive the late fee, write off part, or split what is left into dates." action={concede && openBills.length ? <SettlementBuilder studentId={studentId} studentName={student.name} bills={billsForDeal} advancePaise={balance.advancePaise} depositPaise={balance.depositPaise} today={today} /> : undefined} />}</section>
           <section className={`${CARD} lg:col-span-2`} aria-label="Credit and debit notes"><h2 className={H3}>Credit and debit notes</h2>
@@ -133,7 +133,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
       {tab === "advance" ? (
         <div className="grid gap-5 lg:grid-cols-2">
           <section className={CARD} aria-label="Advance and deposit"><h2 className={H3}>Advance and deposit</h2>
-            <p className="mb-3 text-sm">Advance <Money paise={balance.advancePaise} /> and deposit <Money paise={balance.depositPaise} />.</p>
+            <p className="mb-3 text-sm">Advance <Money paise={balance.advancePaise} /> and deposit <Money paise={balance.depositPaise} />.{balance.waitingAdvancePaise + balance.waitingDepositPaise ? <> <Money paise={balance.waitingAdvancePaise + balance.waitingDepositPaise} /> more waits for a cheque to clear and cannot be refunded or used until it does.</> : null}</p>
             {a.advances.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.advances.map((x) => <li key={x.id} className="flex items-center justify-between gap-3 py-2"><span><span className="block">{x.note ?? x.kind}</span><span className={MUTED}>{shortDate(x.date)} · {x.kind === "used" ? "used on a bill" : x.kind === "deposit" ? "deposit" : x.kind}</span></span><Money paise={x.amountPaise} sign="always" /></li>)}</ul> : <EmptyLine title="No advance or deposit" hint="Money paid above the bills becomes an advance, and a refundable deposit is held here." />}</section>
           <section className={CARD} aria-label="Refunds"><h2 className={H3}>Refunds</h2>
             {a.refunds.length ? <ul className="divide-y divide-white/[0.06] text-sm">{a.refunds.map((r) => <li key={r.id} className="flex items-center justify-between gap-3 py-2"><span><span className="block">{r.number ?? "Waiting"} · from the {r.source}</span><span className={MUTED}>{r.reason}</span></span><span className="flex items-center gap-2"><StateBadge state={r.status} /><Money paise={r.amountPaise} /></span></li>)}</ul>

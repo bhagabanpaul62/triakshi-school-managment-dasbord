@@ -265,6 +265,27 @@ describe("ExportService", () => {
     expect(JSON.stringify(full)).not.toContain("v1.secret.pan");
   });
 
+  it("leaves each person's pay out of the ledger too, unless payroll is ticked", async () => {
+    const [acc, run, fee, j1, j2, who] = [uuidv7(), uuidv7(), uuidv7(), uuidv7(), uuidv7(), a.users.teacher];
+    await withSchool(a.id, async (tx) => {
+      await tx.execute(sql`insert into fin_accounts (id, school_id, code, name, type, group_name) values (${acc}, ${a.id}, 'X1', 'Salaries', 'expense', 'Pay')`);
+      await tx.execute(sql`insert into fin_journals (id, school_id, number, date, kind, source_key, source_type, source_id, memo) values
+        (${j1}, ${a.id}, 'J-X1', '2026-04-30', 'auto', ${`payroll:run:${run}`}, 'payroll_run', ${run}, 'Salary for Asha Rao'),
+        (${j2}, ${a.id}, 'J-X2', '2026-04-30', 'auto', ${`fees:test:${fee}`}, 'fees_receipt', ${fee}, 'Fee receipt')`);
+      await tx.execute(sql`insert into fin_journal_lines (id, school_id, journal_id, account_id, debit_paise, party_type, party_id, memo) values
+        (${uuidv7()}, ${a.id}, ${j1}, ${acc}, 5000000, 'staff', ${who}, 'Asha Rao net pay'), (${uuidv7()}, ${a.id}, ${j1}, ${acc}, 700000, null, null, 'Asha Rao PF'),
+        (${uuidv7()}, ${a.id}, ${j2}, ${acc}, 1000, null, null, 'Fee line')`);
+    });
+    const svc = new ExportService(a.as.admin);
+    const plain = await asJson((await svc.exportSchool()).url);
+    expect(JSON.stringify(plain)).not.toContain("Asha Rao");
+    expect(plain.tables.fin_journal_lines.some((l: { party_type: string | null }) => l.party_type === "staff")).toBe(false);
+    expect(plain.tables.fin_journals.map((j: { number: string }) => j.number)).toEqual(expect.arrayContaining(["J-X1", "J-X2"]));
+    expect(plain.tables.fin_journal_lines.map((l: { memo: string | null }) => l.memo)).toContain("Fee line");
+    const full = await asJson((await svc.exportSchool({ includePayroll: true })).url);
+    expect(JSON.stringify(full)).toContain("Asha Rao net pay");
+  });
+
   it("exports one student across the tables that reference them", async () => {
     const mine = uuidv7(), other = uuidv7();
     await withSchool(a.id, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name) values (${mine}, ${a.id}, 'A-1', 'Riya Sharma'), (${other}, ${a.id}, 'A-2', 'Aman Verma')`));

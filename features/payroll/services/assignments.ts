@@ -37,6 +37,7 @@ export class AssignmentService extends PayrollService {
     try {
       return await this.write("manage", async (tx) => {
         await this.check(tx, [d.userId], d.structureId);
+        await this.notSelf(tx, d.userId, "change your own pay");
         const [row] = await tx.insert(payAssignments).values({ schoolId: this.ctx.schoolId, ...d, createdBy: this.ctx.userId }).returning();
         return row!;
       }, (r) => ({ action: "create", entity: "PayAssignment", entityId: r.id, summary: `Set pay from ${r.fromDate}${r.fromDate > todayIST() ? " (future)" : ""}`, meta: { userId: r.userId, grossPaise: r.grossPaise } }));
@@ -59,6 +60,7 @@ export class AssignmentService extends PayrollService {
       const all = people.length ? await tx.select().from(payAssignments).where(and(inArray(payAssignments.userId, people.map((p) => p.id)), lte(payAssignments.fromDate, d.fromDate))).orderBy(desc(payAssignments.fromDate)) : [];
       const rows: RaiseRow[] = [], skipped: { name: string; why: string }[] = [], fresh: (typeof payAssignments.$inferInsert)[] = [];
       for (const p of people) {
+        if (p.id === this.ctx.userId) { skipped.push({ name: p.name, why: "You cannot raise your own pay here. Change it from your pay details page." }); continue; }
         const cur = all.find((a) => a.userId === p.id);
         if (!cur) { skipped.push({ name: p.name, why: "No pay set up" }); continue; }
         if (cur.fromDate === d.fromDate) { skipped.push({ name: p.name, why: "Already has a change on that date" }); continue; }
@@ -91,6 +93,7 @@ export class AssignmentService extends PayrollService {
         const structure = structures.find((s) => s.name.toLowerCase() === (r.structure ?? "").toLowerCase());
         const from = day.safeParse(r.from_date), gross = Number(r.gross), hourly = r.hourly_rate ? Number(r.hourly_rate) : null;
         if (!person) return fail("No staff member with this employee ID.");
+        if (person.id === this.ctx.userId) return fail("You cannot change your own pay. Ask another admin or accountant to import it.");
         if (!structure) return fail("No pay structure with this name.");
         if (!from.success) return fail("from_date must look like 2026-12-01.");
         if (!(gross >= 0) || (hourly !== null && !(hourly >= 0))) return fail("gross and hourly_rate must be amounts in rupees.");

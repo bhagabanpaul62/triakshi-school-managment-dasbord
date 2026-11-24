@@ -75,6 +75,8 @@ export class NoteService extends FeesBase {
     const [inv] = await tx.select().from(feeInvoices).where(eq(feeInvoices.id, spec.invoiceId));
     if (!inv) throw new NotFoundError("Invoice");
     if (inv.status !== "issued") throw new ConflictError("Only an issued bill can have a note.");
+    // Locked before the note is written, so two requests for one student wait for each other instead of deadlocking.
+    await this.lockStudents(tx, [inv.studentId]);
     const lines = spec.kind === "credit" ? await tx.select().from(feeInvoiceLines).where(eq(feeInvoiceLines.invoiceId, inv.id)) : [];
     if (spec.kind === "credit") {
       const seen = new Set<string>();

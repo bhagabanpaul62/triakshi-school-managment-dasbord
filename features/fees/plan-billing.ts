@@ -47,13 +47,15 @@ export class PlanBilling extends FeesBase {
       .from(students).leftJoin(studentEnrollments, and(eq(studentEnrollments.studentId, students.id), eq(studentEnrollments.yearId, year.id)))
       .where(and(o.studentIds ? inArray(students.id, o.studentIds) : undefined, o.classIds ? inArray(classOf, o.classIds) : undefined));
     const ids = pool.map((s) => s.id);
-    const [overrides, optIns, concs, existing, used] = ids.length ? await Promise.all([
-      tx.select().from(feeStudentPlans).where(eq(feeStudentPlans.yearId, year.id)),
-      tx.select().from(feeOptIns).where(eq(feeOptIns.yearId, year.id)),
-      tx.select().from(feeConcessions).where(and(eq(feeConcessions.yearId, year.id), eq(feeConcessions.status, "approved"))),
-      tx.select({ k: feeInvoices.sourceKey }).from(feeInvoices).where(and(like(feeInvoices.sourceKey, "plan:%"), eq(feeInvoices.yearId, year.id), sql`${feeInvoices.status} <> 'cancelled'`)),
-      tx.select({ id: feeConcessionUses.concessionId, v: sql<string>`sum(${feeConcessionUses.amountPaise})` }).from(feeConcessionUses).groupBy(feeConcessionUses.concessionId),
-    ]) : [[], [], [], [], []];
+    // Billing one student reads only that student's rows, not the whole school's.
+    const only = o.studentIds ? ids : null;
+    const [overrides, optIns, concs, existing] = ids.length ? await Promise.all([
+      tx.select().from(feeStudentPlans).where(and(eq(feeStudentPlans.yearId, year.id), only ? inArray(feeStudentPlans.studentId, only) : undefined)),
+      tx.select().from(feeOptIns).where(and(eq(feeOptIns.yearId, year.id), only ? inArray(feeOptIns.studentId, only) : undefined)),
+      tx.select().from(feeConcessions).where(and(eq(feeConcessions.yearId, year.id), eq(feeConcessions.status, "approved"), only ? inArray(feeConcessions.studentId, only) : undefined)),
+      tx.select({ k: feeInvoices.sourceKey }).from(feeInvoices).where(and(like(feeInvoices.sourceKey, "plan:%"), eq(feeInvoices.yearId, year.id), sql`${feeInvoices.status} <> 'cancelled'`, only ? inArray(feeInvoices.studentId, only) : undefined)),
+    ]) : [[], [], [], []];
+    const used = concs.length ? await tx.select({ id: feeConcessionUses.concessionId, v: sql<string>`sum(${feeConcessionUses.amountPaise})` }).from(feeConcessionUses).where(inArray(feeConcessionUses.concessionId, concs.map((c) => c.id))).groupBy(feeConcessionUses.concessionId) : [];
     // "plan:<root>:<student>:<dueKey>": a due already billed to a student under any plan (a student moved to another plan is not billed twice for a month).
     const billed = new Set(existing.map((e) => { const p = e.k!.split(":"); return `${p[2]}:${p.slice(3).join(":")}`; }));
     const spent = new Map(used.map((u) => [u.id, Number(u.v)]));

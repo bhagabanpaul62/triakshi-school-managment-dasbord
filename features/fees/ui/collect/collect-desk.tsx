@@ -18,7 +18,7 @@ import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { collectReceipt, findStudents } from "../collect-actions";
 import { changeDue, cashLimitWarning, dueNow, earliestDate, outcomeOf, pickedTotal, previewAllocation, selectIds, shareText, splitProblem, type DeskBill, type SelectMode } from "./logic";
 
-export interface DeskMember { id: string; name: string; admissionNo: string; classLabel: string; advancePaise: number; duePaise: number; overduePaise: number }
+export interface DeskMember { id: string; name: string; admissionNo: string; classLabel: string; advancePaise: number; waitingAdvancePaise: number; duePaise: number; overduePaise: number }
 export interface DeskConfig { today: string; lateFeeFirst: boolean; cashLimitPaise: number; backdateDays: number; usesCounters: boolean; school: { name: string }; banks: { id: string; name: string }[] }
 export interface DeskProps {
   config: DeskConfig;
@@ -52,6 +52,9 @@ export function CollectDesk({ config, picked, members, bills, cashReady, openCou
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState<Done | null>(null);
+  // One id per time the desk opens: a double click or a retry sends it twice and still makes one receipt.
+  const [requestId] = useState(() => crypto.randomUUID());
+  const [keepExtra, setKeepExtra] = useState(false);
 
   const payer = members.find((m) => m.id === payerId) ?? members[0];
   const picks = Object.entries(sel).map(([id, limitPaise]) => ({ id, limitPaise }));
@@ -62,7 +65,10 @@ export function CollectDesk({ config, picked, members, bills, cashReady, openCou
   const preview = previewAllocation(bills, effective, amount, config.lateFeeFirst);
   const methodParts: SplitPart[] = parts ?? (amount > 0 ? [{ method: cashReady ? "cash" : "upi", amountPaise: amount }] : []);
   const pickedBills = bills.filter((b) => effective.some((p) => p.id === b.id));
+  // A slip of the finger (an extra zero) shows up as an advance larger than the bills themselves.
+  const bigExtra = preview.leftoverPaise > 0 && preview.leftoverPaise >= Math.max(preview.appliedPaise, 100_000);
   const problem = splitProblem(methodParts, amount, payer?.advancePaise ?? 0, preview.leftoverPaise)
+    ?? (bigExtra && !keepExtra ? "This is far more than the bills. Check the amount, or tick that the family really paid it." : null)
     ?? (methodParts.some((p) => p.method === "cash") && !cashReady ? "Open your counter before taking cash." : null)
     ?? (methodParts.some((p) => p.method === "cheque") && (!cheque.chequeNo.trim() || !cheque.bank.trim()) ? "Enter the cheque number and bank." : null);
   const outcome = outcomeOf({ totalPaise: amount, leftoverPaise: preview.leftoverPaise, picked: pickedBills, appliedPaise: preview.appliedPaise, parts: methodParts, payer: payer?.name ?? "The" });
@@ -82,7 +88,7 @@ export function CollectDesk({ config, picked, members, bills, cashReady, openCou
     start(async () => {
       const limited = picks.filter((p) => p.limitPaise);
       const r = await collectReceipt({
-        studentId: payer.id, date: date !== config.today ? date : undefined, payerName: payerName.trim() || undefined, note: note.trim() || undefined,
+        requestId, studentId: payer.id, date: date !== config.today ? date : undefined, payerName: payerName.trim() || undefined, note: note.trim() || undefined,
         invoiceIds: picks.filter((p) => !p.limitPaise).map((p) => p.id), parts: limited.map((p) => ({ invoiceId: p.id, amountPaise: p.limitPaise })),
         methods: methodParts.map((p) => ({
           method: p.method, amountPaise: p.amountPaise, reference: detail[p.method]?.reference?.trim() || undefined, cashAccountId: detail[p.method]?.accountId || undefined,
@@ -138,6 +144,7 @@ export function CollectDesk({ config, picked, members, bills, cashReady, openCou
                   <span><span className="block text-[var(--ds-on-surface-muted)]">Overdue</span><Money paise={m.overduePaise} size="sm" tone={m.overduePaise ? "danger" : "default"} /></span>
                   <span><span className="block text-[var(--ds-on-surface-muted)]">Advance</span><Money paise={m.advancePaise} size="sm" tone={m.advancePaise ? "success" : "default"} /></span>
                 </span>
+                {m.waitingAdvancePaise ? <span className="text-xs text-[var(--ds-on-surface-muted)]"><Money paise={m.waitingAdvancePaise} size="sm" /> more advance waits for a cheque to clear</span> : null}
               </label>
             ))}
             {members.length > 1 ? <p className="text-xs text-[var(--ds-on-surface-muted)]">Brothers and sisters share one receipt. Pick who it is made out to.</p> : null}
@@ -237,11 +244,12 @@ export function CollectDesk({ config, picked, members, bills, cashReady, openCou
               <h3 className="mb-2 font-mono text-[11px] uppercase tracking-[0.05em] text-[var(--ds-on-surface-muted)]">What will happen</h3>
               <dl className="grid grid-cols-3 gap-2">
                 <div><dt className="text-xs text-[var(--ds-on-surface-muted)]">Receipt</dt><dd><Money paise={outcome.receiptPaise} size="lg" /></dd></div>
-                <div><dt className="text-xs text-[var(--ds-on-surface-muted)]">Still due</dt><dd><Money paise={outcome.leftDuePaise} size="lg" tone={outcome.leftDuePaise ? "warning" : "success"} /></dd></div>
+                <div><dt className="text-xs text-[var(--ds-on-surface-muted)]">Still due on these</dt><dd><Money paise={outcome.leftDuePaise} size="lg" tone={outcome.leftDuePaise ? "warning" : "success"} /></dd></div>
                 <div><dt className="text-xs text-[var(--ds-on-surface-muted)]">New advance</dt><dd><Money paise={outcome.newAdvancePaise} size="lg" /></dd></div>
               </dl>
               <ul className="mt-3 list-disc pl-4 text-xs text-[var(--ds-on-surface-variant)]">{outcome.lines.map((l) => <li key={l}>{l}</li>)}</ul>
             </section>
+            {bigExtra ? <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={keepExtra} onChange={(e) => setKeepExtra(e.target.checked)} className="h-5 w-5 accent-[var(--ds-primary)]" />The family paid this much. Keep <Money paise={preview.leftoverPaise} size="sm" /> as advance.</label> : null}
             {error || problem ? <p role="alert" className="text-sm text-[var(--ds-color-danger-400)]">{error || problem}{/counter/i.test(error) ? <> <Link href="/app/fees/counter" className="underline underline-offset-4">Go to the counter</Link></> : null}</p> : null}
             <Button type="submit" className="h-12 rounded-full text-base" isLoading={pending} disabled={!!problem || !payer}>Collect <Money paise={amount} size="md" className="ml-2" /></Button>
             <p className="text-center text-xs text-[var(--ds-on-surface-muted)]">Enter collects. / finds a student.</p>

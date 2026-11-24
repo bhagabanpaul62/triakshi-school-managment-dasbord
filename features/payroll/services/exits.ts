@@ -1,14 +1,14 @@
 import { and, desc, eq, lte, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
-import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, listQuerySchema, rethrowUnique, toPage, type ListQuery, type Page } from "@smw/feature-kit";
 import { addDays, monthStart } from "@smw/feature-kit/money";
 import { day, paiseAmount } from "@smw/feature-finance/services/common";
 import { computeMonth, openLoans, type CalcEnv } from "../compute";
 import { monthlyWages } from "../engine";
 import { PayrollService } from "../base";
 import { undoExit, exitTotals, type ExitLine } from "../exit-ledger";
-import { payAssignments, payComponents, payExits, payItems, payRuns } from "../schema";
+import { payAssignments, payComponents, payExits, payItems, payProfiles, payRuns } from "../schema";
 import { staffProfiles } from "@smw/feature-staff/schema";
 
 export type Exit = typeof payExits.$inferSelect;
@@ -42,13 +42,15 @@ export class ExitService extends PayrollService {
       const [p] = await this.people(tx, [x.userId]).then((m) => [m.get(x.userId)]);
       const book = await this.rateBook(tx);
       const wages = book.resolve<number>("exit_pay_days", x.lastDay), gratuity = book.resolve<number>("gratuity_days", x.lastDay);
+      const [prof] = await tx.select({ payBy: payProfiles.payBy, sealed: payProfiles.bankSealed, ifsc: payProfiles.ifsc }).from(payProfiles).where(eq(payProfiles.userId, x.userId));
+      const noBank = exitTotals(x.lines).net > 0 && (prof?.payBy ?? "bank") === "bank" && !(prof?.sealed && prof.ifsc);
       const notice = x.lines.find((l) => l.code === "notice_pay" || l.code === "notice_recovery");
       const days = Number((notice?.note ?? "").replace("days=", "")) || 0;
       return {
         exit: x, name: p?.name ?? "", employeeId: p?.employeeId ?? "",
         due: { wages: workingDaysAfter(x.lastDay, wages?.value ?? 2), gratuity: x.lines.some((l) => l.code === "gratuity") ? addDays(x.lastDay, gratuity?.value ?? 30) : null },
         totals: exitTotals(x.lines), noticeDays: days, stillActive: !!p && !p.left, deactivateBy: (await tx.select({ name: users.name }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")))).map((u) => u.name), paid: x.status === "paid",
-        blockers: [...x.lines.filter((l) => l.amountPaise === 0 && l.note?.startsWith("needs:")).map((l) => `${l.label}: ${l.note!.slice(6)}`), ...(exitTotals(x.lines).net < 0 ? ["Deductions are more than the settlement. Lower a deduction or pay part of the loan back first."] : [])],
+        blockers: [...(noBank ? [`${p?.name ?? "This person"} has no bank account. Add one or pay by cash or cheque.`] : []), ...x.lines.filter((l) => l.amountPaise === 0 && l.note?.startsWith("needs:")).map((l) => `${l.label}: ${l.note!.slice(6)}`), ...(exitTotals(x.lines).net < 0 ? ["Deductions are more than the settlement. Lower a deduction or pay part of the loan back first."] : [])],
         sources: [wages, gratuity].filter((r): r is NonNullable<typeof r> => !!r).map((r) => ({ key: r.key, source: r.source, confidence: r.confidence })),
       };
     });
@@ -57,6 +59,10 @@ export class ExitService extends PayrollService {
   async create(input: unknown): Promise<Exit> {
     this.authorize("manage", "write");
     const d = this.parse(exitInput, input);
+    try { return await this.createExit(d); } catch (e) { return rethrowUnique(e, "This person already has an exit for that last day. Open it from the list and change it there."); }
+  }
+
+  private createExit(d: z.infer<typeof exitInput>): Promise<Exit> {
     return this.write("manage", async (tx) => {
       const people = await this.people(tx, [d.userId]);
       if (!people.has(d.userId)) throw new NotFoundError("Person");
@@ -76,7 +82,7 @@ export class ExitService extends PayrollService {
       const [x] = await tx.select().from(payExits).where(eq(payExits.id, id)).for("update");
       if (!x) throw new NotFoundError("Exit");
       if (x.status !== "draft" && x.status !== "rejected") throw new ConflictError(`This exit is ${x.status}, so it cannot be changed.`);
-      const lines = await this.build(tx, { ...d, userId: x.userId });
+      const lines = await this.build(tx, { ...d, userId: x.userId }, id);
       return (await tx.update(payExits).set({ lastDay: d.lastDay, reason: d.reason, lines, status: "draft" }).where(eq(payExits.id, id)).returning())[0]!;
     }, (r) => ({ action: "update", entity: "PayExit", entityId: r.id, summary: "Changed an exit settlement" }));
   }
@@ -123,7 +129,7 @@ export class ExitService extends PayrollService {
   }
 
   /** The lines of a settlement, each with how it was worked out. */
-  private async build(tx: Tx, d: z.infer<typeof exitInput>): Promise<ExitLine[]> {
+  private async build(tx: Tx, d: z.infer<typeof exitInput>, exitId?: string): Promise<ExitLine[]> {
     const env: CalcEnv = await this.envOf(tx);
     const { userId, lastDay } = d;
     const month = monthStart(lastDay);
@@ -136,13 +142,13 @@ export class ExitService extends PayrollService {
     const [paidIn] = await tx.select({ id: payItems.id }).from(payItems).innerJoin(payRuns, eq(payRuns.id, payItems.runId)).where(and(eq(payItems.userId, userId), eq(payRuns.month, month), ne(payRuns.status, "cancelled"), sql`${payItems.skippedReason} is null`));
     if (paidIn) lines.push({ kind: "earning", code: "info", label: "Salary for the last month", amountPaise: 0, note: "Paid in that month's pay run" });
     else {
-      const { done } = await computeMonth(env, { userIds: [userId], month, runId: null, leftOn: { [userId]: lastDay } });
+      const { done } = await computeMonth(env, { userIds: [userId], month, runId: null, leftOn: { [userId]: lastDay }, exceptExit: exitId });
       const r = done[0]?.result;
       // The wages the contributions rest on travel with the PF line, so the return file reads them back instead of working them out.
       const wages = r ? `wages=${r.epfWagesPaise}:${r.epsWagesPaise}:${r.edliWagesPaise}:${r.esiWagesPaise}` : undefined;
       for (const l of r?.lines ?? []) {
         if (l.code === "loan") continue;
-        lines.push({ kind: l.kind, code: l.code ?? "salary", label: l.code ? l.label : `${l.label} (to ${lastDay.slice(8)}th)`, amountPaise: l.amountPaise, note: l.needsInput ? `needs:${l.note}` : l.code === "pf_employee" || (l.code === "esi_employee" && !r?.lines.some((o) => o.code === "pf_employee")) ? wages : l.note ?? undefined });
+        lines.push({ ...(l.code === "claim" ? { refId: l.refId ?? undefined } : {}), kind: l.kind, code: l.code ?? "salary", label: l.code ? l.label : `${l.label} (to ${lastDay.slice(8)}th)`, amountPaise: l.amountPaise, note: l.needsInput ? `needs:${l.note}` : l.code === "pf_employee" || (l.code === "esi_employee" && !r?.lines.some((o) => o.code === "pf_employee")) ? wages : l.note ?? undefined });
       }
     }
 
@@ -154,7 +160,7 @@ export class ExitService extends PayrollService {
     if (d.noticeDays) lines.push({ kind: d.noticeDays > 0 ? "earning" : "deduction", code: d.noticeDays > 0 ? "notice_pay" : "notice_recovery", label: d.noticeDays > 0 ? `Notice pay, ${d.noticeDays} days` : `Notice not served, ${-d.noticeDays} days`, amountPaise: Math.round((gross * Math.abs(d.noticeDays)) / div), note: `days=${d.noticeDays}` });
 
     // What is still owed on loans comes out of the settlement.
-    for (const l of (await openLoans(tx, [userId], addDaysToMonth(lastDay))).get(userId) ?? []) lines.push({ kind: "deduction", code: "loan", label: "Loan balance", amountPaise: l.balance, note: l.id });
+    for (const l of (await openLoans(tx, [userId], addDaysToMonth(lastDay))).get(userId) ?? []) lines.push({ kind: "deduction", code: "loan", label: "Loan balance", amountPaise: l.balance, note: l.id, refId: l.id });
     const g = await this.gratuity(tx, env, userId, lastDay, a, gross);
     if (g) lines.push(g);
     for (const o of d.other) lines.push({ ...o, code: "other" });
@@ -166,14 +172,14 @@ export class ExitService extends PayrollService {
     const [s] = await tx.select({ joined: staffProfiles.joiningDate, type: staffProfiles.employmentType }).from(staffProfiles).where(eq(staffProfiles.userId, userId));
     if (!s?.joined || a.hourlyPaise != null || (s.type !== "permanent" && s.type !== "contract")) return null;
     const rate = (k: string) => env.book.resolve<number>(k, lastDay);
-    const minYears = rate(s.type === "permanent" ? "gratuity_years" : "gratuity_years_fixed")?.value, cap = rate("gratuity_max")?.value;
-    if (minYears === undefined || cap === undefined) return { kind: "earning", code: "gratuity", label: "Gratuity", amountPaise: 0, note: "needs:There is no gratuity rule for this date. Type the amount as another pay line." };
+    const minYears = rate(s.type === "permanent" ? "gratuity_years" : "gratuity_years_fixed")?.value, cap = rate("gratuity_max")?.value, exclusion = rate("wage_exclusion_bp")?.value;
+    if (minYears === undefined || cap === undefined || exclusion === undefined) return { kind: "earning", code: "gratuity", label: "Gratuity", amountPaise: 0, note: "needs:There is no gratuity rule for this date. Type the amount as another pay line." };
     const months = (+lastDay.slice(0, 4) - +s.joined.slice(0, 4)) * 12 + (+lastDay.slice(5, 7) - +s.joined.slice(5, 7)) - (+lastDay.slice(8) < +s.joined.slice(8) ? 1 : 0);
     const years = Math.floor(months / 12);
     if (years < minYears) return null;
     const counted = years + (months % 12 >= 6 ? 1 : 0);
     const comps = await tx.select().from(payComponents).where(eq(payComponents.structureId, a.structureId));
-    const wage = monthlyWages(comps.map((c) => ({ id: c.id, label: c.label, kind: c.kind, mode: c.mode, value: Number(c.value), isBasic: c.isBasic, isWage: c.isWage, proRata: c.proRata, taxable: c.taxable, sort: c.sort })), gross, a.overrides, env.book.resolve<number>("wage_exclusion_bp", lastDay)?.value ?? 5000);
+    const wage = monthlyWages(comps.map((c) => ({ id: c.id, label: c.label, kind: c.kind, mode: c.mode, value: Number(c.value), isBasic: c.isBasic, isWage: c.isWage, proRata: c.proRata, taxable: c.taxable, sort: c.sort })), gross, a.overrides, exclusion);
     return { kind: "earning", code: "gratuity", label: `Gratuity, ${counted} years`, amountPaise: Math.min(cap, Math.round((wage * 15 * counted) / 26)), note: `15/26 of ${wage / 100} a month for ${counted} years` };
   }
 }

@@ -33,7 +33,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
 
   const steps: TrackStep[] = cheque
     ? [{ label: "Received", state: "done", at: r.date }, { label: "Deposited", state: cheque.status === "received" ? "now" : "done", at: cheque.depositedOn },
-      cheque.status === "bounced" ? { label: "Bounced", state: "failed", at: cheque.bouncedOn } : { label: "Cleared", state: cheque.status === "cleared" ? "done" : "todo", at: cheque.clearedOn }]
+      cheque.status === "bounced" ? { label: "Bounced", state: "failed", at: cheque.bouncedOn } : cheque.status === "cancelled" ? { label: "Cancelled with the receipt", state: "failed", at: r.reversedAt?.toISOString().slice(0, 10) ?? null } : { label: "Cleared", state: cheque.status === "cleared" ? "done" : "todo", at: cheque.clearedOn }]
     : [{ label: "Received", state: "done", at: r.date }, { label: "In the books", state: journalId || !staff ? "done" : "todo" }];
   if (r.status === "reversed") steps.push({ label: "Reversed", state: "failed", at: r.reversedAt?.toISOString() ?? null });
   else if (ask?.status === "pending") steps.push({ label: "Reversal asked", state: "now", at: undefined });

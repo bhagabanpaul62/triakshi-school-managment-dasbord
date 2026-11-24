@@ -18,7 +18,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { shortDate } from "@smw/ui/format";
 import { PayoutService } from "../services/payouts";
 import { ADJUSTMENT_CODES, RunService, type ItemDetail, type RunView } from "../services/runs";
-import { addAdjustment, addPerson, cancelRun, includePerson, recomputeRun, removeAdjustment, withdrawRequest, reopenRun, requestRecall, retryPayout, reviewRun, setDays, skipPerson, submitRun, switchPayBy, typeAmount, markFailed, markPaid } from "./actions";
+import { addAdjustment, addPerson, confirmBank, cancelRun, includePerson, recomputeRun, removeAdjustment, withdrawRequest, reopenRun, requestRecall, retryPayout, reviewRun, setDays, skipPerson, submitRun, switchPayBy, typeAmount, markFailed, markPaid } from "./actions";
 import { NoAccess, PILL_BTN, PRIMARY_BTN, PayNav, RUN_KIND_LABEL, monthName, one, type Search } from "./common";
 import { PeekByUrl } from "./peek-by-url";
 
@@ -146,7 +146,7 @@ export default async function RunPage({ params, searchParams }: { params: Promis
             <li><a className="underline" href={`/app/payroll/files/register-csv?run=${id}`} download>Salary register (CSV)</a></li>
             {["approved", "paid"].includes(run.status) ? <li><a className="underline" href={`/app/payroll/files/bank-file?run=${id}`} download>Bank file (CSV)</a></li> : null}
             <li><Link className="underline" href={`/app/payroll/reports?report=bank&runId=${id}`}>Bank advice</Link></li>
-            <li><a className="underline" href={`/app/payroll/files/ecr?month=${run.month.slice(0, 7)}`} download>PF return file</a></li>
+            {manage ? <li><a className="underline" href={`/app/payroll/files/ecr?month=${run.month.slice(0, 7)}`} download>PF return file</a></li> : null}
             <li><Link className="underline" href={`/app/payroll/reports?report=esi&period=${run.month.slice(0, 7)}`}>ESI sheet</Link></li>
             <li><Link className="underline" href={`/app/payroll/reports?report=pt&period=${run.month.slice(0, 7)}`}>Professional tax register</Link></li>
             <li><Link className="underline" href={`/app/payroll/reports?report=tds&period=${run.month.slice(0, 7)}`}>Income tax register</Link></li>
@@ -184,9 +184,10 @@ function Payouts({ v, payouts, manage, id }: { v: RunView; payouts: Awaited<Retu
       <ul className="flex flex-col gap-2">
         {live.map((i) => (
           <li key={i.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/[0.04] p-4 text-sm">
-            <span className="min-w-0"><Link href={`/app/payroll/runs/${id}?item=${i.id}`} className="underline">{i.name}</Link><span className="block text-xs text-[var(--ds-on-surface-muted)]">{i.payBy === "bank" ? `Bank ${i.bankLast4 ? `XXXX${i.bankLast4}` : "(no account)"}` : i.payBy === "cash" ? "Cash" : "Cheque"}{i.paidOn ? `, paid ${shortDate(i.paidOn)}` : ""}{i.failReason ? `. ${i.failReason}` : ""}</span></span>
+            <span className="min-w-0"><Link href={`/app/payroll/runs/${id}?item=${i.id}`} className="underline">{i.name}</Link><span className="block text-xs text-[var(--ds-on-surface-muted)]">{i.payBy === "bank" ? `Bank ${i.bankLast4 ? `XXXX${i.bankLast4}` : "(no account)"}` : i.payBy === "cash" ? "Cash" : "Cheque"}{i.paidOn ? `, paid ${shortDate(i.paidOn)}` : ""}{i.failReason ? `. ${i.failReason}` : ""}</span>{i.bankMoved ? <span className="mt-1 block text-xs text-[var(--ds-color-danger-300)]">Bank details changed after approval ({i.bankMoved}). They cannot be paid until you use the new account or recall the run.</span> : null}</span>
             <span className="flex flex-wrap items-center gap-2"><Money paise={i.netPaise} /><StateBadge state={i.payout === "paid" ? "paid" : i.payout} />
-              {manage && run.status === "approved" && i.payout === "pending" ? <>
+              {manage && run.status === "approved" && i.bankMoved ? <ActionButton action={confirmBank} values={{ id, itemId: i.id }} label="Use the new account" variant="secondary" confirm={{ title: "Pay into the new account?", body: `${i.name}: ${i.bankMoved}. Check with them that this is their account. A second person than ${i.name} must do this.` }} /> : null}
+              {manage && run.status === "approved" && i.payout === "pending" && !i.bankMoved ? <>
                 <ActionButton action={markPaid} values={{ id, itemIds: i.id }} label="Paid" variant="secondary" />
                 <FormModal title={`Transfer failed: ${i.name}`} icon="money" action={markFailed} hidden={{ id, itemIds: i.id }} trigger={{ label: "Failed", variant: "ghost", size: "sm" }} submitLabel="Mark failed" fields={[{ name: "reason", label: "What the bank said", type: "text", required: true }]} />
               </> : null}

@@ -59,7 +59,7 @@ export function BankImportForm({ cashAccountId, check, commit, doneHref }: { cas
     <div className="flex flex-col gap-3">
       <Panel title="1. Choose the statement">
         <div className="flex flex-wrap items-center gap-3">
-          <input type="file" accept=".xlsx,.csv,text/csv" aria-label="Bank statement file" className={`${INPUT} max-w-sm py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]`}
+          <input type="file" accept=".xlsx,.csv,text/csv" aria-label="Bank statement file" className={`${INPUT} max-w-sm`}
             onChange={(e) => { setFile(e.target.files?.[0] ?? null); setPreview(null); setError(null); setMap({}); }} />
           <Button type="button" className="rounded-full" disabled={!file} isLoading={pending && !preview} onClick={() => runCheck({})}>Check the file</Button>
         </div>

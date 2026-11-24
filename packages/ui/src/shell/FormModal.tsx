@@ -91,7 +91,7 @@ function Control({ f, id, value, invalid }: { f: Field; id: string; value: unkno
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" id={id} name={f.name} value="true" defaultChecked={value === true || value === "true"} className="h-4 w-4 accent-[var(--ds-primary)]" />{f.placeholder ?? "Yes"}</label>
     );
     case "money": return <input {...common} type="number" step="0.01" min="0" defaultValue={value == null ? undefined : Number(value) / 100} className={INPUT} />;
-    case "file": return <input id={id} name={f.name} type="file" accept={f.accept} required={f.required} onChange={f.asJpeg ? (e) => void reencodeAsJpeg(e.currentTarget) : undefined} className={cn(INPUT, "py-2 file:mr-3 file:rounded-full file:border-0 file:bg-white/[0.08] file:px-3 file:text-[var(--ds-on-surface)]")} />;
+    case "file": return <input id={id} name={f.name} type="file" accept={f.accept} required={f.required} onChange={f.asJpeg ? (e) => void reencodeAsJpeg(e.currentTarget) : undefined} className={INPUT} />;
     default: return <input {...common} type={f.type ?? "text"} min={f.min} max={f.max} step={f.step} defaultValue={v?.slice(0, f.type === "date" ? 10 : undefined)} className={INPUT} />;
   }
 }

@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
-import { ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, countIn, type Ctx } from "@smw/feature-kit";
 import { users, type Tx } from "@smw/db";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { classes, sections } from "@smw/feature-academics/schema";
@@ -32,12 +32,6 @@ const MAX_DAYS = 60;
 const BACKDATE_DAYS = 30;
 /** The note on the daily rows an approval wrote, so a reversal removes only those. */
 const LEAVE_NOTE = "On approved leave";
-
-/** Has payroll already approved this month's salary run? The app fills it in (attendance never imports payroll). */
-export type PayMonthGuard = (tx: Tx, month: string) => Promise<boolean>;
-let payMonthClosed: PayMonthGuard | null = null;
-/** App startup: tell leave how to ask payroll. Pass null to take it off. Without it, leave never refuses for payroll. */
-export const usePayMonthGuard = (guard: PayMonthGuard | null) => { payMonthClosed = guard; };
 
 /** Leave requests: a student or staff member applies, the class teacher or the admin decides, approval marks the days as leave. */
 export class LeaveService extends SchoolService<Perm> {
@@ -280,11 +274,16 @@ export class LeaveService extends SchoolService<Perm> {
     return true;
   }
 
+  /** Payroll is another module, so its table is asked by name; a school without payroll has no closed months. */
+  protected async payMonthClosed(tx: Tx, month: string) {
+    return (await countIn(tx, "pay_runs", sql`kind = 'monthly' and to_char(month, 'YYYY-MM') = ${month} and status in ('approved', 'paid')`)) > 0;
+  }
+
   /** Approving or turning around staff leave changes days that salary is cut from, so a month with an approved run is shut. */
   private async assertPayOpen(tx: Tx, r: typeof leaveRequests.$inferSelect) {
-    if (r.kind !== "staff" || !payMonthClosed) return;
+    if (r.kind !== "staff") return;
     for (const { month } of await requestMonths(tx, r)) {
-      if (await payMonthClosed(tx, month)) throw new ConflictError(`Salary for ${month} is already approved; ask for a recall or adjust next month.`);
+      if (await this.payMonthClosed(tx, month)) throw new ConflictError(`Salary for ${month} is already approved; ask for a recall or adjust next month.`);
     }
   }
 
