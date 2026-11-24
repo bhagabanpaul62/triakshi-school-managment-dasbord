@@ -4,6 +4,7 @@ export * from "./budgets";
 export * from "./claims";
 export * from "./files";
 export * from "./income";
+export * from "./lookups";
 export * from "./payments";
 export * from "./petty";
 export * from "./recurring";

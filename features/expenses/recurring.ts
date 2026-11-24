@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import { NotFoundError } from "@smw/feature-kit";
-import { addDays, addMonths, monthEnd, todayIST } from "@smw/feature-kit/money";
+import { addDays, addMonths, monthEnd, percentOf, todayIST } from "@smw/feature-kit/money";
 import { invoices, type Tx } from "@smw/db";
 import { systemAccounts } from "@smw/feature-finance/chart";
 import { finAccounts } from "@smw/feature-finance/schema";
@@ -29,12 +29,13 @@ const fields = z.object({
 /** Draft one bill per due period for every active recurring cost. Safe to run any number of times a day: the source key makes a period one bill. */
 export async function draftRecurringBills(tx: Tx, schoolId: string, today = todayIST()) {
   const due = await tx.select().from(expRecurring).where(and(eq(expRecurring.isActive, true), lte(expRecurring.nextOn, today))).orderBy(asc(expRecurring.nextOn)).for("update");
+  const tdsOf = new Map((await tx.select({ id: expVendors.id, bps: expVendors.tdsBasisPoints }).from(expVendors)).map((v) => [v.id, v.bps]));
   let made = 0;
   for (const r of due) {
     let on = r.nextOn;
     for (let i = 0; i < 12 && on <= today && (!r.endsOn || on <= r.endsOn); i++) {
       const gross = r.lines.reduce((s, l) => s + l.amountPaise, 0);
-      const [b] = await tx.insert(expBills).values({ schoolId, vendorId: r.vendorId, billNo: `${r.label} ${on.slice(0, 7)}`, billDate: on, dueDate: addDays(on, r.dueDays), grossPaise: gross, sourceKey: `expenses:recurring:${r.id}:${on}`, note: "Made from a recurring cost. Check the amount, then send it for approval." })
+      const [b] = await tx.insert(expBills).values({ schoolId, vendorId: r.vendorId, billNo: `${r.label} ${on.slice(0, 7)}`, billDate: on, dueDate: addDays(on, r.dueDays), grossPaise: gross, tdsPaise: percentOf(gross, tdsOf.get(r.vendorId) ?? 0), sourceKey: `expenses:recurring:${r.id}:${on}`, note: "Made from a recurring cost. Check the amount, then send it for approval." })
         .onConflictDoNothing().returning();
       if (b) {
         await tx.insert(expBillLines).values(r.lines.map((l, k) => ({ schoolId, billId: b.id, accountId: l.accountId, costCentreId: l.costCentreId ?? null, label: l.label, amountPaise: l.amountPaise, sort: k })));

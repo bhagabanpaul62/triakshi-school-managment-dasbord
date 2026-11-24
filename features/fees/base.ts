@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, ne, sql, sum, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, ForbiddenError, NotFoundError, type Ctx } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { todayIST } from "@smw/feature-kit/money";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { MoneyService } from "@smw/feature-finance/base";
@@ -23,6 +23,9 @@ export interface StudentLine { id: string; name: string; admissionNo: string; cl
 export interface InvoiceFull extends Invoice { lines: InvoiceLine[]; parts: { dueOn: string; amountPaise: number }[] }
 /** Money that landed on one bill line. */
 export interface Slice { invoiceId: string; lineId: string; lineKind: string; headId: string | null; studentId: string; amountPaise: number }
+
+/** A refusal on one field whose message already says what to do next (the form shows it by the field, the API returns it as the message). */
+export const invalid = (field: string, message: string) => new ValidationError({ [field]: message }, message);
 
 export const newToken = () => randomBytes(16).toString("hex");
 const ids = (xs: string[]) => sql.join(xs.map((x) => sql`${x}::uuid`), sql`, `);
@@ -188,6 +191,11 @@ export abstract class FeesBase extends MoneyService<Perm> {
     return new Map((want.length ? await tx.select().from(feeHeads).where(inArray(feeHeads.id, want)) : []).map((h) => [h.id, h]));
   }
 
+  /** A line on a student's own list (deposits) carries the student, so the list can be checked against the ledger. */
+  protected party(account: PostLine["account"], studentId: string): Pick<PostLine, "party"> {
+    return account === "deposits_payable" ? { party: { type: "student", id: studentId } } : {};
+  }
+
   /** The ledger account a bill line is income (or liability) in. */
   protected lineAccount(l: { kind: string; headId: string | null }, heads: Map<string, Head>): PostLine["account"] {
     if (l.kind === "late") return "late_fee";
@@ -212,12 +220,12 @@ export abstract class FeesBase extends MoneyService<Perm> {
     if (!slices.length) return [];
     const key = (s: Slice) => (s.lineKind === "late" ? `fees:late:${s.lineId}` : `fees:invoice:${s.invoiceId}`);
     const [booked, heads] = await Promise.all([this.posted(tx, [...new Set(slices.map(key))]), this.headMap(tx, slices.map((s) => s.headId))]);
-    const dues = new Map<string, number>(), other = new Map<string, { account: PostLine["account"]; credit: number }>();
+    const dues = new Map<string, number>(), other = new Map<string, PostLine & { credit: number }>();
     for (const s of slices) {
       if (booked.has(key(s))) { dues.set(s.studentId, (dues.get(s.studentId) ?? 0) + s.amountPaise); continue; }
       const account = this.lineAccount({ kind: s.lineKind, headId: s.headId }, heads);
       const k = typeof account === "string" ? account : account.id;
-      other.set(k, { account, credit: (other.get(k)?.credit ?? 0) + s.amountPaise });
+      other.set(`${k}:${account === "deposits_payable" ? s.studentId : ""}`, { account, credit: (other.get(`${k}:${account === "deposits_payable" ? s.studentId : ""}`)?.credit ?? 0) + s.amountPaise, ...this.party(account, s.studentId) });
     }
     return [
       ...[...dues].map(([id, credit]): PostLine => ({ account: "student_dues", credit, party: { type: "student", id }, memo })),

@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@smw/db";
-import { ConflictError, CrudService, NotFoundError, ValidationError, listQuerySchema, toPage, type Ctx, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, CrudService, NotFoundError, listQuerySchema, toPage, type Ctx, type ListQuery } from "@smw/feature-kit";
 import { rupees } from "@smw/feature-kit/money";
 import { finAccounts } from "@smw/feature-finance/schema";
 import { classes } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
-import { FeesBase, type Perm } from "./base";
+import { FeesBase, invalid, type Perm } from "./base";
 import { copyPlanInput, headInput, optInInput, planInput, studentPlanInput } from "./inputs";
 import { feeHeads, feeInvoiceLines, feeOptIns, feePlanClasses, feePlanDues, feePlanLines, feePlans, feeStudentPlans } from "./schema";
 import type { ADMISSION_TYPES } from "./constants";
@@ -150,14 +150,14 @@ export class PlanService extends FeesBase {
 
   private async checkPlan(tx: Tx, data: z.infer<typeof planInput>) {
     const heads = [...new Set(data.lines.map((l) => l.headId))];
-    if (heads.length !== data.lines.length) throw new ValidationError({ lines: "Each fee can be added only once." });
+    if (heads.length !== data.lines.length) throw invalid("lines", "Each fee can be added only once.");
     if ((await tx.select({ id: feeHeads.id }).from(feeHeads).where(inArray(feeHeads.id, heads))).length !== heads.length) throw new NotFoundError("Fee head");
     const cls = [...new Set(data.classIds)];
     if ((await tx.select({ id: classes.id }).from(classes).where(inArray(classes.id, cls))).length !== cls.length) throw new NotFoundError("Class");
     for (const l of data.lines) {
       const keys = l.dues.map((d) => d.dueKey);
-      if (new Set(keys).size !== keys.length) throw new ValidationError({ lines: "A due date key repeats inside one fee." });
-      if (l.dues.some((d) => d.dueOn < d.billOn)) throw new ValidationError({ lines: "A due date is before its bill date." });
+      if (new Set(keys).size !== keys.length) throw invalid("lines", "A due date key repeats inside one fee.");
+      if (l.dues.some((d) => d.dueOn < d.billOn)) throw invalid("lines", "A due date is before its bill date.");
     }
   }
 

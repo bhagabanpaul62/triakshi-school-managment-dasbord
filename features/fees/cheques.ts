@@ -1,10 +1,10 @@
 import { desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees } from "@smw/feature-kit/money";
 import { cashAccount } from "@smw/feature-finance/posting";
 import { finCashAccounts } from "@smw/feature-finance/schema";
-import { FeesBase } from "./base";
+import { FeesBase, invalid } from "./base";
 import { chequeStepInput } from "./inputs";
 import { InvoiceService } from "./invoices";
 import { ReceiptService } from "./receipts";
@@ -64,7 +64,7 @@ export class ChequeService extends FeesBase {
   /** Bounced: the receipt is taken back, the bills reopen, and the school's bounce charge is billed once. */
   bounce(input: unknown) {
     return this.step(input, ["received", "deposited"], "bounced", async (tx, c, d, date) => {
-      if (!d.reason) throw new ValidationError({ reason: "Say why it bounced, like insufficient funds." });
+      if (!d.reason) throw invalid("reason", "Say why it bounced, like insufficient funds.");
       const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, c.receiptId)).for("update");
       if (r!.advancePaise > 0 && (await this.advanceOf(tx, r!.studentId)) < r!.advancePaise) {
         throw new ConflictError(`The ${rupees(r!.advancePaise)} advance from this cheque has already been used on other bills. Reverse or refund what used it first.`);

@@ -105,14 +105,17 @@ export function pfCeiling(segments: PayRates["pfCeilingSegments"]): number {
   return Math.round(segments.reduce((a, s) => a + s.days * s.paise, 0) / Math.max(1, days));
 }
 
-function monthlyTds(p: PayInput, taxableThisMonth: number, tax: TaxRates): number {
+/** The year's income, tax and what to deduct this month, from this month's taxable pay and what came before. */
+export function taxProjection(p: Pick<PayInput, "month" | "ytd" | "declaration" | "profile">, taxableThisMonth: number, tax: TaxRates) {
   const left = 13 - fyMonthIndex(p.month);
   const d = p.declaration;
-  const yearly = (p.ytd?.taxableGrossPaise ?? 0) + taxableThisMonth * left + (d?.previousSalaryPaise ?? 0) + (d?.otherIncomePaise ?? 0);
-  const taxable = Math.max(0, yearly - tax.std - (p.profile.regime === "old" ? d?.deductionsPaise ?? 0 : 0));
-  const owed = yearlyTax(taxable, tax) - (p.ytd?.tdsPaise ?? 0) - (d?.previousTdsPaise ?? 0);
-  return Math.max(0, Math.round(owed / left));
+  const income = (p.ytd?.taxableGrossPaise ?? 0) + taxableThisMonth * left + (d?.previousSalaryPaise ?? 0) + (d?.otherIncomePaise ?? 0);
+  const taxable = Math.max(0, income - tax.std - (p.profile.regime === "old" ? d?.deductionsPaise ?? 0 : 0));
+  const yearly = yearlyTax(taxable, tax);
+  const owed = yearly - (p.ytd?.tdsPaise ?? 0) - (d?.previousTdsPaise ?? 0);
+  return { monthsLeft: left, incomePaise: income, taxablePaise: taxable, yearlyTaxPaise: yearly, monthlyPaise: Math.max(0, Math.round(owed / left)) };
 }
+const monthlyTds = (p: PayInput, taxableThisMonth: number, tax: TaxRates) => taxProjection(p, taxableThisMonth, tax).monthlyPaise;
 
 /** What each earning component would be for a full month, before days are cut. */
 function fullAmounts(earn: EngineComponent[], gross: number, overrides: Record<string, number>): Map<string, number> {
@@ -237,4 +240,13 @@ export function computePay(p: PayInput): PayResult {
   const net = gross + claims - deductions;
   if (net < 0) flags.push({ code: "net_negative", message: "Deductions are more than the pay." });
   return { lines, grossPaise: gross, claimsPaise: claims, deductionsPaise: deductions, employerPaise: employerTotal, netPaise: net, shortfallPaise: Math.max(0, -net), taxableGrossPaise: taxable, pfWagesPaise: pfWagesUsed, flags };
+}
+
+/** The monthly wages gratuity and PF rest on: wage components, and never less than the share of pay the wage rule keeps. */
+export function monthlyWages(components: EngineComponent[], grossPaise: number, overrides: Record<string, number>, wageExclusionBp: number): number {
+  const earn = components.filter((c) => c.kind === "earning").sort((a, b) => a.sort - b.sort);
+  if (!earn.length) return grossPaise;
+  const full = fullAmounts(earn, grossPaise, overrides);
+  const wages = earn.filter((c) => c.isWage).reduce((a, c) => a + (full.get(c.id) ?? 0), 0);
+  return Math.max(wages, percentOf(grossPaise, 10_000 - wageExclusionBp));
 }

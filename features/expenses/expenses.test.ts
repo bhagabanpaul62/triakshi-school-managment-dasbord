@@ -13,7 +13,6 @@ import {
   BillService, BudgetService, ClaimService, ExpenseReportService, IncomeService, PaymentService, PettyCashService, RecurringService, VendorService,
   expensesApprovals, markClaimsPaid, openSalaryClaims, verifyIncomeReceipt, sendBudgetAlerts,
 } from "./service";
-import { runRecurringJob } from "./recurring";
 import seed from "./seed";
 
 const today = todayIST();

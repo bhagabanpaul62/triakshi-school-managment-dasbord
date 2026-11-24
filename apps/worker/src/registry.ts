@@ -19,6 +19,8 @@ export const SCHEDULES: Record<string, { cron: string; tz: string }> = {
   "transport.fee-sync": { cron: "0 2 1 * *", tz: "Asia/Kolkata" }, // 02:00 IST on the 1st; idempotent
   "timetable.publish-due": { cron: "15 0 * * *", tz: "Asia/Kolkata" }, // 00:15 IST daily; a scheduled draft goes live before school
   "attendance.send-alerts": { cron: "*/10 * * * *", tz: "UTC" }, // every 10 minutes; alerts wait 30 minutes so a corrected mark never goes out
+  "finance.control-checks": { cron: "0 3 * * *", tz: "Asia/Kolkata" }, // 03:00 IST daily; admins hear only of a mismatch
+  "expenses.recurring": { cron: "0 2 * * *", tz: "Asia/Kolkata" }, // 02:00 IST daily; one draft bill per period
   "attendance.leave-credit": { cron: "30 0 * * *", tz: "Asia/Kolkata" }, // 00:30 IST daily; each person, type and leave year is credited once
   "transport.document-expiry": { cron: "0 9 * * *", tz: "Asia/Kolkata" }, // 09:00 IST daily; 30/7/0-day alerts, once each
 };

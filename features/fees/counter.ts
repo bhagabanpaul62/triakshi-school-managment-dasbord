@@ -1,10 +1,10 @@
 import { and, desc, eq, inArray, sql, sum } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError } from "@smw/feature-kit";
+import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { cashAccount } from "@smw/feature-finance/posting";
 import { finCashAccounts } from "@smw/feature-finance/schema";
-import { FeesBase } from "./base";
+import { FeesBase, invalid } from "./base";
 import { closeCounterInput, openCounterInput } from "./inputs";
 import { feeCounters, feeReceiptMethods, feeReceipts, feeRefunds } from "./schema";
 
@@ -56,12 +56,12 @@ export class CounterService extends FeesBase {
       const [c] = await tx.select().from(feeCounters).where(and(eq(feeCounters.userId, this.ctx.userId), sql`${feeCounters.closedAt} is null`)).for("update");
       if (!c) throw new NotFoundError("An open counter");
       const { expectedPaise } = await this.expectedIn(tx, c);
-      const diff = d.countedPaise - expectedPaise;
-      if (diff !== 0 && !d.differenceReason) throw new ValidationError({ differenceReason: `The box should hold ${rupees(expectedPaise)} but you counted ${rupees(d.countedPaise)}. Say why it is ${diff < 0 ? "short" : "over"}.` });
       if (d.denominations) {
         const sumNotes = Object.entries(d.denominations).reduce((s, [note, n]) => s + Number(note) * n, 0);
-        if (sumNotes !== d.countedPaise) throw new ValidationError({ countedPaise: `The notes and coins add up to ${rupees(sumNotes)}, not ${rupees(d.countedPaise)}.` });
+        if (sumNotes !== d.countedPaise) throw invalid("countedPaise", `The notes and coins add up to ${rupees(sumNotes)}, not ${rupees(d.countedPaise)}.`);
       }
+      const diff = d.countedPaise - expectedPaise;
+      if (diff !== 0 && !d.differenceReason) throw invalid("differenceReason", `The box should hold ${rupees(expectedPaise)} but you counted ${rupees(d.countedPaise)}. Say why it is ${diff < 0 ? "short" : "over"}.`);
       const [row] = await tx.update(feeCounters).set({ expectedPaise, countedPaise: d.countedPaise, denominations: d.denominations ?? null, differenceReason: d.differenceReason ?? null, closedAt: new Date() }).where(eq(feeCounters.id, c.id)).returning();
       if (diff !== 0) {
         const [cash] = await tx.select().from(finCashAccounts).where(eq(finCashAccounts.id, c.cashAccountId));

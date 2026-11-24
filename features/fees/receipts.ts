@@ -1,12 +1,12 @@
 import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { PdfBuilder } from "@smw/integrations";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
 import { finJournals, finPrints, finTemplates } from "@smw/feature-finance/schema";
 import { schools, users } from "@smw/db";
-import { FeesBase, calcOf, newToken, type InvoiceFull } from "./base";
+import { FeesBase, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { allocatePlan, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL } from "./constants";
 import { collectInput, reversalInput } from "./inputs";
@@ -32,9 +32,9 @@ export class ReceiptService extends FeesBase {
     const total = data.methods.reduce((s, m) => s + m.amountPaise, 0);
     const advanceAsked = data.methods.filter((m) => m.method === "advance").reduce((s, m) => s + m.amountPaise, 0);
     const hasCheque = data.methods.some((m) => m.method === "cheque");
-    if (hasCheque && data.methods.length > 1) throw new ValidationError({ methods: "Take a cheque in its own receipt. If it bounces, only its money comes back." });
-    for (const m of data.methods) if (m.method === "cheque" && !m.cheque) throw new ValidationError({ methods: "Enter the cheque number, bank and date." });
-    if (data.methods.filter((m) => m.method === "advance").length > 1) throw new ValidationError({ methods: "Use the advance once." });
+    if (hasCheque && data.methods.length > 1) throw invalid("methods", "Take a cheque in its own receipt. If it bounces, only its money comes back.");
+    for (const m of data.methods) if (m.method === "cheque" && !m.cheque) throw invalid("methods", "Enter the cheque number, bank and date.");
+    if (data.methods.filter((m) => m.method === "advance").length > 1) throw invalid("methods", "Use the advance once.");
 
     const payer = await this.oneStudent(tx, data.studentId);
     const family = new Set(await this.familyOf(tx, payer.id));

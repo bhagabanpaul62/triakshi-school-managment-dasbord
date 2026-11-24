@@ -586,6 +586,9 @@ importers:
       '@smw/feature-domains':
         specifier: workspace:*
         version: link:../../features/domains
+      '@smw/feature-expenses':
+        specifier: workspace:*
+        version: link:../../features/expenses
       '@smw/feature-fees':
         specifier: workspace:*
         version: link:../../features/fees

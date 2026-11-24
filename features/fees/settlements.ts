@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { students } from "@smw/feature-students/schema";
-import { FeesBase, calcOf, type InvoiceFull } from "./base";
+import { FeesBase, calcOf, invalid, type InvoiceFull } from "./base";
 import { allocatePlan, openOf } from "./calc";
 import { settlementInput } from "./inputs";
 import { NoteService } from "./notes";
@@ -139,10 +139,10 @@ export class SettlementService extends FeesBase {
     const depositPaise = await use("deposit", d.useDepositPaise);
 
     const left = this.open(invs);
-    if (d.finalPaise !== undefined && d.writeOffPaise) throw new ValidationError({ writeOffPaise: "Give the amount to write off or the final amount, not both." });
-    if (d.finalPaise !== undefined && d.finalPaise > left) throw new ValidationError({ finalPaise: `The final amount ${rupees(d.finalPaise)} is more than the ${rupees(left)} that is open.` });
+    if (d.finalPaise !== undefined && d.writeOffPaise) throw invalid("writeOffPaise", "Give the amount to write off or the final amount, not both.");
+    if (d.finalPaise !== undefined && d.finalPaise > left) throw invalid("finalPaise", `The final amount ${rupees(d.finalPaise)} is more than the ${rupees(left)} that is open.`);
     const writtenOffPaise = d.finalPaise !== undefined ? left - d.finalPaise : d.writeOffPaise;
-    if (writtenOffPaise > left) throw new ValidationError({ writeOffPaise: `Only ${rupees(left)} is open, so ${rupees(writtenOffPaise)} cannot be written off.` });
+    if (writtenOffPaise > left) throw invalid("writeOffPaise", `Only ${rupees(left)} is open, so ${rupees(writtenOffPaise)} cannot be written off.`);
     if (writtenOffPaise) {
       await noteFor("write_off", d.reason, allocatePlan(invs.map((i) => calcOf(i)), writtenOffPaise, { lateFirst: true }).parts);
       invs = await load();
@@ -152,7 +152,7 @@ export class SettlementService extends FeesBase {
     const out: SettlementResult["parts"] = [];
     if (d.parts.length) {
       const total = d.parts.reduce((s, p) => s + p.amountPaise, 0);
-      if (total !== remainingPaise) throw new ValidationError({ parts: `The dates add up to ${rupees(total)} but ${rupees(remainingPaise)} is left to pay after the waiver, advance and write-off.` });
+      if (total !== remainingPaise) throw invalid("parts", `The dates add up to ${rupees(total)} but ${rupees(remainingPaise)} is left to pay after the waiver, advance and write-off.`);
       await tx.delete(feeDueParts).where(inArray(feeDueParts.invoiceId, invs.map((i) => i.id)));
       const todo = [...d.parts].sort((a, b) => a.dueOn.localeCompare(b.dueOn)).map((p) => ({ ...p }));
       for (const inv of [...invs].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.id.localeCompare(b.id))) {

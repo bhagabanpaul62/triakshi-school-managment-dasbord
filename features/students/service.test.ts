@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Passwords } from "@smw/auth";
 import { closeDb, eq, schools, sessions, users, withConsole, withSchool } from "@smw/db";
@@ -199,6 +200,15 @@ describe("edit and delete", () => {
     }));
     expect(state.login).toHaveLength(0);
     expect(state.parent).toHaveLength(0);
+  });
+
+  it("refuses to delete a student who has money records, and keeps their login and files", async () => {
+    const s = await asAdmin(a).create({ name: "Has Fees", sectionId: s4A, guardianName: "Fee Parent", guardianPhone: "9833300002" });
+    await withSchool(a.id, (tx) => tx.execute(sql`insert into fee_advances (id, school_id, student_id, kind, amount_paise, date) values (gen_random_uuid(), ${a.id}, ${s.id}, 'opening', 100, '2026-04-01')`));
+    await expect(asAdmin(a).remove(s.id)).rejects.toThrow(/fee/i);
+    await expect(asAdmin(a).remove(s.id)).rejects.toBeInstanceOf(ConflictError);
+    expect((await asAdmin(a).get(s.id)).id).toBe(s.id);
+    expect(await withSchool(a.id, (tx) => tx.select().from(users).where(eq(users.id, s.userId!)))).toHaveLength(1);
   });
 });
 

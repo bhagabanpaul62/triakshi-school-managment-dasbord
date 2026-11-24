@@ -5,7 +5,7 @@ import { rupees, todayIST } from "@smw/feature-kit/money";
 import { users, type Tx } from "@smw/db";
 import { postJournal, type Poster } from "@smw/feature-finance/posting";
 import { finAccounts, finApprovals } from "@smw/feature-finance/schema";
-import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, managers, need, tell } from "./base";
+import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, managers, need, tell } from "./base";
 import { ExpenseFiles, type UploadedFile } from "./files";
 import { day, method, optionalId, paiseAmount } from "./inputs";
 import { expClaims } from "./schema";
@@ -72,11 +72,11 @@ export class ClaimService extends ExpenseService {
         f.from ? sql`${expClaims.spentOn} >= ${f.from}` : undefined, f.to ? sql`${expClaims.spentOn} <= ${f.to}` : undefined,
       );
       const [rows, [n]] = await Promise.all([
-        tx.select({ c: expClaims, userName: users.name, waiting: sql<boolean>`exists (select 1 from fin_approvals a where a.ref_id = ${expClaims.id} and a.kind = 'expenses.claim' and a.status = 'pending')` })
+        tx.select({ c: expClaims, userName: users.name, journalId: journalIdSql("expenses:claim:", expClaims.id), waiting: sql<boolean>`exists (select 1 from fin_approvals a where a.ref_id = ${expClaims.id} and a.kind = 'expenses.claim' and a.status = 'pending')` })
           .from(expClaims).innerJoin(users, eq(users.id, expClaims.userId)).where(where).orderBy(desc(expClaims.spentOn), desc(expClaims.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(expClaims).innerJoin(users, eq(users.id, expClaims.userId)).where(where),
       ]);
-      return toPage(await Promise.all(rows.map(async ({ c, userName, waiting }) => ({ ...c, userName, state: c.status === "submitted" && waiting ? "pending" : c.status, journalId: null as string | null }))), Number(n?.n ?? 0), q);
+      return toPage(await Promise.all(rows.map(async ({ c, userName, waiting, journalId }) => ({ ...c, userName, state: c.status === "submitted" && waiting ? "pending" : c.status, journalId }))), Number(n?.n ?? 0), q);
     });
   }
 

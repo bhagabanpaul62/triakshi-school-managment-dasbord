@@ -1,8 +1,8 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { parseSheet, SheetError } from "@smw/integrations";
-import { ValidationError } from "@smw/feature-kit";
+import { } from "@smw/feature-kit";
 import { students } from "@smw/feature-students/schema";
-import { FeesBase } from "./base";
+import { FeesBase, invalid } from "./base";
 import type { InvoiceService } from "./invoices";
 import { feeAdvances, feeInvoices } from "./schema";
 
@@ -20,9 +20,9 @@ const money = (v: string): number | null => {
 export class OpeningImport extends FeesBase {
   async run(file: { name: string; bytes: Uint8Array }, dryRun: boolean, invoices: InvoiceService) {
     let sheet;
-    try { sheet = await parseSheet(file); } catch (e) { if (e instanceof SheetError) throw new ValidationError({ file: e.message }); throw e; }
+    try { sheet = await parseSheet(file); } catch (e) { if (e instanceof SheetError) throw invalid("file", e.message); throw e; }
     const missing = ["admission_no"].filter((c) => !sheet.columns.includes(c));
-    if (missing.length) throw new ValidationError({ file: `The sheet needs a column called ${missing.join(", ")}. Download the template and use its first row.` });
+    if (missing.length) throw invalid("file", `The sheet needs a column called ${missing.join(", ")}. Download the template and use its first row.`);
     return this.write("setup", async (tx) => {
       const year = await this.currentYear(tx);
       const nos = sheet.rows.map((r) => r.admission_no ?? "");

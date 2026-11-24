@@ -27,7 +27,7 @@ export function billState(b: Pick<Bill, "status" | "grossPaise" | "tdsPaise" | "
 }
 
 const json = (v: unknown) => (typeof v === "string" ? JSON.parse(v) : v);
-export const billInput = z.object({
+const billShape = z.object({
   id: z.uuid().optional(),
   vendorId: z.uuid("Choose a vendor."),
   billNo: z.string().trim().min(1, "Enter the number printed on the bill.").max(60),
@@ -39,8 +39,9 @@ export const billInput = z.object({
     accountId: z.uuid("Choose an account."), costCentreId: optionalId, vehicleId: optionalId,
     label: z.string().trim().min(1, "Describe the line.").max(160), amountPaise: paiseAmount, gstPaise: z.coerce.number().int().min(0).default(0),
   })).min(1, "Add at least one line.").max(50)),
-  removeFile: z.coerce.boolean().optional(),
-}).refine((v) => v.dueDate >= v.billDate, { path: ["dueDate"], message: "The due date cannot be before the bill date." });
+  removeFile: z.preprocess((v) => v === true || v === "true" || v === "on", z.boolean()).optional(),
+});
+export const billInput = billShape.refine((v) => v.dueDate >= v.billDate, { path: ["dueDate"], message: "The due date cannot be before the bill date." });
 
 export interface BillRow {
   id: string; billNo: string; vendorId: string; vendorName: string; billDate: string; dueDate: string; status: Bill["status"]; state: BillState;
@@ -168,6 +169,23 @@ export class BillService extends ExpenseService {
       await this.files.remove([result.old]);
       return result.bill;
     } catch (e) { await this.files.remove([stored?.fileKey ?? null]); throw e; }
+  }
+
+  /** What saving would do, before it is saved: totals, the entry that will post, budget effects and whether an approver is needed. */
+  async preview(input: unknown) {
+    const d = this.parse(billShape.partial({ id: true, billNo: true, dueDate: true, billDate: true }), input);
+    return this.read("manage", async (tx) => {
+      const [vendor] = await tx.select().from(expVendors).where(eq(expVendors.id, d.vendorId));
+      const gross = d.lines.reduce((s, l) => s + l.amountPaise, 0), tds = percentOf(gross, d.tdsBasisPoints ?? vendor?.tdsBasisPoints ?? 0), net = gross - tds;
+      const names = new Map((await tx.select({ id: finAccounts.id, name: finAccounts.name }).from(finAccounts)).map((a) => [a.id, a.name]));
+      const settings = await this.settings(tx);
+      const budget = await budgetCheck(tx, { date: d.billDate ?? todayIST(), lines: d.lines.map((l) => ({ accountId: l.accountId, costCentreId: l.costCentreId ?? null, amountPaise: l.amountPaise })), excludeBillId: d.id });
+      const postings = settings.basis === "cash"
+        ? []
+        : [...d.lines.map((l) => ({ side: "Dr" as const, label: names.get(l.accountId) ?? "Expense", paise: l.amountPaise })), { side: "Cr" as const, label: "Vendor dues", paise: net }, ...(tds ? [{ side: "Cr" as const, label: "TDS payable", paise: tds }] : [])];
+      const needsApproval = gross > settings.billLimitPaise || budget.blocks.length > 0;
+      return { grossPaise: gross, tdsPaise: tds, netPaise: net, basis: settings.basis, postings, warnings: budget.warnings, blocks: budget.blocks, needsApproval, limitPaise: settings.billLimitPaise };
+    });
   }
 
   /** Send for approval, or approve straight away when it is under the limit and inside budget. */

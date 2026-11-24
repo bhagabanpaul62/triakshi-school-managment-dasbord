@@ -2,7 +2,8 @@ import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { addMonths, monthStart, todayIST } from "@smw/feature-kit/money";
 import { systemAccounts } from "../chart";
 import { finApprovals, finCashAccounts, finJournalLines, finJournals } from "../schema";
-import { cashBalances } from "./cash";
+import { CashAccountService, cashBalances } from "./cash";
+import { dashboardExtras } from "./dashboard-extras";
 import { FinanceService } from "./common";
 import { runControlChecks, type ControlCheck, type Mismatch } from "./control";
 import { JournalService, type JournalRow } from "./journals";
@@ -19,12 +20,29 @@ export interface FinanceOverview {
   mismatches: Mismatch[];
   /** What is owed to the school and by it, from the system accounts. Positive = the usual direction. */
   owed: { studentDuesPaise: number; studentAdvancesPaise: number; depositsPaise: number; vendorDuesPaise: number; salaryPayablePaise: number };
+  extras: DashboardExtras;
+}
+
+export interface SetupStep { key: string; text: string; done: boolean; href: string; /** Who can fix it: finance settings, fee setup, or the counter. */ needs: "settings" | "fees-setup" | "fees-collect" | "reconcile" }
+export interface DashboardExtras {
+  fy: string; from: string; to: string; basis: "accrual" | "cash";
+  /** Financial year to date, from the fee income, concession and student dues accounts. */
+  fees: { billedPaise: number; concessionsPaise: number; collectedPaise: number; duePaise: number; links: { billed: string; concessions: string; collected: string; due: string } };
+  /** Spend against the budget so far; null when budgets are not in use. */
+  budget: { rows: { accountId: string; name: string; budgetPaise: number; actualPaise: number; href: string }[]; yearBudgetPaise: number; toDateBudgetPaise: number; toDateActualPaise: number; href: string } | null;
+  /** Open bills by how late they are; null when fees are not in use. */
+  ageing: { buckets: { label: string; paise: number; href: string }[]; totalPaise: number } | null;
+  salary: { salaryPaise: number; incomePaise: number; shareBp: number | null; href: string };
+  perStudent: { students: number; expensePaise: number; perStudentPaise: number; href: string } | null;
+  forecast: { openingPaise: number; months: { label: string; inPaise: number; outPaise: number; closingPaise: number }[]; notes: string[] };
+  setup: SetupStep[];
+  unmatchedBankLines: number;
 }
 
 export class FinanceDashboardService extends FinanceService {
   /** First version of the home screen. Every number is a SQL aggregate, so it stays fast with years of entries. */
   async overview(extraChecks: ControlCheck[] = []): Promise<FinanceOverview> {
-    const recent = await new JournalService(this.ctx).list({ pageSize: 8 });
+    const [recent, cashList] = await Promise.all([new JournalService(this.ctx).list({ pageSize: 8 }), new CashAccountService(this.ctx).list()]);
     return this.read("read", async (tx) => {
       const thisMonth = monthStart(todayIST()), first = addMonths(thisMonth, -11);
       const system = await systemAccounts(tx, this.ctx.schoolId);
@@ -48,11 +66,16 @@ export class FinanceDashboardService extends FinanceService {
         return { month: m, inPaise: Number(f?.debit ?? 0), outPaise: Number(f?.credit ?? 0) };
       });
       const net = (key: (typeof owedKeys)[number]) => Number(owed.find((o) => o.id === system[key])?.net ?? 0);
+      const cashTotalPaise = cash.reduce((s, c) => s + c.balancePaise, 0);
+      const extras = await dashboardExtras(tx, {
+        system, cashTotalPaise, duesPaise: net("student_dues"), hasCash: cash.some((c) => c.kind === "cash"), hasBank: cash.some((c) => c.kind === "bank"),
+        hasUpi: cash.some((c) => accounts.find((x) => x.id === c.id)?.upiId), openingSet: cashList.filter((c) => c.isActive).every((c) => c.openingSet),
+      });
       return {
-        cash, cashTotalPaise: cash.reduce((s, c) => s + c.balancePaise, 0),
+        cash, cashTotalPaise,
         monthInPaise: trend[11]!.inPaise, monthOutPaise: trend[11]!.outPaise, trend,
         pendingApprovals: Number(pending?.n ?? 0), recent: recent.rows, mismatches,
-        owed: { studentDuesPaise: net("student_dues"), studentAdvancesPaise: -net("student_advances"), depositsPaise: -net("deposits_payable"), vendorDuesPaise: -net("vendor_dues"), salaryPayablePaise: -net("salary_payable") },
+        owed: { studentDuesPaise: net("student_dues"), studentAdvancesPaise: -net("student_advances"), depositsPaise: -net("deposits_payable"), vendorDuesPaise: -net("vendor_dues"), salaryPayablePaise: -net("salary_payable") }, extras,
       };
     });
   }

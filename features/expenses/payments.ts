@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { ConflictError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
-import { apportion, rupees } from "@smw/feature-kit/money";
+import { apportion, inWords, rupees } from "@smw/feature-kit/money";
+import { PdfBuilder } from "@smw/integrations";
 import { unseal } from "@smw/feature-kit/secret";
 import type { Tx } from "@smw/db";
 import { balanceOf, postJournal, reverseJournal, type PostLine, type Poster } from "@smw/feature-finance/posting";
-import { finApprovals, finCashAccounts } from "@smw/feature-finance/schema";
+import { finApprovals, finCashAccounts, finJournals } from "@smw/feature-finance/schema";
 import { CASH_NOTE_PAISE } from "./constants";
+import { LookupService } from "./lookups";
 import { ExpenseService, cashFor, journalIdOf, journalIdSql, need } from "./base";
 import { netOf, openOf } from "./bills";
 import { day, method, note, paiseAmount } from "./inputs";
@@ -111,7 +113,10 @@ export class PaymentService extends ExpenseService {
       await tx.insert(expPaymentBills).values(allocs.map((a) => ({ schoolId: this.ctx.schoolId, paymentId: payment!.id, billId: a.bill.id, amountPaise: a.amountPaise })));
       await postPayment(tx, this.poster, payment!, allocs, cash.accountId, settings.basis);
       for (const a of allocs) await tx.update(expBills).set({ paidPaise: a.bill.paidPaise + a.amountPaise }).where(eq(expBills.id, a.bill.id));
-      return { payment: payment!, warnings, journalId: await journalIdOf(tx, `expenses:payment:${payment!.id}`) };
+      const journalId = await journalIdOf(tx, `expenses:payment:${payment!.id}`);
+      const [j] = journalId ? await tx.select({ date: finJournals.date }).from(finJournals).where(eq(finJournals.id, journalId)) : [];
+      if (j && j.date !== date) warnings.push(`The month of ${date} is closed, so this was posted on ${j.date}. An admin can reopen the month in Finance, Periods.`);
+      return { payment: payment!, warnings, journalId };
     }, (r) => ({ action: "pay", entity: "Payment", entityId: r.payment.id, summary: `Paid ${rupees(r.payment.amountPaise)} to vendor, voucher ${r.payment.number}`, meta: { method: r.payment.method, warnings: r.warnings } }));
   }
 
@@ -168,6 +173,20 @@ export class PaymentService extends ExpenseService {
       const head = ["Voucher", "Beneficiary", "Account number", "IFSC", "Amount (INR)", "Narration"];
       return [head, ...rows.map(({ p, v }) => [p.number, v.name, unseal(v.bankSealed!, this.ctx.schoolId), v.ifsc!, (p.amountPaise / 100).toFixed(2), `Voucher ${p.number}`])].map((r) => r.map(csvCell).join(",")).join("\r\n");
     }, () => ({ action: "bank-file", entity: "Payment", summary: `Made a bank file for ${ids.length} payment(s)` }));
+  }
+
+  /** The voucher as a PDF. */
+  async voucherPdf(id: string) {
+    const v = await this.voucher(id), school = await new LookupService(this.ctx).schoolName();
+    const pdf = await PdfBuilder.create({ unicode: true });
+    const money = (p: number) => PdfBuilder.money(p);
+    await pdf.need([school, v.vendorName, v.number, ...v.bills.map((b) => b.billNo), v.reference ?? "", v.from ?? "", "₹0123456789 Payment voucher Reversed"]);
+    pdf.header({ title: "Payment voucher", orgName: school, rightLines: [`No: ${v.number}`, `Date: ${v.date}`] });
+    pdf.facts([["Paid to", v.vendorName], ["Method", v.method.replace(/_/g, " ")], ["From", v.from ?? "-"], ["Reference", v.reference ?? "-"]]);
+    pdf.table({ columns: [{ label: "Against bill", width: 330 }, { label: "Amount", width: 150, align: "right" }], rows: v.bills.map((b) => [b.billNo, money(b.amountPaise)]) });
+    pdf.totals([["Total paid", money(v.amountPaise), true]]).text(inWords(v.amountPaise), { size: 9 });
+    if (v.status === "reversed") pdf.text("REVERSED", { size: 14, bold: true, color: [0.7, 0.1, 0.1] });
+    return { filename: `voucher-${v.number.replace(/\W+/g, "-")}.pdf`, bytes: await pdf.save() };
   }
 
   /** What the voucher says, for the PDF and the screen. */

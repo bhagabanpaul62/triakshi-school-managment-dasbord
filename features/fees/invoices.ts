@@ -1,10 +1,10 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import type { PostLine } from "@smw/feature-finance/posting";
 import { students } from "@smw/feature-students/schema";
-import { FeesBase, calcOf, newToken, type InvoiceFull } from "./base";
+import { FeesBase, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { chargeManyInput, draftInput, bulkInput, reviseInput } from "./inputs";
 import { NoteService } from "./notes";
@@ -166,7 +166,7 @@ export class InvoiceService extends FeesBase {
     const settings = await this.settings(tx);
     const byId = new Map((await this.studentLines(tx, inArray(students.id, studentIds))).map((s) => [s.id, s]));
     for (const inv of drafts) {
-      if (!inv.lines.length || inv.grossPaise <= 0) throw new ValidationError({ lines: "A bill needs at least one line." });
+      if (!inv.lines.length || inv.grossPaise <= 0) throw invalid("lines", "A bill needs at least one line.");
       const s = byId.get(inv.studentId)!;
       const number = await this.number(tx, "invoice", date);
       await tx.update(feeInvoices).set({ status: "issued", number, issueDate: date, verifyToken: newToken(), snapshot: inv.kind === "plan" ? inv.snapshot : await this.snapshot(tx, s), classId: inv.classId ?? s.classId }).where(eq(feeInvoices.id, inv.id));
@@ -183,7 +183,7 @@ export class InvoiceService extends FeesBase {
     const heads = await this.headMap(tx, lines.map((l) => l.headId));
     const party = { type: "student" as const, id: inv.studentId };
     const gross = lines.reduce((s, l) => s + l.amountPaise, 0), conc = lines.reduce((s, l) => s + l.concessionPaise, 0);
-    const out: PostLine[] = [{ account: "student_dues", debit: gross, party }, ...lines.map((l): PostLine => ({ account: this.lineAccount(l, heads), credit: l.amountPaise, memo: l.label })), { account: "concessions", debit: conc }, { account: "student_dues", credit: conc, party }];
+    const out: PostLine[] = [{ account: "student_dues", debit: gross, party }, ...lines.map((l): PostLine => { const account = this.lineAccount(l, heads); return { account, credit: l.amountPaise, memo: l.label, ...this.party(account, inv.studentId) }; }), { account: "concessions", debit: conc }, { account: "student_dues", credit: conc, party }];
     await this.post(tx, { date, sourceKey: `fees:invoice:${inv.id}`, sourceType: "fee_invoice", sourceId: inv.id, memo: `Bill ${inv.label}`, lines: out });
   }
 

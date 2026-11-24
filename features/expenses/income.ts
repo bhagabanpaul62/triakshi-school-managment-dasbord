@@ -5,6 +5,8 @@ import { inWords, rupees } from "@smw/feature-kit/money";
 import { schools, withConsole, type Tx } from "@smw/db";
 import type { DocumentData } from "@smw/ui/finance/document-types";
 import { finApprovals, finCashAccounts } from "@smw/feature-finance/schema";
+import { PdfBuilder } from "@smw/integrations";
+import { LookupService } from "./lookups";
 import { ExpenseService, cashFor, checkAccount, checkCentre, journalIdOf, journalIdSql, need } from "./base";
 import { day, method, note, optionalId, paiseAmount } from "./inputs";
 import { expIncome } from "./schema";
@@ -66,6 +68,19 @@ export class IncomeService extends ExpenseService {
       const [ap] = await tx.select().from(finApprovals).where(and(eq(finApprovals.kind, "expenses.reversal"), eq(finApprovals.refId, id))).orderBy(desc(finApprovals.createdAt)).limit(1);
       return { receipt: r, cashName: cash?.name ?? null, journalId: await journalIdOf(tx, `expenses:income:${id}`), reversal: ap ? { id: ap.id, status: ap.status, reason: ap.reason, note: ap.note } : null };
     });
+  }
+
+  /** The receipt as a PDF. */
+  async pdf(id: string) {
+    const { number, data } = await this.document(id), school = await new LookupService(this.ctx).schoolName();
+    const pdf = await PdfBuilder.create({ unicode: true });
+    await pdf.need([school, number, ...data.facts.flat(), ...data.rows.flatMap((r) => Object.values(r).map(String)), ...data.totals.flat().map(String), data.amountWords ?? "", "₹0123456789 Receipt REVERSED"]);
+    pdf.header({ title: "Receipt", orgName: school, rightLines: [`No: ${number}`] });
+    pdf.facts(data.facts);
+    pdf.table({ columns: [{ label: "For", width: 330 }, { label: "Amount", width: 150, align: "right" }], rows: data.rows.map((r) => [String(r.item), String(r.amount)]) });
+    pdf.totals(data.totals).text(data.amountWords ?? "", { size: 9 });
+    for (const m of data.marks) pdf.text(m, { size: 14, bold: true, color: [0.7, 0.1, 0.1] });
+    return { filename: `receipt-${number.replace(/\W+/g, "-")}.pdf`, bytes: await pdf.save() };
   }
 
   async requestReversal(id: string, reason: string) {

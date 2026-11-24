@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { asc, closeDb, eq, withSchool } from "@smw/db";
+import { and, asc, closeDb, eq, inArray, withSchool } from "@smw/db";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
-import { feeCharges } from "@smw/feature-fees/schema";
+import { feeInvoiceLines, feeInvoices } from "@smw/feature-fees/schema";
 import { DuesService } from "@smw/feature-fees/service";
 import { ForbiddenError, ValidationError } from "@smw/feature-kit";
 import { monthStarts, nextMonthStart } from "./rules";
@@ -39,8 +39,8 @@ async function route(s: TestSchool, fees = [120_000, 80_000]) {
   const s2 = await routes.addStop(r.id, { name: "Second", morningTime: "07:10", eveningTime: "15:10", monthlyFeePaise: fees[1] });
   return { r, s1, s2 };
 }
-const charges = (studentId: string) => withSchool(a.id, (tx) => tx.select().from(feeCharges).where(eq(feeCharges.studentId, studentId)).orderBy(asc(feeCharges.dueDate)));
-const active = async (studentId: string) => (await charges(studentId)).filter((c) => c.status === "active");
+const charges = (studentId: string) => withSchool(a.id, (tx) => tx.select().from(feeInvoices).where(and(eq(feeInvoices.studentId, studentId), eq(feeInvoices.kind, "transport"))).orderBy(asc(feeInvoices.dueDate)));
+const active = async (studentId: string) => (await charges(studentId)).filter((c) => c.status === "issued");
 const both = { pickup: "true", drop: "true" };
 
 describe("transport fee on the ledger", () => {
@@ -49,16 +49,16 @@ describe("transport fee on the ledger", () => {
     const st = await makeStudent(a);
     await new StudentTransportService(a.as.admin).assign({ studentId: st.id, routeId: r.id, stopId: s1.id, ...both });
     const rows = await active(st.id);
-    expect(rows[0]).toMatchObject({ dueDate: nextMonth, amountPaise: 120_000, kind: "transport" });
+    expect(rows[0]).toMatchObject({ dueDate: nextMonth, grossPaise: 120_000, kind: "transport" });
     expect(rows).toHaveLength(monthsFrom(nextMonth));
-    expect(rows.every((c) => c.amountPaise === 120_000 && c.dueDate.endsWith("-01"))).toBe(true);
+    expect(rows.every((c) => c.grossPaise === 120_000 && c.dueDate.endsWith("-01"))).toBe(true);
   });
 
   it("one way costs half", async () => {
     const { r, s1 } = await route(a);
     const st = await makeStudent(a);
     await new StudentTransportService(a.as.admin).assign({ studentId: st.id, routeId: r.id, stopId: s1.id, pickup: "true", drop: "false" });
-    expect((await active(st.id)).every((c) => c.amountPaise === 60_000)).toBe(true);
+    expect((await active(st.id)).every((c) => c.grossPaise === 60_000)).toBe(true);
   });
 
   it("a free stop bills nothing", async () => {
@@ -73,11 +73,11 @@ describe("transport fee on the ledger", () => {
     const st = await makeStudent(a);
     const svc = new StudentTransportService(a.as.admin);
     await svc.assign({ studentId: st.id, routeId: r.id, stopId: s1.id, ...both, startsOn: lastMonth });
-    expect((await active(st.id))[0]).toMatchObject({ dueDate: thisMonth, amountPaise: 120_000 });
+    expect((await active(st.id))[0]).toMatchObject({ dueDate: thisMonth, grossPaise: 120_000 });
     await svc.assign({ studentId: st.id, routeId: r.id, stopId: s2.id, ...both }); // a move
     const rows = await active(st.id);
-    expect(rows[0]).toMatchObject({ dueDate: thisMonth, amountPaise: 120_000 }); // this month is already billed
-    expect(rows.slice(1).every((c) => c.amountPaise === 80_000)).toBe(true);
+    expect(rows[0]).toMatchObject({ dueDate: thisMonth, grossPaise: 120_000 }); // this month is already billed
+    expect(rows.slice(1).every((c) => c.grossPaise === 80_000)).toBe(true);
     expect(rows).toHaveLength(monthsFrom(thisMonth));
   });
 
@@ -98,18 +98,19 @@ describe("transport fee on the ledger", () => {
     const { r, s1 } = await route(a);
     const st = await makeStudent(a);
     await new StudentTransportService(a.as.admin).assign({ studentId: st.id, routeId: r.id, stopId: s1.id, ...both, startsOn: lastMonth });
-    const ledger = await new DuesService(a.as.accountant).studentLedger(st.id);
-    expect(ledger.statement.lines.filter((l) => l.charge)).toHaveLength(monthsFrom(thisMonth));
-    expect(ledger.statement.lines[0]!.name).toMatch(/^Transport, /);
-    expect(ledger.statement.totals.due).toBe(120_000 * monthsFrom(thisMonth));
-    expect((await new DuesService(a.as.accountant).duesReport()).rows.find((x) => x.id === st.id)?.due).toBe(120_000 * monthsFrom(thisMonth));
+    const account = await new DuesService(a.as.accountant).studentAccount(st.id);
+    const lines = account.invoices.filter((i) => i.kind === "transport").sort((x, y) => x.dueDate.localeCompare(y.dueDate));
+    expect(lines).toHaveLength(monthsFrom(thisMonth));
+    expect(lines[0]!.label).toMatch(/^Transport, /);
+    expect(account.balance.openPaise).toBe(120_000 * monthsFrom(thisMonth));
+    expect((await new DuesService(a.as.accountant).report({ q: st.name })).rows.find((x) => x.id === st.id)?.due).toBe(120_000 * monthsFrom(thisMonth));
   });
 
   it("a school without an academic year can still assign (nothing to bill yet), and school B never sees A's lines", async () => {
     const { r, s1 } = await route(b);
     const st = await makeStudent(b);
     await new StudentTransportService(b.as.admin).assign({ studentId: st.id, routeId: r.id, stopId: s1.id, ...both });
-    expect(await withSchool(b.id, (tx) => tx.select().from(feeCharges))).toHaveLength(0);
+    expect(await withSchool(b.id, (tx) => tx.select().from(feeInvoices))).toHaveLength(0);
   });
 });
 
@@ -120,16 +121,19 @@ describe("monthly fee sync", () => {
     await new StudentTransportService(a.as.admin).assign({ studentId: st.id, routeId: r.id, stopId: s1.id, ...both });
     await withSchool(a.id, async (tx) => {
       await tx.update(routeStops).set({ monthlyFeePaise: 150_000 }).where(eq(routeStops.id, s1.id));
-      await tx.delete(feeCharges).where(eq(feeCharges.studentId, st.id)); // as if the year had just rolled over
+      // as if the year had just rolled over
+      const mine = tx.select({ id: feeInvoices.id }).from(feeInvoices).where(eq(feeInvoices.studentId, st.id));
+      await tx.delete(feeInvoiceLines).where(inArray(feeInvoiceLines.invoiceId, mine));
+      await tx.delete(feeInvoices).where(eq(feeInvoices.studentId, st.id));
     });
     await resyncSchoolTransport(a.id, today);
     await resyncSchoolTransport(a.id, today);
     const rows = await active(st.id);
     expect(rows[0]!.dueDate).toBe(nextMonth); // joined this month, so billing still starts next month
     expect(rows).toHaveLength(monthsFrom(nextMonth));
-    expect(rows.every((c) => c.amountPaise === 150_000)).toBe(true);
+    expect(rows.every((c) => c.grossPaise === 150_000)).toBe(true);
     // school B is untouched
-    expect(await withSchool(b.id, (tx) => tx.select().from(feeCharges))).toEqual([]);
+    expect(await withSchool(b.id, (tx) => tx.select().from(feeInvoices))).toEqual([]);
   });
 });
 

@@ -65,7 +65,7 @@ const seed: FeatureSeed = async (ctx) => {
   const e2 = await make(electric, "CE-91", 5, 25, [["5120", "Generator service", 22_000]], true);
   const h1 = await make(housekeeping, "BH-310", 35, -20, [["5170", "Housekeeping, last month", 42_000]], true);
   await make(housekeeping, "BH-322", 6, 24, [["5170", "Housekeeping, this month", 42_000]], true);
-  const l1 = await make(landlord, "GP-2611", 20, 10, [["5110", "Annexe rent", 60_000]], true);
+  await make(landlord, "GP-2611", 20, 10, [["5110", "Annexe rent", 60_000]], true);
   await make(landlord, "GP-2612", 2, 28, [["5110", "Annexe rent, next month", 60_000]], false);
   const j1 = await make(internet, "JF-8841", 25, -3, [["5140", "Broadband", 1_770]], true);
   const j2 = await make(internet, "JF-8902", 4, 26, [["5140", "Broadband", 1_770]], true);

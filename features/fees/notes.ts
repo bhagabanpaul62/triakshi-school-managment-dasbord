@@ -109,7 +109,7 @@ export class NoteService extends FeesBase {
         if (!line) throw new NotFoundError("Bill line");
         if (sl.amountPaise > openOf(line)) throw new ConflictError(`${line.label} has only ${rupees(Math.max(0, openOf(line)))} open now, so this note cannot be applied.`);
         if (!posted.has(key(line.kind, line.id))) continue;
-        out.push({ account: this.creditSide(n.reasonType, line, heads), debit: sl.amountPaise, memo: line.label });
+        { const account = this.creditSide(n.reasonType, line, heads); out.push({ account, debit: sl.amountPaise, memo: line.label, ...this.party(account, n.studentId) }); }
       }
       await this.bump(tx, "credited_paise", specLines);
       const total = out.reduce((s, l) => s + (l.debit ?? 0), 0);
@@ -124,7 +124,7 @@ export class NoteService extends FeesBase {
       await this.refreshInvoiceTotals(tx, [inv!.id]);
       specLines[0] = { ...add, lineId: line!.id };
       if ((await this.posted(tx, [key("fee", line!.id)])).size) {
-        out.push({ account: "student_dues", debit: add.amountPaise, party: { type: "student", id: n.studentId } }, { account: this.lineAccount({ kind, headId: add.headId ?? null }, heads), credit: add.amountPaise, memo: line!.label });
+        out.push({ account: "student_dues", debit: add.amountPaise, party: { type: "student", id: n.studentId } }, { account: this.lineAccount({ kind, headId: add.headId ?? null }, heads), credit: add.amountPaise, memo: line!.label, ...this.party(this.lineAccount({ kind, headId: add.headId ?? null }, heads), n.studentId) });
       }
     }
     const number = await this.number(tx, "credit_note", date);
