@@ -8,6 +8,8 @@ const LABELS: Record<string, string> = {
   read: "View", view: "View", write: "Add and edit", manage: "Manage", mark: "Mark attendance", marks: "Enter marks",
   enquiries: "Website enquiries", public: "Publish pages", use: "Use", send: "Send", audit: "View audit log",
   export: "Export data", run: "Run", self: "Own records", submit: "Submit work",
+  collect: "Collect money", setup: "Set up plans and bills", concede: "Propose concessions and corrections", claim: "Claim own expenses",
+  journal: "Manual entries and transfers", reconcile: "Match bank statements", approve: "Approve requests", close: "Close months and years",
 };
 export const permissionLabel = (key: string) => LABELS[key] ?? key.replace(/[-_]/g, " ").replace(/^./, (c) => c.toUpperCase());
 
@@ -60,7 +62,10 @@ export const SYSTEM_ROLES = [
 
 /** Ready-made roles, seeded into every school as editable custom roles. */
 export const ROLE_TEMPLATES: readonly { name: string; description: string; grants: string[] }[] = [
-  { name: "Fee accountant", description: "Collects fees and sees billing.", grants: ["fees:read", "fees:manage", "billing:read"] },
+  { name: "Fee accountant", description: "Sets up fees, collects and proposes concessions.", grants: ["fees:read", "fees:collect", "fees:setup", "fees:concede", "finance:read", "students:read"] },
+  { name: "Cashier", description: "Takes money at the counter and prints receipts. Cannot change bills.", grants: ["fees:read", "fees:collect", "students:read"] },
+  { name: "Bursar", description: "Approves money requests and closes months.", grants: ["finance:read", "finance:approve", "finance:close", "fees:read", "expenses:read", "payroll:read"] },
+  { name: "Auditor", description: "Reads every book and report. Changes nothing.", grants: ["finance:read", "fees:read", "expenses:read", "payroll:read"] },
   { name: "Librarian", description: "Runs the library desk.", grants: ["library:read", "library:manage"] },
   { name: "Transport in-charge", description: "Manages routes, stops and vehicles.", grants: ["transport:read", "transport:manage"] },
   { name: "Front office", description: "Looks up students, answers enquiries and posts notices.", grants: ["students:read", "website:enquiries", "announcements:read", "announcements:write"] },

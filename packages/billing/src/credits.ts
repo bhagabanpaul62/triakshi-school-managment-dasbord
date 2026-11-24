@@ -25,7 +25,7 @@ export class AccountCredits {
    * Spend credit on a just-issued invoice, as much as covers it. The school row is locked first so two invoices issued
    * at the same moment cannot both spend the same credit. Returns what was used.
    */
-  static async useOn(tx: Tx, inv: typeof invoices.$inferSelect): Promise<number> {
+  static async spendOn(tx: Tx, inv: typeof invoices.$inferSelect): Promise<number> {
     await tx.select({ id: schools.id }).from(schools).where(eq(schools.id, inv.schoolId)).for("update");
     const use = Math.min(await this.balance(tx, inv.schoolId), dueOf(inv));
     if (use <= 0) return 0;

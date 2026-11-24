@@ -42,7 +42,7 @@ export function reportToCsv(r: Report): string {
   const notes = (r.notes ?? []).map((n) => [n]);
   const lines = [...head, ...body, ...(notes.length ? [[], ...notes] : [])];
   // Money cells are numbers (a leading minus is fine); only text is defused.
-  return `﻿${lines.map((l, i) => l.map((cell, j) => {
+  return `\uFEFF${lines.map((l, i) => l.map((cell, j) => {
     const col = i >= 4 && i < 4 + body.length ? r.columns[j] : undefined;
     return col?.kind === "money" && cell !== "" ? cell : csvText(cell);
   }).join(",")).join("\r\n")}\r\n`;

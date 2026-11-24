@@ -254,6 +254,17 @@ describe("ExportService", () => {
     expect((await new AuditService(a.as.admin).list({ q: "Exported" })).total).toBeGreaterThan(0);
   });
 
+  it("leaves salaries out unless an admin asks, and never exports sealed numbers", async () => {
+    await withSchool(a.id, (tx) => tx.execute(sql`insert into pay_profiles (id, school_id, user_id, pan_sealed, pan_last4) values (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'v1.secret.pan', '234F')`));
+    const svc = new ExportService(a.as.admin);
+    const plain = await asJson((await svc.exportSchool()).url);
+    expect(Object.keys(plain.tables).some((t) => t.startsWith("pay_"))).toBe(false);
+    const full = await asJson((await svc.exportSchool({ includePayroll: true })).url);
+    expect(full.tables.pay_profiles).toHaveLength(1);
+    expect(full.tables.pay_profiles[0].pan_last4).toBe("234F");
+    expect(JSON.stringify(full)).not.toContain("v1.secret.pan");
+  });
+
   it("exports one student across the tables that reference them", async () => {
     const mine = uuidv7(), other = uuidv7();
     await withSchool(a.id, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name) values (${mine}, ${a.id}, 'A-1', 'Riya Sharma'), (${other}, ${a.id}, 'A-2', 'Aman Verma')`));

@@ -43,8 +43,8 @@ export async function signOutUser(fd: FormData) {
 }
 
 // Data export
-export async function exportSchoolData() {
-  return serviceAction(ExportService, (s) => s.exportSchool(), "Export ready. Download it from the list.");
+export async function exportSchoolData(fd: FormData) {
+  return serviceAction(ExportService, (s) => s.exportSchool({ includePayroll: fd.get("includePayroll") === "true" || fd.get("includePayroll") === "on" }), "Export ready. Download it from the list.");
 }
 export async function exportStudentData(fd: FormData) {
   return serviceAction(ExportService, (s) => s.exportStudent(formToObject(fd)), "Export ready. Download it from the list.");

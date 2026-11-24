@@ -164,6 +164,8 @@ describe("matching", () => {
     expect((await lines(a, acc.id, "open")).map((l) => l.id)).toContain(dep!.id);
     await expect(svc.unmatch(dep!.id)).rejects.toBeInstanceOf(ConflictError);
     await svc.match(dep!.id, [e1.lineId, e2.lineId]);
+    const [j1] = await withSchool(a.id, (tx) => tx.select({ key: finJournals.sourceKey }).from(finJournals).where(eq(finJournals.id, e1.journalId)));
+    await expect(withSchool(a.id, (tx) => reverseJournal(tx, poster(a), j1!.key, { date: "2026-10-06", memo: "undo" }))).rejects.toThrow(/matched to a bank statement line/);
   });
 
   it("an entry that is matched cannot be undone until it is unmatched", async () => {

@@ -5,7 +5,7 @@ import { nextSequence, type Tx } from "@smw/db";
 import { ConflictError } from "@smw/feature-kit";
 import { addMonths, fyOf, monthStart } from "@smw/feature-kit/money";
 import { systemAccounts, type SystemAccount } from "./chart";
-import { finAccounts, finBankLines, finCashAccounts, finJournalLines, finJournals, finPeriods, finSeries, type JOURNAL_KINDS, type PARTY_TYPES } from "./schema";
+import { finAccounts, finBankLines, finBankMatches, finCashAccounts, finJournalLines, finJournals, finPeriods, finSeries, type JOURNAL_KINDS, type PARTY_TYPES } from "./schema";
 
 export interface PostLine {
   /** A system account by key, or any account of this school by id. */
@@ -78,7 +78,8 @@ export async function reverseJournal(tx: Tx, by: Poster, sourceKey: string, opts
   if (done) return done;
   const lines = await tx.select().from(finJournalLines).where(eq(finJournalLines.journalId, j.id));
   const [matched] = await tx.select({ id: finBankLines.id }).from(finBankLines).where(inArray(finBankLines.journalLineId, lines.map((l) => l.id))).limit(1);
-  if (matched) throw new ConflictError("This is matched to a bank statement line. Undo the match first.");
+  const [split] = await tx.select({ id: finBankMatches.id }).from(finBankMatches).where(inArray(finBankMatches.journalLineId, lines.map((l) => l.id))).limit(1);
+  if (matched || split) throw new ConflictError("This is matched to a bank statement line. Undo the match first.");
   const date = await postingDate(tx, opts.date);
   const [r] = await tx.insert(finJournals).values({
     schoolId: by.schoolId, number: await nextNumber(tx, by.schoolId, "journal", date), date, originalDate: date === opts.date ? null : opts.date, kind: "reversal",

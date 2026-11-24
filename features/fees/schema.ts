@@ -192,6 +192,8 @@ export const feeConcessionTypes = pgTable("fee_concession_types", {
   value: paise("value").notNull(),
   headId: uuid("head_id").references(() => feeHeads.id, { onDelete: "restrict" }),
   isActive: boolean("is_active").notNull().default(true),
+  /** For an amount: off every bill, or in all across the year (spread over the bills as they are issued). */
+  per: text("per").$type<"bill" | "year">().notNull().default("year"),
 }, (t) => [...tenant(t, "fee_concession_types"), uniqueIndex("fee_concession_types_name").on(t.schoolId, t.name)]);
 
 /** A discount for one student in one year. Approved ones cut every bill issued while they last, and open bills by a note. */
@@ -207,7 +209,16 @@ export const feeConcessions = pgTable("fee_concessions", {
   fileKey: text("file_key"),
   status: text("status").$type<(typeof CONCESSION_STATUSES)[number]>().notNull().default("pending"),
   createdBy: uuid("created_by"),
+  per: text("per").$type<"bill" | "year">().notNull().default("year"),
 }, (t) => [...tenant(t, "fee_concessions"), index("fee_concessions_student").on(t.studentId, t.yearId)]);
+
+/** How much of a yearly amount concession each bill took. Cancelling a bill deletes its rows, so the amount goes back into the pool. */
+export const feeConcessionUses = pgTable("fee_concession_uses", {
+  ...schoolColumns(),
+  concessionId: uuid("concession_id").notNull().references(() => feeConcessions.id, { onDelete: "restrict" }),
+  invoiceId: uuid("invoice_id").notNull().references(() => feeInvoices.id, { onDelete: "restrict" }),
+  amountPaise: paise("amount_paise").notNull(),
+}, (t) => [...tenant(t, "fee_concession_uses"), uniqueIndex("fee_concession_uses_unique").on(t.concessionId, t.invoiceId), index("fee_concession_uses_invoice").on(t.invoiceId), check("fee_concession_uses_amount", sql`amount_paise > 0`)]);
 
 /** One approved deal on a student's dues: waive, write off, split into dated parts, use advance or deposit. */
 export const feeSettlements = pgTable("fee_settlements", {
@@ -371,3 +382,25 @@ export const feeReminderStops = pgTable("fee_reminder_stops", {
   studentId: student(),
   reason: text("reason").notNull(),
 }, (t) => [...tenant(t, "fee_reminder_stops"), uniqueIndex("fee_reminder_stops_student").on(t.schoolId, t.studentId)]);
+
+// ---------- changes that lower what is owed ----------
+
+/**
+ * A cancel, a revision, a move to another plan, an opt-out or a plan switch-off that lowers what a student owes. Small
+ * ones (under the school's limit) are applied at once and kept here as `direct` so the limit counts them; bigger ones
+ * wait for approval `fees.invoice_change`. `payload` keeps the proposal.
+ */
+export const feeInvoiceChanges = pgTable("fee_invoice_changes", {
+  ...schoolColumns(),
+  kind: text("kind").$type<"cancel" | "revise" | "student_plan" | "opt_out" | "archive_plan">().notNull(),
+  /** Null for a plan-wide change. */
+  invoiceId: uuid("invoice_id").references(() => feeInvoices.id, { onDelete: "restrict" }),
+  studentId: uuid("student_id").references(() => students.id, { onDelete: "restrict" }),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  reason: text("reason").notNull(),
+  /** How much less the student owes after this. */
+  lowersPaise: paise("lowers_paise").notNull().default(0),
+  status: text("status").$type<(typeof REQUEST_STATUSES)[number]>().notNull().default("pending"),
+  direct: boolean("direct").notNull().default(false),
+  createdBy: uuid("created_by"),
+}, (t) => [...tenant(t, "fee_invoice_changes"), index("fee_invoice_changes_invoice").on(t.invoiceId), index("fee_invoice_changes_student").on(t.schoolId, t.studentId)]);

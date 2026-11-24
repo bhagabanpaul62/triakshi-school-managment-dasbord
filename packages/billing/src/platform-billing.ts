@@ -139,7 +139,7 @@ export class PlatformBilling {
     }).returning();
     await tx.insert(platformAuditLogs).values({ schoolId: p.school.id, action: "billing.invoice_issued", summary: `Invoice ${number} issued`, meta: { invoiceId: inv!.id } });
     // Credit the school already holds pays first; an invoice it fully covers is paid without a payment.
-    const used = await AccountCredits.useOn(tx, inv!);
+    const used = await AccountCredits.spendOn(tx, inv!);
     if (used === 0) return inv!;
     const now = { ...inv!, creditAppliedPaise: used };
     if (dueOf(now) > 0) return now;

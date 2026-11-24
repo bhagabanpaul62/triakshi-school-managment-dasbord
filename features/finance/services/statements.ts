@@ -277,7 +277,6 @@ export class StatementService extends FinanceService {
     const columns: ReportColumn[] = [{ key: "account", label: "Account" }, money("cur", "This period"), ...(cmp ? [money("prev", "Compared"), money("change", "Change")] : [])];
     const both = (c: number, p: number) => ({ cur: c, ...(cmp ? { prev: p, change: c - p } : {}) });
     const out: ReportRow[] = [{ style: "head", cells: { account: "Opening cash and bank balance", ...both(cur.opening, prev?.opening ?? 0) } }];
-    let balanced = true;
     const side = (title: string, pick: "receipts" | "payments", totalLabel: string) => {
       out.push({ style: "head", cells: { account: title } });
       const ids = [...new Set([...cur.lines, ...(prev?.lines ?? [])].map((l) => l.id))];
@@ -297,7 +296,7 @@ export class StatementService extends FinanceService {
     const [pc, pp] = side("Payments", "payments", "Total payments");
     out.push({ style: "total", cells: { account: "Closing cash and bank balance", ...both(cur.closing, prev?.closing ?? 0) } });
     // Opening + receipts - payments must equal the closing balance read straight from the ledger.
-    balanced = cur.opening + rc - pc === cur.closing && (!prev || prev.opening + rp - pp === prev.closing);
+    const balanced = cur.opening + rc - pc === cur.closing && (!prev || prev.opening + rp - pp === prev.closing);
     return { report: { title: "Receipts and payments", subtitle, columns, rows: out, notes: ["Money moved between the school's own cash and bank accounts is not counted."], warning: balanced ? undefined : "Opening balance plus receipts less payments does not equal the closing balance. An entry was changed outside the product." }, balanced, page: null };
   }
 

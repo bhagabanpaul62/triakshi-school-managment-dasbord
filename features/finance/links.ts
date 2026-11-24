@@ -1,6 +1,6 @@
 /** Where the other money modules keep their lists. Finance links to them and never imports them; change a route here and every link follows. */
 export const MODULE_LINKS = {
-  feeSetup: "/app/fees/setup",
+  feeSetup: "/app/fees/heads",
   plans: "/app/fees/plans",
   invoices: "/app/fees/invoices",
   dues: "/app/fees/dues",

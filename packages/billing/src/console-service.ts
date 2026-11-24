@@ -6,6 +6,7 @@ import { z } from "zod";
 import { dueOf } from "./amounts";
 import { AccountCredits } from "./credits";
 import { loadStatement, type Statement } from "./statement";
+import { InvoicePdf } from "./invoice-pdf";
 import { addDays } from "./util";
 
 export interface ConsoleInvoiceRow {
@@ -151,6 +152,11 @@ export class ConsoleBillingService extends PlatformService {
       const p = period ?? { from: `${today.slice(0, 4)}-01-01`, to: today };
       return { school, creditPaise: await AccountCredits.balance(tx, schoolId), statement: await loadStatement(tx, schoolId, p.from, p.to) };
     });
+  }
+
+  async invoicePdf(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
+    const { invoice, school } = await this.invoice(id);
+    return { filename: `${invoice.number.replace(/\//g, "-")}.pdf`, bytes: await InvoicePdf.render(invoice, school) };
   }
 
   async credits(schoolId: string) {

@@ -347,7 +347,7 @@ export class BankService extends FinanceService {
       if (d.action === "other") return this.askOther(tx, b, acc, d);
       if (d.action === "charge" && b.amountPaise > 0) throw new ConflictError("A charge is money going out. This line is money coming in.");
       if (d.action === "interest" && b.amountPaise < 0) throw new ConflictError("Interest is money coming in. This line is money going out.");
-      let lines: PostLine[], kind: "auto" | "transfer" = "auto", sourceType = "bank-line", memo = d.memo || b.description;
+      let lines: PostLine[], kind: "auto" | "transfer" = "auto", sourceType = "bank-line", memo: string;
       if (d.action === "transfer") {
         if (!d.toCashAccountId || d.toCashAccountId === acc.id) throw new ValidationError({ toCashAccountId: "Choose the other account." });
         const other = await this.cashOf(tx, d.toCashAccountId);

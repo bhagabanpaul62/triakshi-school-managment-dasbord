@@ -9,6 +9,7 @@ const GROUP_BY_KEY: Record<string, string> = { student_dues: "Sundry Debtors", g
 const GROUP_BY_TYPE = { asset: "Current Assets", liability: "Current Liabilities", equity: "Capital Account", income: "Indirect Incomes", expense: "Indirect Expenses" } as const;
 
 /** Text safe inside an XML element: the five special characters escaped, characters XML forbids dropped. */
+// eslint-disable-next-line no-control-regex -- stripping the characters XML forbids is the point
 export const xml = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/g, "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]!);
 const tallyDate = (d: string) => d.replaceAll("-", "");
 const amount = (paise: number) => (paise / 100).toFixed(2);

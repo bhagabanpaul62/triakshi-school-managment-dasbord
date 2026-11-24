@@ -528,6 +528,8 @@ export class AuditService extends SettingsService {
 
 // ---------- data export (DPDP) ----------
 
+/** Salaries are left out unless the admin asks for them. Sealed values (PAN, bank numbers) never leave. */
+const isPayroll = (table: string) => table.startsWith("pay_");
 /** Never exported: login secrets and session material. */
 const SKIP_TABLES = new Set(["sessions", "one_time_tokens", "data_exports"]);
 const SKIP_COLUMNS = new Set(["password_hash", "token_hash"]);
@@ -540,10 +542,12 @@ export interface ExportResult { id: string; label: string; sizeBytes: number; ur
  * shortcut: the whole file is built in memory; stream per table (or zip CSVs) before schools reach tens of thousands of rows per table.
  */
 export class ExportService extends SettingsService {
-  async exportSchool(): Promise<ExportResult> {
+  async exportSchool(opts: { includePayroll?: boolean } = {}): Promise<ExportResult> {
+    // Payroll is an admin's own choice; a custom role can never hold settings:export anyway.
+    const payroll = !!opts.includePayroll && this.ctx.role === "admin";
     return this.build("school", async (tx) => {
       const [school] = await tx.select(profileCols).from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
-      return { label: "All school data", data: { school, tables: await this.dump(tx, "school_id", this.ctx.schoolId) } };
+      return { label: payroll ? "All school data, with payroll" : "All school data", data: { school, tables: await this.dump(tx, "school_id", this.ctx.schoolId, payroll) } };
     });
   }
 
@@ -594,7 +598,7 @@ export class ExportService extends SettingsService {
   }
 
   /** Every table with `column`, as `{ table: rows[] }` for rows where `column = value`. Table and column names come from the catalog, never from input. */
-  private async dump(tx: Tx, column: string, value: string): Promise<Record<string, unknown[]>> {
+  private async dump(tx: Tx, column: string, value: string, payroll = false): Promise<Record<string, unknown[]>> {
     const cols = await tx.execute<{ table_name: string; column_name: string }>(sql`
       select c.table_name, c.column_name from information_schema.columns c
       join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name and t.table_type = 'BASE TABLE'
@@ -603,7 +607,7 @@ export class ExportService extends SettingsService {
       order by c.table_name, c.ordinal_position`);
     const byTable = new Map<string, string[]>();
     for (const c of cols) {
-      if (SKIP_TABLES.has(c.table_name) || SKIP_COLUMNS.has(c.column_name)) continue;
+      if (SKIP_TABLES.has(c.table_name) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
       byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
     }
     const out: Record<string, unknown[]> = {};

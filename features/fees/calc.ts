@@ -87,42 +87,64 @@ export function dueState(inv: Totals & { status: string; dueDate: string; parts?
 }
 
 /**
- * Spread `amount` over bills: oldest due first; inside a bill the late line first or last by setting, then lines in
- * their order. Returns what lands on each line and what is left over (it becomes an advance).
+ * Spread `amount` over what is open, earliest due date first across ALL bills (a settlement part of one bill and the
+ * part of another that fall due the same day are cleared together). Inside a bill the late line goes first or last by
+ * setting, then the lines in their order. Returns what lands on each line and what is left over (it becomes an advance).
  */
 export function allocatePlan(invoices: CalcInvoice[], amount: number, o: { lateFirst: boolean }) {
-  const next = (i: CalcInvoice) => slicesOf(i, invoiceOpen(i))[0]?.dueOn ?? i.dueDate;
-  const order = [...invoices].sort((a, b) => next(a).localeCompare(next(b)) || a.id.localeCompare(b.id));
+  const rank = (l: CalcLine) => (l.kind === "late" ? (o.lateFirst ? -1 : 1) : 0);
+  const room = new Map<string, number>(), cap = new Map<string, number>(), lines = new Map<string, CalcLine[]>();
+  for (const inv of invoices) {
+    cap.set(inv.id, inv.limit ?? Infinity);
+    lines.set(inv.id, inv.lines.filter((l) => openOf(l) > 0).sort((a, b) => rank(a) - rank(b) || a.sort - b.sort || a.id.localeCompare(b.id)));
+    for (const l of inv.lines) room.set(l.id, openOf(l));
+  }
+  const slices = invoices.flatMap((inv) => slicesOf(inv, invoiceOpen(inv)).map((s) => ({ inv, ...s })))
+    .sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.inv.id.localeCompare(b.inv.id));
   const parts: { invoiceId: string; lineId: string; amountPaise: number }[] = [];
   let left = amount;
-  for (const inv of order) {
-    let cap = inv.limit ?? Infinity;
-    const rank = (l: CalcLine) => (l.kind === "late" ? (o.lateFirst ? -1 : 1) : 0);
-    const lines = inv.lines.filter((l) => openOf(l) > 0).sort((a, b) => rank(a) - rank(b) || a.sort - b.sort || a.id.localeCompare(b.id));
-    for (const l of lines) {
-      const take = Math.min(openOf(l), left, cap);
+  for (const s of slices) {
+    let want = Math.min(s.openPaise, left, cap.get(s.inv.id)!);
+    for (const l of lines.get(s.inv.id)!) {
+      const take = Math.min(room.get(l.id)!, want);
       if (take <= 0) continue;
-      parts.push({ invoiceId: inv.id, lineId: l.id, amountPaise: take });
-      left -= take; cap -= take;
+      const last = parts.at(-1);
+      if (last && last.lineId === l.id) last.amountPaise += take; else parts.push({ invoiceId: s.inv.id, lineId: l.id, amountPaise: take });
+      room.set(l.id, room.get(l.id)! - take);
+      want -= take; left -= take; cap.set(s.inv.id, cap.get(s.inv.id)! - take);
     }
   }
-  return { parts, leftover: left };
+  // A line can be reached by two slices of one bill; merge so each line appears once.
+  const merged = new Map<string, { invoiceId: string; lineId: string; amountPaise: number }>();
+  for (const p of parts) { const m = merged.get(p.lineId); if (m) m.amountPaise += p.amountPaise; else merged.set(p.lineId, { ...p }); }
+  return { parts: [...merged.values()], leftover: left };
 }
 
-/** Concessions on a bill's lines: head-specific ones first, then whole-bill ones, each capped at what is left; spread exactly. Deposits and other non-fee lines take none. */
-export function concessionsOn(lines: { headId?: string | null; kind?: string; amountPaise: number }[], concs: Conc[]): number[] {
+/**
+ * Concessions on a bill's lines: head-specific ones first, then whole-bill ones, each capped at what is left; spread
+ * exactly. Deposits and other non-fee lines take none. `applied` is what each concession actually gave on this bill.
+ */
+export function concessionsDetailed(lines: { headId?: string | null; kind?: string; amountPaise: number }[], concs: Conc[]): { perLine: number[]; applied: number[] } {
   const out = lines.map(() => 0);
+  const applied = concs.map(() => 0);
   const eligible = lines.map((l, i) => (l.kind ?? "fee") === "fee" ? i : -1).filter((i) => i >= 0);
   const room = (i: number) => lines[i]!.amountPaise - out[i]!;
-  for (const c of [...concs.filter((x) => x.headId), ...concs.filter((x) => !x.headId)]) {
+  const order = concs.map((c, i) => ({ c, i })).sort((x, y) => Number(!!y.c.headId) - Number(!!x.c.headId));
+  for (const { c, i: ci } of order) {
     const idx = eligible.filter((i) => !c.headId || lines[i]!.headId === c.headId);
     const base = idx.reduce((s, i) => s + room(i), 0);
     const want = c.mode === "percent" ? percentOf(idx.reduce((s, i) => s + lines[i]!.amountPaise, 0), c.value) : c.value;
     const give = Math.min(want, base);
+    applied[ci] = give;
     apportion(give, idx.map(room)).forEach((p, k) => { out[idx[k]!] = out[idx[k]!]! + p; });
   }
-  return out;
+  return { perLine: out, applied };
 }
+
+export const concessionsOn = (lines: Parameters<typeof concessionsDetailed>[0], concs: Conc[]): number[] => concessionsDetailed(lines, concs).perLine;
+
+/** What one bill's share of a yearly amount is: the pool left divided by the bills still to come (the last one takes the rest, so the year adds up exactly). */
+export const yearShare = (poolLeft: number, billsLeft: number) => (billsLeft <= 1 ? poolLeft : Math.floor(poolLeft / billsLeft));
 
 /** What a draft bill comes to, with the concessions on it. */
 export function previewInvoice(draft: { lines: { headId?: string | null; kind?: string; label?: string; amountPaise: number }[]; concessions?: Conc[] }) {

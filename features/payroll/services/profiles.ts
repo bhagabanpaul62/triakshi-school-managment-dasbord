@@ -37,7 +37,7 @@ export const profileInput = z.object({
   regime: z.enum(["new", "old"]).default("new"),
   state: z.string().trim().max(60).optional(),
   pfApplies: tri, esiApplies: tri, ptApplies: tri,
-  pfOnFullWages: flag, paysMonthly: flag.default(true),
+  pfOnFullWages: flag, skipMonthly: flag,
 });
 const FIELDS = { pan: ["panSealed", "panLast4"], uan: ["uanSealed", "uanLast4"], esi: ["esiSealed", "esiLast4"], bankAccount: ["bankSealed", "bankLast4"] } as const;
 export type SealedField = keyof typeof FIELDS;
@@ -103,7 +103,7 @@ export class ProfileService extends PayrollService {
     const d = this.parse(profileInput, input);
     return this.write("manage", async (tx) => {
       if (!(await this.people(tx, [userId])).has(userId)) throw new NotFoundError("Person");
-      const set: Partial<typeof payProfiles.$inferInsert> = { payBy: d.payBy, regime: d.regime, state: d.state || null, pfApplies: d.pfApplies, esiApplies: d.esiApplies, ptApplies: d.ptApplies, pfOnFullWages: d.pfOnFullWages, paysMonthly: d.paysMonthly };
+      const set: Partial<typeof payProfiles.$inferInsert> = { payBy: d.payBy, regime: d.regime, state: d.state || null, pfApplies: d.pfApplies, esiApplies: d.esiApplies, ptApplies: d.ptApplies, pfOnFullWages: d.pfOnFullWages, paysMonthly: !d.skipMonthly };
       if (d.bankName !== undefined) set.bankName = d.bankName || null;
       if (d.ifsc) set.ifsc = d.ifsc;
       for (const [k, [sealed, last4]] of Object.entries(FIELDS) as [SealedField, readonly [string, string]][]) {
