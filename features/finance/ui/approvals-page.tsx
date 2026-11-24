@@ -47,7 +47,8 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
 
   return (
     <>
-      <PageHeader eyebrow="Finance" title="Approvals" description="Money requests that need a second person. Read what will happen, then decide." />
+      <PageHeader eyebrow="Finance" title="Approvals" description="Money requests that need a second person. Read what will happen, then decide."
+        actions={<a href={`/app/finance/export/approvals?status=${status}`} download className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm font-medium hover:bg-white/[0.12]">CSV</a>} />
       <nav aria-label="Filter by status" className="flex flex-wrap gap-2 pb-6">
         {STATUSES.map(([key, label]) => (
           <Link key={key} href={link(key)} aria-current={status === key ? "page" : undefined}

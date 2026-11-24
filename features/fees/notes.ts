@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
@@ -54,9 +54,12 @@ export class NoteService extends FeesBase {
   async list(query: ListQuery = {}) {
     const q = listQuerySchema.parse(query);
     return this.viewer(async (tx, own) => {
-      const where = and(q.filters.invoiceId ? eq(feeNotes.invoiceId, q.filters.invoiceId) : undefined, q.filters.studentId ? eq(feeNotes.studentId, q.filters.studentId) : undefined, q.filters.status ? eq(feeNotes.status, q.filters.status as Note["status"]) : undefined);
-      const rows = (await tx.select().from(feeNotes).where(where).orderBy(desc(feeNotes.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize)).filter((n) => !own || own.includes(n.studentId));
-      return toPage(rows, rows.length, q);
+      const where = and(own ? inArray(feeNotes.studentId, own.length ? own : ["00000000-0000-0000-0000-000000000000"]) : undefined, q.filters.invoiceId ? eq(feeNotes.invoiceId, q.filters.invoiceId) : undefined, q.filters.studentId ? eq(feeNotes.studentId, q.filters.studentId) : undefined, q.filters.status ? eq(feeNotes.status, q.filters.status as Note["status"]) : undefined);
+      const [rows, [n]] = await Promise.all([
+        tx.select().from(feeNotes).where(where).orderBy(desc(feeNotes.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
+        tx.select({ n: sql<number>`count(*)::int` }).from(feeNotes).where(where),
+      ]);
+      return toPage(rows, Number(n?.n ?? 0), q);
     });
   }
 
@@ -129,7 +132,7 @@ export class NoteService extends FeesBase {
     }
     const number = await this.number(tx, "credit_note", date);
     const [row] = await tx.update(feeNotes).set({ status: "approved", number, issuedOn: date, lines: specLines }).where(eq(feeNotes.id, n.id)).returning();
-    await this.post(tx, { date, sourceKey: `fees:note:${n.id}`, sourceType: "fee_note", sourceId: n.id, memo: `${n.kind === "credit" ? "Credit" : "Debit"} note ${number}: ${n.reason}`, lines: out });
+    await this.post(tx, { date, sourceKey: `fees:note:${n.id}`, sourceType: "fee_note", sourceId: n.invoiceId, memo: `${n.kind === "credit" ? "Credit" : "Debit"} note ${number}: ${n.reason}`, lines: out });
     return row!;
   }
 

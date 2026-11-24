@@ -59,7 +59,7 @@ export class OpeningImport extends FeesBase {
         for (const [kind, amount, account, label] of [["opening", r.advance, "student_advances", "Opening advance"], ["deposit", r.deposit, "deposits_payable", "Opening deposit"]] as const) {
           if (!amount) continue;
           const [row] = await tx.insert(feeAdvances).values({ schoolId: this.ctx.schoolId, studentId: r.studentId, kind, amountPaise: amount, note: label, date: r.asOf }).returning({ id: feeAdvances.id });
-          await this.post(tx, { date: r.asOf, sourceKey: `fees:opening-${kind}:${row!.id}`, sourceType: "fee_advance", sourceId: row!.id, memo: `${label} (${r.no})`, lines: [{ account: "opening", debit: amount }, { account, credit: amount, party: { type: "student", id: r.studentId } }] });
+          await this.post(tx, { date: r.asOf, sourceKey: `fees:opening-${kind}:${row!.id}`, sourceType: "fee_student", sourceId: r.studentId, memo: `${label} (${r.no})`, lines: [{ account: "opening", debit: amount }, { account, credit: amount, party: { type: "student", id: r.studentId } }] });
         }
       }
       await this.audit(tx, { action: "import_opening", entity: "Fee opening balances", summary: `Imported opening balances for ${rows.length} students`, meta: totals });

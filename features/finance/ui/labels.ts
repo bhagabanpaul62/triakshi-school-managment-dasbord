@@ -12,10 +12,15 @@ export const APPROVAL_KIND_LABEL: Record<string, string> = {
   "fees.note": "Credit and debit notes",
   "fees.settlement": "Settlements",
   "fees.reversal": "Receipt reversals",
+  "fees.invoice_change": "Bill changes",
   "fees.refund": "Refunds",
   "expenses.bill": "Vendor bills",
   "expenses.claim": "Staff claims",
+  "expenses.reversal": "Payment reversals",
   "payroll.run": "Payroll runs",
+  "payroll.recall": "Payroll recalls",
+  "payroll.loan": "Staff loans",
+  "payroll.exit": "Exit settlements",
 };
 export const kindLabel = (kind: string) => APPROVAL_KIND_LABEL[kind] ?? kind.replace(/[._]/g, " ");
 

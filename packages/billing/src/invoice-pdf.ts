@@ -1,6 +1,7 @@
 import { env } from "@smw/config";
 import type { invoices, schools } from "@smw/db";
 import { PdfBuilder } from "@smw/integrations";
+import { dueOf } from "./amounts";
 import { dmy } from "./util";
 
 /** GST tax invoice for one of our invoices. SAC 998431 (CA to confirm). */
@@ -25,7 +26,12 @@ export class InvoicePdf {
       rows: [[inv.description, inv.sacCode, money(inv.taxablePaise)]],
     });
     const tax: [string, string][] = inv.igstPaise > 0 ? [["IGST 18%", money(inv.igstPaise)]] : [["CGST 9%", money(inv.cgstPaise)], ["SGST 9%", money(inv.sgstPaise)]];
-    pdf.totals([["Taxable value", money(inv.taxablePaise)], ...tax, ["Total", money(inv.totalPaise), true]]);
+    const settle: [string, string][] = [];
+    if (inv.creditedPaise > 0) settle.push(["Less: credit notes", money(inv.creditedPaise)]);
+    if (inv.creditAppliedPaise > 0) settle.push(["Less: account credit used", money(inv.creditAppliedPaise)]);
+    if (inv.tdsPaise > 0) settle.push(["Less: tax withheld (TDS)", money(inv.tdsPaise)]);
+    pdf.totals([["Taxable value", money(inv.taxablePaise)], ...tax, ["Total", money(inv.totalPaise), !settle.length], ...settle,
+      ...(settle.length ? [[inv.status === "paid" ? "Paid in cash" : "Amount due", money(inv.status === "paid" ? inv.totalPaise - inv.creditedPaise - inv.creditAppliedPaise - inv.tdsPaise : dueOf(inv)), true] as [string, string, boolean]] : [])]);
     pdf.space(24);
     pdf.text("This is a computer generated invoice and needs no signature.", { size: 8, color: [0.4, 0.4, 0.45] });
     return pdf.save();

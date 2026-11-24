@@ -11,8 +11,9 @@ export async function nextSequence(tx: Tx, schoolId: string, key: string): Promi
   return Number(rows[0]!.value);
 }
 
-/** Indian financial year label for a date: Apr 2026 - Mar 2027 -> "2026-27". */
+/** Indian financial year label for a date: Apr 2026 - Mar 2027 -> "2026-27". Read in IST, so a UTC server agrees with India on 1 April. */
 export function financialYear(d = new Date()): string {
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  const ist = new Date(d.getTime() + 5.5 * 3_600_000);
+  const y = ist.getUTCMonth() >= 3 ? ist.getUTCFullYear() : ist.getUTCFullYear() - 1;
   return `${y}-${String((y + 1) % 100).padStart(2, "0")}`;
 }

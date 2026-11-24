@@ -77,8 +77,6 @@ export class PayoutService extends PayrollService {
         await this.post(tx, { date, sourceKey: `payroll:payout:${batch}:${account.id}`, sourceType: "payroll_payout", sourceId: runId, memo: `Salary paid: ${run.label}`, lines: [...lines, { account: { id: account.accountId }, credit: sum }] });
         await tx.update(payItems).set({ payout: "paid", paidOn: date, payoutRef: d.reference ?? null, cashAccountId: account.id, failReason: null }).where(inArray(payItems.id, items.map((i) => i.id)));
       }
-      const claimIds = (await tx.select({ id: payLines.refId }).from(payLines).where(and(eq(payLines.code, "claim"), inArray(payLines.itemId, pick.map((i) => i.id))))).map((r) => r.id!);
-      if (claimIds.length) await this.sources.claims.markPaid(tx, claimIds, { runId, date });
       const left = await tx.select({ id: payItems.id }).from(payItems).where(and(eq(payItems.runId, runId), sql`${payItems.skippedReason} is null`, sql`${payItems.payout} <> 'paid'`)).limit(1);
       const runPaid = left.length === 0;
       if (runPaid) {

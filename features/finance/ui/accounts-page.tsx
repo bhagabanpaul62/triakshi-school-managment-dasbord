@@ -40,7 +40,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
   return (
     <>
       <PageHeader eyebrow="Finance" title="Accounts" description="The chart every entry posts to. Fees, expenses and payroll use the system accounts; add your own for anything else."
-        actions={canEdit ? <FormModal title="New account" icon="book" fields={createFields} action={createAccount} submitLabel="Add" /> : null} />
+        actions={<><a href="/app/finance/export/accounts" download className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm font-medium hover:bg-white/[0.12]">CSV</a>{canEdit ? <FormModal title="New account" icon="book" fields={createFields} action={createAccount} submitLabel="Add" /> : null}</>} />
       <form method="get" role="search" className="pb-6">
         <label className="sr-only" htmlFor="account-q">Search accounts</label>
         <input id="account-q" name="q" defaultValue={q} placeholder="Search by code or name" className="h-10 w-full max-w-sm rounded-full bg-white/[0.05] px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]" />

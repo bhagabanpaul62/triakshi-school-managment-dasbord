@@ -57,7 +57,7 @@ export class StructureService extends PayrollService {
     const d = this.parse(structureInput, input);
     try {
       return await this.write("manage", async (tx) => {
-        let s: Structure;
+        let s: Structure | undefined;
         if (id) {
           const [have] = await tx.select().from(payStructures).where(eq(payStructures.id, id)).for("update");
           if (!have) throw new NotFoundError("Structure");
@@ -67,7 +67,9 @@ export class StructureService extends PayrollService {
           await tx.delete(payComponents).where(eq(payComponents.structureId, id));
         } else [s] = await tx.insert(payStructures).values({ schoolId: this.ctx.schoolId, name: d.name }).returning();
         if (d.components.length) await tx.insert(payComponents).values(d.components.map((c, sort) => ({ schoolId: this.ctx.schoolId, structureId: s!.id, sort, ...c })));
-        return s!;
+        if (!s) throw new NotFoundError("Structure");
+        const made = s;
+        return made;
       }, (s) => ({ action: id ? "update" : "create", entity: "PayStructure", entityId: s.id, summary: `${id ? "Changed" : "Added"} pay structure ${s.name}` }));
     } catch (e) { return rethrowUnique(e, "A structure with this name already exists."); }
   }

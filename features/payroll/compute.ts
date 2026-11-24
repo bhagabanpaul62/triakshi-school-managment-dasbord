@@ -5,7 +5,7 @@ import type { Tx } from "@smw/db";
 import { fyRange, monthEnd, fyOf } from "@smw/feature-kit/money";
 import { staffProfiles } from "@smw/feature-staff/schema";
 import type { PayConfig } from "./config";
-import { computePay, daysIn, type Adjustment, type EngineComponent, type Flag, type PayResult } from "./engine";
+import { computePay, daysIn, taxProjection, type Adjustment, type EngineComponent, type Flag, type PayResult } from "./engine";
 import type { RateBook, RateUse } from "./rate-book";
 import { payAssignments, payComponents, payDeclarations, payItems, payLines, payLoanRepayments, payLoans, payProfiles, payRuns } from "./schema";
 import type { Sources } from "./sources";
@@ -19,7 +19,7 @@ export interface CalcEnv { tx: Tx; config: PayConfig; book: RateBook; sources: S
 export type ItemRow = typeof payItems.$inferSelect;
 export type LineRow = typeof payLines.$inferSelect;
 
-export interface Computed { userId: string; result: PayResult; days: { calendarDays: number; unpaidHalfDays: number; unmarkedDays: number; hours: number | null }; used: RateUse[]; assignmentId: string; structureId: string; grossSetupPaise: number }
+export interface Computed { userId: string; tax: ReturnType<typeof taxProjection> | null; result: PayResult; days: { calendarDays: number; unpaidHalfDays: number; unmarkedDays: number; hours: number | null }; used: RateUse[]; assignmentId: string; structureId: string; grossSetupPaise: number }
 
 const half = (n: number) => Math.round(n * 2);
 
@@ -96,7 +96,8 @@ export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: 
       profile: { pan: !!p?.panSealed, regime, pfApplies: req.offCycle ? null : p?.pfApplies ?? null, esiApplies: req.offCycle ? null : p?.esiApplies ?? null, ptApplies: req.offCycle ? null : p?.ptApplies ?? null, pfOnFullWages: p?.pfOnFullWages ?? false },
       declaration: d ? { otherIncomePaise: Number(d.otherIncomePaise), deductionsPaise: Number(d.deductionsPaise), previousSalaryPaise: Number(d.previousSalaryPaise), previousTdsPaise: Number(d.previousTdsPaise) } : null,
     });
-    done.push({ userId, result, days, used, assignmentId: a.id, structureId: a.structureId, grossSetupPaise: Number(a.grossPaise) });
+    const profile = { pan: !!p?.panSealed, regime, pfApplies: null, esiApplies: null, ptApplies: null, pfOnFullWages: false };
+    done.push({ userId, tax: rates.tax && config.tds ? taxProjection({ month, ytd: ytd.get(userId), declaration: d ? { otherIncomePaise: Number(d.otherIncomePaise), deductionsPaise: Number(d.deductionsPaise), previousSalaryPaise: Number(d.previousSalaryPaise), previousTdsPaise: Number(d.previousTdsPaise) } : null, profile }, result.taxableGrossPaise, rates.tax) : null, result, days, used, assignmentId: a.id, structureId: a.structureId, grossSetupPaise: Number(a.grossPaise) });
   }
   return { done, missing };
 }

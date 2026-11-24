@@ -1,8 +1,7 @@
 import { and, asc, eq, gte, lte } from "drizzle-orm";
-import { schools } from "@smw/db";
 import { ConflictError, ValidationError } from "@smw/feature-kit";
 import { finAccounts, finCashAccounts, finJournalLines, finJournals } from "../schema";
-import { FinanceService, day } from "./common";
+import { FinanceService, day, schoolName } from "./common";
 
 const CAP = 50_000;
 /** Tally's own groups for our system accounts; anything else follows its type. */
@@ -27,7 +26,7 @@ export class TallyExportService extends FinanceService {
     if (!from.success || !to.success || input.from > input.to) throw new ValidationError({ from: "Choose a start date that is not after the end date." });
     return this.read("read", async (tx) => {
       const [school, cash, rows] = await Promise.all([
-        tx.select({ name: schools.name }).from(schools).limit(1).then((r) => r[0]),
+        schoolName(tx),
         tx.select({ accountId: finCashAccounts.accountId, kind: finCashAccounts.kind }).from(finCashAccounts),
         tx.select({ journalId: finJournals.id, number: finJournals.number, date: finJournals.date, memo: finJournals.memo, accountId: finAccounts.id, name: finAccounts.name, type: finAccounts.type, key: finAccounts.systemKey, debit: finJournalLines.debitPaise, credit: finJournalLines.creditPaise })
           .from(finJournalLines).innerJoin(finJournals, eq(finJournals.id, finJournalLines.journalId)).innerJoin(finAccounts, eq(finAccounts.id, finJournalLines.accountId))
@@ -52,7 +51,7 @@ export class TallyExportService extends FinanceService {
         body.push(`<TALLYMESSAGE xmlns:UDF="TallyUDF"><VOUCHER VCHTYPE="${type}" ACTION="Create" OBJVIEW="Accounting Voucher View"><DATE>${tallyDate(head.date)}</DATE><VOUCHERTYPENAME>${type}</VOUCHERTYPENAME><VOUCHERNUMBER>${xml(head.number)}</VOUCHERNUMBER><NARRATION>${xml(head.memo.slice(0, 500))}</NARRATION>${entries.join("")}</VOUCHER></TALLYMESSAGE>`);
       }
       const ledgers = [...masters].map(([name, parent]) => `<TALLYMESSAGE xmlns:UDF="TallyUDF"><LEDGER NAME="${xml(name)}" ACTION="Create"><NAME>${xml(name)}</NAME><PARENT>${xml(parent)}</PARENT></LEDGER></TALLYMESSAGE>`);
-      const doc = `<?xml version="1.0" encoding="UTF-8"?>\n<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(school?.name ?? "School")}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA>${[...ledgers, ...body].join("")}</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>\n`;
+      const doc = `<?xml version="1.0" encoding="UTF-8"?>\n<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA><REQUESTDESC><REPORTNAME>Vouchers</REPORTNAME><STATICVARIABLES><SVCURRENTCOMPANY>${xml(school)}</SVCURRENTCOMPANY></STATICVARIABLES></REQUESTDESC><REQUESTDATA>${[...ledgers, ...body].join("")}</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>\n`;
       return { xml: doc, vouchers: byJournal.size, fileName: `tally-vouchers-${input.from}-to-${input.to}.xml` };
     });
   }

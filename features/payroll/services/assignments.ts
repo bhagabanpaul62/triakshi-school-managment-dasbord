@@ -23,7 +23,7 @@ export interface ImportReport { rows: { line: number; employeeId: string; ok: bo
 const wholeRupee = (p: number) => Math.round(p / 100) * 100;
 
 export class AssignmentService extends PayrollService {
-  history(userId: string): Promise<(Assignment & { structure: string | null })[]> {
+  async history(userId: string): Promise<(Assignment & { structure: string | null })[]> {
     this.assertCanSee(userId);
     return this.read("self", async (tx) => {
       const rows = await tx.select({ a: payAssignments, structure: payStructures.name }).from(payAssignments).leftJoin(payStructures, eq(payStructures.id, payAssignments.structureId)).where(eq(payAssignments.userId, userId)).orderBy(desc(payAssignments.fromDate));

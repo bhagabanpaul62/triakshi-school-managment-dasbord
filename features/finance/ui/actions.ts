@@ -1,7 +1,8 @@
 "use server";
 
+import { ValidationError } from "@smw/feature-kit";
 import { formToObject, serviceAction } from "@smw/runtime";
-import { AccountService, ApprovalDeskService, CashAccountService, CostCentreService, JournalService, PeriodService, SeriesService, SettingsService } from "../service";
+import { AccountService, ApprovalDeskService, BankService, CashAccountService, CostCentreService, JournalService, PeriodService, SeriesService, SettingsService } from "../service";
 
 const id = (fd: FormData) => String(fd.get("id"));
 const on = (fd: FormData) => fd.get("active") === "1";
@@ -37,3 +38,19 @@ export async function deleteCostCentre(fd: FormData) { return serviceAction(Cost
 export async function setCostCentreActive(fd: FormData) { return serviceAction(CostCentreService, (s) => s.setActive(id(fd), on(fd)), on(fd) ? "Cost centre switched on" : "Cost centre switched off"); }
 
 export async function withdrawRequest(fd: FormData) { return serviceAction(ApprovalDeskService, (s) => s.withdraw(id(fd)).then((r) => ({ id: r.id })), "Request withdrawn"); }
+
+/** The uploaded sheet as the service reads it. */
+async function sheet(fd: FormData) {
+  const f = fd.get("file");
+  if (!(f instanceof File) || f.size === 0) throw new ValidationError({ file: "Choose the statement file first." });
+  return { name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) };
+}
+export async function checkBankImport(fd: FormData) { return serviceAction(BankService, async (s) => s.previewImport(await sheet(fd), formToObject(fd))); }
+export async function importBankStatement(fd: FormData) { return serviceAction(BankService, async (s) => s.commitImport(await sheet(fd), formToObject(fd))); }
+export async function autoMatchBank(fd: FormData) { return serviceAction(BankService, (s) => s.autoMatch(String(fd.get("cashAccountId"))).then((r) => ({ id: String(fd.get("cashAccountId")), ...r })), "Matching done"); }
+export async function matchBankLine(fd: FormData) { return serviceAction(BankService, (s) => s.match(String(fd.get("bankLineId")), fd.getAll("entry").map(String)).then((r) => ({ id: r.bankLineId })), "Matched"); }
+export async function unmatchBankLine(fd: FormData) { return serviceAction(BankService, (s) => s.unmatch(String(fd.get("bankLineId"))).then((r) => ({ id: r.bankLineId })), "Unmatched"); }
+export async function createBankEntry(fd: FormData) {
+  const r = await serviceAction(BankService, (s) => s.createEntry(String(fd.get("bankLineId")), formToObject(fd)).then((e) => ({ id: e.bankLineId, pending: !!e.approvalId })), "Recorded and matched");
+  return r.ok && r.data.pending ? { ...r, message: "Sent for approval. The line is matched once it is approved." } : r;
+}

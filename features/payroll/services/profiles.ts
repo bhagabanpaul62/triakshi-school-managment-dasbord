@@ -64,6 +64,12 @@ export class ProfileService extends PayrollService {
     });
   }
 
+  /** Paid leave that could be cashed out today, when attendance is on. */
+  async leaveBalance(userId: string): Promise<{ name: string; days: number }[]> {
+    if (!this.attendanceOn) return [];
+    return this.read("read", async (tx) => (await this.sources.days.encashable(tx, userId, new Date().toISOString().slice(0, 10))).map((e) => ({ name: e.name, days: e.halfDays / 2 })));
+  }
+
   /** Every active person, for CSV and the run's group pickers. */
   all(): Promise<PersonRow[]> { return this.read("read", async (tx) => (await this.rows(tx)).filter((r) => !r.left)); }
 

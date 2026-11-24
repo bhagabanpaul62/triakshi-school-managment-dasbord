@@ -57,7 +57,7 @@ export class ChequeService extends FeesBase {
       const [acct] = await tx.select().from(finCashAccounts).where(eq(finCashAccounts.id, c.depositedTo!));
       await tx.update(feeCheques).set({ status: "cleared", clearedOn: date }).where(eq(feeCheques.id, c.id));
       await tx.update(feeReceipts).set({ status: "valid" }).where(eq(feeReceipts.id, c.receiptId));
-      await this.post(tx, { date, sourceKey: `fees:cheque-clear:${c.id}`, sourceType: "fee_cheque", sourceId: c.id, memo: `Cheque ${c.chequeNo} cleared`, lines: [{ account: { id: acct!.accountId }, debit: c.amountPaise }, { account: "cheques", credit: c.amountPaise }] });
+      await this.post(tx, { date, sourceKey: `fees:cheque-clear:${c.id}`, sourceType: "fee_receipt", sourceId: c.receiptId, memo: `Cheque ${c.chequeNo} cleared`, lines: [{ account: { id: acct!.accountId }, debit: c.amountPaise }, { account: "cheques", credit: c.amountPaise }] });
     });
   }
 

@@ -3,6 +3,8 @@ import { env, schoolUrl } from "@smw/config";
 import { and, between, desc, eq, inArray, invoices, payments, plans, platformAuditLogs, schools, subscriptions, users, withConsole, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { services } from "@smw/integrations";
+import { dueOf } from "./amounts";
+import { AccountCredits } from "./credits";
 import { PaymentGatewayError } from "./errors";
 import { ensureGateway } from "./gateway";
 import { GstCalculator } from "./gst";
@@ -10,13 +12,16 @@ import { InvoiceNumberer } from "./invoice-number";
 import { PlanCatalog, type PlanView } from "./plans";
 import { ProrationCalculator } from "./proration";
 import { Settlement } from "./settlement";
+import { TdsCertificates } from "./tds";
 import { addDays, addInterval, countStudents, dmy } from "./util";
 
 export type Interval = "annual" | "monthly";
 export interface CheckoutResult { kind: "checkout"; invoiceId: string; orderId: string; checkoutUrl: string; amountPaise: number }
+/** The invoice was covered by account credit, so there is nothing to pay. */
+export interface PaidResult { kind: "paid"; invoiceId: string }
 export interface ScheduledResult { kind: "scheduled"; planName: string; effectiveAt: Date }
 export type ConfirmState = "paid" | "pending" | "failed";
-export interface ConfirmResult { state: ConfirmState; invoiceId: string | null; schoolId: string }
+export interface ConfirmResult { state: ConfirmState; invoiceId: string | null; schoolId: string; /** Money kept as account credit because the invoice no longer needed it. */ creditedPaise?: number }
 
 const priceOf = (p: PlanView, i: Interval) => (i === "annual" ? p.priceAnnualPaise : p.priceMonthlyPaise);
 
@@ -56,7 +61,7 @@ export class PlatformBilling {
   // ---------- checkout ----------
 
   /** Start paying for a plan: new purchase, renewal, prorated upgrade, or (for a downgrade) schedule it for renewal. */
-  async startCheckout(input: { planKey: string; interval: Interval }, now = new Date()): Promise<CheckoutResult | ScheduledResult> {
+  async startCheckout(input: { planKey: string; interval: Interval }, now = new Date()): Promise<CheckoutResult | ScheduledResult | PaidResult> {
     const { schoolId } = this.need();
     const prepared = await withConsole(async (tx) => {
       const plan = await this.catalog.byKey(tx, input.planKey);
@@ -86,7 +91,7 @@ export class PlatformBilling {
           if (quote.kind === "downgrade") {
             await tx.update(subscriptions).set({ pendingPlanId: plan.id }).where(eq(subscriptions.id, live.id));
             await tx.insert(platformAuditLogs).values({ schoolId, action: "billing.downgrade_scheduled", summary: `${old?.name ?? "Plan"} to ${plan.name} at renewal`, meta: { planId: plan.id } });
-            return { scheduled: { kind: "scheduled", planName: plan.name, effectiveAt: curEnd } as ScheduledResult, invoiceId: null };
+            return { scheduled: { kind: "scheduled", planName: plan.name, effectiveAt: curEnd } as ScheduledResult, invoiceId: null, covered: false };
           }
           if (quote.kind === "same") throw new ConflictError("You are already on this plan.");
           amount = quote.amountPaise; start = now; end = curEnd;
@@ -102,15 +107,16 @@ export class PlatformBilling {
         .where(and(eq(invoices.schoolId, schoolId), eq(invoices.status, "issued"), eq(invoices.taxablePaise, split.taxablePaise),
           between(invoices.periodEnd, addDays(end, -1), addDays(end, 1)),
           eq(subscriptions.status, "pending"), eq(subscriptions.planId, plan.id), eq(subscriptions.interval, input.interval))).limit(1);
-      if (open) return { scheduled: null, invoiceId: open.id };
+      if (open) return { scheduled: null, invoiceId: open.id, covered: false };
       const [sub] = await tx.insert(subscriptions).values({
         schoolId, planId: plan.id, interval: input.interval, status: "pending", pricePaise: priceOf(plan, input.interval),
         currentPeriodStart: start, currentPeriodEnd: end,
       }).returning();
       const inv = await this.issueInvoice(tx, { school, subscriptionId: sub!.id, description: `${label} (${dmy(start)} to ${dmy(end)})`, split, start, end, now });
-      return { scheduled: null, invoiceId: inv.id };
+      return { scheduled: null, invoiceId: inv.id, covered: inv.status === "paid" };
     });
     if (prepared.scheduled) return prepared.scheduled;
+    if (prepared.covered) return { kind: "paid", invoiceId: prepared.invoiceId! };
     return this.openOrder(prepared.invoiceId!, now);
   }
 
@@ -132,7 +138,13 @@ export class PlatformBilling {
       schoolGstin: p.school.gstin, placeOfSupply: p.school.state, dueAt: addDays(p.now, 7), periodStart: p.start, periodEnd: p.end,
     }).returning();
     await tx.insert(platformAuditLogs).values({ schoolId: p.school.id, action: "billing.invoice_issued", summary: `Invoice ${number} issued`, meta: { invoiceId: inv!.id } });
-    return inv!;
+    // Credit the school already holds pays first; an invoice it fully covers is paid without a payment.
+    const used = await AccountCredits.useOn(tx, inv!);
+    if (used === 0) return inv!;
+    const now = { ...inv!, creditAppliedPaise: used };
+    if (dueOf(now) > 0) return now;
+    await Settlement.markPaid(tx, now, p.now);
+    return { ...now, status: "paid" as const };
   }
 
   private async openOrder(invoiceId: string, now: Date): Promise<CheckoutResult> {
@@ -143,8 +155,9 @@ export class PlatformBilling {
       const [school] = await tx.select().from(schools).where(eq(schools.id, scope.schoolId)).limit(1);
       const [user] = await tx.select().from(users).where(and(eq(users.id, scope.userId), eq(users.schoolId, scope.schoolId))).limit(1);
       if (!inv || !school) throw new NotFoundError("Invoice");
+      if (inv.status !== "issued") throw new ConflictError("This invoice is already settled.");
       const orderId = `trk_${randomBytes(9).toString("hex")}`;
-      const [pay] = await tx.insert(payments).values({ schoolId: school.id, invoiceId: inv.id, amountPaise: inv.totalPaise, method: "cashfree", status: "created", gatewayOrderId: orderId }).returning();
+      const [pay] = await tx.insert(payments).values({ schoolId: school.id, invoiceId: inv.id, amountPaise: dueOf(inv), method: "cashfree", status: "created", gatewayOrderId: orderId }).returning();
       return { inv, school, user, orderId, paymentId: pay!.id };
     });
     const { inv, school, user, orderId, paymentId } = ctxRows;
@@ -157,19 +170,22 @@ export class PlatformBilling {
 
     try {
       const order = await gw.createOrder({
-        orderId, amountPaise: inv.totalPaise,
+        orderId, amountPaise: dueOf(inv),
         customer: { id: school.id.replace(/-/g, ""), name: user?.name ?? school.name, email, phone },
         returnUrl: schoolUrl(school.slug, `/app/billing/return?order_id=${orderId}`),
         notifyUrl: `${env().CONSOLE_URL}/api/webhooks/cashfree`,
         note: `Invoice ${inv.number}`,
       });
-      return { kind: "checkout", invoiceId: inv.id, orderId, checkoutUrl: order.checkoutUrl, amountPaise: inv.totalPaise };
+      return { kind: "checkout", invoiceId: inv.id, orderId, checkoutUrl: order.checkoutUrl, amountPaise: dueOf(inv) };
     } catch (err) {
       await withConsole((tx) => tx.update(payments).set({ status: "failed" }).where(eq(payments.id, paymentId)));
       console.error(JSON.stringify({ level: "error", msg: "gateway createOrder failed", err: String(err), invoice: inv.number, at: now.toISOString() }));
       throw new PaymentGatewayError();
     }
   }
+
+  /** The school's TDS certificates, pinned to this school. */
+  tds() { return new TdsCertificates(this.need().schoolId); }
 
   // ---------- confirmation ----------
 
@@ -187,7 +203,7 @@ export class PlatformBilling {
         throw new ConflictError("The amount paid does not match the invoice. Our team has been notified.");
       }
       const r = await withConsole((tx) => Settlement.apply(tx, pay.id, { now: opts.now, gatewayPaymentId: remote.paymentId }));
-      return { state: "paid", invoiceId: r.invoiceId, schoolId: r.schoolId };
+      return { state: "paid", invoiceId: r.invoiceId, schoolId: r.schoolId, creditedPaise: r.creditedPaise };
     }
     if (remote.status === "EXPIRED" || remote.status === "TERMINATED") {
       await withConsole((tx) => tx.update(payments).set({ status: "failed" }).where(and(eq(payments.id, pay.id), eq(payments.status, "created"))));

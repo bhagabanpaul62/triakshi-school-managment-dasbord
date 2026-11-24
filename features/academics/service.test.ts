@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb } from "@smw/db";
+import { sql } from "drizzle-orm";
+import { closeDb, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import {
@@ -21,6 +22,17 @@ describe("years and terms", () => {
     await svc.setCurrent(y1.id);
     const current = (await svc.list()).rows.filter((y) => y.isCurrent);
     expect(current.map((y) => y.name)).toEqual(["2025-26"]);
+  });
+
+  it("a year that has bills is closed, never deleted", async () => {
+    const svc = new AcademicYearService(a.as.admin);
+    const y = await svc.create({ name: "2030-31" });
+    await withSchool(a.id, async (tx) => {
+      await tx.execute(sql`insert into students (id, school_id, admission_no, name) values (gen_random_uuid(), ${a.id}, 'BILLED1', 'Billed Kid')`);
+      await tx.execute(sql`insert into fee_invoices (id, school_id, student_id, year_id, kind, label, due_date, snapshot)
+        select gen_random_uuid(), ${a.id}, s.id, ${y.id}::uuid, 'custom', 'Trip', '2030-05-01', '{"studentName":"Billed Kid","admissionNo":"BILLED1","classLabel":"-","guardian":null}'::jsonb from students s where s.admission_no = 'BILLED1'`);
+    });
+    await expect(svc.remove(y.id)).rejects.toThrow(/fee records/);
   });
 
   it("rejects bad names, duplicates and deleting the current year", async () => {

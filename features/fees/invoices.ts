@@ -1,10 +1,10 @@
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
-import { rupees, todayIST } from "@smw/feature-kit/money";
+import { todayIST } from "@smw/feature-kit/money";
 import type { PostLine } from "@smw/feature-finance/posting";
 import { students } from "@smw/feature-students/schema";
-import { FeesBase, calcOf, invalid, newToken, type InvoiceFull } from "./base";
+import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { chargeManyInput, draftInput, bulkInput, reviseInput } from "./inputs";
 import { NoteService } from "./notes";
@@ -51,7 +51,7 @@ export class InvoiceService extends FeesBase {
   /** One bill in full: lines, notes, who paid what, earlier and later versions, and the late fee that has built up today. */
   async get(id: string) {
     return this.viewer(async (tx, own) => {
-      const [inv] = await this.loadInvoices(tx, eq(feeInvoices.id, id));
+      const [inv] = await this.loadInvoices(tx, eq(feeInvoices.id, asId(id, "Invoice")));
       if (!inv) throw new NotFoundError("Invoice");
       this.assertVisible(own, inv.studentId, "Invoice");
       if (own && inv.status === "draft") throw new NotFoundError("Invoice");

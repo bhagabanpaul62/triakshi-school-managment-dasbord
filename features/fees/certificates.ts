@@ -12,7 +12,7 @@ export class CertificateService extends FeesBase {
       this.assertVisible(own, studentId);
       const student = await this.oneStudent(tx, studentId);
       const rows = [...(await tx.execute<{ date: string; number: string; memo: string; debit: string; credit: string; source_type: string; source_id: string | null; journal_id: string }>(sql`
-        select j.date::text date, j.number, coalesce(jl.memo, j.memo) memo, jl.debit_paise debit, jl.credit_paise credit, j.source_type, j.source_id, j.id journal_id
+        select j.date::text as date, j.number, coalesce(jl.memo, j.memo) memo, jl.debit_paise debit, jl.credit_paise credit, j.source_type, j.source_id, j.id journal_id
         from fin_journal_lines jl join fin_journals j on j.id = jl.journal_id join fin_accounts a on a.id = jl.account_id
         where a.system_key = 'student_dues' and jl.party_type = 'student' and jl.party_id = ${studentId}::uuid order by j.date, j.created_at, jl.created_at, jl.id`))];
       let balance = 0;

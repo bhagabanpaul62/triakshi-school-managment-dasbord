@@ -2,12 +2,13 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, ValidationError } from "@smw/feature-kit";
-import { feeAdvances, feeAllocations, feeCheques, feeInvoices, feeReceipts } from "./schema";
+import { feeCheques, feeReceipts } from "./schema";
 import { ChecksService } from "./checks";
 import { ChequeService } from "./cheques";
 import { CounterService } from "./counter";
 import { DuesService } from "./dues";
 import { InvoiceService } from "./invoices";
+import { NoteService } from "./notes";
 import { ReceiptService } from "./receipts";
 import { LATE, TODAY, bills, config, decide, due, issueAll, ledger, makeSchool, newStudent, publish, type Fixture } from "./testing";
 import { finApprovals } from "@smw/feature-finance/schema";
@@ -44,6 +45,19 @@ describe("collecting", () => {
     expect(full.accruedLatePaise).toBe(0); // what built up is now a line
     expect(await ledger(fx, "late_fee")).toBe(-30_000);
     expect(await ledger(fx, "student_dues", meera)).toBe(180_000);
+    expect(await checks()).toEqual([]);
+  });
+
+  it("waiving a fixed late fee posts against late fee income; an unpaid bill shows the fee that is building up", async () => {
+    const id = await newStudent(fx, "Waiver Kid");
+    const [m1, m2] = await bills(fx, id);
+    expect((await new InvoiceService(fx.school.as.admin).get(m1!.id)).accruedLatePaise).toBe(25_000); // 25 late days at 1,000, nothing paid yet
+    await cashier().collect({ studentId: id, invoiceIds: [m1!.id, m2!.id], parts: [{ invoiceId: m1!.id, amountPaise: 1_000 }, { invoiceId: m2!.id, amountPaise: 1_000 }], methods: cash(2_000) });
+    const line = (await new InvoiceService(fx.school.as.admin).get(m2!.id)).invoice.lines.find((l) => l.kind === "late")!;
+    const before = await ledger(fx, "late_fee");
+    const n = await new NoteService(fx.school.as.accountant).propose({ invoiceId: m2!.id, reasonType: "waiver", reason: "Bus strike", lines: [{ lineId: line.id, amountPaise: 4_000 }] });
+    await decide(fx, "fees.note", n.id);
+    expect(await ledger(fx, "late_fee")).toBe(before + 4_000);
     expect(await checks()).toEqual([]);
   });
 
@@ -189,6 +203,21 @@ const numbers = () => withSchool(fx.school.id, async (tx) => (await tx.select({ 
 const expectNoGaps = async () => { const n = await numbers(); expect(n).toEqual(n.map((_, i) => i + 1)); };
 const addDaysIso = (n: number) => new Date(Date.parse(`${TODAY}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
+describe("the receipt file", () => {
+  it("prints a plain PDF, logs every print, and says DUPLICATE from the second", async () => {
+    const id = await newStudent(fx, "Print Kid");
+    const r = await cashier().collect({ studentId: id, methods: cash(5_000) });
+    const first = await cashier().receiptFile(r.id);
+    expect(Buffer.from(first.bytes.slice(0, 4)).toString()).toBe("%PDF");
+    expect(first.filename).toBe(`${r.number.replace(/\//g, "-")}.pdf`);
+    const second = await cashier().receiptFile(r.id);
+    expect(second.filename).toContain("duplicate");
+    const prints = await withSchool(fx.school.id, (tx) => tx.execute<{ n: number }>(sql`select count(*)::int n from fin_prints where doc_id = ${r.id}::uuid`));
+    expect([...prints][0]!.n).toBe(2);
+    await expect(new ReceiptService(fx.school.as.student).receiptFile(r.id)).rejects.toThrow();
+  });
+});
+
 describe("reversal", () => {
   it("does nothing until someone else approves; then dues reopen, the receipt keeps its number and the postings are mirrored", async () => {
     const id = await newStudent(fx, "Reverse Kid");
@@ -271,4 +300,3 @@ describe("the counter", () => {
   });
 });
 
-void feeAdvances; void feeAllocations; void feeInvoices;

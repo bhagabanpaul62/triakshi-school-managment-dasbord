@@ -1,7 +1,7 @@
 -- What the school app may do with platform tables (spec §8). RLS already limits rows to its own school.
 REVOKE INSERT, UPDATE, DELETE ON plans, plan_modules, modules FROM app_school;
 REVOKE ALL ON platform_staff, staff_sessions, platform_audit_logs, webhook_events FROM app_school;
-REVOKE INSERT, UPDATE, DELETE ON school_module_overrides, subscriptions, invoices, payments FROM app_school;
+REVOKE INSERT, UPDATE, DELETE ON school_module_overrides, subscriptions, invoices, payments, credit_notes, account_credits, tds_certificates FROM app_school;
 REVOKE UPDATE, DELETE ON audit_logs FROM app_school;
 REVOKE INSERT, DELETE ON schools FROM app_school;
 REVOKE UPDATE ON schools FROM app_school;

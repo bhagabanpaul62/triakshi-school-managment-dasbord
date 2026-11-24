@@ -205,7 +205,7 @@ describe("professional tax and labour welfare fund", () => {
 
 describe("income tax (TDS)", () => {
   const tds = (tax: TaxRates | null) => rates({ tax }, { tds: true });
-  const april = (o: Partial<PayInput>) => run({ month: "2026-04-01", ...o });
+  const april = (o: Parameters<typeof run>[0]) => run({ month: "2026-04-01", ...o });
   it("yearly tax: slabs, rebate, marginal relief and cess", () => {
     expect(slabTax(11_250_000 * 10, NEW_TAX.slabs)).toBe(5_250_000);
     expect(yearlyTax(112_500_000, NEW_TAX)).toBe(0);

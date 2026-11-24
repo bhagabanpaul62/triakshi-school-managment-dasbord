@@ -158,7 +158,7 @@ export const payExits = pgTable("pay_exits", {
   lastDay: date("last_day").notNull(),
   reason: text("reason").notNull(),
   /** Leave encashment, notice, gratuity, recoveries: label, amount, kind, how it was worked out. */
-  lines: jsonb("lines").$type<{ kind: "earning" | "deduction"; code: string; label: string; amountPaise: number; note?: string }[]>().notNull().default([]),
+  lines: jsonb("lines").$type<{ kind: "earning" | "deduction" | "employer"; code: string; label: string; amountPaise: number; note?: string }[]>().notNull().default([]),
   status: text("status").$type<(typeof EXIT_STATUSES)[number]>().notNull().default("draft"),
   runId: uuid("run_id").references(() => payRuns.id, { onDelete: "restrict" }),
   createdBy: uuid("created_by"),

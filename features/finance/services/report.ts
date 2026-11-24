@@ -25,7 +25,7 @@ export interface Report {
 /** A text cell that Excel will not run as a formula: a leading = + - @ tab or return is defused, then it is quoted when needed. */
 export function csvText(v: string): string {
   const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-  return safe !== v || /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 const rupeesPlain = (paise: number) => (paise / 100).toFixed(2);

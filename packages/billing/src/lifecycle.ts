@@ -1,10 +1,12 @@
 import { schoolUrl } from "@smw/config";
-import { and, eq, inArray, isNull, lt, lte, schools, sql, subscriptions, users, uuidv7, withConsole, type Tx } from "@smw/db";
+import { and, eq, inArray, isNull, lt, lte, schools, sql, subscriptions, uuidv7, withConsole } from "@smw/db";
 import { emailHtml, services } from "@smw/integrations";
+import { schoolContact } from "./contact";
+import { TdsReminders } from "./tds";
 import { addDays } from "./util";
 
 export interface LifecycleReport {
-  trialsEnded: number; suspended: number; deletionScheduled: number; pastDue: number; readOnly: number; remindersSent: number;
+  trialsEnded: number; suspended: number; deletionScheduled: number; pastDue: number; readOnly: number; remindersSent: number; tdsReminded: number;
 }
 
 const REMINDER_OFFSETS = [-7, 0, 7] as const; // days after the period end: -7 means a week before
@@ -42,7 +44,7 @@ export class LifecycleService {
       };
     });
     for (const id of report.scheduledIds) await this.sendFinalNotice(id);
-    return { ...report.counts, remindersSent: await this.sendReminders(now) };
+    return { ...report.counts, remindersSent: await this.sendReminders(now), tdsReminded: await new TdsReminders().run(now) };
   }
 
   /** Renewal emails at 7 days before, on, and 7 days after the period end. Each (subscription, period, offset) is sent once. */
@@ -75,16 +77,8 @@ export class LifecycleService {
     return withConsole((tx) => tx.execute(sql`delete from billing_reminders where subscription_id = ${subscriptionId} and period_key = ${end.toISOString()} and offset_days = ${offset}`));
   }
 
-  private async contact(tx: Tx, schoolId: string) {
-    const [school] = await tx.select().from(schools).where(eq(schools.id, schoolId)).limit(1);
-    if (!school) return null;
-    const [admin] = school.email ? [] : await tx.select({ email: users.email }).from(users).where(and(eq(users.schoolId, schoolId), eq(users.role, "admin"), eq(users.status, "active"))).limit(1);
-    const to = school.email ?? admin?.email ?? null;
-    return to ? { to, school } : null;
-  }
-
   private async mailRenewal(schoolId: string, offset: number, end: Date): Promise<boolean> {
-    const c = await withConsole((tx) => this.contact(tx, schoolId));
+    const c = await withConsole((tx) => schoolContact(tx, schoolId));
     if (!c) return false;
     const date = end.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
     const [subject, body] = offset === -7
@@ -99,7 +93,7 @@ export class LifecycleService {
 
   private async sendFinalNotice(schoolId: string) {
     try {
-      const c = await withConsole((tx) => this.contact(tx, schoolId));
+      const c = await withConsole((tx) => schoolContact(tx, schoolId));
       if (!c) return;
       const subject = `Final notice: ${c.school.name} will be deleted`;
       const body = `${c.school.name} has been suspended for 90 days without a payment, so its data is scheduled for deletion. Renew now to keep it, and export what you need first.`;

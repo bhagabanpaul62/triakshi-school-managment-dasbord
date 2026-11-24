@@ -1,11 +1,10 @@
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { schools } from "@smw/db";
 import { ValidationError } from "@smw/feature-kit";
 import { addDays, addMonths, daysBetween, fyOf, fyRange, monthEnd, monthStart, rupees, todayIST } from "@smw/feature-kit/money";
 import { finAccounts, finCashAccounts, finJournalLines, finJournals } from "../schema";
 import { loadFinanceSettings } from "../settings";
-import { FinanceService, day } from "./common";
+import { FinanceService, day, schoolName } from "./common";
 import { reportToCsv, reportToPdf, type Report, type ReportColumn, type ReportRow } from "./report";
 
 /** The entry year close posts. Statements of income and spending leave it out so a closed year still shows its surplus. */
@@ -123,8 +122,7 @@ export class StatementService extends FinanceService {
 
   async pdf(q: StatementQuery): Promise<Uint8Array> {
     const { report } = await this.run({ ...q, all: true });
-    const school = await this.read("read", (tx) => tx.select({ name: schools.name }).from(schools).limit(1).then((r) => r[0]));
-    return reportToPdf(report, school?.name ?? "School");
+    return reportToPdf(report, await this.read("read", schoolName));
   }
 
   // ---------------------------------------------------------------- books with a running balance

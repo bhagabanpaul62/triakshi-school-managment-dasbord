@@ -6,7 +6,7 @@ import { PdfBuilder } from "@smw/integrations";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
 import { finJournals, finPrints, finTemplates } from "@smw/feature-finance/schema";
 import { schools, users } from "@smw/db";
-import { FeesBase, calcOf, invalid, newToken, type InvoiceFull } from "./base";
+import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { allocatePlan, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL } from "./constants";
 import { collectInput, reversalInput } from "./inputs";
@@ -197,7 +197,7 @@ export class ReceiptService extends FeesBase {
   /** One receipt with where each rupee went, its cheque, advances and the ledger entry it posted. */
   async get(id: string) {
     return this.viewer(async (tx, own) => {
-      const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, id));
+      const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
       if (!r) throw new NotFoundError("Receipt");
       this.assertVisible(own, r.studentId, "Receipt");
       const [methods, cheque, allocations, journal, by] = await Promise.all([
@@ -229,7 +229,7 @@ export class ReceiptService extends FeesBase {
   /** The receipt as a plain PDF (a template can replace the layout later). Every print is logged; the second one onwards says DUPLICATE. */
   async receiptFile(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
     return this.viewer(async (tx, own) => {
-      const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, id));
+      const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
       if (!r) throw new NotFoundError("Receipt");
       this.assertVisible(own, r.studentId, "Receipt");
       const [[school], methods, allocs, [last]] = await Promise.all([

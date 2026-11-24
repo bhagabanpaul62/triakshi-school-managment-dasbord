@@ -1,6 +1,21 @@
-/** Where a journal entry's source document opens, by the `sourceType` each module posts with. Other streams add their rows; an unknown type shows as plain text. */
+/** Where a journal entry's source document opens, by the `sourceType` each module posts with. An unknown type shows as plain text. */
 const ROUTES: Record<string, (id: string) => string> = {
   manual: () => "/app/finance/approvals?status=approved",
+  "bank-line": () => "/app/finance/banking",
+  fee_invoice: (id) => `/app/fees/invoices/${id}`,
+  fee_note: (id) => `/app/fees/invoices/${id}`,
+  fee_receipt: (id) => `/app/fees/receipts/${id}`,
+  fee_student: (id) => `/app/fees/students/${id}`,
+  fee_counter: () => "/app/fees/collect",
+  exp_bill: (id) => `/app/expenses/bills?open=${id}`,
+  exp_payment: () => "/app/expenses/payments",
+  exp_income: () => "/app/expenses/income",
+  exp_petty: () => "/app/expenses/petty",
+  exp_claim: () => "/app/expenses/claims",
+  payroll_run: (id) => `/app/payroll/runs/${id}`,
+  payroll_payout: (id) => `/app/payroll/runs/${id}`,
+  payroll_exit: (id) => `/app/payroll/exits/${id}`,
+  payroll_loan: () => "/app/payroll/loans",
 };
 
 export function sourceHref(sourceType: string, sourceId: string | null): string | null {

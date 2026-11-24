@@ -247,6 +247,12 @@ export const invoices = pgTable("invoices", {
   paidAt: timestamp("paid_at", { withTimezone: true }),
   periodStart: timestamp("period_start", { withTimezone: true }),
   periodEnd: timestamp("period_end", { withTimezone: true }),
+  /** Tax the school withheld and will pay the government; the invoice is settled by cash plus this. */
+  tdsPaise: bigint("tds_paise", { mode: "number" }).notNull().default(0),
+  /** Total of credit notes issued against this invoice (the invoice itself is never edited). */
+  creditedPaise: bigint("credited_paise", { mode: "number" }).notNull().default(0),
+  /** Account credit used to pay this invoice at issue. The invoice total stays; the amount due is lower. */
+  creditAppliedPaise: bigint("credit_applied_paise", { mode: "number" }).notNull().default(0),
 }, (t) => [...tenant(t, "invoices"), uniqueIndex("invoices_number").on(t.number)]);
 
 export const payments = pgTable("payments", {
@@ -260,7 +266,71 @@ export const payments = pgTable("payments", {
   reference: text("reference"),
   recordedBy: uuid("recorded_by"),
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  /** Tax withheld by the school on this payment. Cash received is `amount_paise`; the invoice is settled by both. */
+  tdsPaise: bigint("tds_paise", { mode: "number" }).notNull().default(0),
 }, (t) => [...tenant(t, "payments"), uniqueIndex("payments_gateway_order").on(t.gatewayOrderId)]);
+
+export const CREDIT_NOTE_KINDS = ["correction", "refund", "goodwill"] as const;
+export const CREDIT_SETTLEMENTS = ["adjusted", "refund", "credit"] as const;
+
+/** GST credit note against one of our invoices, numbered in its own gap-free series. Never edited. Console-only writes. */
+export const creditNotes = pgTable("credit_notes", {
+  ...schoolColumns(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  number: text("number").notNull(),
+  financialYear: text("financial_year").notNull(),
+  kind: text("kind").$type<(typeof CREDIT_NOTE_KINDS)[number]>().notNull(),
+  status: text("status").$type<"issued">().notNull().default("issued"),
+  reason: text("reason").notNull(),
+  taxablePaise: bigint("taxable_paise", { mode: "number" }).notNull(),
+  cgstPaise: bigint("cgst_paise", { mode: "number" }).notNull().default(0),
+  sgstPaise: bigint("sgst_paise", { mode: "number" }).notNull().default(0),
+  igstPaise: bigint("igst_paise", { mode: "number" }).notNull().default(0),
+  totalPaise: bigint("total_paise", { mode: "number" }).notNull(),
+  /** adjusted = an unpaid invoice owes less; refund = cash goes back; credit = kept on the account. */
+  settlement: text("settlement").$type<(typeof CREDIT_SETTLEMENTS)[number]>().notNull(),
+  refundMethod: text("refund_method").$type<"bank_transfer" | "cheque" | "cash" | "upi">(),
+  refundReference: text("refund_reference"),
+  refundedOn: text("refunded_on"),
+  refundedAt: timestamp("refunded_at", { withTimezone: true }),
+  refundedBy: uuid("refunded_by"),
+  issuedBy: uuid("issued_by"),
+  emailedAt: timestamp("emailed_at", { withTimezone: true }),
+}, (t) => [...tenant(t, "credit_notes"), uniqueIndex("credit_notes_number").on(t.number), index("credit_notes_invoice").on(t.invoiceId)]);
+
+/** What Triakshi holds for a school: + when credit is added, - when an invoice uses it. The balance is the sum. Console-only writes. */
+export const accountCredits = pgTable("account_credits", {
+  ...schoolColumns(),
+  amountPaise: bigint("amount_paise", { mode: "number" }).notNull(),
+  kind: text("kind").$type<"second_payment" | "overpayment" | "voided_payment" | "credit_note" | "used" | "released">().notNull(),
+  invoiceId: uuid("invoice_id").references(() => invoices.id),
+  paymentId: uuid("payment_id").references(() => payments.id),
+  creditNoteId: uuid("credit_note_id").references(() => creditNotes.id),
+  /** One row per event, so a replay cannot add or spend the same credit twice. */
+  sourceKey: text("source_key").notNull(),
+  note: text("note"),
+}, (t) => [...tenant(t, "account_credits"), uniqueIndex("account_credits_source").on(t.schoolId, t.sourceKey)]);
+
+/** The government's TDS certificate for tax a school withheld. Awaited until the school uploads it, then verified by staff. Console-only writes. */
+export const tdsCertificates = pgTable("tds_certificates", {
+  ...schoolColumns(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id),
+  paymentId: uuid("payment_id").notNull().references(() => payments.id),
+  amountPaise: bigint("amount_paise", { mode: "number" }).notNull(),
+  /** "2026-27 Q2" of the day the tax was withheld. */
+  quarter: text("quarter").notNull(),
+  /** Day the reminder is due: 45 days after that quarter ends. */
+  remindOn: text("remind_on").notNull(),
+  status: text("status").$type<"awaited" | "received" | "verified">().notNull().default("awaited"),
+  fileKey: text("file_key"),
+  fileName: text("file_name"),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  verifiedBy: uuid("verified_by"),
+  /** Why staff sent the file back, shown to the school next to the upload button. */
+  note: text("note"),
+  remindedAt: timestamp("reminded_at", { withTimezone: true }),
+}, (t) => [...tenant(t, "tds_certificates"), uniqueIndex("tds_certificates_payment").on(t.paymentId)]);
 
 /** Webhook replay guard: each gateway event is processed once. Console-only. */
 export const webhookEvents = pgTable("webhook_events", {

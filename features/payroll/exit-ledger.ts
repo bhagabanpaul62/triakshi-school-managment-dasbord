@@ -1,11 +1,10 @@
 // Turning an approved exit into a final-settlement run, and undoing it. Shared by the approval handler and the exit service.
 import { eq } from "drizzle-orm";
-import type { Tx } from "@smw/db";
+import { users, type Tx } from "@smw/db";
 import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { todayIST, monthStart } from "@smw/feature-kit/money";
 import { reverseJournal, type Poster } from "@smw/feature-finance/posting";
 import { leaveLedger } from "@smw/feature-attendance/schema";
-import { users } from "@smw/db";
 import { recoverLoans, approveRun, runWithItems } from "./ledger";
 import { monthLabel } from "./csv";
 import { daysIn } from "./engine";

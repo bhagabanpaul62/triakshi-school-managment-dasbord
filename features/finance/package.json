@@ -9,6 +9,8 @@
     "./service": "./service.ts",
     "./seed": "./seed.ts",
     "./jobs": "./jobs.ts",
+    "./ui/export-route": "./ui/export-route.ts",
+    "./ui/actions": "./ui/actions.ts",
     "./ui/*": "./ui/*.tsx",
     "./templates/ui/*": "./templates/ui/*.tsx",
     "./*": "./*.ts"

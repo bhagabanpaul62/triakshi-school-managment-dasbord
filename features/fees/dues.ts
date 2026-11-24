@@ -2,10 +2,10 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { listQuerySchema, type ListQuery } from "@smw/feature-kit";
 import { todayIST } from "@smw/feature-kit/money";
-import { FeesBase, calcOf } from "./base";
+import { FeesBase, asId, calcOf } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL, type PayMethod } from "./constants";
-import { feeAdvances, feeConcessions, feePromises, feeRefunds, feeReminders, feeSettlements, feeUpiSlips, feeNotes, feeReceipts, feeReceiptMethods, feeInvoices } from "./schema";
+import { feeAdvances, feeConcessions, feePromises, feeRefunds, feeReminders, feeSettlements, feeUpiSlips, feeNotes, feeReceipts, feeInvoices } from "./schema";
 
 export interface DueRow {
   id: string; name: string; admissionNo: string; classLabel: string; classId: string | null;
@@ -39,6 +39,12 @@ const headSlices = (headId: string) => sql`slices as (
     from fee_invoice_lines l join fee_invoices i on i.id = l.invoice_id where i.status = 'issued' and l.head_id = ${headId}
 )`;
 const LIVE = sql`('valid', 'clearing')`;
+/**
+ * Live receipts of a date range with the new money in each (an advance spent is not new money): `rcp` and `mon`.
+ * Written as two steps on purpose: each row of one joined to the other by index is slow when one school holds the whole table.
+ */
+const receiptMoney = (from: string, to: string) => sql`rcp as materialized (select id, date, amount_paise, collected_by from fee_receipts where status in ${LIVE} and date between ${from}::date and ${to}::date),
+  mon as materialized (select receipt_id, method, sum(amount_paise) paise from fee_receipt_methods where receipt_id in (select id from rcp) group by receipt_id, method)`;
 
 const asRows = <T,>(r: Iterable<T>) => [...r];
 const num = (v: unknown) => Number(v ?? 0);
@@ -49,7 +55,7 @@ export class DuesService extends FeesBase {
   /** Everything about one student's money, all years: balance, bills, receipts, notes, concessions, advances, deposits, promises and one timeline. */
   async studentAccount(studentId: string) {
     return this.viewer(async (tx, own) => {
-      this.assertVisible(own, studentId);
+      this.assertVisible(own, asId(studentId, "Student"));
       const today = todayIST();
       const student = await this.oneStudent(tx, studentId);
       const invoices = await this.loadInvoices(tx, eq(feeInvoices.studentId, studentId));
@@ -157,12 +163,12 @@ export class DuesService extends FeesBase {
     };
   }
 
-  /** For a student login: their own dues, with the late fee that has built up included. */
+  /** For a student login: their own dues (only students who have been billed), with the late fee that has built up included. */
   async mine(): Promise<DueRow[]> {
     return this.viewer(async (tx, own) => {
       if (!own?.length) return [];
       const out = await this.rows(tx, { ids: own, includeZero: true, limit: 50, offset: 0 });
-      return out.rows.map(({ accrued, ageing: _a, studentStatus: _s, leftOn: _l, ...r }) => ({ ...r, due: r.due + accrued, overdue: r.overdue + (r.status === "overdue" ? accrued : 0), late: r.late + accrued }));
+      return out.rows.filter((r) => r.gross > 0 || r.due > 0).map(({ accrued, ageing: _a, studentStatus: _s, leftOn: _l, ...r }) => ({ ...r, due: r.due + accrued, overdue: r.overdue + (r.status === "overdue" ? accrued : 0), late: r.late + accrued }));
     });
   }
 
@@ -191,8 +197,8 @@ export class DuesService extends FeesBase {
 
   /** Money received between two days (the advance used is not new money, so it is left out). */
   private async collectedIn(tx: Tx, from: string, to: string) {
-    const [r] = asRows(await tx.execute<{ paise: string; n: string }>(sql`select coalesce(sum(m.amount_paise) filter (where m.method <> 'advance'), 0) paise, count(distinct r.id) n
-      from fee_receipts r join fee_receipt_methods m on m.receipt_id = r.id where r.status in ${LIVE} and r.date between ${from}::date and ${to}::date`));
+    const [r] = asRows(await tx.execute<{ paise: string; n: string }>(sql`with ${receiptMoney(from, to)}
+      select coalesce(sum(paise) filter (where method <> 'advance'), 0) paise, count(distinct receipt_id) n from mon`));
     return { paise: num(r?.paise), n: num(r?.n) };
   }
 
@@ -220,8 +226,7 @@ export class DuesService extends FeesBase {
         tx.execute<{ id: string; student_id: string; student: string; amount: string; method: string | null; number: string }>(sql`
           select r.id, r.student_id, r.snapshot->>'studentName' student, r.amount_paise amount, (select m.method from fee_receipt_methods m where m.receipt_id = r.id order by m.amount_paise desc limit 1) method, r.number
           from fee_receipts r where r.status in ${LIVE} and r.date = ${today}::date order by r.created_at desc limit 8`).then(asRows),
-        tx.select({ method: feeReceiptMethods.method, paise: sql<string>`sum(${feeReceiptMethods.amountPaise})` }).from(feeReceiptMethods).innerJoin(feeReceipts, eq(feeReceipts.id, feeReceiptMethods.receiptId))
-          .where(and(inArray(feeReceipts.status, ["valid", "clearing"]), eq(feeReceipts.date, today), sql`${feeReceiptMethods.method} <> 'advance'`)).groupBy(feeReceiptMethods.method),
+        tx.execute<{ method: PayMethod; paise: string }>(sql`with ${receiptMoney(today, today)} select method, sum(paise) paise from mon where method <> 'advance' group by method`).then(asRows),
       ]);
       return {
         summary, ageing: top.totals.ageing,
@@ -243,8 +248,8 @@ export class DuesService extends FeesBase {
         buckets.push({ key: at.toISOString().slice(0, unit === "day" ? 10 : 7), label: at.toLocaleDateString("en-IN", unit === "day" ? { day: "numeric", month: "short", timeZone: "UTC" } : { month: "short", year: "2-digit", timeZone: "UTC" }), paise: 0 });
       }
       const from = unit === "day" ? buckets[0]!.key : `${buckets[0]!.key}-01`;
-      const rows = await tx.execute<{ day: string; paise: string }>(sql`select to_char(r.date, ${unit === "day" ? "YYYY-MM-DD" : "YYYY-MM"}) day, sum(m.amount_paise) paise from fee_receipts r join fee_receipt_methods m on m.receipt_id = r.id
-        where r.status in ${LIVE} and m.method <> 'advance' and r.date >= ${from}::date group by 1`);
+      const rows = await tx.execute<{ day: string; paise: string }>(sql`with ${receiptMoney(from, today)}
+        select to_char(rcp.date, ${unit === "day" ? "YYYY-MM-DD" : "YYYY-MM"}) as day, sum(mon.paise) paise from rcp join mon on mon.receipt_id = rcp.id where mon.method <> 'advance' group by 1`);
       for (const r of rows) { const b = buckets.find((x) => x.key === r.day); if (b) b.paise += num(r.paise); }
       return buckets;
     });

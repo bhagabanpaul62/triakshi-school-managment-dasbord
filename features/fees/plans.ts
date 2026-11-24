@@ -8,7 +8,7 @@ import { finAccounts } from "@smw/feature-finance/schema";
 import { classes } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
-import { FeesBase, invalid, type Perm } from "./base";
+import { FeesBase, asId, invalid, type Perm } from "./base";
 import { copyPlanInput, headInput, optInInput, planInput, studentPlanInput } from "./inputs";
 import { feeHeads, feeInvoiceLines, feeOptIns, feePlanClasses, feePlanDues, feePlanLines, feePlans, feeStudentPlans } from "./schema";
 import type { ADMISSION_TYPES } from "./constants";
@@ -108,7 +108,7 @@ export class PlanService extends FeesBase {
 
   async get(id: string) {
     return this.read("read", async (tx) => {
-      const [plan] = await tx.select().from(feePlans).where(eq(feePlans.id, id));
+      const [plan] = await tx.select().from(feePlans).where(eq(feePlans.id, asId(id, "Fee plan")));
       if (!plan) throw new NotFoundError("Fee plan");
       const [cls, lines, versions] = await Promise.all([
         tx.select({ id: classes.id, name: classes.name }).from(feePlanClasses).innerJoin(classes, eq(classes.id, feePlanClasses.classId)).where(eq(feePlanClasses.planId, id)).orderBy(asc(classes.grade)),

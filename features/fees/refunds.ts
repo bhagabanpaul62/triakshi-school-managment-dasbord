@@ -85,7 +85,7 @@ export class RefundService extends FeesBase {
     const number = await this.number(tx, "voucher", date);
     const [row] = await tx.update(feeRefunds).set({ status: "approved", number, paidOn: date, cashAccountId: acct.id }).where(eq(feeRefunds.id, id)).returning();
     await tx.insert(feeAdvances).values({ schoolId: this.ctx.schoolId, studentId: r!.studentId, kind: r!.source === "advance" ? "refund" : "deposit", amountPaise: -r!.amountPaise, refId: r!.id, note: `Refund ${number}`, date });
-    await this.post(tx, { date, sourceKey: `fees:refund:${r!.id}`, sourceType: "fee_refund", sourceId: r!.id, memo: `Refund ${number}: ${r!.reason}`,
+    await this.post(tx, { date, sourceKey: `fees:refund:${r!.id}`, sourceType: "fee_student", sourceId: r!.studentId, memo: `Refund ${number}: ${r!.reason}`,
       lines: [{ account: r!.source === "advance" ? "student_advances" : "deposits_payable", debit: r!.amountPaise, party: { type: "student", id: r!.studentId } }, { account: { id: acct.accountId }, credit: r!.amountPaise }] });
     await this.tell(tx, [r!.studentId], "Refund approved", `${rupees(r!.amountPaise)} will be returned to you (voucher ${number}).`);
     return row!;

@@ -5,6 +5,7 @@ import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { monthEnd, todayIST } from "@smw/feature-kit/money";
 import { nextNumber, postJournal, reverseJournal, type PostLine, type Poster } from "@smw/feature-finance/posting";
 import { finTemplates } from "@smw/feature-finance/schema";
+import { defaultSources, type Sources } from "./sources";
 import { ratesOf, repaid, type ItemRow, type LineRow } from "./compute";
 import { payItems, payLines, payLoanRepayments, payLoans, payRuns } from "./schema";
 
@@ -35,12 +36,12 @@ export async function accrue(tx: Tx, poster: Poster, run: RunRow, items: ItemRow
   const live = items.filter((i) => !i.skippedReason);
   const cr = new Map<string, PostLine>();
   const credit = (key: string, line: PostLine) => { const have = cr.get(key); if (have) have.credit = (have.credit ?? 0) + (line.credit ?? 0); else cr.set(key, line); };
-  let salaries = 0, claims = 0, employer = 0;
+  let salaries = 0, employer = 0;
   const out: PostLine[] = [];
   for (const i of live) {
     for (const l of lines.filter((x) => x.itemId === i.id)) {
       const v = Number(l.amountPaise);
-      if (l.kind === "earning") { if (l.code === "claim") claims += v; else salaries += v; continue; }
+      if (l.kind === "earning") { if (l.code === "claim") out.push({ account: "claims_payable", debit: v, party: { type: "staff", id: i.userId } }); else salaries += v; continue; }
       if (l.kind === "employer") employer += v;
       const account = ACCOUNT_OF(l);
       if (account === "staff_loans") credit(`loan:${i.userId}`, { account, credit: v, party: { type: "staff", id: i.userId } });
@@ -53,7 +54,7 @@ export async function accrue(tx: Tx, poster: Poster, run: RunRow, items: ItemRow
   const name = `${run.label}`;
   return postJournal(tx, poster, {
     date, sourceKey: `payroll:run:${run.id}`, sourceType: "payroll_run", sourceId: run.id, memo: `Payroll: ${name}`,
-    lines: [{ account: "salaries", debit: salaries }, { account: "claims_payable", debit: claims }, { account: "employer_contrib", debit: employer }, ...out, ...cr.values()],
+    lines: [{ account: "salaries", debit: salaries }, { account: "employer_contrib", debit: employer }, ...out, ...cr.values()],
   });
 }
 
@@ -80,7 +81,7 @@ export async function recoverLoans(tx: Tx, schoolId: string, lines: LineRow[], d
 }
 
 /** Approve a reviewed run: number the payslips, recover the EMIs, freeze the rates and post the accrual. */
-export async function approveRun(tx: Tx, poster: Poster, runId: string, approvedBy: string, allowed: RunRow["status"][] = ["reviewed"]) {
+export async function approveRun(tx: Tx, poster: Poster, runId: string, approvedBy: string, allowed: RunRow["status"][] = ["reviewed"], sources: Sources = defaultSources) {
   const { run, items, lines } = await runWithItems(tx, runId, true);
   if (!allowed.includes(run.status)) throw new ConflictError(`This run is ${run.status}, so it cannot be approved now.`);
   const live = items.filter((i) => !i.skippedReason);
@@ -95,12 +96,14 @@ export async function approveRun(tx: Tx, poster: Poster, runId: string, approved
   const liveIds = new Set(live.map((i) => i.id));
   await recoverLoans(tx, run.schoolId, lines.filter((l) => liveIds.has(l.itemId)), today, 1);
   await accrue(tx, poster, run, items, lines, date);
+  const claimIds = lines.filter((l) => l.code === "claim" && liveIds.has(l.itemId)).map((l) => l.refId!);
+  if (claimIds.length) await sources.claims.markPaid(tx, claimIds, { runId, date });
   const [row] = await tx.update(payRuns).set({ status: "approved", approvedBy, approvedAt: new Date(), rates: ratesOf(items) }).where(eq(payRuns.id, runId)).returning();
   return row!;
 }
 
 /** Undo an approved run before any money went out: reverse the accrual and the EMIs and reopen it as a draft. */
-export async function recallRun(tx: Tx, poster: Poster, runId: string, reason: string) {
+export async function recallRun(tx: Tx, poster: Poster, runId: string, reason: string, sources: Sources = defaultSources) {
   const { run, items, lines } = await runWithItems(tx, runId, true);
   if (run.status !== "approved") throw new ConflictError(run.status === "paid" ? "This run is paid, so it cannot be recalled." : "Only an approved run can be recalled.");
   if (run.kind === "exit") throw new ConflictError("A final settlement is undone from the exit page.");
@@ -108,6 +111,7 @@ export async function recallRun(tx: Tx, poster: Poster, runId: string, reason: s
   await reverseJournal(tx, poster, `payroll:run:${runId}`, { date: todayIST(), memo: `Payroll recalled: ${run.label}. ${reason}` });
   const liveIds = new Set(items.filter((i) => !i.skippedReason).map((i) => i.id));
   await recoverLoans(tx, run.schoolId, lines.filter((l) => liveIds.has(l.itemId)), todayIST(), -1);
+  await sources.claims.unmark(tx, runId);
   const [row] = await tx.update(payRuns).set({ status: "draft", approvedBy: null, approvedAt: null }).where(eq(payRuns.id, runId)).returning();
   await tx.update(payItems).set({ payout: "pending", failReason: null }).where(and(eq(payItems.runId, runId), sql`${payItems.payout} <> 'paid'`));
   return row!;

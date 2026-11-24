@@ -396,7 +396,8 @@ export class BankService extends FinanceService {
   /** Book balance, what the bank has not caught up with, and the bank balance that should result. Compare it with the bank's own closing balance. */
   async reconciliation(cashAccountId: string, input: unknown = {}): Promise<Reconciliation> {
     const d = this.parse(recInput, input);
-    return this.read("reconcile", async (tx) => {
+    // A report, so anyone who may read the books (an auditor) may open it.
+    return this.read("read", async (tx) => {
       const acc = await this.bankAccountOf(tx, cashAccountId);
       const [[book], open, bankOnly] = await Promise.all([
         tx.select({ net: sql<string>`coalesce(sum(${finJournalLines.debitPaise} - ${finJournalLines.creditPaise}), 0)` }).from(finJournalLines).innerJoin(finJournals, eq(finJournals.id, finJournalLines.journalId)).where(and(eq(finJournalLines.accountId, acc.accountId), lte(finJournals.date, d.asOn))),

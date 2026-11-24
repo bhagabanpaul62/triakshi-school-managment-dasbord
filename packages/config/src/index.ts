@@ -41,6 +41,8 @@ const schema = z.object({
   FAKE_PAYMENTS: z.enum(["true", "false"]).default("false"),
   CASHFREE_APP_ID: z.string().optional(),
   CASHFREE_SECRET_KEY: z.string().optional(),
+  /** Recurring auto-renew has not been proven against Cashfree's sandbox, so its option stays hidden until this is true. */
+  CASHFREE_SUBSCRIPTIONS: bool,
 
   PLATFORM_GSTIN: z.string().default("29ABCDE1234F1Z5"),
   PLATFORM_STATE: z.string().default("Karnataka"),
@@ -108,6 +110,9 @@ export const isLocal = () => /(^|\.)(localhost|test)$/.test(env().ROOT_DOMAIN);
 
 /** The test checkout (no Cashfree keys): always on localhost, elsewhere only when FAKE_PAYMENTS=true. */
 export const fakePayments = () => isLocal() || env().FAKE_PAYMENTS === "true";
+
+/** Whether the auto-renew option may be shown or used. */
+export const autoRenewEnabled = () => env().CASHFREE_SUBSCRIPTIONS;
 
 /** Cookies get `secure` when the site is served over https, which is what the flag is about. */
 export const secureCookies = () => env().APP_PROTOCOL === "https";

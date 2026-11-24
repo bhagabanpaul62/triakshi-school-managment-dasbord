@@ -24,6 +24,9 @@ export interface InvoiceFull extends Invoice { lines: InvoiceLine[]; parts: { du
 /** Money that landed on one bill line. */
 export interface Slice { invoiceId: string; lineId: string; lineKind: string; headId: string | null; studentId: string; amountPaise: number }
 
+/** An id from a URL: anything that is not a uuid is simply not found (never a database error). */
+export const asId = (v: string, what: string) => { if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) throw new NotFoundError(what); return v; };
+
 /** A refusal on one field whose message already says what to do next (the form shows it by the field, the API returns it as the message). */
 export const invalid = (field: string, message: string) => new ValidationError({ [field]: message }, message);
 
@@ -271,7 +274,7 @@ export abstract class FeesBase extends MoneyService<Perm> {
     const [row] = await tx.insert(feeAdvances).values({ schoolId: this.ctx.schoolId, studentId, kind: from === "advance" ? "used" : "deposit", amountPaise: -amount, note, date }).returning({ id: feeAdvances.id });
     const slices = await this.applyParts(tx, parts, { receiptId: null, date });
     await this.post(tx, {
-      date, sourceKey: `fees:${from}-used:${row!.id}`, sourceType: "fee_advance", sourceId: row!.id, memo: note,
+      date, sourceKey: `fees:${from}-used:${row!.id}`, sourceType: "fee_student", sourceId: studentId, memo: note,
       lines: [{ account: from === "advance" ? "student_advances" : "deposits_payable", debit: amount, party: { type: "student", id: studentId } }, ...(await this.creditLines(tx, slices))],
     });
     return amount;

@@ -27,7 +27,7 @@ export class LoanService extends PayrollService {
     const q = listQuerySchema.parse(query);
     return this.read("self", async (tx) => {
       const all = !!this.can("read");
-      const rows = await tx.select().from(payLoans).where(and(all ? undefined : eq(payLoans.userId, this.ctx.userId), q.filters.status ? eq(payLoans.status, q.filters.status as Loan["status"]) : undefined)).orderBy(desc(payLoans.createdAt));
+      const rows = await tx.select().from(payLoans).where(and(all ? (q.filters.userId ? eq(payLoans.userId, q.filters.userId) : undefined) : eq(payLoans.userId, this.ctx.userId), q.filters.status ? eq(payLoans.status, q.filters.status as Loan["status"]) : undefined)).orderBy(desc(payLoans.createdAt));
       const people = await this.people(tx, [...new Set(rows.map((r) => r.userId))]);
       const paid = await repaid(tx, rows.map((r) => r.id));
       const needle = q.q?.toLowerCase();
@@ -105,7 +105,7 @@ export class LoanService extends PayrollService {
       const [loan] = await tx.select().from(payLoans).where(eq(payLoans.id, id)).for("update");
       if (!loan) throw new NotFoundError("Loan");
       if (!loan.givenOn || loan.status === "closed") throw new ConflictError("There is nothing to pay back on this loan.");
-      const balance = Number(loan.amountPaise) - (await repaid(tx, [id])).get(id)!;
+      const balance = Number(loan.amountPaise) - ((await repaid(tx, [id])).get(id) ?? 0);
       const amount = d.amountPaise ?? balance;
       if (amount > balance) throw new ValidationError({ amountPaise: `Only ${balance / 100} rupees are left on this loan.` });
       const date = await this.moneyDate(tx, d.date);
