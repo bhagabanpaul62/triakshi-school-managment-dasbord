@@ -4,6 +4,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@
 import { addDays, monthStart } from "@smw/feature-kit/money";
 import { createTestSchool } from "@smw/feature-kit/testing";
 import { students } from "@smw/feature-students/schema";
+import { financeConfig } from "@smw/feature-finance/settings";
 import { ChequeService } from "./cheques";
 import { ConcessionService } from "./concessions";
 import { CounterService } from "./counter";
@@ -318,5 +319,13 @@ describe("the counter desk's own reads", () => {
     expect((await new DuesService(admin()).card(noClassId)).billed).toBe(false);
     await expect(new DuesService(fx.school.as.student).card(fx.students.riya)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new DuesService(admin()).card("not-an-id")).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("the two new finance settings", () => {
+  it("default off and empty, take a ticked form box, and keep the office line short", () => {
+    expect(financeConfig.parse({})).toMatchObject({ planNeedsFile: false, officeHours: "" });
+    expect(financeConfig.parse({ planNeedsFile: "on", officeHours: "  Mon to Sat  " })).toMatchObject({ planNeedsFile: true, officeHours: "Mon to Sat" });
+    expect(financeConfig.safeParse({ officeHours: "x".repeat(121) }).success).toBe(false);
   });
 });
