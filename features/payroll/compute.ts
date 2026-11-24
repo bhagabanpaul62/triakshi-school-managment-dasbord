@@ -47,7 +47,7 @@ export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: 
   for (const a of assigns) if (!assign.has(a.userId)) assign.set(a.userId, a);
   const structureIds = [...new Set([...assign.values()].map((a) => a.structureId))];
   const comps = structureIds.length ? await tx.select().from(payComponents).where(inArray(payComponents.structureId, structureIds)) : [];
-  const attendance = env.attendanceOn && !req.offCycle ? await sources.days.monthDays(tx, userIds, month, { leftOn: req.leftOn }) : {};
+  const attendance = env.attendanceOn && !req.offCycle ? await sources.days.monthDays(tx, userIds, month.slice(0, 7), { leftOn: req.leftOn }) : {};
   const joining = new Map(staff.map((s) => [s.userId, s.joiningDate]));
 
   // Year to date for tax: pay already approved this financial year, other runs only.

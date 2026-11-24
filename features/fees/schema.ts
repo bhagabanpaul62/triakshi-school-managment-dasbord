@@ -386,13 +386,13 @@ export const feeReminderStops = pgTable("fee_reminder_stops", {
 // ---------- changes that lower what is owed ----------
 
 /**
- * A cancel, a revision, a move to another plan, an opt-out or a plan switch-off that lowers what a student owes. Small
+ * A cancel, a revision, a move to another plan, an opt-out, a plan switch-off or a small credit note that lowers what a student owes. Small
  * ones (under the school's limit) are applied at once and kept here as `direct` so the limit counts them; bigger ones
  * wait for approval `fees.invoice_change`. `payload` keeps the proposal.
  */
 export const feeInvoiceChanges = pgTable("fee_invoice_changes", {
   ...schoolColumns(),
-  kind: text("kind").$type<"cancel" | "revise" | "student_plan" | "opt_out" | "archive_plan">().notNull(),
+  kind: text("kind").$type<"cancel" | "revise" | "student_plan" | "opt_out" | "archive_plan" | "note" | "concession">().notNull(),
   /** Null for a plan-wide change. */
   invoiceId: uuid("invoice_id").references(() => feeInvoices.id, { onDelete: "restrict" }),
   studentId: uuid("student_id").references(() => students.id, { onDelete: "restrict" }),

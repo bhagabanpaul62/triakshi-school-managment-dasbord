@@ -4,6 +4,7 @@ import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery }
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import type { PostLine } from "@smw/feature-finance/posting";
 import { FeesBase, type Head } from "./base";
+import { ChangeService } from "./changes";
 import { openOf } from "./calc";
 import { noteInput } from "./inputs";
 import { feeInvoiceLines, feeInvoices, feeNotes } from "./schema";
@@ -23,9 +24,15 @@ export class NoteService extends FeesBase {
     const data = this.parse(noteInput, input);
     return this.write("concede", async (tx) => {
       const spec: NoteSpec = { invoiceId: data.invoiceId, kind: data.kind, reasonType: data.reasonType, reason: data.reason, lines: data.kind === "credit" ? data.lines! : [{ lineId: "", ...data.add!, amountPaise: data.add!.amountPaise }] };
+      const changes = new ChangeService(this.ctx);
+      await changes.assertNoneWaitingIn(tx, { invoiceId: data.invoiceId });
       const note = await this.recordIn(tx, spec);
-      const { concessionLimitPaise: limit } = await this.settings(tx);
-      if (spec.reasonType !== "correction" && limit > 0 && note.amountPaise <= limit) return this.applyIn(tx, note.id);
+      // A note that takes money off what is owed needs a second person above the school's limit, counting what this student has already had off alone; a debit note adds, so it applies at once.
+      const lowers = note.kind === "credit" ? note.amountPaise : 0;
+      if (await changes.mayApplyAloneIn(tx, note.studentId, lowers)) {
+        await changes.recordDirectIn(tx, { kind: "note", invoiceId: note.invoiceId, studentId: note.studentId, reason: data.reason, lowersPaise: lowers });
+        return this.applyIn(tx, note.id);
+      }
       const [inv] = await tx.select({ number: feeInvoices.number, label: feeInvoices.label }).from(feeInvoices).where(eq(feeInvoices.id, note.invoiceId));
       await this.askApproval(tx, { kind: "fees.note", refType: "fee_note", refId: note.id, title: `${data.kind === "credit" ? "Credit" : "Debit"} note ${rupees(note.amountPaise)} on ${inv?.number ?? inv?.label}`, amountPaise: note.amountPaise, reason: data.reason, href: `/app/fees/invoices/${note.invoiceId}` });
       return note;

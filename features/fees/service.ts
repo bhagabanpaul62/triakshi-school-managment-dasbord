@@ -15,3 +15,4 @@ export { CertificateService } from "./certificates";
 export { ChecksService, type Mismatch } from "./checks";
 export { ReminderService } from "./reminders";
 export { SetupService } from "./setup-status";
+export { ChangeService, type Change } from "./changes";

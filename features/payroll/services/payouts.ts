@@ -1,6 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { unseal } from "@smw/feature-kit/secret";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
@@ -9,7 +8,7 @@ import { BANK_COLUMN_LABEL } from "../config";
 import { monthLabel, rupeeText, toCsv } from "../csv";
 import { PayrollService } from "../base";
 import { runWithItems } from "../ledger";
-import { payExits, payItems, payLines, payProfiles, payRuns } from "../schema";
+import { payExits, payItems, payProfiles, payRuns } from "../schema";
 
 const markInput = z.object({ itemIds: z.array(z.uuid()).optional(), date: day.optional(), reference: z.string().trim().max(80).optional(), cashAccountId: z.uuid().optional() });
 const failInput = z.object({ itemIds: z.array(z.uuid()).min(1, "Pick who failed."), reason: z.string().trim().min(3, "Say what the bank said.").max(200) });

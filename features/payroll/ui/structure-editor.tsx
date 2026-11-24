@@ -14,7 +14,7 @@ const OFF: PayRates = { pfCeilingSegments: [{ days: 30, paise: 0 }], pfEmployeeB
 const BLANK: EditorComponent = { label: "", kind: "earning", mode: "fixed", value: 0, isBasic: false, isWage: false, proRata: true, taxable: true };
 const KIND = { earning: "Earning", deduction: "Deduction", employer: "Employer cost" };
 const MODE = { fixed: "Fixed amount", percent_of_basic: "% of basic", percent_of_gross: "% of gross", remainder: "Rest of the gross" };
-const shown = (c: EditorComponent) => (c.mode === "fixed" ? c.value / 100 : c.value / 100);
+const shown = (c: EditorComponent) => c.value / 100;
 
 /** Build a pay structure and see what a sample gross turns into, line by line, before saving. A structure people are paid by is read only: copy it to change it. */
 export function StructureEditor({ id, name: initialName, components: initial, locked, save, copy }: { id?: string; name: string; components: EditorComponent[]; locked: boolean; save: (fd: FormData) => Promise<FormResult>; copy?: (fd: FormData) => Promise<FormResult> }) {

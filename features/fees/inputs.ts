@@ -90,6 +90,7 @@ export const concessionTypeInput = z.object({
   mode: z.enum(["percent", "amount"]),
   value: paise(),
   headId: f.optId(),
+  per: z.enum(["bill", "year"]).default("year"),
   isActive: f.bool(),
 });
 export const concessionInput = z.object({
@@ -98,6 +99,8 @@ export const concessionInput = z.object({
   typeId: f.optId(),
   headId: f.optId(),
   mode: z.enum(["percent", "amount"]),
+  /** An amount is off each bill, or in all across the year. Default: the type's, else the year. */
+  per: z.enum(["bill", "year"]).optional(),
   /** Basis points for percent, paise for amount. */
   value: paise(),
   reason: f.text(3, 200, "Say why, like Sibling discount"),

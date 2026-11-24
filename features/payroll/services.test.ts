@@ -7,11 +7,14 @@ import { systemAccounts } from "@smw/feature-finance/chart";
 import { financeApprovals } from "@smw/feature-finance/approval-handlers";
 import { ApprovalService } from "@smw/feature-finance/approvals";
 import { balanceOf, postJournal } from "@smw/feature-finance/posting";
-import { finJournalLines, finJournals, finApprovals } from "@smw/feature-finance/schema";
+import { finJournalLines, finApprovals } from "@smw/feature-finance/schema";
 import { expClaims } from "@smw/feature-expenses/schema";
 import { staffProfiles } from "@smw/feature-staff/schema";
-import { remindersFor } from "./jobs";
-import { payItems, payLines, payLoans, payProfiles } from "./schema";
+import { ensureCredit, ensureTypes } from "@smw/feature-attendance/leave-ledger";
+import { leaveLedger } from "@smw/feature-attendance/schema";
+import jobs, { remindersFor } from "./jobs";
+import { notifications } from "@smw/feature-notifications/schema";
+import { payItems, payLines, payProfiles } from "./schema";
 import type { DaysSource, MonthDaysRow } from "./sources";
 import {
   AssignmentService, DashboardService, DeclarationService, ExitService, LoanService, PayConfigService, PayoutService, PayslipService, ProfileService, RateService,
@@ -30,7 +33,6 @@ const mkStaff = async (s: TestSchool, key: string, name: string, o: { joined?: s
   await tx.insert(staffProfiles).values({ schoolId: s.id, userId: u!.id, employeeId: `E-${key}`, designation: "TGT", department: o.dept ?? "Science", joiningDate: o.joined ?? "2018-04-01", employmentType: (o.type ?? "permanent") as "permanent" });
   return u!.id;
 });
-const chart = () => withSchool(a.id, (tx) => systemAccounts(tx, a.id));
 const bal = async (key: Parameters<typeof balanceOf>[1][number] extends never ? never : string) => withSchool(a.id, async (tx) => balanceOf(tx, [(await systemAccounts(tx, a.id))[key as "cash"]]));
 const maker = (ctx: Ctx = a.as.accountant) => new RunService(ctx);
 const decider = (s = a, who: Ctx = s.as.admin) => new ApprovalService(who, handlers);
@@ -424,6 +426,25 @@ describe("exit", () => {
     expect((await exits.get(x.id)).exit.status).toBe("paid");
     await expect(exits.update(x.id, { lastDay, reason: "again" })).rejects.toBeInstanceOf(ConflictError);
   });
+  it("leave paid out at exit is written to the leave ledger, and put back when the settlement is undone", async () => {
+    const id = await mkStaff(a, "x3", "Farid Khan", { joined: "2018-04-01", type: "permanent" });
+    await new AssignmentService(a.as.accountant).assign({ userId: id, structureId, grossPaise: 4_000_000, fromDate: addMonths(M0, -20) });
+    await new ProfileService(a.as.accountant).save(id, { pan: "ABCDE7777F", bankAccount: "11223344556", ifsc: "DEMO0001234" });
+    await withSchool(a.id, async (tx) => { await ensureTypes(tx, a.id); await ensureCredit(tx, a.id, todayIST(), id); });
+    const ctx: Ctx = { ...a.as.accountant, features: new Set([...a.as.accountant.features, "attendance"]) };
+    const exits = new ExitService(ctx);
+    const ledger = () => withSchool(a.id, async (tx) => (await tx.select().from(leaveLedger).where(eq(leaveLedger.userId, id))).reduce((s, r) => s + r.halfDays, 0));
+    const before = await ledger();
+    const x = await exits.create({ userId: id, lastDay: `${M0.slice(0, 7)}-15`, reason: "Retired" });
+    const line = (await exits.get(x.id)).exit.lines.find((l) => l.code === "leave_encashment")!;
+    const half = Number(line.note!.split(":")[1]);
+    expect(half).toBeGreaterThan(0);
+    expect(line.amountPaise).toBe(Math.round((4_000_000 * (half / 2)) / 30));
+    await decider().approve({ id: (await exits.submit(x.id)).id });
+    expect(await ledger()).toBe(before - half);
+    await exits.undo(x.id, { reason: "Wrong person" });
+    expect(await ledger()).toBe(before);
+  });
   it("a person with an exit in progress cannot be given another", async () => {
     const id = await mkStaff(a, "x2", "Eka Nair", { type: "contract", joined: "2025-12-01" });
     await new AssignmentService(a.as.accountant).assign({ userId: id, structureId, grossPaise: 3_000_000, fromDate: addMonths(M0, -20) });
@@ -511,6 +532,31 @@ describe("rates, dashboard and reminders", () => {
     const notes = await remindersFor(a.id, day);
     expect(notes.some((n) => n.title.startsWith("Pay run not started"))).toBe(true);
     expect(await remindersFor(a.id, `${day.slice(0, 8)}10`)).not.toContainEqual(expect.objectContaining({ title: expect.stringContaining("Pay run not started") }));
+  });
+});
+
+describe("approval and reminders under load", () => {
+  it("two approvals of the same run at once post it once", async () => {
+    const runs = maker();
+    const run = await runs.create({ month: month(2), kind: "off_cycle", userIds: [ids.p1], label: "Arrears pay" });
+    const item = (await runs.get(run.id)).items[0]!;
+    await runs.addAdjustment(item.id, { code: "arrears", amountPaise: 250_000 });
+    await runs.review(run.id);
+    const ap = await runs.submit(run.id);
+    const before = await bal("salary_payable");
+    const out = await Promise.allSettled([decider().approve({ id: ap.id }), decider().approve({ id: ap.id })]);
+    expect(out.filter((o) => o.status === "fulfilled")).toHaveLength(1);
+    const posted = await withSchool(a.id, async (tx) => (await tx.select().from(finJournalLines)).length);
+    expect(posted).toBeGreaterThan(0);
+    expect(await unbalanced()).toHaveLength(0);
+    expect(await bal("salary_payable")).toBe(before - 250_000);
+  });
+  it("the daily reminder job writes each notice once however often it runs", async () => {
+    await jobs["payroll.reminders"]();
+    const count = () => withSchool(a.id, async (tx) => (await tx.select().from(notifications)).length);
+    const first = await count();
+    await jobs["payroll.reminders"]();
+    expect(await count()).toBe(first);
   });
 });
 

@@ -1,9 +1,9 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
-import { addMonths, fyOf, fyRange, monthStart, todayIST } from "@smw/feature-kit/money";
+import { and, count, eq, gte, inArray, sql } from "drizzle-orm";
+import { addMonths, monthStart, todayIST } from "@smw/feature-kit/money";
+import { users, type Tx } from "@smw/db";
 import { balanceOf } from "@smw/feature-finance/posting";
 import { systemAccounts } from "@smw/feature-finance/chart";
 import { finCashAccounts } from "@smw/feature-finance/schema";
-import { count } from "drizzle-orm";
 import { PayrollService } from "../base";
 import { monthLabel } from "../csv";
 import { missingDetails } from "./profiles";
@@ -39,10 +39,8 @@ export class DashboardService extends PayrollService {
         : run.status === "reviewed" ? { text: "Send the run for approval", href: `/app/payroll/runs/${run.id}` }
         : run.status === "approved" ? { text: "Pay the salaries", href: `/app/payroll/runs/${run.id}?tab=payouts` } : null;
       const [exits] = await tx.select({ n: count() }).from(payExits).where(inArray(payExits.status, ["draft", "pending", "approved"]));
-      const [fyFrom, fyTo] = fyRange(fyOf(month));
       const sys = await systemAccounts(tx, this.ctx.schoolId);
       const salaryShare = this.ctx.features.has("fees") ? { salariesPaise: await balanceOf(tx, [sys.salaries, sys.employer_contrib]), incomePaise: -(await balanceOf(tx, [sys.fee_income, sys.concessions, sys.late_fee])) } : null;
-      void fyFrom; void fyTo;
       return {
         month, run: run ? { id: run.id, status: run.status, label: run.label, netPaise: run.totals.net ?? 0, people: run.totals.people ?? 0 } : null, track: steps, next,
         netPaise: run?.totals.net ?? 0, previousNetPaise: prev ? prev.totals.net ?? 0 : null,
@@ -54,7 +52,7 @@ export class DashboardService extends PayrollService {
   /** The checklist: what is still needed before payroll runs cleanly, each with where to do it. */
   async setupStatus(): Promise<SetupStep[]> { return this.read("read", (tx) => this.setup(tx)); }
 
-  private async setup(tx: Parameters<Parameters<DashboardService["read"]>[1]>[0]): Promise<SetupStep[]> {
+  private async setup(tx: Tx): Promise<SetupStep[]> {
     const [config, people, profiles, assigns, [structures], bank] = await Promise.all([
       this.config(tx), this.people(tx), tx.select().from(payProfiles), tx.select().from(payAssignments), tx.select({ n: count() }).from(payStructures).where(eq(payStructures.isActive, true)),
       tx.select({ id: finCashAccounts.id }).from(finCashAccounts).where(and(eq(finCashAccounts.kind, "bank"), eq(finCashAccounts.isActive, true))).limit(1),
@@ -62,14 +60,14 @@ export class DashboardService extends PayrollService {
     const active = [...people.values()].filter((p) => !p.left);
     const paid = (id: string) => assigns.some((a) => a.userId === id);
     const gaps = active.filter((p) => missingDetails(profiles.find((x) => x.userId === p.id) ?? null, config, paid(p.id)).length);
-    const admins = await tx.execute(sql`select count(*)::int as n from users where role = 'admin' and status = 'active'`) as unknown as { n: number }[];
+    const [admins] = await tx.select({ n: count() }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")));
     return [
       { key: "config", text: "Choose which deductions apply: PF, ESI, professional tax and income tax.", done: config.saved, href: "/app/payroll/statutory?tab=settings", need: "manage" },
       { key: "bank", text: "Add the school's bank account so salaries can be paid.", done: bank.length > 0, href: "/app/finance/settings?tab=cash&next=/app/payroll", need: "finance" },
       { key: "structure", text: "Make a pay structure.", done: Number(structures?.n) > 0, href: "/app/payroll/structures", need: "manage" },
       { key: "assign", text: `Set up pay for ${active.filter((p) => !paid(p.id)).length || "everyone"} staff without it.`, done: active.length > 0 && active.every((p) => paid(p.id)), href: "/app/payroll/people?missing=1", need: "manage" },
       { key: "details", text: `Fill in pay details for ${gaps.length} people (PAN, bank, UAN).`, done: active.length > 0 && gaps.length === 0, href: "/app/payroll/people?missing=1", need: "manage" },
-      { key: "approver", text: "Add a second admin so payroll can be approved by someone other than the person who prepares it.", done: Number(admins[0]?.n ?? 0) > 1, href: "/app/staff", need: "manage" },
+      { key: "approver", text: "Add a second admin so payroll can be approved by someone other than the person who prepares it.", done: Number(admins?.n ?? 0) > 1, href: "/app/staff", need: "manage" },
     ];
   }
 }

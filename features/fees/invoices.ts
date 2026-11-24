@@ -7,10 +7,11 @@ import { students } from "@smw/feature-students/schema";
 import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { chargeManyInput, draftInput, bulkInput, reviseInput } from "./inputs";
+import { ChangeService } from "./changes";
 import { NoteService } from "./notes";
 import { OpeningImport } from "./opening";
 import { PlanBilling } from "./plan-billing";
-import { feeAllocations, feeDueParts, feeInvoiceLines, feeInvoices, feeNotes, feeReceipts } from "./schema";
+import { feeAllocations, feeConcessionUses, feeDueParts, feeInvoiceChanges, feeInvoiceLines, feeInvoices, feeNotes, feeReceipts } from "./schema";
 
 type LineIn = { headId?: string | null; kind: "fee" | "deposit" | "opening" | "bounce"; label: string; amountPaise: number; concessionPaise?: number };
 const CHUNK = 400;
@@ -64,7 +65,8 @@ export class InvoiceService extends FeesBase {
         tx.select({ id: students.id, name: students.name }).from(students).where(eq(students.id, inv.studentId)),
       ]);
       const accruedLatePaise = inv.status === "issued" ? invoiceLateFee(inv.lateRule, calcOf(inv), today) : 0;
-      return { invoice: inv, student: student[0]!, openPaise: inv.status === "issued" ? openOf(inv) : 0, state: dueState(inv, today), accruedLatePaise, notes, allocations, versions };
+      const changes = await tx.select().from(feeInvoiceChanges).where(eq(feeInvoiceChanges.invoiceId, id)).orderBy(desc(feeInvoiceChanges.createdAt));
+      return { invoice: inv, student: student[0]!, changes: own ? [] : changes, openChange: own ? null : changes.find((c) => c.status === "pending") ?? null, openPaise: inv.status === "issued" ? openOf(inv) : 0, state: dueState(inv, today), accruedLatePaise, notes, allocations, versions };
     });
   }
 
@@ -189,13 +191,24 @@ export class InvoiceService extends FeesBase {
 
   // ---------- cancel and revise ----------
 
-  /** Cancel a bill nobody has paid or credited, and reverse its posting. Anything else is corrected with a credit note. */
+  /**
+   * Cancel a bill nobody has paid or credited, and reverse its posting. A cancel takes what is owed off the student, so
+   * above the school's limit it waits for approval `fees.invoice_change` (the proposal is kept; see `ChangeService`).
+   * Anything paid or credited is corrected with a credit note instead.
+   */
   async cancel(id: string, reason: string) {
     this.authorize("setup", "write");
     const why = this.parse(reviseInput.shape.reason, reason);
-    return this.write("setup", (tx) => this.cancelIn(tx, id, why), (r) => ({ action: "cancel", entity: "Invoice", entityId: r.id, summary: `Cancelled bill ${r.number ?? r.label}: ${why}` }));
+    return this.write("setup", async (tx) => {
+      const [row] = await tx.select().from(feeInvoices).where(eq(feeInvoices.id, asId(id, "Invoice")));
+      if (!row) throw new NotFoundError("Invoice");
+      const label = row.number ?? row.label;
+      const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "cancel", invoiceId: id, studentId: row.studentId, payload: {}, reason: why, lowersPaise: row.status === "issued" ? openOf(row) : 0, title: `Cancel bill ${label}`, href: `/app/fees/invoices/${id}` }, () => this.cancelIn(tx, id, why));
+      return out.requested ? { id, number: row.number, label: row.label, requested: true, changeId: out.change.id } : { ...out.value, requested: false, changeId: null };
+    }, (r) => ({ action: r.requested ? "request_cancel" : "cancel", entity: "Invoice", entityId: r.id, summary: `${r.requested ? "Asked to cancel" : "Cancelled"} bill ${r.number ?? r.label}: ${why}` }));
   }
 
+  /** The cancel itself: no permission and no approval check, because the caller did them (the approval handler, the system charges of transport and library). */
   async cancelIn(tx: Tx, id: string, reason: string, date = todayIST()) {
     const [pre] = await tx.select({ s: feeInvoices.studentId }).from(feeInvoices).where(eq(feeInvoices.id, id));
     if (!pre) throw new NotFoundError("Invoice");
@@ -205,6 +218,8 @@ export class InvoiceService extends FeesBase {
     if (inv!.paidPaise > 0) throw new ConflictError(`Money was already paid on this bill. Reverse the receipt first, or add a credit note.`);
     if (inv!.creditedPaise > 0 || inv!.parts.length) throw new ConflictError("This bill has notes or a settlement on it. Correct it with a credit note instead.");
     await tx.update(feeInvoices).set({ status: "cancelled", cancelledAt: new Date(), cancelReason: reason }).where(eq(feeInvoices.id, id));
+    // A yearly concession gets back what this bill took.
+    await tx.delete(feeConcessionUses).where(eq(feeConcessionUses.invoiceId, id));
     for (const l of inv!.lines.filter((x) => x.kind === "late")) await this.reverse(tx, `fees:late:${l.id}`, `Bill ${inv!.number} cancelled`, date);
     await this.reverse(tx, `fees:invoice:${id}`, `Bill ${inv!.number} cancelled: ${reason}`, date);
     return { id, number: inv!.number, label: inv!.label };
@@ -213,26 +228,52 @@ export class InvoiceService extends FeesBase {
   /**
    * Replace what is still open on a bill. Unpaid: it is cancelled and a new version issued. Part paid: its open part is
    * taken off by a credit note and a new version (the lines given) is issued for the rest. The old one stays visible.
+   * A revision that lowers what is owed by more than the limit waits for approval; a fix of a date, a label, a head or
+   * anything of the same total applies at once.
    */
   async revise(id: string, input: unknown) {
     this.authorize("setup", "write");
     const d = this.parse(reviseInput, input);
     return this.write("setup", async (tx) => {
-      const [pre] = await tx.select({ s: feeInvoices.studentId }).from(feeInvoices).where(eq(feeInvoices.id, id));
-      if (!pre) throw new NotFoundError("Invoice");
-      await this.lockStudents(tx, [pre.s]);
-      const [old] = await this.invoicesById(tx, [id], true);
-      if (old!.status !== "issued") throw new ConflictError("Only an issued bill can be revised.");
-      if (old!.paidPaise === 0 && old!.creditedPaise === 0 && !old!.parts.length) await this.cancelIn(tx, id, `Revised: ${d.reason}`);
-      else {
-        const spec = old!.lines.filter((l) => openOf(l) > 0).map((l) => ({ lineId: l.id, amountPaise: openOf(l) }));
-        if (spec.length) await new NoteService(this.ctx).issueIn(tx, { invoiceId: id, kind: "credit", reasonType: "correction", reason: `Revised: ${d.reason}`, lines: spec });
-      }
-      const key = old!.sourceKey ? (old!.paidPaise === 0 && old!.creditedPaise === 0 ? old!.sourceKey : `${old!.sourceKey}:v${old!.version + 1}`) : undefined;
-      const nid = await this.createDraft(tx, { studentId: old!.studentId, yearId: old!.yearId, kind: old!.kind, label: d.label ?? old!.label, dueDate: d.dueDate ?? old!.dueDate, note: d.reason, lines: d.lines, sourceKey: key, replacesId: id, version: old!.version + 1, lateRule: old!.lateRule, classId: old!.classId, snapshot: old!.snapshot });
-      await this.issueIn(tx, [nid]);
-      return nid;
-    }, (nid) => ({ action: "revise", entity: "Invoice", entityId: nid, summary: `Revised a bill: ${d.reason}` }));
+      const [row] = await tx.select().from(feeInvoices).where(eq(feeInvoices.id, asId(id, "Invoice")));
+      if (!row) throw new NotFoundError("Invoice");
+      if (row.status !== "issued") throw new ConflictError("Only an issued bill can be revised.");
+      const lowers = openOf(row) - d.lines.reduce((s, l) => s + l.amountPaise, 0);
+      const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "revise", invoiceId: id, studentId: row.studentId, payload: d, reason: d.reason, lowersPaise: lowers, title: `Revise bill ${row.number ?? row.label}`, href: `/app/fees/invoices/${id}` }, () => this.reviseIn(tx, id, d));
+      return out.requested ? { invoiceId: null, requested: true, changeId: out.change.id } : { invoiceId: out.value, requested: false, changeId: null };
+    }, (r) => ({ action: r.requested ? "request_revise" : "revise", entity: "Invoice", entityId: r.invoiceId ?? id, summary: `${r.requested ? "Asked to revise" : "Revised"} a bill: ${d.reason}` }));
+  }
+
+  /** The revision itself (no permission or approval check). Returns the new version's id. */
+  async reviseIn(tx: Tx, id: string, d: ReturnType<typeof reviseInput.parse>): Promise<string> {
+    const [pre] = await tx.select({ s: feeInvoices.studentId }).from(feeInvoices).where(eq(feeInvoices.id, id));
+    if (!pre) throw new NotFoundError("Invoice");
+    await this.lockStudents(tx, [pre.s]);
+    const [old] = await this.invoicesById(tx, [id], true);
+    if (old!.status !== "issued") throw new ConflictError("Only an issued bill can be revised.");
+    if (old!.paidPaise === 0 && old!.creditedPaise === 0 && !old!.parts.length) await this.cancelIn(tx, id, `Revised: ${d.reason}`);
+    else {
+      const spec = old!.lines.filter((l) => openOf(l) > 0).map((l) => ({ lineId: l.id, amountPaise: openOf(l) }));
+      if (spec.length) await new NoteService(this.ctx).issueIn(tx, { invoiceId: id, kind: "credit", reasonType: "correction", reason: `Revised: ${d.reason}`, lines: spec });
+    }
+    const key = old!.sourceKey ? (old!.paidPaise === 0 && old!.creditedPaise === 0 ? old!.sourceKey : `${old!.sourceKey}:v${old!.version + 1}`) : undefined;
+    const nid = await this.createDraft(tx, { studentId: old!.studentId, yearId: old!.yearId, kind: old!.kind, label: d.label ?? old!.label, dueDate: d.dueDate ?? old!.dueDate, note: d.reason, lines: d.lines, sourceKey: key, replacesId: id, version: old!.version + 1, lateRule: old!.lateRule, classId: old!.classId, snapshot: old!.snapshot });
+    await this.issueIn(tx, [nid]);
+    return nid;
+  }
+
+  /** Edit a refused or withdrawn cancel or revision and send it again. */
+  async resubmitChange(changeId: string, input: unknown) {
+    this.authorize("setup", "write");
+    return this.write("setup", async (tx) => {
+      const [c] = await tx.select().from(feeInvoiceChanges).where(eq(feeInvoiceChanges.id, changeId)).for("update");
+      if (!c || !c.invoiceId) throw new NotFoundError("Request");
+      if (c.status !== "rejected" || c.direct) throw new ConflictError("Only a request that was not approved can be edited and sent again.");
+      const bills = new InvoiceService(this.ctx);
+      if (c.kind === "cancel") return bills.cancel(c.invoiceId, (input as { reason?: string })?.reason ?? c.reason);
+      if (c.kind === "revise") return bills.revise(c.invoiceId, input ?? c.payload);
+      throw new ConflictError("Send this kind of change again from its own screen.");
+    });
   }
 
   // ---------- from the plans ----------
@@ -271,6 +312,8 @@ export class InvoiceService extends FeesBase {
       const kept = chunk.filter((d) => byKey.has(d.sourceKey));
       if (!kept.length) continue;
       await tx.insert(feeInvoiceLines).values(kept.flatMap((d) => d.lines.map((l, k) => ({ schoolId: this.ctx.schoolId, invoiceId: byKey.get(d.sourceKey)!, headId: l.headId, kind: l.kind, label: l.label, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise, sort: k }))));
+      const uses = kept.flatMap((d) => d.uses.map((u) => ({ schoolId: this.ctx.schoolId, concessionId: u.concessionId, invoiceId: byKey.get(d.sourceKey)!, amountPaise: u.amountPaise })));
+      if (uses.length) await tx.insert(feeConcessionUses).values(uses);
       await this.refreshInvoiceTotals(tx, [...byKey.values()]);
       made.push(...await this.issueIn(tx, [...byKey.values()], date));
     }

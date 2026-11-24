@@ -21,6 +21,7 @@ export const SCHEDULES: Record<string, { cron: string; tz: string }> = {
   "attendance.send-alerts": { cron: "*/10 * * * *", tz: "UTC" }, // every 10 minutes; alerts wait 30 minutes so a corrected mark never goes out
   "finance.control-checks": { cron: "0 3 * * *", tz: "Asia/Kolkata" }, // 03:00 IST daily; admins hear only of a mismatch
   "fees.issue-invoices": { cron: "0 1 * * *", tz: "Asia/Kolkata" }, // 01:00 IST daily; one bill per student and due key
+  "payroll.reminders": { cron: "0 9 * * *", tz: "Asia/Kolkata" }, // 09:00 IST daily; run not started, statutory and exit pay due
   "fees.reminders": { cron: "0 9 * * *", tz: "Asia/Kolkata" }, // 09:00 IST daily; only schools that turned reminders on
   "fees.control-checks": { cron: "15 3 * * *", tz: "Asia/Kolkata" }, // 03:15 IST daily
   "expenses.recurring": { cron: "0 2 * * *", tz: "Asia/Kolkata" }, // 02:00 IST daily; one draft bill per period

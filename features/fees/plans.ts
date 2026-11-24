@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@smw/db";
 import { ConflictError, CrudService, NotFoundError, listQuerySchema, toPage, type Ctx, type ListQuery } from "@smw/feature-kit";
@@ -9,8 +9,10 @@ import { classes } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
 import { FeesBase, asId, invalid, type Perm } from "./base";
+import { ChangeService } from "./changes";
+import { PlanBilling } from "./plan-billing";
 import { copyPlanInput, headInput, optInInput, planInput, studentPlanInput } from "./inputs";
-import { feeHeads, feeInvoiceLines, feeOptIns, feePlanClasses, feePlanDues, feePlanLines, feePlans, feeStudentPlans } from "./schema";
+import { feeHeads, feeInvoiceLines, feeInvoices, feeOptIns, feePlanClasses, feePlanDues, feePlanLines, feePlans, feeStudentPlans } from "./schema";
 import type { ADMISSION_TYPES } from "./constants";
 
 export type Plan = typeof feePlans.$inferSelect;
@@ -238,12 +240,22 @@ export class PlanService extends FeesBase {
     }, () => ({ action: "withdraw", entity: "Fee plan", entityId: id, summary: "Withdrew a fee plan from approval" }));
   }
 
+  /** Switch a published plan off: nothing more is billed from it (bills issued stay). That lowers what will be billed, so above the school's limit it waits for approval. */
   async archive(id: string) {
+    this.authorize("setup", "write");
     return this.write("setup", async (tx) => {
-      const [p] = await tx.update(feePlans).set({ status: "archived" }).where(and(eq(feePlans.id, id), eq(feePlans.status, "published"))).returning();
-      if (!p) throw new ConflictError("Only a published plan can be archived.");
-      return p;
-    }, (p) => ({ action: "archive", entity: "Fee plan", entityId: p.id, summary: `Archived fee plan ${p.name}. Bills already issued stay.` }));
+      const [p] = await tx.select().from(feePlans).where(eq(feePlans.id, id));
+      if (!p || p.status !== "published") throw new ConflictError("Only a published plan can be archived.");
+      const { drafts } = await new PlanBilling(this.ctx).build(tx, { yearId: p.yearId });
+      const lowers = drafts.filter((x) => x.planId === p.id).reduce((s, x) => s + x.grossPaise - x.concessionPaise, 0);
+      const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "archive_plan", payload: { planId: id }, reason: `Switch off fee plan ${p.name}`, lowersPaise: lowers, title: `Switch off fee plan ${p.name}`, href: `/app/fees/plans/${id}` }, () => this.archiveIn(tx, id));
+      return { id, name: p.name, requested: out.requested, changeId: out.requested ? out.change.id : null };
+    }, (r) => ({ action: r.requested ? "request_archive" : "archive", entity: "Fee plan", entityId: r.id, summary: `${r.requested ? "Asked to archive" : "Archived"} fee plan ${r.name}. Bills already issued stay.` }));
+  }
+
+  async archiveIn(tx: Tx, id: string) {
+    const [p] = await tx.update(feePlans).set({ status: "archived" }).where(and(eq(feePlans.id, id), eq(feePlans.status, "published"))).returning({ id: feePlans.id });
+    if (!p) throw new ConflictError("This plan is no longer published.");
   }
 
   async removeDraft(id: string) {
@@ -279,38 +291,68 @@ export class PlanService extends FeesBase {
     await tx.update(feePlans).set({ status: "draft" }).where(and(eq(feePlans.id, planId), eq(feePlans.status, "pending")));
   }
 
-  /** Put one student on another plan for the year (their class's plan stops applying). Does not touch bills already issued. */
+  /** What a plan would still bill a student: its dues (mandatory, and the optional heads taken) whose month is not yet billed to them under any plan. */
+  private async unbilledIn(tx: Tx, studentId: string, planId: string, taken: Set<string>, onlyHeads?: Set<string>): Promise<number> {
+    const [lines, billed] = await Promise.all([
+      tx.select({ headId: feePlanLines.headId, optional: feePlanLines.optional, key: feePlanDues.dueKey, amount: feePlanDues.amountPaise }).from(feePlanLines).innerJoin(feePlanDues, eq(feePlanDues.lineId, feePlanLines.id)).where(eq(feePlanLines.planId, planId)),
+      tx.select({ k: feeInvoices.sourceKey }).from(feeInvoices).where(and(eq(feeInvoices.studentId, studentId), like(feeInvoices.sourceKey, "plan:%"), ne(feeInvoices.status, "cancelled"))),
+    ]);
+    const done = new Set(billed.map((b) => b.k!.split(":").slice(3).join(":")));
+    return lines.filter((l) => (!l.optional || taken.has(l.headId)) && (!onlyHeads || onlyHeads.has(l.headId)) && !done.has(l.key)).reduce((s, l) => s + l.amount, 0);
+  }
+
+  /**
+   * Put one student on another plan for the year (their class's plan stops applying). Bills already issued stay. If the
+   * new plan bills less of what is still to come by more than the school's limit, it waits for approval.
+   */
   async setStudentPlan(input: unknown) {
     this.authorize("setup", "write");
     const data = this.parse(studentPlanInput, input);
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
-      const [[s], [root]] = await Promise.all([
-        tx.select({ id: students.id }).from(students).where(eq(students.id, data.studentId)),
-        tx.select({ id: feePlans.id }).from(feePlans).where(and(eq(feePlans.rootId, data.rootId), eq(feePlans.yearId, year.id))).limit(1),
+      const [[s], target] = await Promise.all([
+        tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId)),
+        this.publishedIn(tx, year.id).then((all) => all.find((p) => p.rootId === data.rootId)),
       ]);
       if (!s) throw new NotFoundError("Student");
-      if (!root) throw new NotFoundError("Fee plan");
-      await tx.insert(feeStudentPlans).values({ schoolId: this.ctx.schoolId, studentId: data.studentId, yearId: year.id, rootId: data.rootId, reason: data.reason, createdBy: this.ctx.userId })
-        .onConflictDoUpdate({ target: [feeStudentPlans.studentId, feeStudentPlans.yearId], set: { rootId: data.rootId, reason: data.reason, createdBy: this.ctx.userId } });
-      return data.studentId;
-    }, (id) => ({ action: "student_plan", entity: "Student", entityId: id, summary: `Moved a student to another fee plan: ${data.reason}` }));
+      if (!target) throw new ConflictError("That plan is not published for this year. Publish it first.");
+      const taken = new Set((await tx.select({ h: feeOptIns.headId }).from(feeOptIns).where(and(eq(feeOptIns.studentId, s.id), eq(feeOptIns.yearId, year.id)))).map((r) => r.h));
+      const current = await this.resolve(tx, s, year.id);
+      const [was, will] = [current ? await this.unbilledIn(tx, s.id, current.id, taken) : 0, await this.unbilledIn(tx, s.id, target.id, taken)];
+      const d = { ...data, yearId: year.id };
+      const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "student_plan", studentId: s.id, payload: d, reason: data.reason, lowersPaise: was - will, title: `Move ${s.name} to another fee plan`, href: `/app/fees/students/${s.id}` }, () => this.applyStudentPlanIn(tx, d));
+      return { studentId: s.id, requested: out.requested, changeId: out.requested ? out.change.id : null };
+    }, (r) => ({ action: r.requested ? "request_student_plan" : "student_plan", entity: "Student", entityId: r.studentId, summary: `${r.requested ? "Asked to move" : "Moved"} a student to another fee plan: ${data.reason}` }));
   }
 
-  /** The optional heads this student takes this year (replaces the list). */
+  async applyStudentPlanIn(tx: Tx, d: { studentId: string; yearId: string; rootId: string; reason: string }) {
+    await tx.insert(feeStudentPlans).values({ schoolId: this.ctx.schoolId, studentId: d.studentId, yearId: d.yearId, rootId: d.rootId, reason: d.reason, createdBy: this.ctx.userId })
+      .onConflictDoUpdate({ target: [feeStudentPlans.studentId, feeStudentPlans.yearId], set: { rootId: d.rootId, reason: d.reason, createdBy: this.ctx.userId } });
+  }
+
+  /** The optional heads this student takes this year (replaces the list). Dropping one lowers what will be billed, so above the limit that waits for approval; adding one applies at once. */
   async setOptIns(input: unknown) {
     this.authorize("setup", "write");
     const data = this.parse(optInInput, input);
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
-      const [s] = await tx.select({ id: students.id }).from(students).where(eq(students.id, data.studentId));
+      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId));
       if (!s) throw new NotFoundError("Student");
       const heads = [...new Set(data.headIds)];
       if (heads.length && (await tx.select({ id: feeHeads.id }).from(feeHeads).where(inArray(feeHeads.id, heads))).length !== heads.length) throw new NotFoundError("Fee head");
-      await tx.delete(feeOptIns).where(and(eq(feeOptIns.studentId, data.studentId), eq(feeOptIns.yearId, year.id)));
-      if (heads.length) await tx.insert(feeOptIns).values(heads.map((headId) => ({ schoolId: this.ctx.schoolId, studentId: data.studentId, yearId: year.id, headId })));
-      return data.studentId;
-    }, (id) => ({ action: "opt_in", entity: "Student", entityId: id, summary: "Changed the optional fees a student takes" }));
+      const now = new Set((await tx.select({ h: feeOptIns.headId }).from(feeOptIns).where(and(eq(feeOptIns.studentId, s.id), eq(feeOptIns.yearId, year.id)))).map((r) => r.h));
+      const dropped = new Set([...now].filter((h) => !heads.includes(h)));
+      const plan = await this.resolve(tx, s, year.id);
+      const lowers = plan && dropped.size ? await this.unbilledIn(tx, s.id, plan.id, now, dropped) : 0;
+      const d = { studentId: s.id, yearId: year.id, headIds: heads };
+      const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "opt_out", studentId: s.id, payload: d, reason: "Optional fees changed", lowersPaise: lowers, title: `Drop optional fees for ${s.name}`, href: `/app/fees/students/${s.id}` }, () => this.applyOptInsIn(tx, d));
+      return { studentId: s.id, requested: out.requested, changeId: out.requested ? out.change.id : null };
+    }, (r) => ({ action: r.requested ? "request_opt_in" : "opt_in", entity: "Student", entityId: r.studentId, summary: `${r.requested ? "Asked to change" : "Changed"} the optional fees a student takes` }));
+  }
+
+  async applyOptInsIn(tx: Tx, d: { studentId: string; yearId: string; headIds: string[] }) {
+    await tx.delete(feeOptIns).where(and(eq(feeOptIns.studentId, d.studentId), eq(feeOptIns.yearId, d.yearId)));
+    if (d.headIds.length) await tx.insert(feeOptIns).values(d.headIds.map((headId) => ({ schoolId: this.ctx.schoolId, studentId: d.studentId, yearId: d.yearId, headId })));
   }
 
   /** Last year against this year by class: the fee hike view. */

@@ -36,6 +36,7 @@
     "@smw/feature-timetable": "workspace:*",
     "@smw/feature-attendance": "workspace:*",
     "@smw/feature-finance": "workspace:*",
-    "@smw/feature-expenses": "workspace:*"
+    "@smw/feature-expenses": "workspace:*",
+    "@smw/feature-payroll": "workspace:*"
   }
 }

@@ -604,6 +604,9 @@ importers:
       '@smw/feature-notifications':
         specifier: workspace:*
         version: link:../../features/notifications
+      '@smw/feature-payroll':
+        specifier: workspace:*
+        version: link:../../features/payroll
       '@smw/feature-timetable':
         specifier: workspace:*
         version: link:../../features/timetable

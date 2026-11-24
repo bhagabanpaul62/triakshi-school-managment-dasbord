@@ -3,7 +3,7 @@ import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees } from "@smw/feature-kit/money";
 import { FeesBase } from "./base";
-import { feeInvoiceChanges, feeNotes } from "./schema";
+import { feeInvoiceChanges } from "./schema";
 
 export type Change = typeof feeInvoiceChanges.$inferSelect;
 export interface ChangeSpec { kind: Change["kind"]; invoiceId?: string; studentId?: string; payload: Record<string, unknown>; reason: string; lowersPaise: number; title: string; href: string }
@@ -14,21 +14,17 @@ export interface ChangeSpec { kind: Change["kind"]; invoiceId?: string; studentI
  * waits for approval `fees.invoice_change`; anything else is applied at once and kept as `direct`.
  */
 export class ChangeService extends FeesBase {
-  /** What has been taken off this student's dues with no second person: small cancels and revisions, small credit notes. */
-  async lowedAloneIn(tx: Tx, studentId: string): Promise<number> {
-    const [[c], [n]] = await Promise.all([
-      tx.select({ v: sql<string>`coalesce(sum(${feeInvoiceChanges.lowersPaise}), 0)` }).from(feeInvoiceChanges).where(and(eq(feeInvoiceChanges.studentId, studentId), eq(feeInvoiceChanges.direct, true), eq(feeInvoiceChanges.status, "approved"))),
-      tx.select({ v: sql<string>`coalesce(sum(${feeNotes.amountPaise}), 0)` }).from(feeNotes).where(and(eq(feeNotes.studentId, studentId), eq(feeNotes.kind, "credit"), eq(feeNotes.status, "approved"),
-        sql`not exists (select 1 from fin_approvals a where a.ref_id = ${feeNotes.id} and a.status = 'approved')`)),
-    ]);
-    return Number(c?.v ?? 0) + Number(n?.v ?? 0);
+  /** What has been taken off this student's dues with no second person: small cancels, revisions, credit notes and plan changes. */
+  async loweredAloneIn(tx: Tx, studentId: string): Promise<number> {
+    const [r] = await tx.select({ v: sql<string>`coalesce(sum(${feeInvoiceChanges.lowersPaise}), 0)` }).from(feeInvoiceChanges).where(and(eq(feeInvoiceChanges.studentId, studentId), eq(feeInvoiceChanges.direct, true), eq(feeInvoiceChanges.status, "approved")));
+    return Number(r?.v ?? 0);
   }
 
   /** May this much be taken off alone? Zero or less is never a reduction; a limit of 0 means every reduction needs approval. */
-  async mayApplyAloneIn(tx: Tx, studentId: string, lowersPaise: number, alsoAlone = 0): Promise<boolean> {
+  async mayApplyAloneIn(tx: Tx, studentId: string | undefined, lowersPaise: number): Promise<boolean> {
     if (lowersPaise <= 0) return true;
     const { concessionLimitPaise: limit } = await this.settings(tx);
-    return limit > 0 && (await this.lowedAloneIn(tx, studentId)) + alsoAlone + lowersPaise <= limit;
+    return limit > 0 && (studentId ? await this.loweredAloneIn(tx, studentId) : 0) + lowersPaise <= limit;
   }
 
   async pendingIn(tx: Tx, q: { invoiceId?: string; studentId?: string; kind?: Change["kind"] }) {
@@ -46,7 +42,7 @@ export class ChangeService extends FeesBase {
   async submitIn<T>(tx: Tx, spec: ChangeSpec, now: () => Promise<T>): Promise<{ requested: false; value: T } | { requested: true; change: Change }> {
     await this.assertNoneWaitingIn(tx, spec.invoiceId ? { invoiceId: spec.invoiceId } : { studentId: spec.studentId, kind: spec.kind });
     const base = { schoolId: this.ctx.schoolId, kind: spec.kind, invoiceId: spec.invoiceId ?? null, studentId: spec.studentId ?? null, payload: spec.payload, reason: spec.reason, lowersPaise: Math.max(0, spec.lowersPaise), createdBy: this.ctx.userId };
-    if (!spec.studentId || (await this.mayApplyAloneIn(tx, spec.studentId, spec.lowersPaise))) {
+    if (await this.mayApplyAloneIn(tx, spec.studentId, spec.lowersPaise)) {
       const value = await now();
       await tx.insert(feeInvoiceChanges).values({ ...base, status: "approved", direct: true });
       return { requested: false, value };
@@ -54,6 +50,11 @@ export class ChangeService extends FeesBase {
     const [change] = await tx.insert(feeInvoiceChanges).values({ ...base, status: "pending" }).returning();
     await this.askApproval(tx, { kind: "fees.invoice_change", refType: "fee_invoice_change", refId: change!.id, title: `${spec.title} (takes ${rupees(spec.lowersPaise)} off what is owed)`, amountPaise: spec.lowersPaise, reason: spec.reason, href: spec.href });
     return { requested: true, change: change! };
+  }
+
+  /** Keep a note that was applied at once in the same list, so the limit counts it. */
+  async recordDirectIn(tx: Tx, c: { kind: Change["kind"]; invoiceId?: string; studentId: string; reason: string; lowersPaise: number }) {
+    if (c.lowersPaise > 0) await tx.insert(feeInvoiceChanges).values({ schoolId: this.ctx.schoolId, kind: c.kind, invoiceId: c.invoiceId ?? null, studentId: c.studentId, payload: {}, reason: c.reason, lowersPaise: c.lowersPaise, status: "approved", direct: true, createdBy: this.ctx.userId });
   }
 
   /** A pending change, locked, for the approval handler to apply. */

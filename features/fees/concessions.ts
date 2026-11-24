@@ -5,11 +5,13 @@ import { percentOf, rupees } from "@smw/feature-kit/money";
 import { students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
 import { FeesBase, type Perm } from "./base";
-import { concessionsOn, openOf } from "./calc";
+import { concessionsDetailed, openOf, yearShare } from "./calc";
+import { ChangeService } from "./changes";
+import { PlanBilling } from "./plan-billing";
 import { concessionInput, concessionTypeInput } from "./inputs";
 import { NoteService } from "./notes";
 import { PlanService } from "./plans";
-import { feeConcessionTypes, feeConcessions, feeHeads, feeInvoices, feePlanDues, feePlanLines } from "./schema";
+import { feeConcessionTypes, feeConcessionUses, feeConcessions, feeHeads, feeInvoices, feePlanDues, feePlanLines } from "./schema";
 
 export { NoteService } from "./notes";
 export { SettlementService } from "./settlements";
@@ -51,12 +53,13 @@ export class ConcessionService extends FeesBase {
   }
 
   /** What a concession is worth over the year, for the approval limit: the plan's dues (or the bills so far) for the head. */
-  private async estimateIn(tx: Tx, c: { studentId: string; yearId: string; headId: string | null; mode: "percent" | "amount"; value: number }) {
+  private async estimateIn(tx: Tx, c: { studentId: string; yearId: string; headId: string | null; mode: "percent" | "amount"; value: number; per: "bill" | "year" }) {
     const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate }).from(students).where(eq(students.id, c.studentId));
     const plan = s ? await new PlanService(this.ctx).resolve(tx, s, c.yearId) : null;
     const dues = plan ? await tx.select({ key: feePlanDues.dueKey, amount: feePlanDues.amountPaise }).from(feePlanDues).innerJoin(feePlanLines, eq(feePlanLines.id, feePlanDues.lineId)).where(and(eq(feePlanLines.planId, plan.id), eq(feePlanLines.optional, false), c.headId ? eq(feePlanLines.headId, c.headId) : undefined)) : [];
     const base = dues.reduce((a, d) => a + d.amount, 0);
     if (c.mode === "percent") return percentOf(base, c.value);
+    if (c.per === "year") return Math.min(base || c.value, c.value);
     return Math.min(base || c.value, c.value * Math.max(1, new Set(dues.map((d) => d.key)).size));
   }
 
@@ -76,11 +79,16 @@ export class ConcessionService extends FeesBase {
     if (!s) throw new NotFoundError("Student");
     if (d.typeId && !type[0]) throw new NotFoundError("Concession type");
     if (d.headId && !head[0]) throw new NotFoundError("Fee head");
-    const values = { studentId: s.id, yearId: year.id, typeId: d.typeId ?? null, headId: d.headId ?? null, mode: d.mode, value: d.value, reason: d.reason, fileKey: d.fileKey ?? null, status: "pending" as const, createdBy: this.ctx.userId };
+    const per = d.per ?? type[0]?.per ?? "year";
+    const values = { studentId: s.id, yearId: year.id, typeId: d.typeId ?? null, headId: d.headId ?? null, mode: d.mode, per, value: d.value, reason: d.reason, fileKey: d.fileKey ?? null, status: "pending" as const, createdBy: this.ctx.userId };
     const [row] = id ? await tx.update(feeConcessions).set(values).where(eq(feeConcessions.id, id)).returning() : await tx.insert(feeConcessions).values({ schoolId: this.ctx.schoolId, ...values }).returning();
     const worth = await this.estimateIn(tx, { ...values });
-    const { concessionLimitPaise: limit } = await this.settings(tx);
-    if (limit > 0 && worth <= limit) return this.approveIn(tx, row!.id);
+    const changes = new ChangeService(this.ctx);
+    // Small concessions apply at once, but the limit counts what this student has had alone before.
+    if (await changes.mayApplyAloneIn(tx, s.id, worth)) {
+      await changes.recordDirectIn(tx, { kind: "concession", studentId: s.id, reason: d.reason, lowersPaise: worth });
+      return this.approveIn(tx, row!.id);
+    }
     await this.askApproval(tx, { kind: "fees.concession", refType: "fee_concession", refId: row!.id, title: `Concession for ${s.name}: ${d.mode === "percent" ? `${d.value / 100}%` : rupees(d.value)}`, amountPaise: worth, reason: d.reason, href: `/app/fees/concessions` });
     return row!;
   }
@@ -123,12 +131,23 @@ export class ConcessionService extends FeesBase {
     await this.lockStudents(tx, [pre.studentId]);
     const [c] = await tx.update(feeConcessions).set({ status: "approved" }).where(and(eq(feeConcessions.id, id), eq(feeConcessions.status, "pending"))).returning();
     if (!c) throw new ConflictError("This concession was already decided.");
-    const open = await this.loadInvoices(tx, and(eq(feeInvoices.studentId, c.studentId), eq(feeInvoices.yearId, c.yearId), eq(feeInvoices.status, "issued"), eq(feeInvoices.kind, "plan")), true);
+    const open = (await this.loadInvoices(tx, and(eq(feeInvoices.studentId, c.studentId), eq(feeInvoices.yearId, c.yearId), eq(feeInvoices.status, "issued"), eq(feeInvoices.kind, "plan")), true)).sort((x, y) => x.dueDate.localeCompare(y.dueDate));
     const notes = new NoteService(this.ctx);
-    for (const inv of open) {
-      const shares = concessionsOn(inv.lines.map((l) => ({ headId: l.headId, kind: l.kind, amountPaise: l.amountPaise - l.concessionPaise })), [{ headId: c.headId, mode: c.mode, value: c.value }]);
-      const lines = inv.lines.map((l, i) => ({ lineId: l.id, amountPaise: Math.min(shares[i]!, openOf(l)) })).filter((l) => l.amountPaise > 0);
-      if (lines.length) await notes.issueIn(tx, { invoiceId: inv.id, kind: "credit", reasonType: "concession", reason: c.reason, lines });
+    // A yearly amount is shared by the open bills and the bills still to come.
+    const yearly = c.mode === "amount" && c.per === "year";
+    let pool = c.value;
+    const ahead = yearly ? (await new PlanBilling(this.ctx).build(tx, { yearId: c.yearId, studentIds: [c.studentId] })).drafts.length : 0;
+    for (const [i, inv] of open.entries()) {
+      const value = yearly ? yearShare(pool, open.length + ahead - i) : c.value;
+      const { perLine } = concessionsDetailed(inv.lines.map((l) => ({ headId: l.headId, kind: l.kind, amountPaise: l.amountPaise - l.concessionPaise })), [{ headId: c.headId, mode: c.mode, value }]);
+      const lines = inv.lines.map((l, k) => ({ lineId: l.id, amountPaise: Math.min(perLine[k]!, openOf(l)) })).filter((l) => l.amountPaise > 0);
+      if (!lines.length) continue;
+      await notes.issueIn(tx, { invoiceId: inv.id, kind: "credit", reasonType: "concession", reason: c.reason, lines });
+      if (yearly) {
+        const given = lines.reduce((s, l) => s + l.amountPaise, 0);
+        pool -= given;
+        await tx.insert(feeConcessionUses).values({ schoolId: this.ctx.schoolId, concessionId: c.id, invoiceId: inv.id, amountPaise: given });
+      }
     }
     return c;
   }

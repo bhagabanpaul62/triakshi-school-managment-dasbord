@@ -59,7 +59,7 @@ export class PlanBilling extends FeesBase {
     for (const s of pool) {
       const pick = pickPlan(published, { classId: s.classId, admission: admissionKind(s.admissionDate, year), overrideRoot: overrides.find((x) => x.studentId === s.id)?.rootId });
       if (!pick || !s.classId) { skipped.noPlan++; continue; }
-      const plan = planById.get(pick.id)!;
+      const plan = planById.get(pick.id)!, classId = s.classId;
       const mine = new Set(optIns.filter((x) => x.studentId === s.id).map((x) => x.headId));
       const keys = [...new Set(lines.filter((l) => l.planId === plan.id).flatMap((l) => dues.filter((d) => d.lineId === l.id).map((d) => d.dueKey)))].sort();
       const mineConcs = concs.filter((c) => c.studentId === s.id);
@@ -85,7 +85,7 @@ export class PlanBilling extends FeesBase {
         mineConcs.forEach((c, i) => { if (pool.has(c.id) && applied[i]! > 0) { pool.set(c.id, pool.get(c.id)! - applied[i]!); uses.push({ concessionId: c.id, amountPaise: applied[i]! }); } });
         const priced = raw.map((r, i) => ({ ...r, concessionPaise: conc[i]! }));
         drafts.push({
-          sourceKey: `plan:${plan.rootId}:${s.id}:${key}`, studentId: s.id, studentName: s.name, admissionNo: s.admissionNo, classId: s.classId, planId: plan.id, label: rows[0]!.d.label, dueOn, lateRule: plan.lateRule, lines: priced,
+          sourceKey: `plan:${plan.rootId}:${s.id}:${key}`, studentId: s.id, studentName: s.name, admissionNo: s.admissionNo, classId, planId: plan.id, label: rows[0]!.d.label, dueOn, lateRule: plan.lateRule, lines: priced,
           grossPaise: priced.reduce((a, l) => a + l.amountPaise, 0), concessionPaise: conc.reduce((a, c) => a + c, 0), snapshot: null, uses,
         });
       });
