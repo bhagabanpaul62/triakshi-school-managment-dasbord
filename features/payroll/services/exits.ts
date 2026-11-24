@@ -1,8 +1,8 @@
 import { and, desc, eq, lte, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { Tx } from "@smw/db";
+import { users, type Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
-import { addDays, daysBetween, monthEnd, monthStart } from "@smw/feature-kit/money";
+import { addDays, monthStart } from "@smw/feature-kit/money";
 import { day, paiseAmount } from "@smw/feature-finance/services/common";
 import { computeMonth, openLoans, type CalcEnv } from "../compute";
 import { monthlyWages } from "../engine";
@@ -19,7 +19,7 @@ const exitInput = z.object({
   noticeDays: z.coerce.number().int().min(-180).max(180).default(0),
   other: z.array(otherLine).max(10).default([]),
 });
-export interface ExitView { exit: Exit; name: string; employeeId: string; due: { wages: string; gratuity: string | null }; totals: ReturnType<typeof exitTotals>; noticeDays: number; blockers: string[]; stillActive: boolean; paid: boolean; sources: { key: string; source: string; confidence: string }[] }
+export interface ExitView { exit: Exit; name: string; employeeId: string; due: { wages: string; gratuity: string | null }; totals: ReturnType<typeof exitTotals>; noticeDays: number; blockers: string[]; stillActive: boolean; /** Who can switch the login off (active admins). */ deactivateBy: string[]; paid: boolean; sources: { key: string; source: string; confidence: string }[] }
 
 const workingDaysAfter = (from: string, n: number) => { let d = from, left = n; while (left > 0) { d = addDays(d, 1); if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) left--; } return d; };
 
@@ -47,7 +47,7 @@ export class ExitService extends PayrollService {
       return {
         exit: x, name: p?.name ?? "", employeeId: p?.employeeId ?? "",
         due: { wages: workingDaysAfter(x.lastDay, wages?.value ?? 2), gratuity: x.lines.some((l) => l.code === "gratuity") ? addDays(x.lastDay, gratuity?.value ?? 30) : null },
-        totals: exitTotals(x.lines), noticeDays: days, stillActive: !!p && !p.left, paid: x.status === "paid",
+        totals: exitTotals(x.lines), noticeDays: days, stillActive: !!p && !p.left, deactivateBy: (await tx.select({ name: users.name }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")))).map((u) => u.name), paid: x.status === "paid",
         blockers: [...x.lines.filter((l) => l.amountPaise === 0 && l.note?.startsWith("needs:")).map((l) => `${l.label}: ${l.note!.slice(6)}`), ...(exitTotals(x.lines).net < 0 ? ["Deductions are more than the settlement. Lower a deduction or pay part of the loan back first."] : [])],
         sources: [wages, gratuity].filter((r): r is NonNullable<typeof r> => !!r).map((r) => ({ key: r.key, source: r.source, confidence: r.confidence })),
       };
@@ -136,11 +136,13 @@ export class ExitService extends PayrollService {
     const [paidIn] = await tx.select({ id: payItems.id }).from(payItems).innerJoin(payRuns, eq(payRuns.id, payItems.runId)).where(and(eq(payItems.userId, userId), eq(payRuns.month, month), ne(payRuns.status, "cancelled"), sql`${payItems.skippedReason} is null`));
     if (paidIn) lines.push({ kind: "earning", code: "info", label: "Salary for the last month", amountPaise: 0, note: "Paid in that month's pay run" });
     else {
-      const after = (monthEnd(month) > lastDay ? daysBetween(lastDay, monthEnd(month)) : 0) * 2;
-      const { done } = await computeMonth(env, { userIds: [userId], month, runId: null, leftOn: { [userId]: lastDay }, extraUnpaid: { [userId]: after } });
-      for (const l of done[0]?.result.lines ?? []) {
+      const { done } = await computeMonth(env, { userIds: [userId], month, runId: null, leftOn: { [userId]: lastDay } });
+      const r = done[0]?.result;
+      // The wages the contributions rest on travel with the PF line, so the return file reads them back instead of working them out.
+      const wages = r ? `wages=${r.epfWagesPaise}:${r.epsWagesPaise}:${r.edliWagesPaise}:${r.esiWagesPaise}` : undefined;
+      for (const l of r?.lines ?? []) {
         if (l.code === "loan") continue;
-        lines.push({ kind: l.kind, code: l.code ?? "salary", label: l.code ? l.label : `${l.label} (to ${lastDay.slice(8)}th)`, amountPaise: l.amountPaise, note: l.needsInput ? `needs:${l.note}` : l.note ?? undefined });
+        lines.push({ kind: l.kind, code: l.code ?? "salary", label: l.code ? l.label : `${l.label} (to ${lastDay.slice(8)}th)`, amountPaise: l.amountPaise, note: l.needsInput ? `needs:${l.note}` : l.code === "pf_employee" || (l.code === "esi_employee" && !r?.lines.some((o) => o.code === "pf_employee")) ? wages : l.note ?? undefined });
       }
     }
 

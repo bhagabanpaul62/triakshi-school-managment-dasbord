@@ -1,6 +1,6 @@
 // The pay engine: pure, no database, no clock. Everything is whole paise; lines add up to the totals exactly.
 // A statutory amount whose rate is missing is never guessed: the line comes back empty and flagged `needsInput`.
-import { apportion, percentOf } from "@smw/feature-kit/money";
+import { apportion, percentOf, rupees } from "@smw/feature-kit/money";
 import type { COMPONENT_MODES } from "./constants";
 import type { Slab } from "./rates";
 
@@ -19,7 +19,7 @@ export interface PayLine {
   needsInput?: boolean;
   sort: number;
 }
-export interface EngineComponent { id: string; label: string; kind: LineKind; mode: Mode; value: number; isBasic: boolean; isWage: boolean; proRata: boolean; taxable: boolean; sort: number }
+export interface EngineComponent { /** Where a deduction or employer cost is held (a liability account of the school). */ accountId?: string | null; id: string; label: string; kind: LineKind; mode: Mode; value: number; isBasic: boolean; isWage: boolean; proRata: boolean; taxable: boolean; sort: number }
 export interface Days {
   calendarDays: number;
   /** Half-days not paid. 2 = one day. */
@@ -40,6 +40,15 @@ export interface PayRates {
   tax: TaxRates | null;
   /** What the school has switched on. */
   config: { pf: boolean; esi: boolean; pt: boolean; lwf: boolean; tds: boolean };
+  /** How each contribution is rounded: to the paisa, to the nearest rupee, or up to the next rupee. */
+  rounding: Record<RoundKey, RoundMode>;
+}
+export type RoundMode = "paise" | "nearest" | "up";
+export type RoundKey = "esi_employee" | "esi_employer" | "pf_employee" | "pf_employer" | "eps";
+/** `bp` basis points of `value`, rounded as the rule says. */
+export function share(value: number, bp: number, mode: RoundMode): number {
+  const n = value * bp;
+  return mode === "up" ? Math.ceil(n / 1_000_000) * 100 : mode === "nearest" ? Math.round(n / 1_000_000) * 100 : Math.round(n / 10_000);
 }
 export interface PayInput {
   assignment: { grossPaise: number; hourlyPaise?: number | null; overrides?: Record<string, number> };
@@ -54,6 +63,8 @@ export interface PayInput {
   month: string;
   ytd?: { taxableGrossPaise: number; tdsPaise: number };
   declaration?: { otherIncomePaise: number; deductionsPaise: number; previousSalaryPaise: number; previousTdsPaise: number } | null;
+  /** Set when a raise or a joining date falls inside the month: each part is paid at its own rate for its own days. `days` is then the whole month's. */
+  segments?: Segment[];
   /** Amounts a person typed for a statutory code: they win over the worked-out amount. */
   typed?: Record<string, number>;
 }
@@ -71,6 +82,8 @@ export interface PayResult {
   shortfallPaise: number;
   taxableGrossPaise: number;
   pfWagesPaise: number;
+  /** Wages each contribution was worked on, stored with the pay so the returns never have to work them back. */
+  epfWagesPaise: number; epsWagesPaise: number; edliWagesPaise: number; esiWagesPaise: number;
   flags: Flag[];
 }
 
@@ -129,41 +142,52 @@ function fullAmounts(earn: EngineComponent[], gross: number, overrides: Record<s
   return out;
 }
 
+
+export interface Segment { assignment: PayInput["assignment"]; components: EngineComponent[]; days: Days; /** "1 to 14 Nov", shown on the payslip line. */ label: string }
+interface Earned { code: string | null; label: string; refId: string | null; amount: number; wage: boolean; taxable: boolean; basic: boolean }
+
+/** What one assignment earns over its own days: every component cut by the unpaid days of that part, split to the paisa. */
+function partEarnings(assignment: PayInput["assignment"], components: EngineComponent[], days: Days, flags: Flag[]): Earned[] {
+  const den = days.calendarDays * 2;
+  const factor = (v: number) => Math.round((v * Math.max(0, den - days.unpaidHalfDays)) / den);
+  const earn = components.filter((c) => c.kind === "earning").sort((a, b) => a.sort - b.sort);
+  if (assignment.hourlyPaise != null) {
+    const amount = Math.round((days.hours ?? 0) * assignment.hourlyPaise);
+    return [{ code: "hourly", label: `Pay for ${days.hours ?? 0} hours`, refId: null, amount, wage: true, taxable: true, basic: false }];
+  }
+  if (earn.length === 0) return [{ code: null, label: "Pay", refId: null, amount: factor(assignment.grossPaise), wage: true, taxable: true, basic: false }];
+  const full = fullAmounts(earn, assignment.grossPaise, assignment.overrides ?? {});
+  if (!earn.some((c) => c.isBasic)) flags.push({ code: "no_basic", message: "The structure has no basic component." });
+  if ([...full.values()].reduce((a, b) => a + b, 0) !== assignment.grossPaise) flags.push({ code: "gross_mismatch", message: "The components do not add up to the gross pay. Add a remainder component to the structure." });
+  const cut = earn.filter((c) => c.proRata);
+  const shares = apportion(factor(cut.reduce((a, c) => a + (full.get(c.id) ?? 0), 0)), cut.map((c) => full.get(c.id) ?? 0));
+  const prorated = new Map(cut.map((c, i) => [c.id, shares[i]!]));
+  return earn.map((c) => ({ code: null, label: c.label, refId: c.id, amount: c.proRata ? prorated.get(c.id)! : full.get(c.id) ?? 0, wage: c.isWage, taxable: c.taxable, basic: c.isBasic }));
+}
+
 export function computePay(p: PayInput): PayResult {
   const flags: Flag[] = [];
   const lines: PayLine[] = [];
   const add = (l: Omit<PayLine, "sort">) => { lines.push({ ...l, sort: lines.length }); };
   const den = p.days.calendarDays * 2;
-  const paidHalf = Math.max(0, den - p.days.unpaidHalfDays);
-  const factor = (v: number) => Math.round((v * paidHalf) / den);
+  const factor = (v: number) => Math.round((v * Math.max(0, den - p.days.unpaidHalfDays)) / den);
 
-  // ---- earnings
-  let pfWages = 0, taxable = 0;
-  const earn = p.components.filter((c) => c.kind === "earning").sort((a, b) => a.sort - b.sort);
-  const prorated = new Map<string, number>();
-  if (p.assignment.hourlyPaise != null) {
-    const amount = Math.round((p.days.hours ?? 0) * p.assignment.hourlyPaise);
-    add({ kind: "earning", code: "hourly", label: `Pay for ${p.days.hours ?? 0} hours`, amountPaise: amount });
-    pfWages = taxable = amount;
-  } else if (earn.length === 0) {
-    const amount = factor(p.assignment.grossPaise);
-    add({ kind: "earning", code: null, label: "Pay", amountPaise: amount });
-    pfWages = taxable = amount;
-  } else {
-    const full = fullAmounts(earn, p.assignment.grossPaise, p.assignment.overrides ?? {});
-    if (!earn.some((c) => c.isBasic)) flags.push({ code: "no_basic", message: "The structure has no basic component." });
-    const fullTotal = [...full.values()].reduce((a, b) => a + b, 0);
-    if (fullTotal !== p.assignment.grossPaise) flags.push({ code: "gross_mismatch", message: "The components do not add up to the gross pay. Add a remainder component to the structure." });
-    const cut = earn.filter((c) => c.proRata);
-    const target = factor(cut.reduce((a, c) => a + (full.get(c.id) ?? 0), 0));
-    const shares = apportion(target, cut.map((c) => full.get(c.id) ?? 0));
-    cut.forEach((c, i) => prorated.set(c.id, shares[i]!));
-    for (const c of earn) {
-      const amount = c.proRata ? prorated.get(c.id)! : full.get(c.id) ?? 0;
-      add({ kind: "earning", code: null, label: c.label, amountPaise: amount, refId: c.id });
-      if (c.isWage) pfWages += amount;
-      if (c.taxable) taxable += amount;
-    }
+  // ---- earnings: one part for a normal month, one per assignment when a raise or a joining falls inside it
+  const parts = p.segments?.length ? p.segments : [{ assignment: p.assignment, components: p.components, days: p.days, label: "" }];
+  const items = new Map<string, { code: string | null; label: string; refId: string | null; amount: number; wage: boolean; taxable: boolean; basic: boolean; parts: string[] }>();
+  for (const part of parts) for (const it of partEarnings(part.assignment, part.components, part.days, flags)) {
+    const key = `${it.code ?? ""}|${it.label}`;
+    const have = items.get(key) ?? { ...it, amount: 0, parts: [] };
+    have.amount += it.amount;
+    have.parts.push(`${part.label}: ${rupees(it.amount)}`);
+    items.set(key, have);
+  }
+  let pfWages = 0, taxable = 0, basicPaid = 0;
+  for (const it of items.values()) {
+    add({ kind: "earning", code: it.code, label: it.label, amountPaise: it.amount, refId: it.refId, note: parts.length > 1 ? it.parts.join("; ") : null });
+    if (it.wage) pfWages += it.amount;
+    if (it.taxable) taxable += it.amount;
+    if (it.basic) basicPaid += it.amount;
   }
   for (const a of p.adjustments ?? []) {
     if (a.kind !== "earning") continue;
@@ -186,7 +210,7 @@ export function computePay(p: PayInput): PayResult {
   const pfOn = pr.pfApplies ?? r.config.pf;
   const esiOn = pr.esiApplies ?? r.config.esi;
   const ptOn = pr.ptApplies ?? r.config.pt;
-  let pfWagesUsed = 0;
+  let pfWagesUsed = 0, epfWages = 0, epsWages = 0, esiWages = 0;
   const employer: Omit<PayLine, "sort">[] = [];
   if (pfOn && pfWages > 0) {
     const wages = Math.max(pfWages, percentOf(gross, 10_000 - r.wageExclusionBp));
@@ -194,16 +218,19 @@ export function computePay(p: PayInput): PayResult {
     const cap = pfCeiling(r.pfCeilingSegments);
     const capped = Math.min(wages, cap);
     const base = pr.pfOnFullWages ? wages : capped;
-    const eps = percentOf(capped, r.epsBp);
-    add({ kind: "deduction", code: "pf_employee", label: "Provident fund", amountPaise: percentOf(base, r.pfEmployeeBp) });
-    employer.push({ kind: "employer", code: "pf_employer", label: "PF, employer share", amountPaise: Math.max(0, percentOf(base, r.pfEmployerBp) - eps) });
+    epfWages = base; epsWages = capped;
+    // The pension share is rounded first; the employer's PF is the rounded total less that share.
+    const eps = share(capped, r.epsBp, r.rounding.eps);
+    add({ kind: "deduction", code: "pf_employee", label: "Provident fund", amountPaise: share(base, r.pfEmployeeBp, r.rounding.pf_employee) });
+    employer.push({ kind: "employer", code: "pf_employer", label: "PF, employer share", amountPaise: Math.max(0, share(base, r.pfEmployerBp, r.rounding.pf_employer) - eps) });
     employer.push({ kind: "employer", code: "eps_employer", label: "Pension (EPS)", amountPaise: eps });
     employer.push({ kind: "employer", code: "edli", label: "EDLI", amountPaise: percentOf(capped, r.edliBp) });
     employer.push({ kind: "employer", code: "pf_admin", label: "PF admin charges", amountPaise: percentOf(base, r.pfAdminBp) });
   }
   if (esiOn && gross > 0 && gross <= r.esiCeiling) {
-    add({ kind: "deduction", code: "esi_employee", label: "ESI", amountPaise: percentOf(gross, r.esiEmployeeBp) });
-    employer.push({ kind: "employer", code: "esi_employer", label: "ESI, employer share", amountPaise: percentOf(gross, r.esiEmployerBp) });
+    esiWages = gross;
+    add({ kind: "deduction", code: "esi_employee", label: "ESI", amountPaise: share(gross, r.esiEmployeeBp, r.rounding.esi_employee) });
+    employer.push({ kind: "employer", code: "esi_employer", label: "ESI, employer share", amountPaise: share(gross, r.esiEmployerBp, r.rounding.esi_employer) });
   }
   if (ptOn) {
     const m = monthNumber(p.month);
@@ -224,7 +251,6 @@ export function computePay(p: PayInput): PayResult {
 
   // ---- the school's own deductions and employer costs, then loans
   const own = (kind: LineKind) => p.components.filter((c) => c.kind === kind).sort((a, b) => a.sort - b.sort);
-  const basicPaid = prorated.get(earn.find((c) => c.isBasic)?.id ?? "") ?? 0;
   const ownAmount = (c: EngineComponent) => {
     const v = p.assignment.overrides?.[c.id] ?? (c.mode === "fixed" ? c.value : percentOf(c.mode === "percent_of_basic" ? basicPaid : gross, c.value));
     return c.proRata && c.mode === "fixed" ? factor(v) : v;
@@ -239,7 +265,7 @@ export function computePay(p: PayInput): PayResult {
   const deductions = sum("deduction"), employerTotal = sum("employer");
   const net = gross + claims - deductions;
   if (net < 0) flags.push({ code: "net_negative", message: "Deductions are more than the pay." });
-  return { lines, grossPaise: gross, claimsPaise: claims, deductionsPaise: deductions, employerPaise: employerTotal, netPaise: net, shortfallPaise: Math.max(0, -net), taxableGrossPaise: taxable, pfWagesPaise: pfWagesUsed, flags };
+  return { lines, grossPaise: gross, claimsPaise: claims, deductionsPaise: deductions, employerPaise: employerTotal, netPaise: net, shortfallPaise: Math.max(0, -net), taxableGrossPaise: taxable, pfWagesPaise: pfWagesUsed, epfWagesPaise: epfWages, epsWagesPaise: epsWages, edliWagesPaise: epsWages, esiWagesPaise: esiWages, flags };
 }
 
 /** The monthly wages gratuity and PF rest on: wage components, and never less than the share of pay the wage rule keeps. */

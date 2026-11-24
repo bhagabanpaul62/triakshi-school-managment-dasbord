@@ -1,7 +1,9 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { fyOf, fyRange, todayIST } from "@smw/feature-kit/money";
+import { ConflictError } from "@smw/feature-kit";
+import { fyOf, fyRange, rupees, todayIST } from "@smw/feature-kit/money";
 import { FeesBase, calcOf } from "./base";
 import { invoiceLateFee, openOf } from "./calc";
+import { noDuesData, statementData, tuitionCertificateData } from "./documents";
 import { feeAllocations, feeHeads, feeInvoiceLines, feeInvoices, feeReceipts } from "./schema";
 
 /** The data behind the statement, the tuition certificate and the no-dues certificate. Layout and PDF come from the templates. */
@@ -46,5 +48,33 @@ export class CertificateService extends FeesBase {
       const owedPaise = bills.reduce((s, b) => s + b.openPaise + b.accruedLatePaise, 0);
       return { student, date: today, clear: owedPaise === 0, owedPaise, bills };
     });
+  }
+
+  /** The statement as a PDF (not a numbered document, so reprints are not marked). */
+  async statementFile(studentId: string, o: { from?: string; to?: string } = {}): Promise<{ filename: string; bytes: Uint8Array }> {
+    const st = await this.statement(studentId, o);
+    const snapshot = await this.snapshotOf(studentId);
+    const bytes = await this.templates().render("statement", statementData({ snapshot, from: o.from ?? null, to: o.to ?? null, openingPaise: st.openingPaise, closingPaise: st.closingPaise, rows: st.rows }));
+    return { filename: `statement-${st.student.admissionNo}.pdf`, bytes };
+  }
+
+  /** The tuition fee certificate of a financial year as a PDF. */
+  async certificateFile(studentId: string, fy = fyOf(todayIST())): Promise<{ filename: string; bytes: Uint8Array }> {
+    const t = await this.tuition(studentId, fy);
+    const snapshot = await this.snapshotOf(studentId);
+    const bytes = await this.templates().render("certificate", tuitionCertificateData({ snapshot, fy, totalPaise: t.totalPaise, rows: t.rows.map((r) => ({ number: r.number, date: r.date, head: r.head, amountPaise: r.amountPaise })) }));
+    return { filename: `tuition-certificate-${t.student.admissionNo}-${fy}.pdf`, bytes };
+  }
+
+  /** The no-dues certificate as a PDF. Refused while anything is owed, with what is owed. */
+  async noDuesFile(studentId: string): Promise<{ filename: string; bytes: Uint8Array }> {
+    const n = await this.noDues(studentId);
+    if (!n.clear) throw new ConflictError(`${n.student.name} still owes ${rupees(n.owedPaise)} on ${n.bills.length} bill${n.bills.length === 1 ? "" : "s"}. A no-dues certificate can be made once it is paid, written off or settled.`);
+    const bytes = await this.templates().render("certificate", noDuesData({ snapshot: await this.snapshotOf(studentId), date: n.date }));
+    return { filename: `no-dues-${n.student.admissionNo}.pdf`, bytes };
+  }
+
+  private snapshotOf(studentId: string) {
+    return this.viewer((tx) => this.oneStudent(tx, studentId).then((s) => this.snapshot(tx, s)));
   }
 }

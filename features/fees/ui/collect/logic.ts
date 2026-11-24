@@ -17,7 +17,7 @@ export interface DeskBill {
   lines: (CalcLine & { label: string })[];
 }
 
-export interface Pick { id: string; /** Pay only this much on the bill; leave out to pay it all. */ limitPaise?: number | null }
+export interface Chosen { id: string; /** Pay only this much on the bill; leave out to pay it all. */ limitPaise?: number | null }
 
 /** What one bill needs today: what is open plus the late fee that will be added when it is collected. */
 export const dueNow = (b: Pick<DeskBill, "openPaise" | "accruedLatePaise">) => b.openPaise + b.accruedLatePaise;
@@ -42,7 +42,7 @@ export interface Preview {
 }
 
 /** Exactly which lines of which bills a payment will clear, by the same function the server uses. */
-export function previewAllocation(bills: DeskBill[], picks: Pick[], amountPaise: number, lateFirst: boolean): Preview {
+export function previewAllocation(bills: DeskBill[], picks: Chosen[], amountPaise: number, lateFirst: boolean): Preview {
   const chosen = picks.flatMap((p) => { const b = bills.find((x) => x.id === p.id); return b ? [{ b, limit: p.limitPaise }] : []; });
   const plan = allocatePlan(chosen.map((c) => asCalc(c.b, c.limit)), Math.max(0, amountPaise), { lateFirst });
   const names = new Map(chosen.flatMap(({ b }) => [...b.lines.map((l) => [l.id, l.label] as const), [`late:${b.id}`, "Late fee"] as const]));
@@ -54,7 +54,7 @@ export function previewAllocation(bills: DeskBill[], picks: Pick[], amountPaise:
 }
 
 /** What the chosen bills come to today, each capped at its own limit. */
-export function pickedTotal(bills: DeskBill[], picks: Pick[]): number {
+export function pickedTotal(bills: DeskBill[], picks: Chosen[]): number {
   return picks.reduce((s, p) => { const b = bills.find((x) => x.id === p.id); return b ? s + Math.min(dueNow(b), p.limitPaise ?? Infinity) : s; }, 0);
 }
 
@@ -152,4 +152,11 @@ export function receiptData(r: ReceiptFacts, money: (p: number) => string) {
     notes: r.status === "reversed" && r.reason ? [`Reversed: ${r.reason}`] : [],
     marks: [...(r.duplicate ? ["DUPLICATE"] : []), ...(r.status === "reversed" ? ["REVERSED"] : []), ...(r.status === "bounced" ? ["CHEQUE BOUNCED"] : [])],
   };
+}
+
+/** One CSV cell that a spreadsheet will not run as a formula: a leading = + - @ tab or return gets an apostrophe. */
+export function csvCell(v: unknown): string {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

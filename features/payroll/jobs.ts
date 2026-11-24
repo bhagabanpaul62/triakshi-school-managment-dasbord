@@ -7,7 +7,7 @@ import { notifications } from "@smw/feature-notifications/schema";
 import { monthLabel } from "./csv";
 import { payAssignments, payExits, payRuns } from "./schema";
 import { ExitService } from "./services/exits";
-import { REMIT_LABEL, RemittanceService } from "./services/remittances";
+import { RemittanceService } from "./services/remittances";
 
 type Note = { title: string; body: string; href: string };
 
@@ -33,7 +33,7 @@ export async function remindersFor(schoolId: string, today = todayIST()): Promis
     if (!started) notes.push({ title: `Pay run not started for ${monthLabel(month)}`, body: "Salaries are due soon. Start the run and fix any open days.", href: "/app/payroll/runs/new" });
   }
   for (const r of await new RemittanceService(ctx).upcoming(20)) {
-    if (r.dueDate <= addDays(today, 3)) notes.push({ title: `${REMIT_LABEL[r.key]} for ${monthLabel(r.month)} due ${r.dueDate}`, body: `${(r.outstandingPaise / 100).toLocaleString("en-IN")} rupees are still unpaid.`, href: "/app/payroll/statutory?tab=remittances" });
+    if (r.dueDate <= addDays(today, 3)) notes.push({ title: `${r.label} for ${monthLabel(r.month)} due ${r.dueDate}`, body: `${(r.outstandingPaise / 100).toLocaleString("en-IN")} rupees are still unpaid.`, href: "/app/payroll/statutory?tab=remittances" });
   }
   const exits = await withSchool(schoolId, (tx) => tx.select({ id: payExits.id }).from(payExits).where(eq(payExits.status, "approved")));
   for (const x of exits) {

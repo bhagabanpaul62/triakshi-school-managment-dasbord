@@ -7,20 +7,23 @@ import { nextNumber, postJournal, reverseJournal, type PostLine, type Poster } f
 import { finTemplates } from "@smw/feature-finance/schema";
 import { defaultSources, type Sources } from "./sources";
 import { ratesOf, repaid, type ItemRow, type LineRow } from "./compute";
-import { payItems, payLines, payLoanRepayments, payLoans, payRuns } from "./schema";
+import { payComponents, payItems, payLines, payLoanRepayments, payLoans, payRuns } from "./schema";
 
 export type RunRow = typeof payRuns.$inferSelect;
 const PF = ["pf_employee", "pf_employer", "eps_employer", "edli", "pf_admin"];
-const ACCOUNT_OF = (l: { kind: string; code: string | null }) => {
+/** The payment key a deduction or employer line is cleared by: an office (pf, esi, pt, tds, lwf), a held account, or "other". Loans are cleared by recovery, never paid out. */
+export function remitKeyOf(l: { code: string | null }, accountId?: string | null): string | null {
   const c = l.code ?? "";
-  if (PF.includes(c)) return "pf_payable" as const;
-  if (c.startsWith("esi")) return "esi_payable" as const;
-  if (c === "pt") return "pt_payable" as const;
-  if (c === "tds") return "tds_payable" as const;
-  if (c.startsWith("lwf")) return "lwf_payable" as const;
-  if (c === "loan") return "staff_loans" as const;
-  return l.kind === "employer" ? "gratuity_payable" as const : "other_deductions" as const;
-};
+  if (PF.includes(c)) return "pf";
+  if (c.startsWith("esi")) return "esi";
+  if (c === "pt" || c === "tds") return c;
+  if (c.startsWith("lwf")) return "lwf";
+  if (c === "loan") return null;
+  return accountId ? `acct:${accountId}` : "other";
+}
+const SYSTEM_OF = { pf: "pf_payable", esi: "esi_payable", pt: "pt_payable", tds: "tds_payable", lwf: "lwf_payable", other: "other_deductions" } as const;
+/** The ledger account a remittance key pays down. */
+export const accountOfKey = (key: string) => (key.startsWith("acct:") ? { id: key.slice(5) } : SYSTEM_OF[key as keyof typeof SYSTEM_OF]);
 
 export async function runWithItems(tx: Tx, runId: string, lock = false) {
   const q = tx.select().from(payRuns).where(eq(payRuns.id, runId));
@@ -34,27 +37,34 @@ export async function runWithItems(tx: Tx, runId: string, lock = false) {
 /** The accrual of a run (PRD 5.2): salaries and employer cost against each person's net pay, the statutory payables and loans recovered. */
 export async function accrue(tx: Tx, poster: Poster, run: RunRow, items: ItemRow[], lines: LineRow[], date: string) {
   const live = items.filter((i) => !i.skippedReason);
+  const refs = [...new Set(lines.filter((l) => l.code === null && l.refId).map((l) => l.refId!))];
+  const held = new Map((refs.length ? await tx.select({ id: payComponents.id, accountId: payComponents.accountId }).from(payComponents).where(inArray(payComponents.id, refs)) : []).map((c) => [c.id, c.accountId]));
   const cr = new Map<string, PostLine>();
   const credit = (key: string, line: PostLine) => { const have = cr.get(key); if (have) have.credit = (have.credit ?? 0) + (line.credit ?? 0); else cr.set(key, line); };
-  let salaries = 0, employer = 0;
+  const dr = new Map<string, PostLine>();
+  const debit = (account: "salaries" | "employer_contrib", cc: string | null, v: number) => {
+    const key = `${account}|${cc ?? ""}`, have = dr.get(key);
+    if (have) have.debit = (have.debit ?? 0) + v; else dr.set(key, { account, debit: v, costCentreId: cc });
+  };
   const out: PostLine[] = [];
   for (const i of live) {
+    const cc = (i.snapshot as { costCentreId?: string | null }).costCentreId ?? null;
     for (const l of lines.filter((x) => x.itemId === i.id)) {
       const v = Number(l.amountPaise);
-      if (l.kind === "earning") { if (l.code === "claim") out.push({ account: "claims_payable", debit: v, party: { type: "staff", id: i.userId } }); else salaries += v; continue; }
-      if (l.kind === "employer") employer += v;
-      const account = ACCOUNT_OF(l);
-      if (account === "staff_loans") credit(`loan:${i.userId}`, { account, credit: v, party: { type: "staff", id: i.userId } });
-      else credit(account, { account, credit: v });
+      if (l.kind === "earning") { if (l.code === "claim") out.push({ account: "claims_payable", debit: v, party: { type: "staff", id: i.userId } }); else debit("salaries", cc, v); continue; }
+      if (l.kind === "employer") debit("employer_contrib", cc, v);
+      const own = l.code === null && l.refId ? held.get(l.refId) ?? null : null;
+      const key = remitKeyOf(l, own);
+      if (key === null) credit(`loan:${i.userId}`, { account: "staff_loans", credit: v, party: { type: "staff", id: i.userId } });
+      else credit(key, { account: accountOfKey(key), credit: v });
     }
     out.push({ account: "salary_payable", credit: Number(i.netPaise), party: { type: "staff", id: i.userId } });
   }
   const top = Number(run.totals.pfAdminTopUp ?? 0);
-  if (top) { employer += top; credit("pf_payable", { account: "pf_payable", credit: top }); }
-  const name = `${run.label}`;
+  if (top) { debit("employer_contrib", null, top); credit("pf", { account: "pf_payable", credit: top }); }
   return postJournal(tx, poster, {
-    date, sourceKey: `payroll:run:${run.id}`, sourceType: "payroll_run", sourceId: run.id, memo: `Payroll: ${name}`,
-    lines: [{ account: "salaries", debit: salaries }, { account: "employer_contrib", debit: employer }, ...out, ...cr.values()],
+    date, sourceKey: `payroll:run:${run.id}`, sourceType: "payroll_run", sourceId: run.id, memo: `Payroll: ${run.label}`,
+    lines: [...dr.values(), ...out, ...cr.values()],
   });
 }
 

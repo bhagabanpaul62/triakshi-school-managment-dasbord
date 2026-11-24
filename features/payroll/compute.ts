@@ -1,11 +1,11 @@
 // Loads everything one month of pay rests on, runs the engine, and stores the result as items and lines.
 // Shared by runs and exits; it checks no permission (the calling service did) and works inside the caller's transaction.
-import { and, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { fyRange, monthEnd, fyOf } from "@smw/feature-kit/money";
+import { addDays, apportion, daysBetween, fyRange, monthEnd, fyOf } from "@smw/feature-kit/money";
 import { staffProfiles } from "@smw/feature-staff/schema";
 import type { PayConfig } from "./config";
-import { computePay, daysIn, taxProjection, type Adjustment, type EngineComponent, type Flag, type PayResult } from "./engine";
+import { computePay, daysIn, taxProjection, type Adjustment, type EngineComponent, type Flag, type PayResult, type Segment } from "./engine";
 import type { RateBook, RateUse } from "./rate-book";
 import { payAssignments, payComponents, payDeclarations, payItems, payLines, payLoanRepayments, payLoans, payProfiles, payRuns } from "./schema";
 import type { Sources } from "./sources";
@@ -16,20 +16,16 @@ export const TYPED_CODES = ["pt", "lwf_employee", "tds"] as const;
 export const STATUTORY_EMPLOYER = ["pf_employer", "eps_employer", "edli", "pf_admin", "esi_employer", "lwf_employer"];
 
 export interface CalcEnv { tx: Tx; config: PayConfig; book: RateBook; sources: Sources; attendanceOn: boolean }
+const monthShort = (m: string) => new Date(`${m}T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" });
 export type ItemRow = typeof payItems.$inferSelect;
 export type LineRow = typeof payLines.$inferSelect;
 
-export interface Computed { userId: string; tax: ReturnType<typeof taxProjection> | null; result: PayResult; days: { calendarDays: number; unpaidHalfDays: number; unmarkedDays: number; hours: number | null }; used: RateUse[]; assignmentId: string; structureId: string; grossSetupPaise: number }
+export interface Computed { userId: string; costCentreId: string | null; tax: ReturnType<typeof taxProjection> | null; result: PayResult; days: { calendarDays: number; unpaidHalfDays: number; unmarkedDays: number; hours: number | null }; used: RateUse[]; assignmentId: string; structureId: string; grossSetupPaise: number }
 
 const half = (n: number) => Math.round(n * 2);
 
-/** Unpaid days before the person joined, in half-days, when they joined inside this month. */
-function beforeJoining(joining: string | null, month: string): number {
-  return joining && joining > month && joining <= monthEnd(month) ? (+joining.slice(8) - 1) * 2 : 0;
-}
-
 /** `offCycle`: nothing is worked out from the structure; only typed lines count (a bonus, an arrears payment). */
-export interface Request { userIds: string[]; month: string; runId: string | null; offCycle?: boolean; /** Half-days to count as unpaid on top of attendance, by person (the days after an exit). */ extraUnpaid?: Record<string, number>; leftOn?: Record<string, string>; existing?: Map<string, { item: ItemRow; lines: LineRow[] }> }
+export interface Request { userIds: string[]; month: string; runId: string | null; offCycle?: boolean; /** Last day of work, by person: days after it are not paid. */ leftOn?: Record<string, string>; existing?: Map<string, { item: ItemRow; lines: LineRow[] }> }
 
 /** Work out the month's pay for each person who has a pay assignment. People without one are returned in `missing`. */
 export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: Computed[]; missing: string[] }> {
@@ -38,14 +34,12 @@ export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: 
   if (!userIds.length) return { done: [], missing: [] };
   const last = monthEnd(month), [fyFrom] = fyRange(fyOf(month));
   const [assigns, profiles, staff, decls] = await Promise.all([
-    tx.select().from(payAssignments).where(and(inArray(payAssignments.userId, userIds), lte(payAssignments.fromDate, last))).orderBy(desc(payAssignments.fromDate)),
+    tx.select().from(payAssignments).where(and(inArray(payAssignments.userId, userIds), lte(payAssignments.fromDate, last))).orderBy(payAssignments.fromDate),
     tx.select().from(payProfiles).where(inArray(payProfiles.userId, userIds)),
     tx.select({ userId: staffProfiles.userId, joiningDate: staffProfiles.joiningDate }).from(staffProfiles).where(inArray(staffProfiles.userId, userIds)),
     tx.select().from(payDeclarations).where(and(inArray(payDeclarations.userId, userIds), eq(payDeclarations.fy, fyOf(month)))),
   ]);
-  const assign = new Map<string, (typeof assigns)[number]>();
-  for (const a of assigns) if (!assign.has(a.userId)) assign.set(a.userId, a);
-  const structureIds = [...new Set([...assign.values()].map((a) => a.structureId))];
+  const structureIds = [...new Set(assigns.map((a) => a.structureId))];
   const comps = structureIds.length ? await tx.select().from(payComponents).where(inArray(payComponents.structureId, structureIds)) : [];
   const attendance = env.attendanceOn && !req.offCycle ? await sources.days.monthDays(tx, userIds, month.slice(0, 7), { leftOn: req.leftOn }) : {};
   const joining = new Map(staff.map((s) => [s.userId, s.joiningDate]));
@@ -63,19 +57,35 @@ export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: 
   const claims = await openClaims(env, userIds, req.runId);
 
   const done: Computed[] = [], missing: string[] = [];
+  const first = month, D = daysIn(month);
   for (const userId of userIds) {
-    const a = assign.get(userId);
-    if (!a) { missing.push(userId); continue; }
+    // The rates that applied inside this month, each with the days it covered (a raise or a joining date can fall inside it).
+    const mine = assigns.filter((x) => x.userId === userId);
+    const k = Math.max(0, mine.reduce((at, x, i) => (x.fromDate <= first ? i : at), 0));
+    const start0 = [first, joining.get(userId) ?? first].sort().at(-1)!, end0 = [last, req.leftOn?.[userId] ?? last].sort()[0]!;
+    const spans = mine.slice(k).map((x, i, all) => {
+      const from = [x.fromDate, start0].sort().at(-1)!, nextFrom = all[i + 1]?.fromDate;
+      const to = [nextFrom ? addDays(nextFrom, -1) : last, end0].sort()[0]!;
+      return { a: x, from, to, d: daysBetween(from, to) + 1 };
+    }).filter((s) => s.d > 0);
+    if (!spans.length) { missing.push(userId); continue; }
+    const a = spans.at(-1)!.a;
     const p = profiles.find((x) => x.userId === userId) ?? null;
     const prior = req.existing?.get(userId);
     const att = attendance[userId];
-    const cal = config.lopBasis === "fixed30" ? 30 : daysIn(month);
-    const scale = (h: number) => (config.lopBasis === "fixed30" ? Math.round((h * 30) / daysIn(month)) : h);
-    const unpaid = req.offCycle ? cal * 2 : env.attendanceOn && att
-      ? half(att.absentDays) + att.unpaidLeaveHalfDays + beforeJoining(joining.get(userId) ?? null, month)
-      : (prior?.item.unpaidHalfDays ?? 0);
-    const unpaidAll = unpaid + (req.extraUnpaid?.[userId] ?? 0);
-    const days = { calendarDays: cal, unpaidHalfDays: Math.min(cal * 2, scale(unpaidAll)), unmarkedDays: att?.unmarkedDays ?? 0, hours: prior?.item.hours != null ? Number(prior.item.hours) : null };
+    const cal = config.lopBasis === "fixed30" ? 30 : D;
+    const dd = cal === D ? spans.map((s) => s.d) : apportion(cal, spans.map((s) => s.d));
+    const outside = 2 * (cal - dd.reduce((x, y) => x + y, 0));
+    const scale = (h: number) => (cal === D ? h : Math.round((h * cal) / D));
+    const lop = req.offCycle ? 0 : Math.min(2 * cal - outside, scale(env.attendanceOn && att ? half(att.absentDays) + att.unpaidLeaveHalfDays : Math.max(0, (prior?.item.unpaidHalfDays ?? 0) - outside)));
+    const unpaidAll = req.offCycle ? cal * 2 : outside + lop;
+    const days = { calendarDays: cal, unpaidHalfDays: unpaidAll, unmarkedDays: att?.unmarkedDays ?? 0, hours: prior?.item.hours != null ? Number(prior.item.hours) : null };
+    const lops = apportion(lop, dd);
+    const toComponents = (sid: string) => comps.filter((c) => c.structureId === sid).map((c): EngineComponent => ({ id: c.id, label: c.label, kind: c.kind, mode: c.mode, value: Number(c.value), isBasic: c.isBasic, isWage: c.isWage, proRata: c.proRata, taxable: c.taxable, sort: c.sort, accountId: c.accountId }));
+    const segments: Segment[] | undefined = spans.length > 1 ? spans.map((s, i) => ({
+      assignment: { grossPaise: Number(s.a.grossPaise), hourlyPaise: s.a.hourlyPaise == null ? null : Number(s.a.hourlyPaise), overrides: s.a.overrides }, components: toComponents(s.a.structureId),
+      label: `${+s.from.slice(8)} to ${+s.to.slice(8)} ${monthShort(month)}`, days: { calendarDays: cal, unpaidHalfDays: Math.min(2 * cal, 2 * (cal - dd[i]!) + lops[i]!), hours: days.hours },
+    })) : undefined;
     const manual = (prior?.lines ?? []).filter((l) => l.manual);
     const typed: Record<string, number> = {};
     const adjustments: Adjustment[] = [];
@@ -89,7 +99,7 @@ export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: 
     const d = decls.find((x) => x.userId === userId);
     const result = computePay({
       assignment: { grossPaise: Number(a.grossPaise), hourlyPaise: a.hourlyPaise == null ? null : Number(a.hourlyPaise), overrides: a.overrides },
-      components: comps.filter((c) => c.structureId === a.structureId).map((c): EngineComponent => ({ id: c.id, label: c.label, kind: c.kind, mode: c.mode, value: Number(c.value), isBasic: c.isBasic, isWage: c.isWage, proRata: c.proRata, taxable: c.taxable, sort: c.sort })),
+      components: toComponents(a.structureId), segments,
       days, adjustments, typed, rates, month, ytd: ytd.get(userId),
       loans: (loans.get(userId) ?? []).map((l) => ({ loanId: l.id, emiPaise: l.emi })),
       claims: req.offCycle ? [] : (claims.get(userId) ?? []).map((c) => ({ id: c.id, amountPaise: c.amountPaise, label: c.label })),
@@ -97,7 +107,7 @@ export async function computeMonth(env: CalcEnv, req: Request): Promise<{ done: 
       declaration: d ? { otherIncomePaise: Number(d.otherIncomePaise), deductionsPaise: Number(d.deductionsPaise), previousSalaryPaise: Number(d.previousSalaryPaise), previousTdsPaise: Number(d.previousTdsPaise) } : null,
     });
     const profile = { pan: !!p?.panSealed, regime, pfApplies: null, esiApplies: null, ptApplies: null, pfOnFullWages: false };
-    done.push({ userId, tax: rates.tax && config.tds ? taxProjection({ month, ytd: ytd.get(userId), declaration: d ? { otherIncomePaise: Number(d.otherIncomePaise), deductionsPaise: Number(d.deductionsPaise), previousSalaryPaise: Number(d.previousSalaryPaise), previousTdsPaise: Number(d.previousTdsPaise) } : null, profile }, result.taxableGrossPaise, rates.tax) : null, result, days, used, assignmentId: a.id, structureId: a.structureId, grossSetupPaise: Number(a.grossPaise) });
+    done.push({ userId, tax: rates.tax && config.tds ? taxProjection({ month, ytd: ytd.get(userId), declaration: d ? { otherIncomePaise: Number(d.otherIncomePaise), deductionsPaise: Number(d.deductionsPaise), previousSalaryPaise: Number(d.previousSalaryPaise), previousTdsPaise: Number(d.previousTdsPaise) } : null, profile }, result.taxableGrossPaise, rates.tax) : null, result, days, used, assignmentId: a.id, structureId: a.structureId, grossSetupPaise: Number(a.grossPaise), costCentreId: p?.costCentreId ?? null });
   }
   return { done, missing };
 }
@@ -135,7 +145,7 @@ async function openClaims(env: CalcEnv, userIds: string[], runId: string | null)
 /** Store one person's result: the item row, and the lines the engine worked out (typed lines stay as they were). */
 export async function saveItem(tx: Tx, schoolId: string, runId: string, c: Computed, extra: { skippedReason?: string | null } = {}): Promise<string> {
   const r = c.result;
-  const snapshot = { taxableGrossPaise: r.taxableGrossPaise, pfWagesPaise: r.pfWagesPaise, flags: r.flags satisfies Flag[], assignmentId: c.assignmentId, structureId: c.structureId, grossSetupPaise: c.grossSetupPaise, rates: c.used.map((u) => ({ key: u.key, state: u.state, confidence: u.confidence, source: u.source, value: u.value, overridden: u.overridden })) };
+  const snapshot = { taxableGrossPaise: r.taxableGrossPaise, pfWagesPaise: r.pfWagesPaise, epfWagesPaise: r.epfWagesPaise, epsWagesPaise: r.epsWagesPaise, edliWagesPaise: r.edliWagesPaise, esiWagesPaise: r.esiWagesPaise, costCentreId: c.costCentreId, flags: r.flags satisfies Flag[], assignmentId: c.assignmentId, structureId: c.structureId, grossSetupPaise: c.grossSetupPaise, rates: c.used.map((u) => ({ key: u.key, state: u.state, confidence: u.confidence, source: u.source, value: u.value, overridden: u.overridden })) };
   const values = {
     calendarDays: c.days.calendarDays, paidHalfDays: c.days.calendarDays * 2 - c.days.unpaidHalfDays, unpaidHalfDays: c.days.unpaidHalfDays, unmarkedDays: c.days.unmarkedDays,
     hours: c.days.hours == null ? null : String(c.days.hours), grossPaise: r.grossPaise, deductionsPaise: r.deductionsPaise, employerPaise: r.employerPaise, netPaise: r.netPaise, snapshot,

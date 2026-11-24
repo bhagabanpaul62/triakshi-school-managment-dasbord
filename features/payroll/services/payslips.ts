@@ -38,7 +38,8 @@ export class PayslipService extends PayrollService {
       if (p.department) facts.push(["Department", p.department]);
       if (prof?.panLast4) facts.push(["PAN", `XXXXXX${prof.panLast4}`]);
       if (prof?.bankLast4) facts.push(["Bank account", `XXXX${prof.bankLast4}`]);
-      const rows = [...earn.map((l) => ({ item: l.label, earn: rupees(Number(l.amountPaise)), deduct: "" })), ...cut.map((l) => ({ item: l.label, earn: "", deduct: rupees(Number(l.amountPaise)) }))];
+      const named = (l: (typeof lines)[number]) => (l.note && !l.manual && l.code === null ? `${l.label} (${l.note})` : l.label);
+      const rows = [...earn.map((l) => ({ item: named(l), earn: rupees(Number(l.amountPaise)), deduct: "" })), ...cut.map((l) => ({ item: l.label, earn: "", deduct: rupees(Number(l.amountPaise)) }))];
       const net = Number(row.i.netPaise);
       return {
         data: { facts, rows, totals: [["Total earnings", rupees(sum(earn))], ["Total deductions", rupees(sum(cut))], ["Net pay", rupees(net), true]], amountWords: inWords(net), notes: [], marks: [], qrSvg: null },

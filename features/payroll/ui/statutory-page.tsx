@@ -76,14 +76,14 @@ async function Remittances({ svc, manage }: { svc: RemittanceService; manage: bo
       <ul className="flex flex-col gap-2">
         {rows.map((r) => (
           <li key={`${r.key}${r.month}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/[0.04] p-4 text-sm">
-            <span className="min-w-0"><span className="block">{REMIT_LABEL[r.key]}, {monthName(r.month)}</span><span className={`block text-xs ${r.late ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-muted)]"}`}>{r.outstandingPaise > 0 ? `${r.late ? "Was due" : "Due"} ${shortDate(r.dueDate)}` : "Paid"}</span></span>
+            <span className="min-w-0"><span className="block">{r.label}, {monthName(r.month)}</span><span className={`block text-xs ${r.late ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-muted)]"}`}>{r.outstandingPaise > 0 ? `${r.late ? "Was due" : "Due"} ${shortDate(r.dueDate)}` : "Paid"}</span></span>
             <span className="flex flex-wrap items-center gap-3"><span className="text-right text-xs text-[var(--ds-on-surface-muted)]">Owed <Money paise={r.duePaise} size="sm" /> · paid <Money paise={r.paidPaise} size="sm" /></span><Money paise={r.outstandingPaise} tone={r.late ? "danger" : "default"} />
-              {manage && r.outstandingPaise > 0 ? <FormModal title={`Record payment: ${REMIT_LABEL[r.key]}`} description={`For ${monthName(r.month)}. At most ${paise(r.outstandingPaise)}.`} icon="money" action={recordRemittance} hidden={{ key: r.key, month: r.month }} trigger={{ label: "Record payment", variant: "secondary", size: "sm" }} submitLabel="Record" values={{ amountPaise: r.outstandingPaise }}
+              {manage && r.outstandingPaise > 0 ? <FormModal title={`Record payment: ${r.label}`} description={`For ${monthName(r.month)}. At most ${paise(r.outstandingPaise)}.`} icon="money" action={recordRemittance} hidden={{ key: r.key, month: r.month }} trigger={{ label: "Record payment", variant: "secondary", size: "sm" }} submitLabel="Record" values={{ amountPaise: r.outstandingPaise }}
                 fields={[{ name: "amountPaise", label: "Amount paid", type: "money", required: true }, { name: "paidOn", label: "Paid on", type: "date" }, { name: "reference", label: "Challan or reference", type: "text" }]} /> : null}</span>
           </li>
         ))}
       </ul>
-      {paid.length ? <Panel title="Payments made"><ul className="flex flex-col gap-1 text-sm">{paid.slice(0, 20).map((p) => <li key={p.id} className="flex justify-between gap-3"><span>{REMIT_LABEL[p.key as keyof typeof REMIT_LABEL]}, {monthName(p.month)} <span className="text-xs text-[var(--ds-on-surface-muted)]">paid {shortDate(p.paidOn)}{p.reference ? `, ${p.reference}` : ""}</span></span><Money paise={Number(p.amountPaise)} /></li>)}</ul></Panel> : null}
+      {paid.length ? <Panel title="Payments made"><ul className="flex flex-col gap-1 text-sm">{paid.slice(0, 20).map((p) => <li key={p.id} className="flex justify-between gap-3"><span>{REMIT_LABEL[p.key] ?? "Held amount"}, {monthName(p.month)} <span className="text-xs text-[var(--ds-on-surface-muted)]">paid {shortDate(p.paidOn)}{p.reference ? `, ${p.reference}` : ""}</span></span><Money paise={Number(p.amountPaise)} /></li>)}</ul></Panel> : null}
     </div>
   );
 }

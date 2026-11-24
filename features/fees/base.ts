@@ -6,7 +6,11 @@ import { todayIST } from "@smw/feature-kit/money";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { MoneyService } from "@smw/feature-finance/base";
 import type { PostLine } from "@smw/feature-finance/posting";
-import { finApprovals, finJournals } from "@smw/feature-finance/schema";
+import { schoolUrl } from "@smw/config";
+import { schools } from "@smw/db";
+import { TemplateService } from "@smw/feature-finance/templates/service";
+import type { DocumentKind } from "@smw/feature-finance/templates/config";
+import { finApprovals, finJournals, finTemplates } from "@smw/feature-finance/schema";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
@@ -177,6 +181,28 @@ export abstract class FeesBase extends MoneyService<Perm> {
     await tx.update(feeAllocations).set({ undoneAt: new Date() }).where(inArray(feeAllocations.id, rows.map((r) => r.id)));
     await this.bump(tx, "paid_paise", rows.map((r) => ({ lineId: r.lineId, amountPaise: -r.amountPaise })));
     return rows.map(({ id: _id, lineId, ...s }) => ({ ...s, lineId }));
+  }
+
+  // ---------- documents ----------
+
+  /**
+   * The finance template renderer for a document this service has already authorised (a family prints its own receipt
+   * without holding any finance grant, so the renderer is given the module and the read it needs; it only reads layouts).
+   */
+  protected templates() {
+    return new TemplateService({ ...this.ctx, role: "admin", grants: undefined, features: new Set([...this.ctx.features, "finance"]) });
+  }
+
+  /** The layout version a document is issued with (0 = the built-in one), so it prints the same for ever. */
+  protected async templateVersionIn(tx: Tx, kind: DocumentKind): Promise<number> {
+    const [t] = await tx.select({ v: finTemplates.version }).from(finTemplates).where(and(eq(finTemplates.kind, kind), eq(finTemplates.isCurrent, true))).limit(1);
+    return t?.v ?? 0;
+  }
+
+  /** The address the QR code on a document opens: the public check page of this school. */
+  protected async verifyUrlIn(tx: Tx, kind: "receipt" | "invoice", token: string): Promise<string> {
+    const [s] = await tx.select({ slug: schools.slug }).from(schools).limit(1);
+    return schoolUrl(s!.slug, `/verify/${kind}/${token}`);
   }
 
   /** Take back a request that waits for approval. Only who asked (or an admin) may; the request stays on file as withdrawn. */

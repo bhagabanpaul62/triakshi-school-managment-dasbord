@@ -4,6 +4,7 @@ import type { Tx } from "@smw/db";
 import { NotFoundError, ValidationError } from "@smw/feature-kit";
 import { addMonths, fyOf, fyRange, monthStart, todayIST } from "@smw/feature-kit/money";
 import { unseal } from "@smw/feature-kit/secret";
+import { finCostCentres } from "@smw/feature-finance/schema";
 import { staffProfiles } from "@smw/feature-staff/schema";
 import { monthLabel, rupeeText, toCsv } from "../csv";
 import { PayrollService } from "../base";
@@ -12,9 +13,9 @@ import { repaid } from "../compute";
 
 export interface ReportColumn { key: string; label: string; type?: "text" | "money" | "number" }
 export interface Report { name: string; title: string; columns: ReportColumn[]; rows: Record<string, unknown>[]; groupKey?: string; note?: string }
-export const REPORT_NAMES = { register: "Salary register", components: "Cost by month or department", bank: "Bank advice", pt: "Professional tax register", tds: "Income tax register", esi: "ESI sheet", statement: "Yearly salary statement", leave: "Leave liability", loans: "Loan ledger" } as const;
+export const REPORT_NAMES = { register: "Salary register", components: "Cost by month, department or cost centre", bank: "Bank advice", pt: "Professional tax register", tds: "Income tax register", esi: "ESI sheet", statement: "Yearly salary statement", leave: "Leave liability", loans: "Loan ledger" } as const;
 export type ReportName = keyof typeof REPORT_NAMES;
-const params = z.object({ month: z.string().regex(/^\d{4}-\d{2}(-01)?$/).optional(), from: z.string().optional(), to: z.string().optional(), by: z.enum(["month", "department"]).default("month"), runId: z.uuid().optional(), userId: z.uuid().optional(), fy: z.string().regex(/^\d{4}-\d{2}$/).optional() });
+const params = z.object({ month: z.string().regex(/^\d{4}-\d{2}(-01)?$/).optional(), from: z.string().optional(), to: z.string().optional(), by: z.enum(["month", "department", "cost_centre"]).default("month"), runId: z.uuid().optional(), userId: z.uuid().optional(), fy: z.string().regex(/^\d{4}-\d{2}$/).optional() });
 
 export const reportCsv = (r: Report) => toCsv([r.columns.map((c) => c.label), ...r.rows.map((row) => r.columns.map((c) => (c.type === "money" ? rupeeText(Number(row[c.key] ?? 0)) : (row[c.key] as string | number | null | undefined))))]);
 
@@ -48,16 +49,16 @@ export class ReportService extends PayrollService {
         }
         case "components": {
           const from = p.from ?? addMonths(month, -11), to = p.to ?? month;
-          const rows = await tx.select({ m: payRuns.month, dept: staffProfiles.department, people: sql<number>`count(*)::int`, gross: sql<string>`sum(${payItems.grossPaise})`, ded: sql<string>`sum(${payItems.deductionsPaise})`, emp: sql<string>`sum(${payItems.employerPaise})`, net: sql<string>`sum(${payItems.netPaise})` })
-            .from(payItems).innerJoin(payRuns, eq(payRuns.id, payItems.runId)).leftJoin(staffProfiles, eq(staffProfiles.userId, payItems.userId))
-            .where(and(inArray(payRuns.status, ["approved", "paid"]), sql`${payItems.skippedReason} is null`, sql`${payRuns.month} >= ${from} and ${payRuns.month} <= ${to}`)).groupBy(payRuns.month, staffProfiles.department).orderBy(payRuns.month);
+          const rows = await tx.select({ m: payRuns.month, dept: staffProfiles.department, cc: finCostCentres.name, people: sql<number>`count(*)::int`, gross: sql<string>`sum(${payItems.grossPaise})`, ded: sql<string>`sum(${payItems.deductionsPaise})`, emp: sql<string>`sum(${payItems.employerPaise})`, net: sql<string>`sum(${payItems.netPaise})` })
+            .from(payItems).innerJoin(payRuns, eq(payRuns.id, payItems.runId)).leftJoin(staffProfiles, eq(staffProfiles.userId, payItems.userId)).leftJoin(finCostCentres, sql`${finCostCentres.id} = (${payItems.snapshot}->>'costCentreId')::uuid`)
+            .where(and(inArray(payRuns.status, ["approved", "paid"]), sql`${payItems.skippedReason} is null`, sql`${payRuns.month} >= ${from} and ${payRuns.month} <= ${to}`)).groupBy(payRuns.month, staffProfiles.department, finCostCentres.name).orderBy(payRuns.month);
           const by = new Map<string, { label: string; people: number; gross: number; ded: number; emp: number; net: number }>();
           for (const r of rows) {
-            const k = p.by === "month" ? r.m : r.dept ?? "No department";
+            const k = p.by === "month" ? r.m : p.by === "department" ? r.dept ?? "No department" : r.cc ?? "No cost centre";
             const g = by.get(k) ?? { label: p.by === "month" ? monthLabel(r.m) : k, people: 0, gross: 0, ded: 0, emp: 0, net: 0 };
             g.people = Math.max(g.people, r.people); g.gross += Number(r.gross); g.ded += Number(r.ded); g.emp += Number(r.emp); g.net += Number(r.net); by.set(k, g);
           }
-          return { name, title: `${title}, ${p.by === "month" ? "by month" : "by department"}`, note: "Cost centres are not set per person, so there is no cost centre cut.", columns: [{ key: "label", label: p.by === "month" ? "Month" : "Department" }, { key: "people", label: "People", type: "number" }, { key: "gross", label: "Gross", type: "money" }, { key: "ded", label: "Deductions", type: "money" }, { key: "emp", label: "Employer cost", type: "money" }, { key: "net", label: "Net pay", type: "money" }], rows: [...by.values()] };
+          return { name, title: `${title}, ${{ month: "by month", department: "by department", cost_centre: "by cost centre" }[p.by]}`, columns: [{ key: "label", label: { month: "Month", department: "Department", cost_centre: "Cost centre" }[p.by] }, { key: "people", label: "People", type: "number" }, { key: "gross", label: "Gross", type: "money" }, { key: "ded", label: "Deductions", type: "money" }, { key: "emp", label: "Employer cost", type: "money" }, { key: "net", label: "Net pay", type: "money" }], rows: [...by.values()] };
         }
         case "bank": {
           if (!p.runId) throw new ValidationError({ runId: "Pick a run." });
@@ -77,7 +78,7 @@ export class ReportService extends PayrollService {
         case "esi": {
           const rows = (await this.month(tx, month)).filter((r) => r.sum((c) => c === "esi_employee") > 0);
           await this.audit(tx, { action: "export", entity: "Report", summary: "Opened the ESI sheet with ESI numbers", meta: { count: rows.length } });
-          return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "esi", label: "IP number" }, { key: "name", label: "Person" }, { key: "days", label: "Days", type: "number" }, { key: "gross", label: "Wages", type: "money" }, { key: "employee", label: "Employee share", type: "money" }, { key: "employer", label: "Employer share", type: "money" }], rows: rows.map((r) => ({ esi: r.profile?.esiSealed ? unseal(r.profile.esiSealed, this.ctx.schoolId) : null, name: r.person.name, days: r.item.paidHalfDays / 2, gross: Number(r.item.grossPaise), employee: r.sum((c) => c === "esi_employee"), employer: r.sum((c) => c === "esi_employer") })) };
+          return { name, title: `${title}, ${monthLabel(month)}`, columns: [{ key: "esi", label: "IP number" }, { key: "name", label: "Person" }, { key: "days", label: "Days", type: "number" }, { key: "gross", label: "Wages", type: "money" }, { key: "employee", label: "Employee share", type: "money" }, { key: "employer", label: "Employer share", type: "money" }], rows: rows.map((r) => ({ esi: r.profile?.esiSealed ? unseal(r.profile.esiSealed, this.ctx.schoolId) : null, name: r.person.name, days: r.item.paidHalfDays / 2, gross: Number((r.item.snapshot as { esiWagesPaise?: number }).esiWagesPaise ?? 0), employee: r.sum((c) => c === "esi_employee"), employer: r.sum((c) => c === "esi_employer") })) };
         }
         case "leave": {
           const day = todayIST(), people = [...(await this.people(tx)).values()].filter((x) => !x.left);
@@ -113,18 +114,18 @@ export class ReportService extends PayrollService {
     });
   }
 
-  /** The EPFO return file for a month: one line per person, fields joined by "#~#". Wages are worked back from the amounts and rates the run used. */
+  /** The EPFO return file for a month: one line per person, fields joined by "#~#". The wages are the ones stored with each person's pay when it was worked out. */
   async ecr(rawMonth: string): Promise<{ filename: string; text: string; count: number }> {
     this.authorize("read", "read");
     const month = monthStart(`${rawMonth.slice(0, 7)}-01`);
     return this.write("read", async (tx) => {
       const rows = (await this.month(tx, month)).filter((r) => r.sum((c) => c === "pf_employee") > 0);
       const lines = rows.map((r) => {
-        const rate = (key: string, fallback: number) => Number(((r.item.snapshot as { rates?: { key: string; value: unknown }[] }).rates ?? []).find((x) => x.key === key)?.value ?? fallback);
-        const wages = (code: string, bp: number) => Math.round(r.sum((c) => c === code) * 10_000 / bp / 100);
+        const w = r.item.snapshot as { epfWagesPaise?: number; epsWagesPaise?: number; edliWagesPaise?: number };
+        const rupee = (paise = 0) => Math.round(paise / 100);
         const epf = r.sum((c) => c === "pf_employee"), eps = r.sum((c) => c === "eps_employer"), employer = r.sum((c) => c === "pf_employer") + eps;
         if (!r.profile?.uanSealed) throw new ValidationError({ uan: `${r.person.name} has no UAN. Add it before making the return file.` });
-        return [unseal(r.profile.uanSealed, this.ctx.schoolId), r.person.name.toUpperCase(), Math.round(Number(r.item.grossPaise) / 100), wages("pf_employee", rate("pf_employee_bp", 1200)), wages("eps_employer", rate("eps_bp", 833)), wages("edli", rate("edli_bp", 50)), Math.round(epf / 100), Math.round(eps / 100), Math.round((employer - eps) / 100), r.item.unpaidHalfDays / 2, 0].join("#~#");
+        return [unseal(r.profile.uanSealed, this.ctx.schoolId), r.person.name.toUpperCase(), Math.round(Number(r.item.grossPaise) / 100), rupee(w.epfWagesPaise), rupee(w.epsWagesPaise), rupee(w.edliWagesPaise), Math.round(epf / 100), Math.round(eps / 100), Math.round((employer - eps) / 100), r.item.unpaidHalfDays / 2, 0].join("#~#");
       });
       if (!lines.length) throw new ValidationError({ month: "Nobody paid provident fund in this month." });
       await this.audit(tx, { action: "export", entity: "Report", summary: "Made the PF return file with UAN numbers", meta: { count: lines.length, month } });

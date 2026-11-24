@@ -2,10 +2,10 @@ import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
-import { PdfBuilder } from "@smw/integrations";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
-import { finJournals, finPrints, finTemplates } from "@smw/feature-finance/schema";
-import { schools, users } from "@smw/db";
+import { finJournals } from "@smw/feature-finance/schema";
+import { users } from "@smw/db";
+import { receiptData } from "./documents";
 import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { allocatePlan, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL } from "./constants";
@@ -60,11 +60,10 @@ export class ReceiptService extends FeesBase {
       if (plan.leftover > total - advanceAsked) throw new ConflictError("The advance is more than what is due. Use less of it; an advance is not turned back into an advance.");
     }
 
-    const [tpl] = await tx.select({ v: finTemplates.version }).from(finTemplates).where(and(eq(finTemplates.kind, "receipt"), eq(finTemplates.isCurrent, true))).limit(1);
     const [receipt] = await tx.insert(feeReceipts).values({
       schoolId: this.ctx.schoolId, number: await this.number(tx, "receipt", date), studentId: payer.id, date, amountPaise: total, advancePaise: plan.leftover,
       status: hasCheque ? "clearing" : "valid", counterId: counter?.id ?? null, payerName: data.payerName ?? null, note: data.note ?? null,
-      snapshot: await this.snapshot(tx, payer), templateVersion: tpl?.v ?? null, verifyToken: newToken(), collectedBy: this.ctx.userId,
+      snapshot: await this.snapshot(tx, payer), templateVersion: await this.templateVersionIn(tx, "receipt"), verifyToken: newToken(), collectedBy: this.ctx.userId,
     }).returning();
     const id = receipt!.id;
 
@@ -226,34 +225,27 @@ export class ReceiptService extends FeesBase {
     });
   }
 
-  /** The receipt as a plain PDF (a template can replace the layout later). Every print is logged; the second one onwards says DUPLICATE. */
+  /** The receipt as a PDF in the school's layout (the version it was issued with). Every print is logged; from the second the PDF says DUPLICATE. */
   async receiptFile(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
-    return this.viewer(async (tx, own) => {
+    const doc = await this.viewer(async (tx, own) => {
       const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
       if (!r) throw new NotFoundError("Receipt");
       this.assertVisible(own, r.studentId, "Receipt");
-      const [[school], methods, allocs, [last]] = await Promise.all([
-        tx.select().from(schools).limit(1),
+      const [methods, allocs, [j]] = await Promise.all([
         tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
-        tx.select({ label: feeInvoices.label, line: feeInvoiceLines.label, amountPaise: feeAllocations.amountPaise }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId)).where(and(eq(feeAllocations.receiptId, id), isNull(feeAllocations.undoneAt))).orderBy(asc(feeInvoices.dueDate), asc(feeInvoiceLines.sort)),
-        tx.select({ n: sql<number>`coalesce(max(${finPrints.copyNo}), 0)::int` }).from(finPrints).where(and(eq(finPrints.docType, "fee_receipt"), eq(finPrints.docId, id))),
+        tx.select({ bill: feeInvoices.label, late: feeInvoiceLines.kind, amountPaise: feeAllocations.amountPaise }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId))
+          .where(and(eq(feeAllocations.receiptId, id), isNull(feeAllocations.undoneAt))).orderBy(asc(feeInvoices.dueDate), asc(feeInvoiceLines.sort)),
+        tx.select({ date: finJournals.date, at: finJournals.createdAt }).from(finJournals).where(eq(finJournals.sourceKey, `fees:receipt:${id}`)),
       ]);
-      const copyNo = (last?.n ?? 0) + 1;
-      await tx.insert(finPrints).values({ schoolId: this.ctx.schoolId, docType: "fee_receipt", docId: id, copyNo, printedBy: this.ctx.userId });
-      const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-      const money = PdfBuilder.money;
-      const pdf = await PdfBuilder.create();
-      pdf.header({
-        title: r.status === "reversed" ? "FEE RECEIPT (REVERSED)" : r.status === "bounced" ? "FEE RECEIPT (CHEQUE BOUNCED)" : "FEE RECEIPT", orgName: school?.name ?? "School",
-        orgLines: [school?.address, school?.city, school?.phone ? `Phone: ${school.phone}` : null].filter((x): x is string => !!x),
-        rightLines: [`Receipt no: ${r.number}`, `Date: ${day(r.date)}`, ...(copyNo > 1 ? ["DUPLICATE"] : [])],
-      });
-      pdf.facts([["Student", r.snapshot.studentName], ["Admission no", r.snapshot.admissionNo], ["Class", r.snapshot.classLabel], ["Received from", r.payerName ?? r.snapshot.guardian ?? "-"]]);
-      pdf.table({ columns: [{ label: "Bill", width: 200 }, { label: "For", width: 150 }, { label: "Amount", width: 99, align: "right" }], rows: [...allocs.map((a) => [a.label, a.line, money(a.amountPaise)]), ...(r.advancePaise ? [["Kept as advance", "", money(r.advancePaise)]] : [])] });
-      pdf.totals([...methods.map((m): [string, string] => [`${METHOD_LABEL[m.method]}${m.reference ? ` (${m.reference})` : ""}`, money(m.amountPaise)]), ["Total received", money(r.amountPaise), true]]);
-      if (r.status === "reversed") pdf.space(8).text(`Reversed: ${r.reverseReason ?? ""}`, { bold: true });
-      pdf.space(16).text("Computer generated receipt. No signature required.", { size: 8, color: [0.4, 0.4, 0.45] });
-      return { filename: `${r.number.replace(/\//g, "-")}${copyNo > 1 ? "-duplicate" : ""}.pdf`, bytes: await pdf.save() };
+      const balance = j ? Number((await tx.execute<{ v: string }>(sql`select coalesce(sum(jl.debit_paise - jl.credit_paise), 0) v from fin_journal_lines jl join fin_journals fj on fj.id = jl.journal_id join fin_accounts a on a.id = jl.account_id
+        where a.system_key = 'student_dues' and jl.party_type = 'student' and jl.party_id = ${r.studentId}::uuid and (fj.date < ${j.date}::date or (fj.date = ${j.date}::date and fj.created_at <= ${j.at.toISOString()}::timestamptz))`))[0]!.v) : null;
+      const byBill = new Map<string, { bill: string; feePaise: number; latePaise: number }>();
+      for (const a of allocs) { const row = byBill.get(a.bill) ?? { bill: a.bill, feePaise: 0, latePaise: 0 }; if (a.late === "late") row.latePaise += a.amountPaise; else row.feePaise += a.amountPaise; byBill.set(a.bill, row); }
+      const verifyUrl = await this.verifyUrlIn(tx, "receipt", r.verifyToken);
+      return { r, data: receiptData({ number: r.number, date: r.date, amountPaise: r.amountPaise, advancePaise: r.advancePaise, status: r.status, payerName: r.payerName, note: r.note, snapshot: r.snapshot, verifyUrl,
+        methods: methods.map((m) => ({ method: m.method, amountPaise: m.amountPaise, reference: m.reference })), rows: [...byBill.values()], balanceAfterPaise: balance && balance > 0 ? balance : balance === null ? null : 0 }) };
     });
+    const { bytes, copyNo } = await this.templates().print("receipt", doc.data, { docType: "fee_receipt", docId: id, version: doc.r.templateVersion ?? undefined });
+    return { filename: `${doc.r.number.replace(/\//g, "-")}${copyNo > 1 ? "-duplicate" : ""}.pdf`, bytes };
   }
 }

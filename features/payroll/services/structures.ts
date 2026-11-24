@@ -1,9 +1,10 @@
-import { asc, count, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { ConflictError, NotFoundError, rethrowUnique } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, ValidationError, rethrowUnique } from "@smw/feature-kit";
 import { flag } from "@smw/feature-finance/services/common";
 import { PayrollService } from "../base";
 import { COMPONENT_KINDS, COMPONENT_MODES } from "../constants";
+import { finAccounts } from "@smw/feature-finance/schema";
 import { payAssignments, payComponents, payStructures } from "../schema";
 
 export type Structure = typeof payStructures.$inferSelect;
@@ -16,6 +17,8 @@ const component = z.object({
   /** Paise for fixed, basis points for percent; a remainder has none. */
   value: z.coerce.number().int().min(0).max(100_000_000_00).default(0),
   isBasic: flag, isWage: flag, proRata: flag.default(true), taxable: flag.default(true),
+  /** A liability account where a deduction or employer cost waits until it is paid out. */
+  accountId: z.uuid().nullish().transform((v) => v ?? null),
 });
 export const structureInput = z.object({ name: z.string().trim().min(1, "Name the structure.").max(60), components: z.array(component).max(30) })
   .superRefine((s, ctx) => {
@@ -42,6 +45,11 @@ export class StructureService extends PayrollService {
     });
   }
 
+  /** Liability accounts a deduction or employer cost can be held in until it is paid out. */
+  heldAccounts(): Promise<{ id: string; name: string }[]> {
+    return this.read("read", (tx) => tx.select({ id: finAccounts.id, name: finAccounts.name }).from(finAccounts).where(and(eq(finAccounts.type, "liability"), eq(finAccounts.isActive, true))).orderBy(finAccounts.code));
+  }
+
   get(id: string): Promise<{ structure: Structure; components: Component[]; people: number }> {
     return this.read("read", async (tx) => {
       const [structure] = await tx.select().from(payStructures).where(eq(payStructures.id, id));
@@ -57,6 +65,8 @@ export class StructureService extends PayrollService {
     const d = this.parse(structureInput, input);
     try {
       return await this.write("manage", async (tx) => {
+        const held = [...new Set(d.components.map((c) => c.accountId).filter((x): x is string => !!x))];
+        if (held.length && (await tx.select({ id: finAccounts.id }).from(finAccounts).where(and(inArray(finAccounts.id, held), eq(finAccounts.type, "liability")))).length !== held.length) throw new ValidationError({ components: "Pick a liability account of this school to hold the amount." });
         let s: Structure | undefined;
         if (id) {
           const [have] = await tx.select().from(payStructures).where(eq(payStructures.id, id)).for("update");
@@ -81,7 +91,7 @@ export class StructureService extends PayrollService {
     const names = new Set((await this.list()).map((s) => s.name));
     let n = 2;
     while (names.has(`${structure.name} v${n}`)) n++;
-    return this.save({ name: `${structure.name} v${n}`, components: components.map(({ label, kind, mode, value, isBasic, isWage, proRata, taxable }) => ({ label, kind, mode, value: Number(value), isBasic, isWage, proRata, taxable })) });
+    return this.save({ name: `${structure.name} v${n}`, components: components.map(({ label, kind, mode, value, isBasic, isWage, proRata, taxable, accountId }) => ({ label, kind, mode, value: Number(value), isBasic, isWage, proRata, taxable, accountId })) });
   }
 
   async setActive(id: string, active: boolean): Promise<void> {

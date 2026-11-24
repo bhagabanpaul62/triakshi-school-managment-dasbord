@@ -35,8 +35,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
   let info: Awaited<ReturnType<ProfileService["get"]>>;
   try { info = await profiles.get(id); } catch (e) { if (e instanceof NotFoundError) notFound(); throw e; }
   const manage = profiles.can("manage"), { person, profile, missing } = info;
-  const [history, structures, loans, slips, leave, exits] = await Promise.all([
-    new AssignmentService(ctx).history(id), new StructureService(ctx).list(), new LoanService(ctx).list({ filters: { userId: id } }), new PayslipService(ctx).list(id), profiles.leaveBalance(id), new ExitService(ctx).list({ filters: { userId: id } }),
+  const [history, structures, loans, slips, leave, exits, centres] = await Promise.all([
+    new AssignmentService(ctx).history(id), new StructureService(ctx).list(), new LoanService(ctx).list({ filters: { userId: id } }), new PayslipService(ctx).list(id), profiles.leaveBalance(id), new ExitService(ctx).list({ filters: { userId: id } }), profiles.costCentres(),
   ]);
   const today = todayIST();
   const current = history.find((h) => h.fromDate <= today) ?? history[0];
@@ -65,7 +65,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
         <div className="lg:col-span-6">
           <Panel title="Pay details" className="h-full" action={manage ? <FormModal title="Pay details" description="Leave a private number empty to keep what is stored." icon="teacher" action={saveProfile} hidden={{ userId: id }} trigger={{ label: "Edit", variant: "secondary", size: "sm" }} size="lg"
-            values={{ bankName: profile?.bankName, ifsc: profile?.ifsc, payBy: profile?.payBy ?? "bank", regime: profile?.regime ?? "new", state: profile?.state, pfApplies: tri(profile?.pfApplies ?? null), esiApplies: tri(profile?.esiApplies ?? null), ptApplies: tri(profile?.ptApplies ?? null), pfOnFullWages: profile?.pfOnFullWages, skipMonthly: profile ? !profile.paysMonthly : false }}
+            values={{ bankName: profile?.bankName, ifsc: profile?.ifsc, payBy: profile?.payBy ?? "bank", regime: profile?.regime ?? "new", state: profile?.state, pfApplies: tri(profile?.pfApplies ?? null), esiApplies: tri(profile?.esiApplies ?? null), ptApplies: tri(profile?.ptApplies ?? null), pfOnFullWages: profile?.pfOnFullWages, skipMonthly: profile ? !profile.paysMonthly : false, costCentreId: profile?.costCentreId }}
             fields={[
               { name: "pan", label: "PAN", type: "text", placeholder: has.pan ? `Stored, ends ${profile?.panLast4}` : "ABCDE1234F", section: "Identity" }, { name: "uan", label: "UAN (provident fund)", type: "text", placeholder: has.uan ? `Stored, ends ${profile?.uanLast4}` : undefined },
               { name: "esi", label: "ESI number", type: "text", placeholder: has.esi ? `Stored, ends ${profile?.esiLast4}` : undefined },
@@ -74,12 +74,14 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
               { name: "regime", label: "Tax regime", type: "select", required: true, options: [{ value: "new", label: "New regime" }, { value: "old", label: "Old regime" }], section: "Deductions" },
               { name: "state", label: "State (professional tax)", type: "select", options: STATES.map((s) => ({ value: s, label: s })), hint: "Empty uses the school's state." },
               ...(["pfApplies", "esiApplies", "ptApplies"] as const).map((n) => ({ name: n, label: { pfApplies: "Provident fund", esiApplies: "ESI", ptApplies: "Professional tax" }[n], type: "select" as const, required: true, options: [{ value: "auto", label: "As the school decided" }, { value: "yes", label: "Applies" }, { value: "no", label: "Does not apply" }] })),
+              { name: "costCentreId", label: "Cost centre", type: "select", options: centres.map((c) => ({ value: c.id, label: c.name })), hint: "Their salary is booked to it in the accounts." },
               { name: "pfOnFullWages", label: "PF on full wages", type: "checkbox", placeholder: "Pay PF on full wages, not up to the ceiling" }, { name: "skipMonthly", label: "Monthly run", type: "checkbox", placeholder: "Leave out of the monthly run (extra pay only)" },
             ]} /> : null}>
             {profile ? (
               <div className="divide-y divide-white/[0.06]">
                 {sealed("pan", profile.panLast4, "PAN")}{sealed("uan", profile.uanLast4, "UAN")}{sealed("esi", profile.esiLast4, "ESI number")}{sealed("bankAccount", profile.bankLast4, "Bank account")}
                 <div className="flex justify-between py-1.5 text-sm"><span className="text-[var(--ds-on-surface-variant)]">Paid by</span><span>{{ bank: `Bank${profile.ifsc ? `, ${profile.ifsc}` : ""}`, cash: "Cash", cheque: "Cheque" }[profile.payBy]}</span></div>
+                <div className="flex justify-between py-1.5 text-sm"><span className="text-[var(--ds-on-surface-variant)]">Cost centre</span><span>{centres.find((c) => c.id === profile.costCentreId)?.name ?? "None"}</span></div>
                 <div className="flex justify-between py-1.5 text-sm"><span className="text-[var(--ds-on-surface-variant)]">Tax regime, state</span><span>{profile.regime === "new" ? "New" : "Old"} · {profile.state ?? "School's state"}</span></div>
               </div>
             ) : <EmptyLine title="No pay details yet." hint="PAN, bank account and which deductions apply." action={manage ? <FormModal title="Pay details" icon="teacher" action={saveProfile} hidden={{ userId: id }} trigger={{ label: "Add pay details" }} fields={[{ name: "pan", label: "PAN", type: "text" }, { name: "bankAccount", label: "Account number", type: "text" }, { name: "ifsc", label: "IFSC", type: "text" }, { name: "payBy", label: "Paid by", type: "select", required: true, options: [{ value: "bank", label: "Bank transfer" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }] }]} /> : undefined} />}

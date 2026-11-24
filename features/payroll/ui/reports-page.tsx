@@ -26,7 +26,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const sp = await searchParams, today = todayIST();
   const name = (one(sp.report) as ReportName) in REPORT_NAMES ? (one(sp.report) as ReportName) : "register";
   const period = parsePeriod({ period: one(sp.period), from: one(sp.from), to: one(sp.to) }, today);
-  const month = period.from.slice(0, 7), runId = one(sp.runId), by = one(sp.by) === "department" ? "department" : "month";
+  const month = period.from.slice(0, 7), runId = one(sp.runId), by = one(sp.by) === "department" ? "department" : one(sp.by) === "cost_centre" ? "cost_centre" : "month";
   const runs = name === "bank" ? (await new RunService(ctx).list({ pageSize: 12 })).rows : [];
   const needsRun = name === "bank" && !runId;
   const report = needsRun ? null : await svc.build(name, { month, runId, by, ...(name === "components" ? { from: period.kind === "custom" || period.kind === "fy" ? period.from : undefined, to: period.kind === "custom" || period.kind === "fy" ? period.to : undefined } : {}) });
@@ -42,7 +42,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         ))}
       </nav>
       {BY_MONTH.includes(name) ? <div className="mb-5"><PeriodPicker today={today} presets={["this_month", "last_month", "this_quarter", "this_fy"]} /></div> : null}
-      {name === "components" ? <p className="mb-4 text-sm"><Link href={`/app/payroll/reports?report=components&by=month&period=${one(sp.period) ?? month}`} className={by === "month" ? "font-medium" : "underline"}>By month</Link> · <Link href={`/app/payroll/reports?report=components&by=department&period=${one(sp.period) ?? month}`} className={by === "department" ? "font-medium" : "underline"}>By department</Link></p> : null}
+      {name === "components" ? <p className="mb-4 text-sm"><Link href={`/app/payroll/reports?report=components&by=month&period=${one(sp.period) ?? month}`} className={by === "month" ? "font-medium" : "underline"}>By month</Link> · <Link href={`/app/payroll/reports?report=components&by=department&period=${one(sp.period) ?? month}`} className={by === "department" ? "font-medium" : "underline"}>By department</Link> · <Link href={`/app/payroll/reports?report=components&by=cost_centre&period=${one(sp.period) ?? month}`} className={by === "cost_centre" ? "font-medium" : "underline"}>By cost centre</Link></p> : null}
       {needsRun ? (runs.length ? <ul className="flex flex-col gap-2">{runs.map((r) => <li key={r.id}><Link href={`/app/payroll/reports?report=bank&runId=${r.id}`} className="flex min-h-11 items-center rounded-xl bg-white/[0.04] px-4 text-sm hover:bg-white/[0.08]">{r.label}</Link></li>)}</ul> : <EmptyLine title="No pay runs yet." hint="Bank advice is made from a pay run." action={<Link href="/app/payroll/runs/new" className={PILL_BTN}>Start a run</Link>} />) : null}
       {report ? (
         <>

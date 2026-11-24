@@ -148,7 +148,8 @@ describe("collecting", () => {
     await expect(cashier().collect({ studentId: id, date: "2999-01-01", methods: cash(1_000) })).rejects.toBeInstanceOf(ValidationError);
     await expect(cashier().collect({ studentId: id, date: "2020-01-01", methods: cash(1_000) })).rejects.toMatchObject({ fieldErrors: { date: expect.stringContaining("days back") } });
     const [m1] = await bills(fx, id);
-    await new InvoiceService(fx.school.as.admin).cancel(m1!.id, "Billed by mistake");
+    const asked = await new InvoiceService(fx.school.as.accountant).cancel(m1!.id, "Billed by mistake");
+    await decide(fx, "fees.invoice_change", asked.changeId!);
     await expect(cashier().collect({ studentId: id, invoiceIds: [m1!.id], methods: cash(1_000) })).rejects.toThrow(/cancelled/);
   });
 

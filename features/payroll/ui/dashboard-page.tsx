@@ -12,7 +12,6 @@ import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { Money } from "@smw/ui/finance/Money";
 import { paise as rupees, shortDate } from "@smw/ui/format";
 import { DashboardService } from "../services/dashboard";
-import { REMIT_LABEL } from "../services/remittances";
 import { CostTrend } from "./cost-trend";
 import { PRIMARY_BTN, PayNav, monthName } from "./common";
 
@@ -68,7 +67,7 @@ export default async function PayrollDashboardPage() {
                 {d.due.map((r) => (
                   <li key={`${r.key}${r.month}`}>
                     <Link href="/app/payroll/statutory?tab=remittances" className="flex min-h-11 items-center justify-between gap-3 rounded-xl px-2 py-2 text-sm hover:bg-white/[0.04]">
-                      <span className="min-w-0"><span className="block truncate">{REMIT_LABEL[r.key]}, {monthName(r.month)}</span><span className={`block text-xs ${r.late ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-muted)]"}`}>{r.late ? "Late, was due" : "Due"} {shortDate(r.dueDate)}</span></span>
+                      <span className="min-w-0"><span className="block truncate">{r.label}, {monthName(r.month)}</span><span className={`block text-xs ${r.late ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-muted)]"}`}>{r.late ? "Late, was due" : "Due"} {shortDate(r.dueDate)}</span></span>
                       <Money paise={r.outstandingPaise} />
                     </Link>
                   </li>

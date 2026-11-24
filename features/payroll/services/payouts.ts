@@ -1,6 +1,8 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { users } from "@smw/db";
 import { ConflictError, NotFoundError, ValidationError } from "@smw/feature-kit";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { unseal } from "@smw/feature-kit/secret";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
 import { day } from "@smw/feature-finance/services/common";
@@ -110,7 +112,7 @@ export class PayoutService extends PayrollService {
     }, (n) => ({ action: "payout_retry", entity: "PayRun", entityId: runId, summary: `${n} transfers set to try again` }));
   }
 
-  /** Someone who has been paid their final settlement is marked as having left. Needs the staff permission; otherwise the exit page shows the link. */
+  /** After the final payment the login is switched off when this person may do that. When they may not, the admins are told, with a link, so it is never forgotten. */
   private async leave(userId: string) {
     try {
       const { StaffService } = await import("@smw/feature-staff/service");
@@ -118,6 +120,12 @@ export class PayoutService extends PayrollService {
     } catch (e) {
       console.error(JSON.stringify({ level: "warn", msg: "could not mark staff as left after the final payment", userId, err: String(e) }));
     }
+    await this.write("read", async (tx) => {
+      const who = (await this.people(tx, [userId])).get(userId);
+      if (!who || who.left) return;
+      const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")));
+      await NotificationWriter.insert(tx, this.ctx.schoolId, admins.map((a) => ({ userId: a.id, kind: "system" as const, title: `Deactivate ${who.name}: the final pay is paid`, body: "Their login is still active. Open their staff record and deactivate them.", href: `/app/staff/${userId}` })));
+    });
   }
 
   /** Who is paid, who is waiting, who failed. */

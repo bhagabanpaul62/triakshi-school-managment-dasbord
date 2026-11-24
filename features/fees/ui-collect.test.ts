@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { allocatePlan } from "./calc";
-import { asCalc, changeDue, denominationTotal, outcomeOf, pickedTotal, previewAllocation, selectIds, shareText, splitProblem, type DeskBill } from "./ui/collect/logic";
+import { asCalc, changeDue, csvCell, denominationTotal, outcomeOf, pickedTotal, previewAllocation, selectIds, shareText, splitProblem, type DeskBill } from "./ui/collect/logic";
 
 const line = (id: string, amountPaise: number, sort: number, paidPaise = 0) => ({ id, label: id.toUpperCase(), kind: "fee", amountPaise, concessionPaise: 0, creditedPaise: 0, paidPaise, sort });
 const bill = (id: string, dueDate: string, lines: ReturnType<typeof line>[], over: Partial<DeskBill> = {}): DeskBill => ({
@@ -48,6 +48,16 @@ describe("cash and counts", () => {
   it("denomination totals in paise", () => {
     expect(denominationTotal({ "200000": 1, "50000": 3, "100": 7 })).toBe(200_000 + 150_000 + 700);
     expect(denominationTotal({ "50000": -2, "100": 1.9 })).toBe(100);
+  });
+});
+
+describe("csv", () => {
+  it("does not let a cell run as a formula", () => {
+    expect(csvCell("=HYPERLINK(\"http://x\")")).toBe(`"'=HYPERLINK(""http://x"")"`);
+    expect(csvCell("+91 98765")).toBe("'+91 98765");
+    expect(csvCell("Sharma, Riya")).toBe('"Sharma, Riya"');
+    expect(csvCell(null)).toBe("");
+    expect(csvCell("12.50")).toBe("12.50");
   });
 });
 

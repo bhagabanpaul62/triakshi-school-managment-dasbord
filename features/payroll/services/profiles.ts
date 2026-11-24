@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Tx } from "@smw/db";
 import { NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
 import { seal, unseal } from "@smw/feature-kit/secret";
+import { finCostCentres } from "@smw/feature-finance/schema";
 import { flag } from "@smw/feature-finance/services/common";
 import { PayrollService, type Person } from "../base";
 import { payConfigInput, type PayConfig } from "../config";
@@ -37,6 +38,7 @@ export const profileInput = z.object({
   regime: z.enum(["new", "old"]).default("new"),
   state: z.string().trim().max(60).optional(),
   pfApplies: tri, esiApplies: tri, ptApplies: tri,
+  costCentreId: z.uuid().optional(),
   pfOnFullWages: flag, skipMonthly: flag,
 });
 const FIELDS = { pan: ["panSealed", "panLast4"], uan: ["uanSealed", "uanLast4"], esi: ["esiSealed", "esiLast4"], bankAccount: ["bankSealed", "bankLast4"] } as const;
@@ -69,6 +71,9 @@ export class ProfileService extends PayrollService {
     if (!this.attendanceOn) return [];
     return this.read("read", async (tx) => (await this.sources.days.encashable(tx, userId, new Date().toISOString().slice(0, 10))).map((e) => ({ name: e.name, days: e.halfDays / 2 })));
   }
+
+  /** Active cost centres a person's salary can be charged to. */
+  costCentres(): Promise<{ id: string; name: string }[]> { return this.read("read", (tx) => tx.select({ id: finCostCentres.id, name: finCostCentres.name }).from(finCostCentres).where(eq(finCostCentres.isActive, true)).orderBy(finCostCentres.name)); }
 
   /** Every active person, for CSV and the run's group pickers. */
   all(): Promise<PersonRow[]> { return this.read("read", async (tx) => (await this.rows(tx)).filter((r) => !r.left)); }
@@ -103,7 +108,8 @@ export class ProfileService extends PayrollService {
     const d = this.parse(profileInput, input);
     return this.write("manage", async (tx) => {
       if (!(await this.people(tx, [userId])).has(userId)) throw new NotFoundError("Person");
-      const set: Partial<typeof payProfiles.$inferInsert> = { payBy: d.payBy, regime: d.regime, state: d.state || null, pfApplies: d.pfApplies, esiApplies: d.esiApplies, ptApplies: d.ptApplies, pfOnFullWages: d.pfOnFullWages, paysMonthly: !d.skipMonthly };
+      const set: Partial<typeof payProfiles.$inferInsert> = { payBy: d.payBy, regime: d.regime, state: d.state || null, pfApplies: d.pfApplies, esiApplies: d.esiApplies, ptApplies: d.ptApplies, pfOnFullWages: d.pfOnFullWages, paysMonthly: !d.skipMonthly, costCentreId: d.costCentreId ?? null };
+      if (d.costCentreId && !(await tx.select({ id: finCostCentres.id }).from(finCostCentres).where(eq(finCostCentres.id, d.costCentreId))).length) throw new ValidationError({ costCentreId: "Pick one of this school's cost centres." });
       if (d.bankName !== undefined) set.bankName = d.bankName || null;
       if (d.ifsc) set.ifsc = d.ifsc;
       for (const [k, [sealed, last4]] of Object.entries(FIELDS) as [SealedField, readonly [string, string]][]) {

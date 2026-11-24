@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computePay, pfCeiling, slabTax, yearlyTax, type EngineComponent, type PayInput, type PayRates, type TaxRates } from "./engine";
+import { computePay, pfCeiling, share, slabTax, yearlyTax, type EngineComponent, type PayInput, type PayRates, type TaxRates } from "./engine";
 
 const LAKH = 10_000_000;
 const comp = (o: Partial<EngineComponent> & Pick<EngineComponent, "label" | "mode" | "value">): EngineComponent => ({ id: o.label, kind: "earning", isBasic: false, isWage: false, proRata: true, taxable: true, sort: 0, ...o });
@@ -19,7 +19,8 @@ const MAHARASHTRA = [{ over: 750_000, paise: 17_500 }, { over: 1_000_000, paise:
 const rates = (o: Partial<PayRates> = {}, on: Partial<PayRates["config"]> = {}): PayRates => ({
   pfCeilingSegments: [{ days: 30, paise: 2_500_000 }], pfEmployeeBp: 1200, pfEmployerBp: 1200, epsBp: 833, edliBp: 50, pfAdminBp: 50, wageExclusionBp: 5000,
   esiCeiling: 2_100_000, esiEmployeeBp: 75, esiEmployerBp: 325, pt: null, lwf: null, tax: null,
-  config: { pf: false, esi: false, pt: false, lwf: false, tds: false, ...on }, ...o,
+  config: { pf: false, esi: false, pt: false, lwf: false, tds: false, ...on },
+  rounding: { esi_employee: "up", esi_employer: "up", pf_employee: "nearest", pf_employer: "nearest", eps: "nearest" }, ...o,
 });
 const run = (o: Partial<PayInput> & { gross?: number } = {}) => {
   const r = computePay({
@@ -128,15 +129,15 @@ describe("provident fund", () => {
   it("the ceiling caps the contribution", () => {
     const r = run({ gross: 10_000_000, rates: rates({}, pf) });
     expect(amount(r, "pf_employee")).toBe(300_000);
-    expect(amount(r, "eps_employer")).toBe(208_250);
-    expect(amount(r, "pf_employer")).toBe(91_750);
+    expect(amount(r, "eps_employer")).toBe(208_300);
+    expect(amount(r, "pf_employer")).toBe(91_700);
     expect([amount(r, "edli"), amount(r, "pf_admin")]).toEqual([12_500, 12_500]);
   });
   it("pf on full wages lifts the contribution but not the pension share", () => {
     const r = run({ gross: 10_000_000, rates: rates({}, pf), profile: { pan: true, regime: "new", pfApplies: null, esiApplies: null, ptApplies: null, pfOnFullWages: true } });
     expect(amount(r, "pf_employee")).toBe(600_000);
-    expect(amount(r, "eps_employer")).toBe(208_250);
-    expect(amount(r, "pf_employer")).toBe(391_750);
+    expect(amount(r, "eps_employer")).toBe(208_300);
+    expect(amount(r, "pf_employer")).toBe(391_700);
     expect([amount(r, "edli"), amount(r, "pf_admin")]).toEqual([12_500, 25_000]);
   });
   it("September 2026 uses both ceilings by days", () => {
@@ -161,7 +162,7 @@ describe("ESI", () => {
   const esi = { esi: true };
   it("covers pay up to 21,000 and splits 0.75 and 3.25 percent", () => {
     const r = run({ gross: 2_100_000, rates: rates({}, esi) });
-    expect([amount(r, "esi_employee"), amount(r, "esi_employer")]).toEqual([15_750, 68_250]);
+    expect([amount(r, "esi_employee"), amount(r, "esi_employer")]).toEqual([15_800, 68_300]);
   });
   it("21,001 is out", () => expect(run({ gross: 2_100_100, rates: rates({}, esi) }).lines.some((l) => l.code?.startsWith("esi"))).toBe(false));
   it("the school must turn it on, and a person can be left out", () => {
@@ -247,6 +248,57 @@ describe("income tax (TDS)", () => {
     expect(r.taxableGrossPaise).toBe(r.grossPaise - 1_000_000);
   });
   it("TDS off in the school's settings means no line", () => expect(april({ gross: 20_000_000, rates: rates({ tax: NEW_TAX }) }).lines.some((l) => l.code === "tds")).toBe(false));
+});
+
+describe("rounding of contributions", () => {
+  it("shares round as the rule says: to the paisa, to the nearest rupee, or up to the next rupee", () => {
+    expect([share(2_500_000, 833, "paise"), share(2_500_000, 833, "nearest"), share(2_500_000, 833, "up")]).toEqual([208_250, 208_300, 208_300]);
+    expect([share(2_100_100, 75, "up"), share(2_100_000, 75, "up"), share(1_999_900, 75, "nearest")]).toEqual([15_800, 15_800, 15_000]);
+    expect(share(100, 75, "up")).toBe(100);
+  });
+  it("ESI goes up to the next rupee on each side; the boundary pay of exactly 21,000 stays covered", () => {
+    const r = run({ gross: 1_500_033, rates: rates({}, { esi: true }) });
+    expect([amount(r, "esi_employee"), amount(r, "esi_employer")]).toEqual([11_300, 48_800]);
+  });
+  it("the pension share is rounded first and employer PF is the rounded total less it", () => {
+    const r = run({ gross: 10_000_100, rates: rates({}, { pf: true }) });
+    // basic 5,000,050 is capped at 2,500,000: employee 300,000, total employer 300,000, pension 208,300
+    expect([amount(r, "pf_employee"), amount(r, "eps_employer"), amount(r, "pf_employer")]).toEqual([300_000, 208_300, 91_700]);
+  });
+  it("the wages each contribution rests on come back with the result", () => {
+    const r = run({ gross: 10_000_000, rates: rates({}, { pf: true, esi: true }) });
+    expect([r.epfWagesPaise, r.epsWagesPaise, r.edliWagesPaise, r.esiWagesPaise]).toEqual([2_500_000, 2_500_000, 2_500_000, 0]);
+    const s = run({ gross: 2_000_000, rates: rates({}, { pf: true, esi: true }) });
+    expect([s.epfWagesPaise, s.esiWagesPaise]).toEqual([1_000_000, 2_000_000]);
+  });
+});
+
+describe("a month with two rates", () => {
+  const seg = (gross: number, label: string, days: number, outside: number, lop = 0) => ({ assignment: { grossPaise: gross }, components: STRUCT, label, days: { calendarDays: 30, unpaidHalfDays: 2 * outside + lop } });
+  it("each part is paid for its own days and the lines add up to the paisa", () => {
+    // 14 days at 3,000,000 and 16 days at 3,300,000 in a 30-day month
+    const a = seg(3_000_000, "1 to 14 Nov", 14, 16), b = seg(3_300_000, "15 to 30 Nov", 16, 14);
+    const r = run({ gross: 3_300_000, segments: [a, b] });
+    const partA = Math.round((3_000_000 * 28) / 60), partB = Math.round((3_300_000 * 32) / 60);
+    expect(r.grossPaise).toBe(partA + partB);
+    expect(r.lines.map((l) => l.label)).toEqual(["Basic", "HRA", "Special"]);
+    expect(r.lines[0]!.note).toBe("1 to 14 Nov: ₹7,000; 15 to 30 Nov: ₹8,800");
+    expect(r.lines.reduce((s, l) => s + l.amountPaise, 0)).toBe(r.grossPaise);
+  });
+  it("unpaid days are shared between the parts by their days", () => {
+    const a = seg(3_000_000, "first", 14, 16, 1), b = seg(3_300_000, "second", 16, 14, 1);
+    expect(run({ gross: 3_300_000, segments: [a, b] }).grossPaise).toBe(Math.round((3_000_000 * 27) / 60) + Math.round((3_300_000 * 31) / 60));
+  });
+  it("a joiner is one part that starts late, with the days before it unpaid", () => {
+    const r = run({ gross: 3_000_000, segments: [seg(3_000_000, "from 11 Nov", 20, 10)] });
+    expect(r.grossPaise).toBe(Math.round((3_000_000 * 40) / 60));
+    expect(r.lines[0]!.note).toBeNull();
+  });
+  it("statutory amounts are worked on the sum of the parts, not part by part", () => {
+    const a = seg(3_000_000, "a", 14, 16), b = seg(3_300_000, "b", 16, 14);
+    const r = run({ gross: 3_300_000, segments: [a, b], rates: rates({}, { pf: true }) });
+    expect(amount(r, "pf_employee")).toBe(share(r.epfWagesPaise, 1200, "nearest"));
+  });
 });
 
 describe("lines", () => {

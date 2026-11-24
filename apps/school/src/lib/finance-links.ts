@@ -13,9 +13,12 @@ const ROUTES: Record<string, (id: string) => string> = {
   exp_petty: () => "/app/expenses/petty",
   exp_claim: () => "/app/expenses/claims",
   payroll_run: (id) => `/app/payroll/runs/${id}`,
-  payroll_payout: (id) => `/app/payroll/runs/${id}`,
-  payroll_exit: (id) => `/app/payroll/exits/${id}`,
-  payroll_loan: () => "/app/payroll/loans",
+  payroll_payout: (id) => `/app/payroll/runs/${id}?tab=payouts`,
+  payroll_loan: (id) => `/app/payroll/loans?item=${id}`,
+  payroll_remittance: () => "/app/payroll/statutory?tab=remittances",
+  opening: () => "/app/finance/banking",
+  transfer: () => "/app/finance/banking",
+  "year-close": () => "/app/finance/year-close",
 };
 
 export function sourceHref(sourceType: string, sourceId: string | null): string | null {

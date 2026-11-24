@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, check, date, index, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { schoolColumns, tenant, users } from "@smw/db";
-import { finCashAccounts } from "@smw/feature-finance/schema";
+import { finAccounts, finCashAccounts, finCostCentres } from "@smw/feature-finance/schema";
 import type { COMPONENT_KINDS, COMPONENT_MODES, EXIT_STATUSES, LOAN_STATUSES, PAYOUT_STATUSES, RUN_KINDS, RUN_STATUSES } from "./constants";
 
 // Every table starts with pay_: the school's general data export leaves these out unless the admin asks for payroll.
@@ -29,6 +29,8 @@ export const payProfiles = pgTable("pay_profiles", {
   /** Pay PF on full wages instead of up to the ceiling. */
   pfOnFullWages: boolean("pf_on_full_wages").notNull().default(false),
   paysMonthly: boolean("pays_monthly").notNull().default(true),
+  /** Salary lines of this person post to this cost centre. */
+  costCentreId: uuid("cost_centre_id").references(() => finCostCentres.id, { onDelete: "restrict" }),
   isActive: boolean("is_active").notNull().default(true),
 }, (t) => [...tenant(t, "pay_profiles"), uniqueIndex("pay_profiles_user").on(t.userId)]);
 
@@ -53,6 +55,8 @@ export const payComponents = pgTable("pay_components", {
   /** Cut when days are unpaid. */
   proRata: boolean("pro_rata").notNull().default(true),
   taxable: boolean("taxable").notNull().default(true),
+  /** Where a deduction or employer cost is held until it is paid out; empty = "Other salary deductions". */
+  accountId: uuid("account_id").references(() => finAccounts.id, { onDelete: "restrict" }),
   sort: integer("sort").notNull().default(0),
 }, (t) => [...tenant(t, "pay_components"), index("pay_components_structure").on(t.structureId)]);
 

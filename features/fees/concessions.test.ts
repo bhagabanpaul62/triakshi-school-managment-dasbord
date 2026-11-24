@@ -52,7 +52,7 @@ describe("concessions", () => {
 
   it("an approved concession is on bills issued afterwards and is cut at issue (no note)", async () => {
     const id = await newStudent(fx, "Later Kid", { issue: false });
-    const c = await new ConcessionService(accountant()).propose({ studentId: id, mode: "amount", value: 15_000, reason: "Need" });
+    const c = await new ConcessionService(accountant()).propose({ studentId: id, mode: "amount", per: "bill", value: 15_000, reason: "Need" });
     await decide(fx, "fees.concession", c.id);
     await issueAll(fx, undefined);
     expect((await bills(fx, id))[0]).toMatchObject({ concessionPaise: 15_000, creditedPaise: 0, grossPaise: 120_000 });

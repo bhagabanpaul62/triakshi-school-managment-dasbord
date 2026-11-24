@@ -8,6 +8,7 @@ import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./b
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { chargeManyInput, draftInput, bulkInput, reviseInput } from "./inputs";
 import { ChangeService } from "./changes";
+import { invoiceData } from "./documents";
 import { NoteService } from "./notes";
 import { OpeningImport } from "./opening";
 import { PlanBilling } from "./plan-billing";
@@ -171,7 +172,7 @@ export class InvoiceService extends FeesBase {
       if (!inv.lines.length || inv.grossPaise <= 0) throw invalid("lines", "A bill needs at least one line.");
       const s = byId.get(inv.studentId)!;
       const number = await this.number(tx, "invoice", date);
-      await tx.update(feeInvoices).set({ status: "issued", number, issueDate: date, verifyToken: newToken(), snapshot: inv.kind === "plan" ? inv.snapshot : await this.snapshot(tx, s), classId: inv.classId ?? s.classId }).where(eq(feeInvoices.id, inv.id));
+      await tx.update(feeInvoices).set({ status: "issued", number, issueDate: date, verifyToken: newToken(), templateVersion: await this.templateVersionIn(tx, "invoice"), snapshot: inv.kind === "plan" ? inv.snapshot : await this.snapshot(tx, s), classId: inv.classId ?? s.classId }).where(eq(feeInvoices.id, inv.id));
       await this.postIssue(tx, inv, settings.basis, date);
     }
     await this.autoUseAdvance(tx, studentIds, date);
@@ -187,6 +188,20 @@ export class InvoiceService extends FeesBase {
     const gross = lines.reduce((s, l) => s + l.amountPaise, 0), conc = lines.reduce((s, l) => s + l.concessionPaise, 0);
     const out: PostLine[] = [{ account: "student_dues", debit: gross, party }, ...lines.map((l): PostLine => { const account = this.lineAccount(l, heads); return { account, credit: l.amountPaise, memo: l.label, ...this.party(account, inv.studentId) }; }), { account: "concessions", debit: conc }, { account: "student_dues", credit: conc, party }];
     await this.post(tx, { date, sourceKey: `fees:invoice:${inv.id}`, sourceType: "fee_invoice", sourceId: inv.id, memo: `Bill ${inv.label}`, lines: out });
+  }
+
+  /** The bill as a PDF in the school's invoice layout (the version it was issued with). A draft has no number, so it has no file. */
+  async invoiceFile(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
+    const doc = await this.viewer(async (tx, own) => {
+      const [inv] = await this.loadInvoices(tx, eq(feeInvoices.id, asId(id, "Invoice")));
+      if (!inv) throw new NotFoundError("Invoice");
+      this.assertVisible(own, inv.studentId, "Invoice");
+      if (inv.status === "draft" || !inv.number || !inv.issueDate || !inv.verifyToken) throw new ConflictError("This bill is still a draft. Issue it first, then print it.");
+      const verifyUrl = await this.verifyUrlIn(tx, "invoice", inv.verifyToken);
+      return { inv, data: invoiceData({ number: inv.number, label: inv.label, issueDate: inv.issueDate, dueDate: inv.dueDate, status: inv.status, note: inv.note, snapshot: inv.snapshot, verifyUrl, lines: inv.lines, paidPaise: inv.paidPaise }) };
+    });
+    const { bytes, copyNo } = await this.templates().print("invoice", doc.data, { docType: "fee_invoice", docId: id, version: doc.inv.templateVersion ?? undefined });
+    return { filename: `${doc.inv.number!.replace(/\//g, "-")}${copyNo > 1 ? "-duplicate" : ""}.pdf`, bytes };
   }
 
   // ---------- cancel and revise ----------
@@ -261,6 +276,9 @@ export class InvoiceService extends FeesBase {
     await this.issueIn(tx, [nid]);
     return nid;
   }
+
+  /** Take a waiting cancel or revision back. */
+  withdrawChange(changeId: string) { return new ChangeService(this.ctx).withdraw(changeId); }
 
   /** Edit a refused or withdrawn cancel or revision and send it again. */
   async resubmitChange(changeId: string, input: unknown) {

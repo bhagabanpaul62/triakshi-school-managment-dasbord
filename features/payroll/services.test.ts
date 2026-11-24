@@ -4,6 +4,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx
 import { addMonths, monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { systemAccounts } from "@smw/feature-finance/chart";
+import { finAccounts, finCostCentres } from "@smw/feature-finance/schema";
 import { financeApprovals } from "@smw/feature-finance/approval-handlers";
 import { ApprovalService } from "@smw/feature-finance/approvals";
 import { balanceOf, postJournal } from "@smw/feature-finance/posting";
@@ -424,6 +425,10 @@ describe("exit", () => {
     const runId = (await exits.get(x.id)).exit.runId!;
     expect((await new PayoutService(a.as.accountant).markPaid(runId)).runPaid).toBe(true);
     expect((await exits.get(x.id)).exit.status).toBe("paid");
+    // The accountant cannot switch the login off, so the admins are told.
+    const told = await withSchool(a.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, a.users.admin))).map((n) => n.title));
+    expect(told).toContain("Deactivate Dev Menon: the final pay is paid");
+    expect((await exits.get(x.id)).deactivateBy.length).toBeGreaterThan(0);
     await expect(exits.update(x.id, { lastDay, reason: "again" })).rejects.toBeInstanceOf(ConflictError);
   });
   it("leave paid out at exit is written to the leave ledger, and put back when the settlement is undone", async () => {
@@ -497,6 +502,8 @@ describe("payslips and reports", () => {
     expect(reg.rows.reduce((s, r) => s + Number(r.net), 0)).toBeGreaterThan(0);
     const ecr = await rep.ecr(month(1));
     expect(ecr.text).toContain("100200300400#~#");
+    // Wages are the stored ones: gross 40,000, wages 20,000 (basic), contributions 2,400 / 1,666 / 734.
+    expect(ecr.text).toContain("#~#40000#~#20000#~#20000#~#20000#~#2400#~#1666#~#734#~#");
     expect((await rep.build("loans")).rows.length).toBeGreaterThan(0);
     expect((await rep.build("components", { by: "month" })).rows.length).toBeGreaterThan(0);
   });
@@ -557,6 +564,71 @@ describe("approval and reminders under load", () => {
     const first = await count();
     await jobs["payroll.reminders"]();
     expect(await count()).toBe(first);
+  });
+});
+
+describe("a month with two rates, held deductions and cost centres", () => {
+  it("pays each part at its own rate, books salary to the cost centre and holds employer costs where the school said", async () => {
+    const c = (await createSchoolPair(["finance", "staff", "payroll", "notifications"], "split")).a;
+    const ap = (who: Ctx = c.as.admin) => new ApprovalService(who, handlers);
+    await new PayConfigService(c.as.admin).save({ pf: false, pt: false, tds: false });
+    const [held, centre] = await withSchool(c.id, async (tx) => {
+      await systemAccounts(tx, c.id);
+      const [acc] = await tx.insert(finAccounts).values({ schoolId: c.id, code: "2900", name: "Canteen dues", type: "liability", group: "Payables" }).returning();
+      const [cc] = await tx.insert(finCostCentres).values({ schoolId: c.id, name: "Science" }).returning();
+      return [acc!.id, cc!.id] as const;
+    });
+    const sid = (await new StructureService(c.as.accountant).save({ name: "Plain", components: [
+      { label: "Basic", kind: "earning", mode: "percent_of_gross", value: 10_000, isBasic: true, isWage: true },
+      { label: "Canteen", kind: "deduction", mode: "fixed", value: 20_000, proRata: false, accountId: held },
+      { label: "Welfare provision", kind: "employer", mode: "fixed", value: 10_000, proRata: false }] })).id;
+    const [q1, q2] = [await mkStaff(c, "q1", "Raise Person"), await mkStaff(c, "q2", "Steady Person")];
+    const m = month(1), D = new Date(Date.UTC(+m.slice(0, 4), +m.slice(5, 7), 0)).getUTCDate();
+    for (const [u, g] of [[q1, 3_000_000], [q2, 3_000_000]] as const) {
+      await new AssignmentService(c.as.accountant).assign({ userId: u, structureId: sid, grossPaise: g, fromDate: addMonths(M0, -20) });
+      await new ProfileService(c.as.accountant).save(u, { pan: "ABCDE1111F", bankAccount: "123456789012", ifsc: "DEMO0001234", ...(u === q1 ? { costCentreId: centre } : {}) });
+    }
+    await new AssignmentService(c.as.accountant).assign({ userId: q1, structureId: sid, grossPaise: 3_500_000, fromDate: `${m.slice(0, 7)}-15` });
+    await expect(new StructureService(c.as.accountant).save({ name: "Bad", components: [{ label: "X", kind: "deduction", mode: "fixed", value: 1, accountId: "00000000-0000-4000-8000-000000000000" }] })).rejects.toBeInstanceOf(ValidationError);
+
+    const runs = new RunService(c.as.accountant);
+    const run = await runs.create({ month: m });
+    const view = await runs.get(run.id);
+    const raise = view.items.find((i) => i.name === "Raise Person")!;
+    // 14 days at 30,000 and the rest at 35,000, each part paid for its own days.
+    expect(raise.grossPaise).toBe(Math.round((3_000_000 * 28) / (2 * D)) + Math.round((3_500_000 * 2 * (D - 14)) / (2 * D)));
+    const basic = (await runs.item(raise.id)).lines.find((l) => l.label === "Basic")!;
+    expect(basic.source).toBeTruthy();
+    const note = await withSchool(c.id, async (tx) => (await tx.select().from(payLines).where(eq(payLines.itemId, raise.id))).find((l) => l.label === "Basic")!.note);
+    expect(note).toMatch(/^1 to 14 Oct: .+; 15 to 31 Oct: /);
+    expect(view.items.find((i) => i.name === "Steady Person")!.grossPaise).toBe(3_000_000);
+
+    await runs.review(run.id);
+    await ap().approve({ id: (await runs.submit(run.id)).id });
+    const bal2 = (key: "other_deductions" | "gratuity_payable" | "salaries") => withSchool(c.id, async (tx) => balanceOf(tx, [(await systemAccounts(tx, c.id))[key]]));
+    expect(await bal2("gratuity_payable")).toBe(0);
+    expect(await bal2("other_deductions")).toBe(-20_000);
+    expect(await withSchool(c.id, (tx) => balanceOf(tx, [held]))).toBe(-40_000);
+    // Salary for the person with a cost centre is booked to it.
+    const booked = await withSchool(c.id, async (tx) => (await tx.select().from(finJournalLines).where(eq(finJournalLines.costCentreId, centre))).reduce((s, l) => s + l.debitPaise, 0));
+    expect(booked).toBe(raise.grossPaise + 10_000); // salary plus the welfare provision, both to the cost centre
+    expect(await withSchool(c.id, async (tx) => [...(await tx.execute(sql`select journal_id from fin_journal_lines group by journal_id having sum(debit_paise) <> sum(credit_paise)`))])).toHaveLength(0);
+    const cost = await new ReportService(c.as.accountant).build("components", { by: "cost_centre", from: m, to: m });
+    expect(cost.rows.map((r) => [r.label, r.gross])).toContainEqual(["Science", raise.grossPaise]);
+
+    // Held amounts can be paid out, which clears them.
+    const rem = new RemittanceService(c.as.accountant);
+    const due = await rem.list({ onlyOpen: true });
+    expect(due.map((r) => [r.label.startsWith("Canteen dues") ? "held" : r.key, r.outstandingPaise]).sort()).toEqual([["held", 40_000], ["other", 20_000]]);
+    for (const r of due) await rem.record({ key: r.key, month: r.month, amountPaise: r.outstandingPaise });
+    expect(await bal2("other_deductions")).toBe(0);
+    expect(await withSchool(c.id, (tx) => balanceOf(tx, [held]))).toBe(0);
+  });
+  it("a rounding rule is a rate with a source and medium confidence, and can be overridden", async () => {
+    const rows = (await new RateService(a.as.accountant).list()).filter((r) => r.key.startsWith("round_"));
+    expect(rows.map((r) => r.key).sort()).toEqual(["round_eps", "round_esi_employee", "round_esi_employer", "round_pf_employee", "round_pf_employer"]);
+    expect(rows.every((r) => r.confidence === "medium" && r.source.startsWith("https://"))).toBe(true);
+    expect(rows.find((r) => r.key === "round_esi_employee")!.shown).toBe("up");
   });
 });
 

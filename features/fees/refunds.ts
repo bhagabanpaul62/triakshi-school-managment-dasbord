@@ -3,7 +3,8 @@ import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { cashAccount } from "@smw/feature-finance/posting";
-import { FeesBase } from "./base";
+import { FeesBase, asId } from "./base";
+import { refundVoucherData } from "./documents";
 import { refundInput } from "./inputs";
 import { feeAdvances, feeRefunds } from "./schema";
 
@@ -93,5 +94,19 @@ export class RefundService extends FeesBase {
 
   async rejectIn(tx: Tx, id: string) {
     await tx.update(feeRefunds).set({ status: "rejected" }).where(and(eq(feeRefunds.id, id), eq(feeRefunds.status, "pending")));
+  }
+
+  /** The voucher of an approved refund as a PDF. */
+  async refundVoucherFile(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
+    const doc = await this.viewer(async (tx, own) => {
+      const [r] = await tx.select().from(feeRefunds).where(eq(feeRefunds.id, asId(id, "Refund")));
+      if (!r) throw new NotFoundError("Refund");
+      this.assertVisible(own, r.studentId, "Refund");
+      if (r.status !== "approved" || !r.number || !r.paidOn) throw new ConflictError("This refund has no voucher yet. It is made when the refund is approved.");
+      const snapshot = await this.snapshot(tx, await this.oneStudent(tx, r.studentId));
+      return { r, data: refundVoucherData({ number: r.number, date: r.paidOn, snapshot, source: r.source, method: r.method, reference: r.reference, reason: r.reason, amountPaise: r.amountPaise }) };
+    });
+    const { bytes, copyNo } = await this.templates().print("voucher", doc.data, { docType: "fee_refund", docId: id });
+    return { filename: `${doc.r.number!.replace(/\//g, "-")}${copyNo > 1 ? "-duplicate" : ""}.pdf`, bytes };
   }
 }

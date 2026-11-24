@@ -3,7 +3,8 @@ import { z } from "zod";
 import { monthEnd } from "@smw/feature-kit/money";
 import type { Tx } from "@smw/db";
 import type { CONFIDENCE } from "./constants";
-import { daysIn, type PayRates, type TaxRates } from "./engine";
+import { daysIn, type PayRates, type RoundKey, type RoundMode, type TaxRates } from "./engine";
+import { ROUNDING_RATES } from "./rounding";
 import { RATES, builtIn, type Rate, type Slab } from "./rates";
 import { payRateOverrides } from "./schema";
 
@@ -19,12 +20,16 @@ const EXTRA: Rate[] = [
   { key: "due_day_pt", from: "2014-09-01", value: 20, source: "https://hrone.cloud/blog/professional-tax-slab-rates-2026-27/", confidence: "low", note: "Differs by state." },
   { key: "due_day_lwf", from: "2014-09-01", value: 15, source: "https://hrone.cloud/blog/professional-tax-slab-rates-2026-27/", confidence: "low", note: "Differs by state." },
 ];
-export const OVERRIDABLE_KEYS = [...new Set([...RATES, ...EXTRA].map((r) => r.key)), "lwf"];
+/** Rates that are not in the dated list of rates.ts: due days and rounding rules. */
+export const EXTRA_RATES: Rate[] = [...EXTRA, ...ROUNDING_RATES];
+export const OVERRIDABLE_KEYS = [...new Set([...RATES, ...EXTRA_RATES].map((r) => r.key)), "lwf"];
 
+const ROUND_DEFAULT: Record<RoundKey, RoundMode> = { esi_employee: "up", esi_employer: "up", pf_employee: "nearest", pf_employer: "nearest", eps: "nearest" };
 const num = z.number().int().min(0);
 const slabs = z.array(z.object({ over: num, paise: num, special: z.object({ month: z.number().int().min(1).max(12), paise: num }).optional() }));
 const pairs = z.array(z.tuple([num.nullable(), num]));
 const shape = (key: string): z.ZodType => {
+  if (key.startsWith("round_")) return z.enum(["paise", "nearest", "up"]);
   if (key === "pt") return slabs;
   if (key === "lwf") return z.object({ employeePaise: num, employerPaise: num, months: z.array(z.number().int().min(1).max(12)).optional() });
   if (key.startsWith("tax_slabs")) return pairs;
@@ -46,7 +51,7 @@ export class RateBook {
     const own = this.overrides.filter((o) => o.key === key && o.fromDate <= day && (!o.state || o.state.toLowerCase() === st))
       .sort((a, b) => Number(!!b.state) - Number(!!a.state) || b.fromDate.localeCompare(a.fromDate))[0];
     if (own) return { key, state: own.state, from: own.fromDate, value: own.value as T, source: `Set by your school: ${own.reason}`, confidence: "high", overridden: true };
-    const row = builtIn<T>(key, day, state) ?? (EXTRA.find((r) => r.key === key && r.from <= day) as Rate<T> | undefined) ?? null;
+    const row = builtIn<T>(key, day, state) ?? (EXTRA_RATES.find((r) => r.key === key && r.from <= day) as Rate<T> | undefined) ?? null;
     return row ? { key, state: row.state ?? null, from: row.from, value: row.value, source: row.source, confidence: row.confidence, overridden: false, note: row.note } : null;
   }
 
@@ -84,6 +89,7 @@ export class RateBook {
       edliBp: num("edli_bp", o.config.pf), pfAdminBp: num("pf_admin_bp", o.config.pf), wageExclusionBp: num("wage_exclusion_bp", o.config.pf),
       esiCeiling: num("esi_ceiling", o.config.esi), esiEmployeeBp: num("esi_employee_bp", o.config.esi), esiEmployerBp: num("esi_employer_bp", o.config.esi),
       pt, lwf, tax, config: o.config,
+      rounding: Object.fromEntries((Object.keys(ROUND_DEFAULT) as RoundKey[]).map((k) => [k, get<RoundMode>(`round_${k}`, month, null, k.startsWith("esi") ? o.config.esi : o.config.pf)?.value ?? ROUND_DEFAULT[k]])) as Record<RoundKey, RoundMode>,
     };
     return { rates, used: [...used.values()] };
   }

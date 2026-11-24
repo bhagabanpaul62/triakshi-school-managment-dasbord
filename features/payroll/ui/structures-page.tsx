@@ -18,7 +18,7 @@ export default async function StructuresPage({ searchParams }: { searchParams: S
   if (!svc.can("read")) return <NoAccess what="Pay structures" />;
   const edit = one((await searchParams).edit);
   const manage = svc.can("manage");
-  const list = await svc.list();
+  const [list, accounts] = await Promise.all([svc.list(), svc.heldAccounts()]);
   const open = edit && edit !== "new" ? await svc.get(edit).catch(() => null) : null;
   return (
     <>
@@ -26,8 +26,8 @@ export default async function StructuresPage({ searchParams }: { searchParams: S
       <PayNav active="structures" manager />
       {edit && (edit === "new" || open) ? (
         <Panel title={open ? open.structure.name : "New structure"} action={<Link href="/app/payroll/structures" className="text-xs text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface)]">Close</Link>} className="mb-6">
-          <StructureEditor key={open?.structure.id ?? "new"} id={open?.structure.id} name={open?.structure.name ?? ""} locked={!manage || (open?.people ?? 0) > 0} save={saveStructure} copy={manage ? copyStructure : undefined}
-            components={(open?.components ?? []).map(({ label, kind, mode, value, isBasic, isWage, proRata, taxable }) => ({ label, kind, mode, value: Number(value), isBasic, isWage, proRata, taxable }))} />
+          <StructureEditor accounts={accounts} key={open?.structure.id ?? "new"} id={open?.structure.id} name={open?.structure.name ?? ""} locked={!manage || (open?.people ?? 0) > 0} save={saveStructure} copy={manage ? copyStructure : undefined}
+            components={(open?.components ?? []).map(({ label, kind, mode, value, isBasic, isWage, proRata, taxable, accountId }) => ({ label, kind, mode, value: Number(value), isBasic, isWage, proRata, taxable, accountId }))} />
         </Panel>
       ) : null}
       {list.length === 0 ? <EmptyLine title="No pay structures yet." hint="Make one for teachers and one for support staff, then set each person's pay against it." action={manage ? <Link href="/app/payroll/structures?edit=new" className={PRIMARY_BTN}>Make the first structure</Link> : undefined} /> : (

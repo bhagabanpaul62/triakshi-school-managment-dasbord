@@ -60,7 +60,7 @@ export default async function ExitPage({ params }: { params: Promise<{ id: strin
         <section className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl bg-[var(--ds-surface-container-low)] p-5 text-sm"><p>Approved. The money is owed; pay it from the settlement's run.</p>
           <span className="flex gap-2"><Link href={`/app/payroll/runs/${x.runId}?tab=payouts`} className={PRIMARY_BTN}>Pay the settlement</Link>{manage ? <FormModal title="Undo this settlement" description="Only while nothing is paid. The postings, loan recovery and leave paid out are reversed and the exit goes back to a draft." icon="clock" action={undoExit} hidden={{ id }} trigger={{ label: "Undo", variant: "ghost" }} submitLabel="Undo" fields={[{ name: "reason", label: "Why", type: "text", required: true }]} /> : null}</span></section>
       ) : null}
-      {x.status === "paid" && v.stillActive ? <section className="mb-4 rounded-3xl bg-[var(--ds-surface-container-low)] p-5 text-sm">Paid. {v.name} is still active in your staff list. <Link href={`/app/staff/${x.userId}`} className="underline">Deactivate them</Link> (only an admin can).</section> : null}
+      {x.status === "paid" && v.stillActive ? <section className="mb-4 rounded-3xl bg-[var(--ds-surface-container-low)] p-5 text-sm">Paid, but {v.name} can still sign in. {v.deactivateBy.length ? `${v.deactivateBy.join(", ")} can switch it off (admins were told).` : "Only an admin can switch it off."} <Link href={`/app/staff/${x.userId}`} className="underline">Open their staff record to deactivate them</Link>.</section> : null}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
         <div className="lg:col-span-8">

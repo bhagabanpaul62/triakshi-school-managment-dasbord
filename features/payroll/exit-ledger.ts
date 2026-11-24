@@ -8,7 +8,7 @@ import { leaveLedger } from "@smw/feature-attendance/schema";
 import { recoverLoans, approveRun, runWithItems } from "./ledger";
 import { monthLabel } from "./csv";
 import { daysIn } from "./engine";
-import { payExits, payItems, payLines, payRuns } from "./schema";
+import { payExits, payItems, payLines, payProfiles, payRuns } from "./schema";
 
 export type ExitLine = (typeof payExits.$inferSelect)["lines"][number];
 const sumOf = (lines: ExitLine[], f: (l: ExitLine) => boolean) => lines.filter(f).reduce((a, l) => a + l.amountPaise, 0);
@@ -19,6 +19,12 @@ export function exitTotals(lines: ExitLine[]) {
   return { gross, claims, deductions, employer, net: gross + claims - deductions };
 }
 
+/** The wages stored in the note of the first PF or ESI line (`wages=epf:eps:edli:esi`), in paise. */
+function wagesOf(lines: ExitLine[]) {
+  const [epf, eps, edli, esi] = (lines.find((l) => l.note?.startsWith("wages="))?.note?.replace("wages=", "").split(":") ?? []).map(Number);
+  return { epfWagesPaise: epf ?? 0, epsWagesPaise: eps ?? 0, edliWagesPaise: edli ?? 0, esiWagesPaise: esi ?? 0 };
+}
+
 /** Make the run of an exit that was just approved and approve it, so it posts and waits for its payout. */
 export async function approveExit(tx: Tx, poster: Poster, exitId: string, approvedBy: string) {
   const [x] = await tx.select().from(payExits).where(eq(payExits.id, exitId)).for("update");
@@ -27,8 +33,9 @@ export async function approveExit(tx: Tx, poster: Poster, exitId: string, approv
   const [u] = await tx.select({ name: users.name }).from(users).where(eq(users.id, x.userId));
   const month = monthStart(x.lastDay), t = exitTotals(x.lines);
   const [run] = await tx.insert(payRuns).values({ schoolId: x.schoolId, kind: "exit", month, label: `Final settlement: ${u?.name ?? "staff"}, ${monthLabel(month)}`, status: "reviewed", createdBy: x.createdBy, totals: { people: 1, skipped: 0, gross: t.gross, claims: t.claims, deductions: t.deductions, employer: t.employer, net: t.net } }).returning();
+  const [cc] = await tx.select({ costCentreId: payProfiles.costCentreId }).from(payProfiles).where(eq(payProfiles.userId, x.userId));
   const cal = daysIn(month), after = (cal - +x.lastDay.slice(8)) * 2;
-  const [item] = await tx.insert(payItems).values({ schoolId: x.schoolId, runId: run!.id, userId: x.userId, calendarDays: cal, paidHalfDays: cal * 2 - after, unpaidHalfDays: after, grossPaise: t.gross, deductionsPaise: t.deductions, employerPaise: t.employer, netPaise: t.net, snapshot: { exitId } }).returning();
+  const [item] = await tx.insert(payItems).values({ schoolId: x.schoolId, runId: run!.id, userId: x.userId, calendarDays: cal, paidHalfDays: cal * 2 - after, unpaidHalfDays: after, grossPaise: t.gross, deductionsPaise: t.deductions, employerPaise: t.employer, netPaise: t.net, snapshot: { exitId, costCentreId: cc?.costCentreId ?? null, ...wagesOf(x.lines) } }).returning();
   const earned = x.lines.filter((l) => l.amountPaise > 0 || l.kind === "earning");
   if (earned.length) await tx.insert(payLines).values(earned.map((l, sort) => ({ schoolId: x.schoolId, itemId: item!.id, kind: l.kind, code: l.code === "other" ? null : l.code, label: l.label, amountPaise: l.amountPaise, manual: true, note: l.note ?? null, refId: l.code === "loan" ? l.note ?? null : null, sort })));
   await approveRun(tx, poster, run!.id, approvedBy, ["reviewed"]);

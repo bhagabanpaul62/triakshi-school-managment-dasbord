@@ -9,15 +9,15 @@ import { Money } from "@smw/ui/finance/Money";
 import { toast } from "@smw/ui/shell/toast";
 import { computePay, type EngineComponent, type PayRates } from "../engine";
 
-export interface EditorComponent { label: string; kind: "earning" | "deduction" | "employer"; mode: "fixed" | "percent_of_basic" | "percent_of_gross" | "remainder"; value: number; isBasic: boolean; isWage: boolean; proRata: boolean; taxable: boolean }
-const OFF: PayRates = { pfCeilingSegments: [{ days: 30, paise: 0 }], pfEmployeeBp: 0, pfEmployerBp: 0, epsBp: 0, edliBp: 0, pfAdminBp: 0, wageExclusionBp: 5000, esiCeiling: 0, esiEmployeeBp: 0, esiEmployerBp: 0, pt: null, lwf: null, tax: null, config: { pf: false, esi: false, pt: false, lwf: false, tds: false } };
+export interface EditorComponent { label: string; kind: "earning" | "deduction" | "employer"; mode: "fixed" | "percent_of_basic" | "percent_of_gross" | "remainder"; value: number; isBasic: boolean; isWage: boolean; proRata: boolean; taxable: boolean; accountId?: string | null }
+const OFF: PayRates = { pfCeilingSegments: [{ days: 30, paise: 0 }], pfEmployeeBp: 0, pfEmployerBp: 0, epsBp: 0, edliBp: 0, pfAdminBp: 0, wageExclusionBp: 5000, esiCeiling: 0, esiEmployeeBp: 0, esiEmployerBp: 0, pt: null, lwf: null, tax: null, config: { pf: false, esi: false, pt: false, lwf: false, tds: false }, rounding: { esi_employee: "paise", esi_employer: "paise", pf_employee: "paise", pf_employer: "paise", eps: "paise" } };
 const BLANK: EditorComponent = { label: "", kind: "earning", mode: "fixed", value: 0, isBasic: false, isWage: false, proRata: true, taxable: true };
 const KIND = { earning: "Earning", deduction: "Deduction", employer: "Employer cost" };
 const MODE = { fixed: "Fixed amount", percent_of_basic: "% of basic", percent_of_gross: "% of gross", remainder: "Rest of the gross" };
 const shown = (c: EditorComponent) => c.value / 100;
 
 /** Build a pay structure and see what a sample gross turns into, line by line, before saving. A structure people are paid by is read only: copy it to change it. */
-export function StructureEditor({ id, name: initialName, components: initial, locked, save, copy }: { id?: string; name: string; components: EditorComponent[]; locked: boolean; save: (fd: FormData) => Promise<FormResult>; copy?: (fd: FormData) => Promise<FormResult> }) {
+export function StructureEditor({ id, name: initialName, components: initial, locked, save, copy, accounts }: { accounts: { id: string; name: string }[]; id?: string; name: string; components: EditorComponent[]; locked: boolean; save: (fd: FormData) => Promise<FormResult>; copy?: (fd: FormData) => Promise<FormResult> }) {
   const [name, setName] = useState(initialName), [rows, setRows] = useState<EditorComponent[]>(initial.length ? initial : [{ ...BLANK, label: "Basic", mode: "percent_of_gross", value: 5000, isBasic: true, isWage: true }, { ...BLANK, label: "Allowance", mode: "remainder" }]);
   const [gross, setGross] = useState(30000), [pending, start] = useTransition();
   const router = useRouter();
@@ -48,6 +48,8 @@ export function StructureEditor({ id, name: initialName, components: initial, lo
                 <select aria-label="How it is worked out" value={c.mode} disabled={locked} onChange={(e) => patch(i, { mode: e.target.value as EditorComponent["mode"] })} className={INPUT}>{Object.entries(MODE).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
                 {c.mode !== "remainder" ? <input aria-label={c.mode === "fixed" ? "Amount in rupees" : "Percent"} type="number" step="0.01" min="0" value={shown(c)} disabled={locked} onChange={(e) => patch(i, { value: Math.round(Number(e.target.value) * 100) })} className={INPUT} /> : null}
               </div>
+              {c.kind !== "earning" ? <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--ds-on-surface-variant)]">Held until paid out in
+                <select value={c.accountId ?? ""} disabled={locked} onChange={(ev) => patch(i, { accountId: ev.target.value || null })} className={`${INPUT} w-auto`}><option value="">Other salary deductions</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label> : null}
               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 {c.kind === "earning" ? <>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={c.isBasic} disabled={locked} onChange={(e) => setRows((r) => r.map((x, j) => ({ ...x, isBasic: j === i ? e.target.checked : false })))} className="accent-[var(--ds-primary)]" />Basic</label>

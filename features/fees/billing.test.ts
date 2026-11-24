@@ -11,7 +11,7 @@ import { InvoiceService } from "./invoices";
 import { NoteService } from "./notes";
 import { PlanService } from "./plans";
 import { ReceiptService } from "./receipts";
-import { FEATURES, TODAY, bills, decide, due, ledger, makeSchool, publish, type Fixture } from "./testing";
+import { FEATURES, TODAY, bills, config, decide, due, ledger, makeSchool, publish, type Fixture } from "./testing";
 import { createTestSchool } from "@smw/feature-kit/testing";
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 });
@@ -113,7 +113,16 @@ describe("cancel, revise and notes", () => {
     expect(issued.invoice.number).toMatch(/^INV\//);
     await expect(svc.saveDraft({ id, studentId: fx.students.meera, label: "Trip again", dueDate: TODAY, lines: [{ label: "Bus", amountPaise: 1 }] })).rejects.toBeInstanceOf(ConflictError);
     await expect(svc.deleteDraft(id)).rejects.toBeInstanceOf(ConflictError);
-    await svc.cancel(id, "Trip was called off");
+    // Taking what is owed off a student needs a second person (the school's limit is 0): the request keeps the proposal and shows on the bill.
+    const asked = await svc.cancel(id, "Trip was called off");
+    expect(asked).toMatchObject({ requested: true });
+    expect((await svc.get(id)).invoice.status).toBe("issued");
+    expect((await svc.get(id)).openChange).toMatchObject({ kind: "cancel", status: "pending", lowersPaise: 50_000 });
+    await expect(svc.cancel(id, "Asking again")).rejects.toThrow(/already a request waiting/);
+    await svc.withdrawChange(asked.changeId!);
+    await expect(svc.withdrawChange(asked.changeId!)).rejects.toThrow(/nothing to withdraw/);
+    const again = await svc.cancel(id, "Trip was called off, sure now");
+    await decide(fx, "fees.invoice_change", again.changeId!);
     expect((await svc.get(id)).invoice.status).toBe("cancelled");
     await expect(svc.cancel(id, "again please")).rejects.toBeInstanceOf(ConflictError);
     expect(await checks()).toEqual([]);
@@ -122,14 +131,19 @@ describe("cancel, revise and notes", () => {
   it("revise: an unpaid bill is cancelled and replaced; a part-paid one is credited and replaced, and the old stays", async () => {
     const svc = new InvoiceService(as());
     const [m1, m2] = (await bills(fx, fx.students.meera)).filter((b) => b.status === "issued");
-    const r1 = await svc.revise(m2!.id, { reason: "Wrong amount", lines: [{ label: "Tuition M2", amountPaise: 80_000 }] });
+    const ask1 = await svc.revise(m2!.id, { reason: "Wrong amount", lines: [{ label: "Tuition M2", amountPaise: 80_000 }] });
+    expect(ask1).toMatchObject({ requested: true, invoiceId: null }); // 100,000 down to 80,000 lowers what is owed
+    await decide(fx, "fees.invoice_change", ask1.changeId!);
+    const r1 = (await svc.get(m2!.id)).versions.at(-1)!.id;
     const chain = (await svc.get(r1)).versions;
     expect(chain.map((v) => [v.version, v.status])).toEqual([[1, "cancelled"], [2, "issued"]]);
     await new ReceiptService(as()).collect({ studentId: fx.students.meera, invoiceIds: [m1!.id], methods: [{ method: "cash", amountPaise: 40_000 }] });
-    const r2 = await svc.revise(m1!.id, { reason: "Fee hike agreed", lines: [{ label: "Tuition M1 new", amountPaise: 70_000 }] });
+    // The open part (60,000) is replaced by 70,000: it raises what is owed, so it applies at once.
+    const { invoiceId: r2 } = await svc.revise(m1!.id, { reason: "Fee hike agreed", lines: [{ label: "Tuition M1 new", amountPaise: 70_000 }] });
+    expect(r2).toBeTruthy();
     const old = (await svc.get(m1!.id)).invoice;
     expect(old).toMatchObject({ status: "issued", paidPaise: 40_000, creditedPaise: 60_000 });
-    expect((await svc.get(r2)).invoice).toMatchObject({ version: 2, grossPaise: 70_000, replacesId: m1!.id });
+    expect((await svc.get(r2!)).invoice).toMatchObject({ version: 2, grossPaise: 70_000, replacesId: m1!.id });
     const acc = await new DuesService(as()).studentAccount(fx.students.meera);
     expect(acc.balance.openPaise).toBe(80_000 + 70_000 + 100_000 + 70_000);
     expect(await checks()).toEqual([]);
@@ -148,7 +162,7 @@ describe("cancel, revise and notes", () => {
     const after = (await new InvoiceService(as()).get(b!.id)).invoice;
     expect(after.creditedPaise).toBe(30_000);
     const debit = await notes.propose({ invoiceId: b!.id, kind: "debit", reasonType: "correction", reason: "Lab fee forgotten", add: { label: "Lab fee", amountPaise: 5_000 } });
-    await decide(fx, "fees.note", debit.id);
+    expect(debit.status).toBe("approved"); // a debit note adds to what is owed, so no second person is needed
     expect((await new InvoiceService(as()).get(b!.id)).invoice).toMatchObject({ grossPaise: 105_000, creditedPaise: 30_000 });
     expect(await ledger(fx, "bad_debts")).toBe(30_000);
     expect(await checks()).toEqual([]);
@@ -174,6 +188,7 @@ describe("plans in detail", () => {
   beforeAll(async () => { f2 = await makeSchool("bill2", { plan: false }); });
 
   it("optional heads bill only the opt-ins; a student override beats the class plan; joining and leaving rules", async () => {
+    await config(f2, { concessionLimitPaise: 100_000_000 }); // moves below are small enough to apply at once; the approval path has its own test
     const svc = new PlanService(f2.school.as.accountant);
     const joiner = (await withSchool(f2.school.id, (tx) => tx.insert(students).values({ schoolId: f2.school.id, admissionNo: "J1", name: "Late Joiner", classId: f2.classId, admissionDate: `${addDays(TODAY, -10).slice(0, 7)}-01` }).returning()))[0]!;
     const leaver = (await withSchool(f2.school.id, (tx) => tx.insert(students).values({ schoolId: f2.school.id, admissionNo: "L1", name: "Early Leaver", classId: f2.classId, admissionDate: `${f2.yearStart}`, status: "left", leftOn: addDays(TODAY, -20) }).returning()))[0]!;
