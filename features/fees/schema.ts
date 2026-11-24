@@ -21,6 +21,8 @@ export const feeHeads = pgTable("fee_heads", {
   type: text("type").$type<(typeof FEE_HEAD_TYPES)[number]>().notNull().default("income"),
   /** Income account; null = Fee income. */
   accountId: uuid("account_id").references(() => finAccounts.id, { onDelete: "restrict" }),
+  /** Legacy, unused: plans say how often a fee is billed. */
+  isRecurring: boolean("is_recurring").notNull().default(true),
   /** Counts on the tuition certificate. */
   isTuition: boolean("is_tuition").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
@@ -419,3 +421,5 @@ export const feeOpeningBatches = pgTable("fee_opening_batches", {
   status: text("status").$type<(typeof REQUEST_STATUSES)[number]>().notNull().default("pending"),
   createdBy: uuid("created_by").notNull(),
 }, (t) => [...tenant(t, "fee_opening_batches"), index("fee_opening_batches_status").on(t.schoolId, t.status)]);
+
+export * from "./legacy";

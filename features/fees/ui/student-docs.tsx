@@ -10,7 +10,7 @@ import { fyPeriod, fyStartOf, parsePeriod, periodLabel } from "@smw/ui/finance/l
 import { CertificateService } from "../service";
 import { noDuesData, statementData, tuitionCertificateData } from "../documents";
 import { paperConfig } from "./logic";
-import { CARD, H3, LINK, MUTED, PILL } from "./styles";
+import { CARD, LINK, MUTED, PILL } from "./styles";
 
 type Params = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";

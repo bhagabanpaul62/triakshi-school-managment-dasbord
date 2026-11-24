@@ -28,7 +28,7 @@ const row = "flex min-h-12 items-center justify-between gap-3 rounded-xl px-2 py
 
 export default async function FeesDashboardPage() {
   const ctx = await requireCtx();
-  if (!can(ctx, "read")) return can(ctx, "self") ? <FamilyHome ctx={ctx} /> : <NoAccess what="Fees" who="the accounts team" />;
+  if (!can(ctx, "read")) return can(ctx, "self") ? <FamilyHome /> : <NoAccess what="Fees" who="the accounts team" />;
 
   const collect = can(ctx, "collect"), setup = can(ctx, "setup");
   const [d, trend, month, steps, broken, slips, cheques, pending, pendingPlans] = await Promise.all([

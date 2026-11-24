@@ -19,8 +19,10 @@ import { ConcessionForm } from "./concession-form";
 import { FeesLookup } from "./lookups";
 import { SettlementBuilder, type SettlementPlan } from "./settlement-builder";
 import { StudentDocs } from "./student-docs";
-import { BackLink, Notice, PillLink, Tabs, can, one, type Search } from "./shared";
+import { Notice, PillLink, Tabs, can, one, type Search } from "./shared";
 import { CARD, H3, LINK, MUTED } from "./styles";
+
+export const metadata = { title: "Student fees" };
 
 type Account = Awaited<ReturnType<DuesService["studentAccount"]>>;
 const TABS = [["overview", "Overview"], ["bills", "Bills"], ["receipts", "Receipts"], ["deals", "Concessions and deals"], ["advance", "Advance and deposit"], ["documents", "Documents"], ["notes", "Notes"]] as const;

@@ -47,7 +47,7 @@ export default async function ConcessionsPage({ searchParams }: { searchParams: 
   const tabHref = (t: string) => `/app/fees/concessions${t === "requests" ? "" : `?tab=${t}`}`;
   const headList = heads.map((h) => ({ id: h.id, name: h.name }));
 
-  let body: React.ReactNode = null;
+  let body: React.ReactNode;
   if (tab === "requests") {
     const page = await svc.list(listQueryFrom(sp));
     const ap = await new FeesLookup(ctx).approvals(["fees.concession"], page.rows.map((r) => r.id));

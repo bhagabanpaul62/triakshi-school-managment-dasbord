@@ -22,6 +22,8 @@ import { NoteDialog } from "./note-dialog";
 import { BackLink, JournalLink, Notice, PillLink, can } from "./shared";
 import { CARD, H3, MUTED } from "./styles";
 
+export const metadata = { title: "Bill" };
+
 type Detail = Awaited<ReturnType<InvoiceService["get"]>>;
 const KIND: Record<string, string> = { plan: "From a plan", transport: "Transport", library_fine: "Library fine", custom: "Extra charge", opening: "Opening balance", bounce: "Bounce charge" };
 
@@ -80,7 +82,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   }, new Map<string, { id: string | null; number: string | null; date: string; paise: number; undone: number }>()).values()];
 
   const data = applyHidden(config, invoicePaperData({
-    number: inv.number, issueDate: inv.issueDate, dueDate: inv.dueDate, label: inv.label, student: inv.snapshot, note: inv.note,
+    number: inv.number, issueDate: inv.issueDate, dueDate: inv.dueDate, label: inv.label, student: { name: inv.snapshot.studentName, admissionNo: inv.snapshot.admissionNo, classLabel: inv.snapshot.classLabel, guardian: inv.snapshot.guardian }, note: inv.note,
     lines: inv.lines.map((l) => l.kind === "late" ? { label: l.label, amountPaise: 0, concessionPaise: 0, latePaise: l.amountPaise } : { label: l.label, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise + l.creditedPaise }),
     marks: cancelled ? ["CANCELLED"] : issued && d.state === "paid" ? ["PAID"] : [],
   }));

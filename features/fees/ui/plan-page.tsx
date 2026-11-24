@@ -17,6 +17,8 @@ import { PlanStudents } from "./plan-students";
 import { BackLink, NoAccess, Notice, PillLink, Tabs, can, one, type Search } from "./shared";
 import { CARD, H3, LINK, MUTED } from "./styles";
 
+export const metadata = { title: "Fee plan" };
+
 type View = Awaited<ReturnType<PlanService["get"]>>;
 const shape = (v: View): PlanShape => ({ lines: v.lines.map((l) => ({ headId: l.headId, headName: l.headName, optional: l.optional, dues: l.dues.map((d) => ({ dueKey: d.dueKey, dueOn: d.dueOn, amountPaise: d.amountPaise })) })) });
 const ADMISSION = { all: "All students", new: "New admissions", existing: "Existing students" } as const;

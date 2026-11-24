@@ -4,6 +4,7 @@ import { formToObject, serviceAction } from "@smw/runtime";
 import {
   ConcessionService, ConcessionTypeService, DuesService, HeadService, InvoiceService, NoteService, PlanService, PromiseService, SettlementService,
 } from "../service";
+import { OpeningImport } from "../opening";
 import { FeesLookup } from "./lookups";
 import { ReminderDesk } from "./remind";
 
@@ -101,3 +102,6 @@ export async function stopReminders(fd: FormData) { return serviceAction(Promise
 export async function resumeReminders(fd: FormData) { return serviceAction(PromiseService, (s) => s.resumeReminders(id(fd, "studentId")), "Reminders resumed"); }
 
 export async function remindOne(fd: FormData) { return serviceAction(ReminderDesk, (s) => s.remind([id(fd, "studentId")])); }
+
+export async function withdrawOpening(fd: FormData) { return serviceAction(OpeningImport, (s) => s.withdraw(id(fd)), "Taken back"); }
+export async function resendOpening(fd: FormData) { return serviceAction(OpeningImport, (s) => s.resubmit(id(fd)), "Sent for approval again"); }
