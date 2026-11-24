@@ -2,11 +2,10 @@
 
 import { formToObject, serviceAction } from "@smw/runtime";
 import {
-  ConcessionService, ConcessionTypeService, DuesService, HeadService, InvoiceService, NoteService, PlanService, PromiseService, SettlementService,
+  ConcessionService, ConcessionTypeService, DuesService, HeadService, InvoiceService, NoteService, PlanService, PromiseService, ReminderService, SettlementService,
 } from "../service";
 import { OpeningImport } from "../opening";
 import { FeesLookup } from "./lookups";
-import { ReminderDesk } from "./remind";
 
 const id = (fd: FormData, key = "id") => String(fd.get(key) ?? "");
 const body = (fd: FormData) => { const o = formToObject(fd); delete o.next; return o; };
@@ -54,8 +53,8 @@ export async function importOpening(fd: FormData) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   return serviceAction(InvoiceService, (s) => s.importOpening({ name: file.name, bytes }, fd.get("dry") === "1"));
 }
-export async function remindStudents(ids: string[]) { return serviceAction(ReminderDesk, (s) => s.remind(ids)); }
-export async function remindInvoiceFamilies(ids: string[]) { return serviceAction(ReminderDesk, async (s) => s.remind(await s.studentsOf(ids))); }
+export async function remindStudents(ids: string[]) { return serviceAction(ReminderService, (s) => s.remindNow({ studentIds: ids })); }
+export async function remindInvoiceFamilies(ids: string[]) { return serviceAction(ReminderService, (s) => s.remindNow({ invoiceIds: ids })); }
 
 // ---- plans and heads
 export async function savePlan(payload: string) { return serviceAction(PlanService, (s) => s.saveDraft(JSON.parse(payload)).then((v) => ({ id: v.plan.id }))); }
@@ -101,7 +100,7 @@ export async function addPromise(fd: FormData) { return serviceAction(PromiseSer
 export async function stopReminders(fd: FormData) { return serviceAction(PromiseService, (s) => s.stopReminders(body(fd)), "Reminders stopped for this student"); }
 export async function resumeReminders(fd: FormData) { return serviceAction(PromiseService, (s) => s.resumeReminders(id(fd, "studentId")), "Reminders resumed"); }
 
-export async function remindOne(fd: FormData) { return serviceAction(ReminderDesk, (s) => s.remind([id(fd, "studentId")])); }
+export async function remindOne(fd: FormData) { return serviceAction(ReminderService, (s) => s.remindNow({ studentIds: [id(fd, "studentId")] })); }
 
 export async function withdrawOpening(fd: FormData) { return serviceAction(OpeningImport, (s) => s.withdraw(id(fd)), "Taken back"); }
 export async function resendOpening(fd: FormData) { return serviceAction(OpeningImport, (s) => s.resubmit(id(fd)), "Sent for approval again"); }

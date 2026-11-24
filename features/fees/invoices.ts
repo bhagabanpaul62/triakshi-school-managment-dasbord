@@ -12,7 +12,8 @@ import { invoiceData } from "./documents";
 import { NoteService } from "./notes";
 import { OpeningImport } from "./opening";
 import { PlanBilling } from "./plan-billing";
-import { feeAllocations, feeConcessionUses, feeDueParts, feeInvoiceChanges, feeInvoiceLines, feeInvoices, feeNotes, feeReceipts } from "./schema";
+import { PlanService } from "./plans";
+import { feeAllocations, feeConcessionUses, feeDueParts, feeInvoiceChanges, feeInvoiceLines, feeInvoices, feeNotes, feePlans, feeReceipts } from "./schema";
 
 type LineIn = { headId?: string | null; kind: "fee" | "deposit" | "opening" | "bounce"; label: string; amountPaise: number; concessionPaise?: number };
 const CHUNK = 400;
@@ -66,8 +67,8 @@ export class InvoiceService extends FeesBase {
         tx.select({ id: students.id, name: students.name }).from(students).where(eq(students.id, inv.studentId)),
       ]);
       const accruedLatePaise = inv.status === "issued" ? invoiceLateFee(inv.lateRule, calcOf(inv), today) : 0;
-      const changes = await tx.select().from(feeInvoiceChanges).where(eq(feeInvoiceChanges.invoiceId, id)).orderBy(desc(feeInvoiceChanges.createdAt));
-      return { invoice: inv, student: student[0]!, changes: own ? [] : changes, openChange: own ? null : changes.find((c) => c.status === "pending") ?? null, openPaise: inv.status === "issued" ? openOf(inv) : 0, state: dueState(inv, today), accruedLatePaise, notes, allocations, versions };
+      const changes = own ? [] : await this.withApproval(tx, ["fees.invoice_change"], await tx.select().from(feeInvoiceChanges).where(eq(feeInvoiceChanges.invoiceId, id)).orderBy(desc(feeInvoiceChanges.createdAt)));
+      return { invoice: inv, student: student[0]!, changes, openChange: changes.find((c) => c.status === "pending") ?? null, openPaise: inv.status === "issued" ? openOf(inv) : 0, state: dueState(inv, today), accruedLatePaise, notes: await this.withApproval(tx, ["fees.note"], notes), allocations, versions };
     });
   }
 
@@ -100,11 +101,11 @@ export class InvoiceService extends FeesBase {
         if (!cur) throw new NotFoundError("Invoice");
         if (cur.status !== "draft") throw new ConflictError("This bill is issued, so it cannot be edited. Revise it, or add a credit or debit note.");
         await tx.delete(feeInvoiceLines).where(eq(feeInvoiceLines.invoiceId, d.id));
-        await tx.update(feeInvoices).set({ label: d.label, dueDate: d.dueDate, note: d.note ?? null }).where(eq(feeInvoices.id, d.id));
+        await tx.update(feeInvoices).set({ label: d.label, dueDate: d.dueDate, note: d.note ?? null, ...(d.lateRule === undefined ? {} : { lateRule: d.lateRule }) }).where(eq(feeInvoices.id, d.id));
         await this.writeLines(tx, d.id, d.lines);
         return d.id;
       }
-      return this.createDraft(tx, { studentId: d.studentId, yearId: year.id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines });
+      return this.createDraft(tx, { studentId: d.studentId, yearId: year.id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines, lateRule: d.lateRule === undefined ? await this.planRule(tx, d.studentId, year.id) : d.lateRule });
     }, (id) => ({ action: "draft", entity: "Invoice", entityId: id, summary: `Saved draft bill ${d.label}` }));
   }
 
@@ -123,10 +124,27 @@ export class InvoiceService extends FeesBase {
     return this.write("setup", async (tx) => {
       const year = await this.currentYear(tx);
       const made: string[] = [];
-      for (const studentId of d.studentIds) made.push(await this.createDraft(tx, { studentId, yearId: year.id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines }));
+      for (const studentId of d.studentIds) made.push(await this.createDraft(tx, { studentId, yearId: year.id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines, lateRule: d.lateRule === undefined ? await this.planRule(tx, studentId, year.id) : d.lateRule }));
       await this.issueIn(tx, made);
       return made;
     }, (ids) => ({ action: "charge_many", entity: "Invoice", summary: `Billed ${ids.length} students for ${d.label}` }));
+  }
+
+  /** The late fee rule of the plan a student is billed on (the school's usual), or null when they have no plan or the plan has none. */
+  private async planRule(tx: Tx, studentId: string, yearId: string): Promise<InvoiceFull["lateRule"]> {
+    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate }).from(students).where(eq(students.id, studentId));
+    if (!s) throw new NotFoundError("Student");
+    const pick = await new PlanService(this.ctx).resolve(tx, s, yearId);
+    return pick ? (await tx.select({ r: feePlans.lateRule }).from(feePlans).where(eq(feePlans.id, pick.id)))[0]?.r ?? null : null;
+  }
+
+  /** What a new bill for this student charges late by default, with the plan it comes from, so the editor can say it in words. */
+  async lateRuleFor(studentId: string) {
+    this.authorize("setup", "write");
+    return this.read("setup", async (tx) => {
+      const year = await this.currentYear(tx);
+      return { rule: await this.planRule(tx, asId(studentId, "Student"), year.id) };
+    });
   }
 
   /** A draft bill row with its lines, for one student. `sourceKey` makes system bills idempotent. */
@@ -204,6 +222,9 @@ export class InvoiceService extends FeesBase {
     return { filename: `${doc.inv.number!.replace(/\//g, "-")}${copyNo > 1 ? "-duplicate" : ""}.pdf`, bytes };
   }
 
+  /** Up to 100 bills as one PDF, each printed (and logged as a print) the same way as on its own. */
+  invoicesFile(ids: string[]) { return this.mergedFiles(ids, "bills", (id) => this.invoiceFile(id)); }
+
   // ---------- cancel and revise ----------
 
   /**
@@ -272,7 +293,7 @@ export class InvoiceService extends FeesBase {
       if (spec.length) await new NoteService(this.ctx).issueIn(tx, { invoiceId: id, kind: "credit", reasonType: "correction", reason: `Revised: ${d.reason}`, lines: spec });
     }
     const key = old!.sourceKey ? (old!.paidPaise === 0 && old!.creditedPaise === 0 ? old!.sourceKey : `${old!.sourceKey}:v${old!.version + 1}`) : undefined;
-    const nid = await this.createDraft(tx, { studentId: old!.studentId, yearId: old!.yearId, kind: old!.kind, label: d.label ?? old!.label, dueDate: d.dueDate ?? old!.dueDate, note: d.reason, lines: d.lines, sourceKey: key, replacesId: id, version: old!.version + 1, lateRule: old!.lateRule, classId: old!.classId, snapshot: old!.snapshot });
+    const nid = await this.createDraft(tx, { studentId: old!.studentId, yearId: old!.yearId, kind: old!.kind, label: d.label ?? old!.label, dueDate: d.dueDate ?? old!.dueDate, note: d.reason, lines: d.lines, sourceKey: key, replacesId: id, version: old!.version + 1, lateRule: d.lateRule === undefined ? old!.lateRule : d.lateRule, classId: old!.classId, snapshot: old!.snapshot });
     await this.issueIn(tx, [nid]);
     return nid;
   }
@@ -301,8 +322,8 @@ export class InvoiceService extends FeesBase {
     this.authorize("setup", "write");
     const o = this.parse(bulkInput, input);
     return this.read("setup", async (tx) => {
-      const { year, drafts, skipped } = await new PlanBilling(this.ctx).build(tx, o);
-      return { yearId: year.id, count: drafts.length, grossPaise: drafts.reduce((s, d) => s + d.grossPaise, 0), concessionPaise: drafts.reduce((s, d) => s + d.concessionPaise, 0), skipped,
+      const { year, drafts, skipped, exceptions } = await new PlanBilling(this.ctx).build(tx, o);
+      return { yearId: year.id, count: drafts.length, exceptions, grossPaise: drafts.reduce((s, d) => s + d.grossPaise, 0), concessionPaise: drafts.reduce((s, d) => s + d.concessionPaise, 0), skipped,
         rows: drafts.map((d) => ({ studentId: d.studentId, studentName: d.studentName, admissionNo: d.admissionNo, label: d.label, dueOn: d.dueOn, grossPaise: d.grossPaise, concessionPaise: d.concessionPaise, duePaise: d.grossPaise - d.concessionPaise })) };
     });
   }

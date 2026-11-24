@@ -1,26 +1,10 @@
 // Pure rules of the money-taking screens: no React, no database. The counter screen and the tests read the same functions.
-import { inWords, rupees } from "@smw/feature-kit/money";
-import { allocatePlan, type CalcInvoice, type CalcLine, type Part } from "../../calc";
+import { rupees } from "@smw/feature-kit/money";
+import { allocatePlan, dueNow, type CalcInvoice, type CalcLine, type DeskBill } from "../../calc";
 
-/** One open bill as the counter sees it. `lines` are the real lines; the late fee that has built up is not a line yet. */
-export interface DeskBill {
-  id: string;
-  studentId: string;
-  studentName: string;
-  number: string | null;
-  label: string;
-  dueDate: string;
-  state: string;
-  openPaise: number;
-  accruedLatePaise: number;
-  parts: Part[];
-  lines: (CalcLine & { label: string })[];
-}
+export { dueNow, type DeskBill };
 
 export interface Chosen { id: string; /** Pay only this much on the bill; leave out to pay it all. */ limitPaise?: number | null }
-
-/** What one bill needs today: what is open plus the late fee that will be added when it is collected. */
-export const dueNow = (b: Pick<DeskBill, "openPaise" | "accruedLatePaise">) => b.openPaise + b.accruedLatePaise;
 
 /** The bill the way `allocatePlan` wants it. The late fee is added as the last line, exactly as collect() fixes it. */
 export function asCalc(b: DeskBill, limit?: number | null): CalcInvoice {
@@ -136,23 +120,6 @@ export function shareText(r: { number: string; amountPaise: number; student: str
 
 /** The earliest day money may be dated. */
 export const earliestDate = (today: string, backdateDays: number) => new Date(Date.parse(`${today}T00:00:00Z`) - backdateDays * 86_400_000).toISOString().slice(0, 10);
-
-/** What a receipt document says, in the shape both the on-screen paper and the PDF use. */
-export interface ReceiptFacts {
-  number: string; date: string; student: string; admissionNo: string; classLabel: string; payer: string | null; amountPaise: number; advancePaise: number; status: string; reason?: string | null; duplicate?: boolean;
-  allocations: { bill: string; line: string; amountPaise: number }[];
-  methods: { label: string; reference: string | null; amountPaise: number }[];
-}
-export function receiptData(r: ReceiptFacts, money: (p: number) => string) {
-  return {
-    facts: [["Receipt no", r.number], ["Date", r.date], ["Student", r.student], ["Admission no", r.admissionNo], ["Class", r.classLabel], ["Received from", r.payer ?? "-"]] as [string, string][],
-    rows: [...r.allocations.map((a) => ({ bill: a.bill, line: a.line, amount: money(a.amountPaise) })), ...(r.advancePaise ? [{ bill: "Kept as advance", line: "", amount: money(r.advancePaise) }] : [])],
-    totals: [...r.methods.map((m): [string, string] => [`${m.label}${m.reference ? ` (${m.reference})` : ""}`, money(m.amountPaise)]), ["Total received", money(r.amountPaise), true]] as [string, string, boolean?][],
-    amountWords: inWords(r.amountPaise),
-    notes: r.status === "reversed" && r.reason ? [`Reversed: ${r.reason}`] : [],
-    marks: [...(r.duplicate ? ["DUPLICATE"] : []), ...(r.status === "reversed" ? ["REVERSED"] : []), ...(r.status === "bounced" ? ["CHEQUE BOUNCED"] : [])],
-  };
-}
 
 /** One CSV cell that a spreadsheet will not run as a formula: a leading = + - @ tab or return gets an apostrophe. */
 export function csvCell(v: unknown): string {

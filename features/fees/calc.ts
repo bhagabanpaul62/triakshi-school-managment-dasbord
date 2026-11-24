@@ -154,3 +154,22 @@ export function previewInvoice(draft: { lines: { headId?: string | null; kind?: 
   const concessionPaise = conc.reduce((s, c) => s + c, 0);
   return { lines, grossPaise, concessionPaise, duePaise: grossPaise - concessionPaise };
 }
+
+/** One open bill as the counter sees it. `lines` are the real lines; the late fee that has built up is not a line yet. */
+export interface DeskBill {
+  id: string;
+  studentId: string;
+  studentName: string;
+  number: string | null;
+  label: string;
+  dueDate: string;
+  state: string;
+  openPaise: number;
+  accruedLatePaise: number;
+  parts: Part[];
+  lines: (CalcLine & { label: string })[];
+}
+
+/** What one bill needs today: what is open plus the late fee that will be added when it is collected. */
+export const dueNow = (b: Pick<DeskBill, "openPaise" | "accruedLatePaise">) => b.openPaise + b.accruedLatePaise;
+

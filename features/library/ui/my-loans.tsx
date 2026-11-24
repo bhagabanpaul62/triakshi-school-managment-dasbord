@@ -1,5 +1,6 @@
 import { Panel } from "@smw/ui/kit/Panel";
-import { ToneBadge, WidgetEmptyState, ROW_HOVER } from "@smw/ui/widgets/WidgetPrimitives";
+import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { ROW_HOVER } from "@smw/ui/tone";
 import { paise, shortDate } from "@smw/ui/format";
 import type { LoanRow } from "../service";
 

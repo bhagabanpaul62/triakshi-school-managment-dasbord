@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Panel } from "@smw/ui/kit/Panel";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT } from "@smw/ui/tone";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import type { Ctx } from "@smw/feature-kit";

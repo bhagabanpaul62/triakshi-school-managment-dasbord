@@ -213,15 +213,15 @@ export function splitIntoParts(totalPaise: number, count: number, first: string)
 // ---------- the dashboard and lists ----------
 
 export interface AgeingShape { notDue: number; d1_30: number; d31_60: number; d61_90: number; d90p: number }
-/** AgeingBar buckets. The late ones open the overdue list; the dues report filters by overdue, not by age band. */
+/** AgeingBar buckets: each opens the dues report on that age band. */
 export function ageingBuckets(a: AgeingShape, href = "/app/fees/dues") {
-  const late = `${href}?overdue=1`;
+  const to = (band: string) => `${href}?age=${encodeURIComponent(band)}`;
   return [
-    { label: "Not due yet", paise: a.notDue },
-    { label: "1 to 30 days", paise: a.d1_30, href: late },
-    { label: "31 to 60 days", paise: a.d31_60, href: late },
-    { label: "61 to 90 days", paise: a.d61_90, href: late },
-    { label: "Over 90 days", paise: a.d90p, href: late },
+    { label: "Not due yet", paise: a.notDue, href: to("not-due") },
+    { label: "1 to 30 days", paise: a.d1_30, href: to("0-30") },
+    { label: "31 to 60 days", paise: a.d31_60, href: to("31-60") },
+    { label: "61 to 90 days", paise: a.d61_90, href: to("61-90") },
+    { label: "Over 90 days", paise: a.d90p, href: to("90+") },
   ];
 }
 

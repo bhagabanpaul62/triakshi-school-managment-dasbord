@@ -1,10 +1,10 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { listQuerySchema, type ListQuery } from "@smw/feature-kit";
-import { todayIST } from "@smw/feature-kit/money";
-import { FeesBase, asId, calcOf } from "./base";
+import { addMonths, monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
+import { FeesBase, asId, calcOf, invalid } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
-import { METHOD_LABEL, type PayMethod } from "./constants";
+import { METHOD_LABEL, type AgeBand, type PayMethod } from "./constants";
 import { feeAdvances, feeConcessions, feePromises, feeRefunds, feeReminders, feeSettlements, feeUpiSlips, feeNotes, feeReceipts, feeInvoices } from "./schema";
 
 export interface DueRow {
@@ -46,6 +46,9 @@ const LIVE = sql`('valid', 'clearing')`;
 const receiptMoney = (from: string, to: string) => sql`rcp as materialized (select id, date, amount_paise, collected_by from fee_receipts where status in ${LIVE} and date between ${from}::date and ${to}::date),
   mon as materialized (select receipt_id, method, sum(amount_paise) paise from fee_receipt_methods where receipt_id in (select id from rcp) group by receipt_id, method)`;
 
+/** The column of the per-student ageing aggregate (`a` in `rows`) behind each band of the age filter. */
+const AGE_COLUMN: Record<AgeBand, string> = { "not-due": "not_due", "0-30": "d1", "31-60": "d2", "61-90": "d3", "90+": "d4" };
+
 const asRows = <T,>(r: Iterable<T>) => [...r];
 const num = (v: unknown) => Number(v ?? 0);
 
@@ -82,7 +85,8 @@ export class DuesService extends FeesBase {
         ...promises.map((p) => ({ at: p.promisedOn, kind: "promise", title: `Promised to pay${p.note ? `: ${p.note}` : ""}`, amountPaise: p.amountPaise ?? 0, href: `/app/fees/students/${studentId}` })),
         ...reminders.map((r) => ({ at: r.sentOn, kind: "reminder", title: "Reminder sent", amountPaise: 0, href: `/app/fees/invoices/${r.invoiceId}` })),
       ].sort((a, b) => b.at.localeCompare(a.at));
-      return { student, balance: { openPaise, accruedPaise, advancePaise, depositPaise, netPaise: openPaise + accruedPaise - advancePaise }, invoices: rows, receipts, notes, concessions, settlements, advances, deposits: { heldPaise: depositPaise }, refunds, slips, promises, timeline };
+      const [notesWith, concessionsWith, settlementsWith] = await Promise.all([this.withApproval(tx, ["fees.note"], notes), this.withApproval(tx, ["fees.concession"], concessions), this.withApproval(tx, ["fees.settlement"], settlements)]);
+      return { student, balance: { openPaise, accruedPaise, advancePaise, depositPaise, netPaise: openPaise + accruedPaise - advancePaise }, invoices: rows, receipts, notes: notesWith, concessions: concessionsWith, settlements: settlementsWith, advances, deposits: { heldPaise: depositPaise }, refunds, slips, promises, timeline };
     });
   }
 
@@ -111,13 +115,15 @@ export class DuesService extends FeesBase {
     const q = listQuerySchema.parse(query);
     return this.read("read", async (tx) => {
       const f = q.filters;
-      const out = await this.rows(tx, { q: q.q, classId: f.classId, headId: f.headId, routeId: f.routeId, overdueOnly: f.overdue === "1", status: f.status, limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
+      const out = await this.rows(tx, { q: q.q, classId: f.classId, headId: f.headId, routeId: f.routeId, overdueOnly: f.overdue === "1", age: f.age, status: f.status, limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
       return { rows: out.rows, total: out.total, page: q.page, pageSize: q.pageSize, pageCount: Math.max(1, Math.ceil(out.total / q.pageSize)), totals: out.totals };
     });
   }
 
-  private async rows(tx: Tx, o: { ids?: string[]; q?: string; classId?: string; headId?: string; routeId?: string; overdueOnly?: boolean; status?: string; includeZero?: boolean; limit: number; offset: number }) {
+  private async rows(tx: Tx, o: { ids?: string[]; q?: string; classId?: string; headId?: string; routeId?: string; overdueOnly?: boolean; age?: string; status?: string; includeZero?: boolean; limit: number; offset: number }) {
     const today = todayIST();
+    const ageColumn = o.age ? AGE_COLUMN[o.age as AgeBand] : undefined;
+    if (o.age && !ageColumn) throw invalid("age", "Pick one of the age bands.");
     const [t] = asRows(await tx.execute<{ r: string | null; t: string | null }>(sql`select to_regclass('student_transport') r, to_regclass('routes') t`));
     const where = [
       o.ids ? sql`s.id in (${sql.join((o.ids.length ? o.ids : [NIL]).map((x) => sql`${x}::uuid`), sql`, `)})` : sql`true`,
@@ -126,6 +132,7 @@ export class DuesService extends FeesBase {
       o.status ? sql`s.status = ${o.status}` : sql`true`,
       o.routeId && t?.r ? sql`exists (select 1 from student_transport st where st.student_id = s.id and st.route_id = ${o.routeId}::uuid)` : sql`true`,
       o.overdueOnly ? sql`coalesce(a.overdue, 0) > 0` : sql`true`,
+      ageColumn ? sql`coalesce(a.${sql.raw(ageColumn)}, 0) > 0` : sql`true`,
       o.includeZero ? sql`true` : sql`coalesce(a.open, 0) > 0`,
     ];
     const age = (lo: number, hi: number) => sql`coalesce(sum(open_paise) filter (where due_on < ${today}::date and ${today}::date - due_on between ${lo} and ${hi}), 0)`;
@@ -137,6 +144,7 @@ export class DuesService extends FeesBase {
       inv as (select student_id, sum(gross_paise) gross, sum(concession_paise + credited_paise) conc, sum(late_paise) late, sum(paid_paise) paid from fee_invoices where status = 'issued' group by student_id)
       select s.id, s.name, s.admission_no, s.class_id, s.status, s.left_on, coalesce(c.name || coalesce('-' || sec.name, ''), '-') class_label,
              coalesce(a.open, 0) open, coalesce(a.overdue, 0) overdue, a.next_due, coalesce(a.not_due, 0) not_due, coalesce(a.d1, 0) d1, coalesce(a.d2, 0) d2, coalesce(a.d3, 0) d3, coalesce(a.d4, 0) d4,
+             ${ageColumn ? sql`coalesce(a.${sql.raw(ageColumn)}, 0)` : sql`null`} in_band,
              coalesce(inv.gross, 0) gross, coalesce(inv.conc, 0) conc, coalesce(inv.late, 0) late, coalesce(inv.paid, 0) paid,
              count(*) over () total, sum(coalesce(a.open, 0)) over () t_open, sum(coalesce(a.overdue, 0)) over () t_overdue, sum(coalesce(a.not_due, 0)) over () t_not_due,
              sum(coalesce(a.d1, 0)) over () t1, sum(coalesce(a.d2, 0)) over () t2, sum(coalesce(a.d3, 0)) over () t3, sum(coalesce(a.d4, 0)) over () t4
@@ -152,7 +160,7 @@ export class DuesService extends FeesBase {
         id: r.id as string, name: r.name as string, admissionNo: r.admission_no as string, classId: (r.class_id as string | null), classLabel: r.class_label as string,
         gross: num(r.gross), concession: num(r.conc), late: num(r.late), paid: num(r.paid), due: open, overdue, accrued,
         status: overdue > 0 ? "overdue" as const : open > 0 ? "due" as const : "paid" as const, nextDueDate: (r.next_due as string | null) ?? null,
-        studentStatus: r.status as string, leftOn: (r.left_on as string | null) ?? null,
+        studentStatus: r.status as string, leftOn: (r.left_on as string | null) ?? null, inBand: r.in_band == null ? null : num(r.in_band),
         ageing: { notDue: num(r.not_due), d1_30: num(r.d1), d31_60: num(r.d2), d61_90: num(r.d3), d90p: num(r.d4) } satisfies Ageing,
       };
     });
@@ -168,7 +176,7 @@ export class DuesService extends FeesBase {
     return this.viewer(async (tx, own) => {
       if (!own?.length) return [];
       const out = await this.rows(tx, { ids: own, includeZero: true, limit: 50, offset: 0 });
-      return out.rows.filter((r) => r.gross > 0 || r.due > 0).map(({ accrued, ageing: _a, studentStatus: _s, leftOn: _l, ...r }) => ({ ...r, due: r.due + accrued, overdue: r.overdue + (r.status === "overdue" ? accrued : 0), late: r.late + accrued }));
+      return out.rows.filter((r) => r.gross > 0 || r.due > 0).map(({ accrued, ageing: _a, studentStatus: _s, leftOn: _l, inBand: _b, ...r }) => ({ ...r, due: r.due + accrued, overdue: r.overdue + (r.status === "overdue" ? accrued : 0), late: r.late + accrued }));
     });
   }
 
@@ -212,11 +220,25 @@ export class DuesService extends FeesBase {
       from fee_receipts r where r.status in ${LIVE} order by r.date desc, r.created_at desc limit ${limit}`)).map((r) => ({ id: r.id, student: r.student, amountPaise: num(r.amount), method: r.method ?? "cash", receiptNo: r.number, paidOn: r.date })));
   }
 
+  /**
+   * Billed, conceded and collected between two days: bills issued in the range (gross, and the concession on them), plus
+   * concession notes issued on older bills in it. Collected is new money received, so a month has one source for each number.
+   */
+  private async figuresIn(tx: Tx, from: string, to: string) {
+    const [[b], [n], got] = await Promise.all([
+      tx.select({ gross: sql<string>`coalesce(sum(${feeInvoices.grossPaise}), 0)`, conc: sql<string>`coalesce(sum(${feeInvoices.concessionPaise}), 0)`, n: sql<number>`count(*)::int` }).from(feeInvoices).where(and(eq(feeInvoices.status, "issued"), sql`${feeInvoices.issueDate} between ${from} and ${to}`)),
+      tx.select({ v: sql<string>`coalesce(sum(${feeNotes.amountPaise}), 0)` }).from(feeNotes).where(and(eq(feeNotes.kind, "credit"), eq(feeNotes.status, "approved"), eq(feeNotes.reasonType, "concession"), sql`${feeNotes.issuedOn} between ${from} and ${to}`)),
+      this.collectedIn(tx, from, to),
+    ]);
+    return { from, to, billedPaise: num(b?.gross), concededPaise: num(b?.conc) + num(n?.v), collectedPaise: got.paise, bills: num(b?.n), receipts: got.n };
+  }
+
   /** The staff dashboard: numbers, ageing, dues by class, who to chase, today's receipts. All aggregates in SQL. */
   async overview() {
     return this.read("read", async (tx) => {
       const today = todayIST();
-      const [summary, top, byClass, today_, byMethod] = await Promise.all([
+      const thisFrom = monthStart(today), lastFrom = addMonths(thisFrom, -1);
+      const [summary, top, byClass, today_, byMethod, thisMonth, lastMonth] = await Promise.all([
         this.summaryIn(tx),
         this.rows(tx, { overdueOnly: true, limit: 8, offset: 0 }),
         tx.execute<{ id: string; name: string; students: string; due: string; overdue: string; overdue_students: string }>(sql`
@@ -227,9 +249,10 @@ export class DuesService extends FeesBase {
           select r.id, r.student_id, r.snapshot->>'studentName' student, r.amount_paise amount, (select m.method from fee_receipt_methods m where m.receipt_id = r.id order by m.amount_paise desc limit 1) method, r.number
           from fee_receipts r where r.status in ${LIVE} and r.date = ${today}::date order by r.created_at desc limit 8`).then(asRows),
         tx.execute<{ method: PayMethod; paise: string }>(sql`with ${receiptMoney(today, today)} select method, sum(paise) paise from mon where method <> 'advance' group by method`).then(asRows),
+        this.figuresIn(tx, thisFrom, today), this.figuresIn(tx, lastFrom, monthEnd(lastFrom)),
       ]);
       return {
-        summary, ageing: top.totals.ageing,
+        summary, thisMonth, lastMonth, ageing: top.totals.ageing,
         byClass: byClass.map((c) => ({ classId: c.id, name: c.name, students: num(c.students), due: num(c.due), overdue: num(c.overdue), overdueStudents: num(c.overdue_students) })).filter((c) => c.due > 0),
         chase: top.rows,
         today: { receipts: today_.map((r) => ({ id: r.id, receiptNo: r.number, amountPaise: num(r.amount), method: r.method ?? "cash", studentId: r.student_id, student: r.student })), byMethod: byMethod.map((m) => ({ method: m.method as PayMethod, paise: num(m.paise), label: METHOD_LABEL[m.method] })).sort((a, b) => b.paise - a.paise) },

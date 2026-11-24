@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { cn } from "../../../lib/utils";
 import { EASE } from "../motion";
-import { TONE, type Tone } from "./WidgetPrimitives";
+import { TONE, type Tone } from "../../../lib/tone";
 
 export interface WholeSegment {
   id: string;

@@ -66,7 +66,7 @@ export class NoteService extends FeesBase {
         tx.select().from(feeNotes).where(where).orderBy(desc(feeNotes.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(feeNotes).where(where),
       ]);
-      return toPage(rows, Number(n?.n ?? 0), q);
+      return toPage(await this.withApproval(tx, ["fees.note"], rows), Number(n?.n ?? 0), q);
     });
   }
 

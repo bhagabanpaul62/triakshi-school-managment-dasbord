@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { INPUT } from "@smw/ui/shell/FormModal";
-import { LABEL } from "@smw/ui/widgets/WidgetPrimitives";
+import { LABEL } from "@smw/ui/tone";
 import { addDays } from "../stats";
 
 export type PickerField = {

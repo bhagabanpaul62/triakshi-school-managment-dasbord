@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { cn } from "../../lib/utils";
-import { TONE, type Tone } from "../dashboard/widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../lib/tone";
 import { Money } from "./Money";
 import { formatPaise, shares } from "./logic";
 

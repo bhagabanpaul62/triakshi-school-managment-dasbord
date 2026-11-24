@@ -24,3 +24,9 @@ export const METHOD_LABEL: Record<PayMethod, string> = { cash: "Cash", cheque: "
 
 /** flat: once after grace. per_day: every late day. percent: basis points of what is open, once. slabs: the last slab reached. */
 export interface LateRule { kind: "flat" | "per_day" | "percent" | "slabs"; amountPaise?: number; basisPoints?: number; graceDays: number; maxPaise?: number | null; slabs?: { afterDays: number; amountPaise: number }[] }
+
+/** The age filter of the dues report: how late what is open is. Keys ride in the address, so they never change. */
+export const AGE_BANDS = [
+  { key: "not-due", label: "Not yet due" }, { key: "0-30", label: "1 to 30 days late" }, { key: "31-60", label: "31 to 60 days late" }, { key: "61-90", label: "61 to 90 days late" }, { key: "90+", label: "Over 90 days late" },
+] as const;
+export type AgeBand = (typeof AGE_BANDS)[number]["key"];

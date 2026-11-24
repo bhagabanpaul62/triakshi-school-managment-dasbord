@@ -1,4 +1,6 @@
 import { and, desc, eq, inArray, sql, sum } from "drizzle-orm";
+import { PdfBuilder } from "@smw/integrations";
+import { schools, users } from "@smw/db";
 import type { Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
@@ -154,8 +156,30 @@ export class CounterService extends FeesBase {
     return c;
   }
 
-  /** Past sessions, newest first. */
+  /** Past sessions, newest first, with the cashier's name and what the count differed by. A cashier sees their own; staff who may read see all. */
   async history(limit = 30) {
-    return this.read("read", (tx) => tx.select().from(feeCounters).orderBy(desc(feeCounters.day)).limit(limit));
+    return this.read(this.can("collect") ? "collect" : "read", (tx) => tx.select({ c: feeCounters, name: users.name }).from(feeCounters).leftJoin(users, eq(users.id, feeCounters.userId))
+      .where(this.can("read") ? undefined : eq(feeCounters.userId, this.ctx.userId)).orderBy(desc(feeCounters.day), desc(feeCounters.createdAt)).limit(limit))
+      .then((rows) => rows.map(({ c, name }) => ({ ...c, cashier: name ?? "-", differencePaise: c.countedPaise == null || c.expectedPaise == null ? null : c.countedPaise - c.expectedPaise })));
+  }
+
+  /** The handover slip of a counter: figures, notes and coins, and a line to sign. Only the cashier, or staff who may read, can print it. */
+  async slipFile(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
+    const got = await this.read("collect", async (tx) => {
+      const [c] = await tx.select({ c: feeCounters, name: users.name }).from(feeCounters).leftJoin(users, eq(users.id, feeCounters.userId)).where(eq(feeCounters.id, id));
+      if (!c) throw new NotFoundError("Counter");
+      if (c.c.userId !== this.ctx.userId && !this.can("read")) throw new ForbiddenError();
+      const [school] = await tx.select({ name: schools.name }).from(schools).limit(1);
+      return { ...c, school: school?.name ?? "School" };
+    });
+    const c = got.c, money = PdfBuilder.money;
+    const pdf = await PdfBuilder.create();
+    pdf.header({ title: "CASH HANDOVER SLIP", orgName: got.school, rightLines: [`Day: ${c.day}`] });
+    pdf.facts([["Cashier", got.name ?? "-"], ["Float at opening", money(c.floatPaise)], ["Should be in the box", c.expectedPaise == null ? "Still open" : money(c.expectedPaise)], ["Counted", c.countedPaise == null ? "Still open" : money(c.countedPaise)],
+      ["Difference", c.countedPaise == null || c.expectedPaise == null ? "-" : money(c.countedPaise - c.expectedPaise)], ["Reason", c.differenceReason ?? "-"]]);
+    const notes = Object.entries(c.denominations ?? {}).filter(([, n]) => n > 0).sort((a, b) => Number(b[0]) - Number(a[0]));
+    if (notes.length) pdf.table({ columns: [{ label: "Note or coin", width: 150 }, { label: "Count", width: 150, align: "right" }, { label: "Amount", width: 149, align: "right" }], rows: notes.map(([p, n]) => [`Rs. ${Number(p) / 100}`, String(n), money(Number(p) * n)]) });
+    pdf.space(40).text("Handed over by: ____________________      Received by: ____________________", { size: 9 });
+    return { filename: `handover-${c.day}.pdf`, bytes: await pdf.save() };
   }
 }

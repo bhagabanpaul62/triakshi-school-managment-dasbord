@@ -1,4 +1,4 @@
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 import type { JOURNAL_KINDS } from "../schema";
 
 /** Plain names for approval kinds. Other modules add theirs here when they register a handler. */

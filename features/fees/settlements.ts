@@ -79,7 +79,7 @@ export class SettlementService extends FeesBase {
         tx.select({ s: feeSettlements, studentName: students.name }).from(feeSettlements).innerJoin(students, eq(students.id, feeSettlements.studentId)).where(where).orderBy(desc(feeSettlements.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(feeSettlements).where(where),
       ]);
-      return toPage(rows.map((r) => ({ ...r.s, studentName: r.studentName })), Number(n?.n ?? 0), q);
+      return toPage(await this.withApproval(tx, ["fees.settlement"], rows.map((r) => ({ ...r.s, studentName: r.studentName }))), Number(n?.n ?? 0), q);
     });
   }
 

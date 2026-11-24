@@ -48,7 +48,7 @@ export class ConcessionService extends FeesBase {
           .where(where).orderBy(desc(feeConcessions.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(feeConcessions).where(where),
       ]);
-      return toPage(rows.map((r) => ({ ...r.c, studentName: r.studentName, typeName: r.typeName, headName: r.headName })), Number(n?.n ?? 0), q);
+      return toPage(await this.withApproval(tx, ["fees.concession"], rows.map((r) => ({ ...r.c, studentName: r.studentName, typeName: r.typeName, headName: r.headName }))), Number(n?.n ?? 0), q);
     });
   }
 

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { initials } from "@smw/ui/format";
-import { ROW_HOVER, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { ROW_HOVER } from "@smw/ui/tone";
 
 /** Round avatar: the photo when there is one, otherwise initials. */
 export function Avatar({ name, src, size = 40 }: { name: string; src?: string | null; size?: number }) {

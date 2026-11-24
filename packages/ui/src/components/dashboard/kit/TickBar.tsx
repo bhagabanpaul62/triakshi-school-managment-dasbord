@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { EASE } from "../motion";
-import { TONE, type Tone } from "../widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../../lib/tone";
 import { cn } from "../../../lib/utils";
 
 /** A horizontal meter drawn over a faint ruler of ticks (the "Resource Allocation" bars). */

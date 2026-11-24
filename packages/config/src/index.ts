@@ -64,8 +64,8 @@ function loadRootEnvFile() {
   let dir = process.cwd();
   for (let i = 0; i < 6; i++) {
     for (const name of [".env.local", ".env"]) {
-      const file = join(dir, name);
-      if (existsSync(file) && existsSync(join(dir, "pnpm-workspace.yaml"))) {
+      const file = join(/* turbopackIgnore: true */ dir, name);
+      if (existsSync(/* turbopackIgnore: true */ file) && existsSync(/* turbopackIgnore: true */ join(dir, "pnpm-workspace.yaml"))) {
         process.loadEnvFile(file);
         return;
       }

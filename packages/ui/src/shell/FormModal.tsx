@@ -4,6 +4,7 @@ import { useId, useState, useTransition, type FormEvent, type ReactNode } from "
 import { useRouter } from "next/navigation";
 import { IconPlus } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
+import { INPUT } from "../lib/tone";
 import { Modal, ModalField, ModalFooter, ModalSection } from "../components/dashboard/kit/Modal";
 import { IconChip } from "../components/dashboard/kit/Panel";
 import { Button } from "../components/ui/button";
@@ -61,7 +62,7 @@ async function reencodeAsJpeg(input: HTMLInputElement) {
   } catch { /* the browser cannot read it: upload the original, the server decides */ }
 }
 
-export const INPUT = "h-10 w-full rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)] outline-none placeholder:text-[var(--ds-on-surface-muted)] focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)] aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-[var(--ds-color-danger-500)]";
+export { INPUT } from "../lib/tone";
 
 function Control({ f, id, value, invalid }: { f: Field; id: string; value: unknown; invalid: boolean }) {
   const common = { id, name: f.name, required: f.required, "aria-invalid": invalid || undefined, placeholder: f.placeholder };

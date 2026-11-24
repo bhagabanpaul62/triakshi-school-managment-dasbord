@@ -6,7 +6,8 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { IconChevronLeft, IconChevronRight, IconSearch } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
 import { initials, paise, shortDate } from "../lib/format";
-import { ToneBadge, type Tone } from "../components/dashboard/widgets/WidgetPrimitives";
+import { ToneBadge } from "../components/dashboard/widgets/WidgetPrimitives";
+import { type Tone } from "../lib/tone";
 import { StateBadge } from "../components/finance/StateBadge";
 
 /**

@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import { TONE, type Tone } from "../dashboard/widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../lib/tone";
 import { formatPaise } from "./logic";
 
 const SIZE = { sm: "text-xs", md: "text-sm", lg: "text-xl font-medium", xl: "text-[26px] font-medium leading-none" } as const;

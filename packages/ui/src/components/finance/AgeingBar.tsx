@@ -1,4 +1,4 @@
-import type { Tone } from "../dashboard/widgets/WidgetPrimitives";
+import type { Tone } from "../../lib/tone";
 import { SplitBar, type SplitPart } from "./SplitBar";
 
 export interface AgeingBucket {

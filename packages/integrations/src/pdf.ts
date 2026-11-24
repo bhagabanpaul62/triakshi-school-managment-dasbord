@@ -262,3 +262,13 @@ export async function pdfInfo(bytes: Uint8Array) {
   return { pages: doc.getPageCount(), width: doc.getPage(0).getWidth(), height: doc.getPage(0).getHeight() };
 }
 export const pdfPageCount = async (bytes: Uint8Array) => (await pdfInfo(bytes)).pages;
+
+/** Join finished PDFs into one, in the order given (one print job for a pile of receipts or bills). */
+export async function mergePdfs(files: Uint8Array[]): Promise<Uint8Array> {
+  const out = await PDFDocument.create();
+  for (const bytes of files) {
+    const src = await PDFDocument.load(bytes);
+    for (const page of await out.copyPages(src, src.getPageIndices())) out.addPage(page);
+  }
+  return out.save();
+}

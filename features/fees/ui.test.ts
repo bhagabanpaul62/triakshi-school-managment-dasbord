@@ -121,9 +121,8 @@ describe("invoice on paper and settlement parts", () => {
     expect(addMonthsKeepDay("2027-01-31", 1)).toBe("2027-02-28");
     expect(splitIntoParts(0, 3, "2026-11-30")).toEqual([]);
   });
-  it("only the late age bands open the overdue list", () => {
+  it("every age band opens the dues report on that band", () => {
     const b = ageingBuckets({ notDue: 1, d1_30: 2, d31_60: 3, d61_90: 4, d90p: 5 });
-    expect(b[0]!.href).toBeUndefined();
-    expect(b.slice(1).every((x) => x.href === "/app/fees/dues?overdue=1")).toBe(true);
+    expect(b.map((x) => x.href)).toEqual(["/app/fees/dues?age=not-due", "/app/fees/dues?age=0-30", "/app/fees/dues?age=31-60", "/app/fees/dues?age=61-90", "/app/fees/dues?age=90%2B"]);
   });
 });

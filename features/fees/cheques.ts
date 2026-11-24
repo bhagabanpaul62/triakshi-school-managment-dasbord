@@ -1,7 +1,9 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { PdfBuilder } from "@smw/integrations";
+import { schools } from "@smw/db";
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
-import { rupees } from "@smw/feature-kit/money";
+import { rupees, todayIST } from "@smw/feature-kit/money";
 import { cashAccount } from "@smw/feature-finance/posting";
 import { finCashAccounts } from "@smw/feature-finance/schema";
 import { FeesBase, invalid } from "./base";
@@ -26,6 +28,41 @@ export class ChequeService extends FeesBase {
       ]);
       return toPage(rows, Number(n?.n ?? 0), q);
     });
+  }
+
+  /** Count and total per state, over every cheque. */
+  async totals() {
+    return this.read("collect", async (tx) => {
+      const rows = await tx.select({ status: feeCheques.status, n: sql<number>`count(*)::int`, v: sql<string>`coalesce(sum(${feeCheques.amountPaise}), 0)` }).from(feeCheques).groupBy(feeCheques.status);
+      return Object.fromEntries(rows.map((r) => [r.status, { count: r.n, paise: Number(r.v) }])) as Record<string, { count: number; paise: number }>;
+    });
+  }
+
+  /** The four columns of the cheque board (post-dated ones sit in "received" until their date), with the totals. */
+  async board() {
+    const of = (status: string) => this.list({ filters: { status }, pageSize: 100 });
+    const [received, deposited, cleared, bounced, totals] = await Promise.all([of("received"), of("deposited"), of("cleared"), of("bounced"), this.totals()]);
+    return { received, deposited, cleared, bounced, totals };
+  }
+
+  /** A bank slip listing the chosen cheques. It marks nothing: depositing is a separate step per cheque. */
+  async slipFile(ids: string[]): Promise<{ filename: string; bytes: Uint8Array }> {
+    const NIL = "00000000-0000-0000-0000-000000000000";
+    const rows = await this.read("collect", async (tx) => {
+      const [list, [school]] = await Promise.all([
+        tx.select({ c: feeCheques, student: sql<string>`${feeReceipts.snapshot}->>'studentName'` }).from(feeCheques).innerJoin(feeReceipts, eq(feeReceipts.id, feeCheques.receiptId)).where(inArray(feeCheques.id, ids.length ? ids : [NIL])).orderBy(asc(feeCheques.chequeDate)),
+        tx.select({ name: schools.name }).from(schools).limit(1),
+      ]);
+      return { list, school };
+    });
+    if (!rows.list.length) throw new NotFoundError("Cheque");
+    const pdf = await PdfBuilder.create();
+    pdf.header({ title: "CHEQUE DEPOSIT SLIP", orgName: rows.school?.name ?? "School", rightLines: [`Date: ${todayIST()}`, `Cheques: ${rows.list.length}`] });
+    const money = PdfBuilder.money;
+    pdf.table({ columns: [{ label: "Cheque no", width: 80 }, { label: "Bank", width: 110 }, { label: "Cheque date", width: 70 }, { label: "Student", width: 120 }, { label: "Amount", width: 69, align: "right" }], rows: rows.list.map((r) => [r.c.chequeNo, r.c.bank, r.c.chequeDate, r.student ?? "", money(r.c.amountPaise)]) });
+    pdf.totals([["Total", money(rows.list.reduce((s, r) => s + r.c.amountPaise, 0)), true]]);
+    pdf.space(40).text("Deposited by: ____________________    Bank seal and date", { size: 9 });
+    return { filename: `cheque-deposit-${todayIST()}.pdf`, bytes: await pdf.save() };
   }
 
   /** Lock the students the receipt touched, then the cheque, check it is in a state this step allows, and run the step. */

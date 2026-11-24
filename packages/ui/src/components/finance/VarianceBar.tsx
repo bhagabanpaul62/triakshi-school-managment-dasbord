@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import { TONE } from "../dashboard/widgets/WidgetPrimitives";
+import { TONE } from "../../lib/tone";
 import { Money } from "./Money";
 import { formatPaise, variance } from "./logic";
 

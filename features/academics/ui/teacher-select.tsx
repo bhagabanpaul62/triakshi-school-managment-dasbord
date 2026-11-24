@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
-import { TONE } from "@smw/ui/widgets/WidgetPrimitives";
+import { TONE } from "@smw/ui/tone";
 
 type Option = { value: string; label: string };
 

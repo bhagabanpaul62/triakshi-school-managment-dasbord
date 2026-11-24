@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { CountUp } from "../motion";
 import { Inset } from "./Panel";
-import { TONE, type Tone } from "../widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../../lib/tone";
 import { cn } from "../../../lib/utils";
 
 /**

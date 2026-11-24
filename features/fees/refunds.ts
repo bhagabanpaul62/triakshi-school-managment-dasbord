@@ -1,8 +1,9 @@
-import { and, desc, eq, sql, sum } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, sum } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { cashAccount } from "@smw/feature-finance/posting";
+import { students } from "@smw/feature-students/schema";
 import { FeesBase, asId } from "./base";
 import { refundVoucherData } from "./documents";
 import { refundInput } from "./inputs";
@@ -18,6 +19,11 @@ export class RefundService extends FeesBase {
       .where(and(eq(feeRefunds.studentId, studentId), eq(feeRefunds.source, source), eq(feeRefunds.status, "pending"), exceptId ? sql`${feeRefunds.id} <> ${exceptId}` : undefined));
     const balance = source === "advance" ? await this.advanceOf(tx, studentId) : await this.depositHeld(tx, studentId);
     return balance - Number(waiting?.v ?? 0);
+  }
+
+  /** What can still be refunded to a student, from the advance and from the deposit. */
+  async balances(studentId: string) {
+    return this.read("read", async (tx) => ({ advancePaise: await this.availableIn(tx, studentId, "advance"), depositPaise: await this.availableIn(tx, studentId, "deposit") }));
   }
 
   async propose(input: unknown): Promise<Refund> {
@@ -68,7 +74,11 @@ export class RefundService extends FeesBase {
         tx.select().from(feeRefunds).where(where).orderBy(desc(feeRefunds.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(feeRefunds).where(where),
       ]);
-      return toPage(rows, Number(n?.n ?? 0), q);
+      const [who, rowsWith] = await Promise.all([
+        rows.length ? this.studentLines(tx, inArray(students.id, [...new Set(rows.map((r) => r.studentId))])) : [],
+        this.withApproval(tx, ["fees.refund"], rows),
+      ]);
+      return toPage(rowsWith.map((r) => { const s = who.find((x) => x.id === r.studentId); return { ...r, studentName: s?.name ?? "-", admissionNo: s?.admissionNo ?? "-", classLabel: s?.classLabel ?? "-" }; }), Number(n?.n ?? 0), q);
     });
   }
 

@@ -1,4 +1,6 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { services } from "@smw/integrations";
+import { finBankLines } from "@smw/feature-finance/schema";
 import { ConflictError, ForbiddenError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { addDays, rupees, todayIST } from "@smw/feature-kit/money";
 import { pgErrorCode } from "@smw/feature-kit";
@@ -74,5 +76,24 @@ export class SlipService extends FeesBase {
       await this.tell(tx, [s.studentId], "UPI payment not matched", `We could not match UTR ${s.utr}: ${d.reason}. Please send it again with the right details.`);
       return s;
     }, (s) => ({ action: "reject", entity: "UPI slip", entityId: s.id, summary: `Rejected UPI slip: ${d.reason}` }));
+  }
+
+  /** What the office needs beside each slip: the bills it names, a link to the screenshot, and bank lines that look like it (by UTR, or the same amount within days). */
+  async extras(slips: { id: string; invoiceIds: string[]; utr: string; amountPaise: number; paidOn: string; fileKey: string | null }[]) {
+    return this.read("collect", async (tx) => {
+      const billIds = [...new Set(slips.flatMap((s) => s.invoiceIds))];
+      const bills = billIds.length ? await tx.select({ id: feeInvoices.id, number: feeInvoices.number, label: feeInvoices.label, open: sql<string>`${feeInvoices.grossPaise} - ${feeInvoices.concessionPaise} - ${feeInvoices.creditedPaise} + ${feeInvoices.latePaise} - ${feeInvoices.paidPaise}` }).from(feeInvoices).where(inArray(feeInvoices.id, billIds)) : [];
+      const out: Record<string, { bills: { id: string; number: string | null; label: string; openPaise: number }[]; fileUrl: string | null; hints: { date: string; description: string; amountPaise: number; why: "utr" | "amount"; matched: boolean }[] }> = {};
+      for (const s of slips) {
+        const hits = await tx.select().from(finBankLines).where(and(sql`${finBankLines.amountPaise} > 0`, or(ilike(finBankLines.reference, `%${s.utr}%`), ilike(finBankLines.description, `%${s.utr}%`),
+          and(eq(finBankLines.amountPaise, s.amountPaise), sql`${finBankLines.date} between ${addDays(s.paidOn, -2)}::date and ${addDays(s.paidOn, 3)}::date`)))).limit(3);
+        out[s.id] = {
+          bills: s.invoiceIds.flatMap((i) => bills.filter((b) => b.id === i).map((b) => ({ id: b.id, number: b.number, label: b.label, openPaise: Number(b.open) }))),
+          fileUrl: s.fileKey ? await services().storage.signedUrl(s.fileKey, 3600).catch(() => null) : null,
+          hints: hits.map((h) => ({ date: h.date, description: h.description, amountPaise: h.amountPaise, why: `${h.reference ?? ""} ${h.description}`.toUpperCase().includes(s.utr) ? "utr" as const : "amount" as const, matched: h.journalLineId != null })),
+        };
+      }
+      return out;
+    });
   }
 }

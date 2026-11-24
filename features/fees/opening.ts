@@ -2,7 +2,6 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { parseSheet, SheetError } from "@smw/integrations";
 import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { rupees } from "@smw/feature-kit/money";
-import { finApprovals } from "@smw/feature-finance/schema";
 import { students } from "@smw/feature-students/schema";
 import type { Tx } from "@smw/db";
 import { FeesBase, invalid } from "./base";
@@ -151,8 +150,7 @@ export class OpeningImport extends FeesBase {
   async batches(limit = 20) {
     return this.read("setup", async (tx) => {
       const rows = await tx.select().from(feeOpeningBatches).orderBy(desc(feeOpeningBatches.createdAt)).limit(limit);
-      const asks = rows.length ? await tx.select().from(finApprovals).where(and(eq(finApprovals.kind, "fees.opening"), inArray(finApprovals.refId, rows.map((r) => r.id)))).orderBy(desc(finApprovals.createdAt)) : [];
-      return rows.map((b) => { const a = asks.find((x) => x.refId === b.id); return { ...b, approvalId: a?.id ?? null, approvalStatus: a?.status ?? null, decisionNote: a?.note ?? null }; });
+      return this.withApproval(tx, ["fees.opening"], rows);
     });
   }
 }

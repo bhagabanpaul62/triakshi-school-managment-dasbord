@@ -45,6 +45,8 @@ export const planInput = z.object({
 
 export const copyPlanInput = z.object({ yearId: f.optId(), classIds: z.array(z.uuid()).optional(), name: f.optText(80) });
 export const studentPlanInput = z.object({ studentId: f.id("Pick the student"), yearId: f.optId(), rootId: f.id("Pick the plan"), reason: f.text(3, 200, "Say why this student has a different plan") });
+export const removeOverrideInput = z.object({ studentId: f.id("Pick the student"), yearId: f.optId() });
+export const removeOptInInput = z.object({ studentId: f.id("Pick the student"), yearId: f.optId(), headId: f.id("Pick the fee") });
 export const optInInput = z.object({ studentId: f.id("Pick the student"), yearId: f.optId(), headIds: uuids });
 
 // ---------- invoices ----------
@@ -56,10 +58,12 @@ export const draftInput = z.object({
   label: f.text(2, 120, "Name the bill, like School trip"),
   dueDate: f.date("Pick the due date"),
   note: f.optText(300),
+  /** Left out = the student's plan rule; null = no late fee on this bill. */
+  lateRule: lateRule.nullable().optional(),
   lines: z.array(lineInput).min(1, "Add at least one line").max(40),
 });
 export const chargeManyInput = draftInput.omit({ id: true, studentId: true }).extend({ studentIds: z.array(z.uuid()).min(1, "Pick at least one student").max(500) });
-export const reviseInput = z.object({ lines: z.array(lineInput).min(1, "Add at least one line").max(40), reason: f.text(3, 200, "Say why"), label: f.optText(120), dueDate: f.optDate() });
+export const reviseInput = z.object({ lateRule: lateRule.nullable().optional(), lines: z.array(lineInput).min(1, "Add at least one line").max(40), reason: f.text(3, 200, "Say why"), label: f.optText(120), dueDate: f.optDate() });
 export const bulkInput = z.object({ yearId: f.optId(), classIds: uuids.optional(), dueKeys: z.array(z.string()).max(60).optional(), studentIds: uuids.optional() });
 
 // ---------- receipts ----------

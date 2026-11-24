@@ -3,7 +3,8 @@
 import { useId, useState, type ReactNode } from "react";
 import { Modal, ModalFooter, ModalSection } from "@smw/ui/kit/Modal";
 import { IconChip } from "@smw/ui/kit/Panel";
-import { ToneBadge, type Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
+import { type Tone } from "@smw/ui/tone";
 import { FieldGrid, type Field, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { Button } from "@smw/ui/ui/button";

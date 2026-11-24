@@ -1,5 +1,5 @@
 import { IconChip } from "@smw/ui/kit/Panel";
-import type { Tone } from "@smw/ui/widgets/WidgetPrimitives";
+import type { Tone } from "@smw/ui/tone";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import type { FileLink } from "../service";

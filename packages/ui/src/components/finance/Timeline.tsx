@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "../../lib/utils";
 import { shortDate } from "../../lib/format";
-import { TONE, type Tone } from "../dashboard/widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../lib/tone";
 import { Money } from "./Money";
 import { EmptyLine } from "./States";
 import { groupByDay } from "./logic";

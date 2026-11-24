@@ -23,6 +23,10 @@ export const financeConfig = z.object({
   /** The families' pay page shows the UPI QR and takes UTR slips. */
   upiOn: z.boolean().default(false),
   holdReportCards: z.boolean().default(false),
+  /** A fee plan cannot be sent for approval without the committee's decision attached. Accepts a ticked form box as well. */
+  planNeedsFile: z.preprocess((v) => v === true || v === "on" || v === "true" || v === "1", z.boolean()),
+  /** One line families read on their fees pages, like "Mon to Sat, 9 am to 1 pm". */
+  officeHours: z.string().trim().max(120).default(""),
 });
 export type FinanceConfig = z.infer<typeof financeConfig>;
 

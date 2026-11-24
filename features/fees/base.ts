@@ -7,7 +7,8 @@ import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { MoneyService } from "@smw/feature-finance/base";
 import type { PostLine } from "@smw/feature-finance/posting";
 import { schoolUrl } from "@smw/config";
-import { schools } from "@smw/db";
+import { mergePdfs } from "@smw/integrations";
+import { schoolRoles, schools, users } from "@smw/db";
 import { TemplateService } from "@smw/feature-finance/templates/service";
 import type { DocumentKind } from "@smw/feature-finance/templates/config";
 import { finApprovals, finJournals, finTemplates } from "@smw/feature-finance/schema";
@@ -27,6 +28,13 @@ export interface StudentLine { id: string; name: string; admissionNo: string; cl
 export interface InvoiceFull extends Invoice { lines: InvoiceLine[]; parts: { dueOn: string; amountPaise: number }[] }
 /** Money that landed on one bill line. */
 export interface Slice { invoiceId: string; lineId: string; lineKind: string; headId: string | null; studentId: string; amountPaise: number }
+
+/** Where one request in the approval desk stands: who asked, who decided, what they wrote, and who it still waits for. */
+export interface ApprovalInfo {
+  id: string; kind: string; status: string; title: string; reason: string;
+  note: string | null; requestedBy: string; requestedByName: string | null; decidedByName: string | null;
+  waitingFor: string[];
+}
 
 /** An id from a URL: anything that is not a uuid is simply not found (never a database error). */
 export const asId = (v: string, what: string) => { if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) throw new NotFoundError(what); return v; };
@@ -183,6 +191,39 @@ export abstract class FeesBase extends MoneyService<Perm> {
     return rows.map(({ id: _id, lineId, ...s }) => ({ ...s, lineId }));
   }
 
+  // ---------- approvals ----------
+
+  /** The latest request of these kinds for each document id, with names (not ids) of who asked, who decided and who it waits for. */
+  protected async approvalsIn(tx: Tx, kinds: string[], refIds: string[]): Promise<Map<string, ApprovalInfo>> {
+    if (!refIds.length) return new Map();
+    const rows = await tx.select().from(finApprovals).where(and(inArray(finApprovals.kind, kinds), inArray(finApprovals.refId, refIds))).orderBy(desc(finApprovals.createdAt));
+    const who = [...new Set(rows.flatMap((r) => [r.requestedBy, r.decidedBy]).filter((x): x is string => !!x))];
+    const names = new Map(who.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, who))).map((u) => [u.id, u.name]) : []);
+    const waiting = rows.some((r) => r.status === "pending") ? await this.approverNames(tx) : [];
+    const out = new Map<string, ApprovalInfo>();
+    for (const r of rows) {
+      if (out.has(r.refId)) continue;
+      out.set(r.refId, { id: r.id, kind: r.kind, status: r.status, title: r.title, reason: r.reason, note: r.note, requestedBy: r.requestedBy, requestedByName: names.get(r.requestedBy) ?? null, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null, waitingFor: r.status === "pending" ? waiting.filter((n) => n !== names.get(r.requestedBy)) : [] });
+    }
+    return out;
+  }
+
+  /** The same rows, each with its request (null when none was ever made). One helper so every list says "waiting for Asha" the same way. */
+  protected async withApproval<T extends { id: string }>(tx: Tx, kinds: string[], rows: T[]): Promise<(T & { approval: ApprovalInfo | null })[]> {
+    const found = this.can("read") ? await this.approvalsIn(tx, kinds, rows.map((r) => r.id)) : new Map<string, ApprovalInfo>();
+    return rows.map((r) => ({ ...r, approval: found.get(r.id) ?? null }));
+  }
+
+  /** Active people who may approve, other than the one asking now: admins and custom roles with the approve grant. */
+  private async approverNames(tx: Tx) {
+    const active = and(eq(users.status, "active"), ne(users.id, this.ctx.userId));
+    const [admins, custom] = await Promise.all([
+      tx.select({ name: users.name }).from(users).where(and(eq(users.role, "admin"), active)),
+      tx.select({ name: users.name }).from(users).innerJoin(schoolRoles, eq(schoolRoles.id, users.roleId)).where(and(active, sql`${"finance:approve"} = any(${schoolRoles.grants})`)),
+    ]);
+    return [...new Set([...admins, ...custom].map((u) => u.name))];
+  }
+
   // ---------- documents ----------
 
   /**
@@ -203,6 +244,16 @@ export abstract class FeesBase extends MoneyService<Perm> {
   protected async verifyUrlIn(tx: Tx, kind: "receipt" | "invoice", token: string): Promise<string> {
     const [s] = await tx.select({ slug: schools.slug }).from(schools).limit(1);
     return schoolUrl(s!.slug, `/verify/${kind}/${token}`);
+  }
+
+  /** Print a pile as one PDF: `one` makes (and logs) each file, in the order given. */
+  protected async mergedFiles(ids: string[], name: string, one: (id: string) => Promise<{ bytes: Uint8Array }>): Promise<{ filename: string; bytes: Uint8Array }> {
+    const list = [...new Set(ids)];
+    if (!list.length) throw invalid("ids", "Pick at least one to print.");
+    if (list.length > 100) throw invalid("ids", "Print up to 100 at a time. Narrow the list, or print in two goes.");
+    const files: Uint8Array[] = [];
+    for (const id of list) files.push((await one(id)).bytes);
+    return { filename: `${name}-${todayIST()}.pdf`, bytes: await mergePdfs(files) };
   }
 
   /** Take back a request that waits for approval. Only who asked (or an admin) may; the request stays on file as withdrawn. */

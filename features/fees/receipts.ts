@@ -3,7 +3,8 @@ import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
-import { finJournals } from "@smw/feature-finance/schema";
+import { finJournals, finPrints } from "@smw/feature-finance/schema";
+import { applyHidden } from "@smw/feature-finance/templates/config";
 import { users } from "@smw/db";
 import { receiptData } from "./documents";
 import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
@@ -199,15 +200,17 @@ export class ReceiptService extends FeesBase {
       const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
       if (!r) throw new NotFoundError("Receipt");
       this.assertVisible(own, r.studentId, "Receipt");
-      const [methods, cheque, allocations, journal, by] = await Promise.all([
+      const [methods, cheque, allocations, journal, by, reversal, prints] = await Promise.all([
         tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
         tx.select().from(feeCheques).where(eq(feeCheques.receiptId, id)),
         tx.select({ id: feeAllocations.id, invoiceId: feeInvoices.id, invoiceNumber: feeInvoices.number, invoiceLabel: feeInvoices.label, line: feeInvoiceLines.label, studentId: feeAllocations.studentId, amountPaise: feeAllocations.amountPaise, undoneAt: feeAllocations.undoneAt })
           .from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId)).where(eq(feeAllocations.receiptId, id)).orderBy(asc(feeInvoices.dueDate), asc(feeInvoiceLines.sort)),
         tx.select({ id: finJournals.id }).from(finJournals).where(eq(finJournals.sourceKey, `fees:receipt:${id}`)),
         r.collectedBy ? tx.select({ name: users.name }).from(users).where(eq(users.id, r.collectedBy)) : [],
+        own ? new Map<string, never>() : this.approvalsIn(tx, ["fees.reversal"], [id]),
+        own ? [] : tx.select({ copyNo: finPrints.copyNo, at: finPrints.createdAt, by: users.name }).from(finPrints).leftJoin(users, eq(users.id, finPrints.printedBy)).where(and(eq(finPrints.docType, "fee_receipt"), eq(finPrints.docId, id))).orderBy(asc(finPrints.copyNo)),
       ]);
-      return { receipt: r, methods, cheque: cheque[0] ?? null, allocations: own ? allocations.filter((a) => own.includes(a.studentId)) : allocations, journalId: own ? null : journal[0]?.id ?? null, collectedByName: by[0]?.name ?? null };
+      return { receipt: r, reversal: reversal.get(id) ?? null, prints, methods, cheque: cheque[0] ?? null, allocations: own ? allocations.filter((a) => own.includes(a.studentId)) : allocations, journalId: own ? null : journal[0]?.id ?? null, collectedByName: by[0]?.name ?? null };
     });
   }
 
@@ -225,27 +228,78 @@ export class ReceiptService extends FeesBase {
     });
   }
 
+  /** What a receipt says, as the data the template prints (the PDF and the on-screen paper read the same). */
+  private async docIn(tx: Tx, own: string[] | null, id: string) {
+    const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
+    if (!r) throw new NotFoundError("Receipt");
+    this.assertVisible(own, r.studentId, "Receipt");
+    const [methods, allocs, [j]] = await Promise.all([
+      tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
+      tx.select({ bill: feeInvoices.label, late: feeInvoiceLines.kind, amountPaise: feeAllocations.amountPaise }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId))
+        .where(and(eq(feeAllocations.receiptId, id), isNull(feeAllocations.undoneAt))).orderBy(asc(feeInvoices.dueDate), asc(feeInvoiceLines.sort)),
+      tx.select({ date: finJournals.date, at: finJournals.createdAt }).from(finJournals).where(eq(finJournals.sourceKey, `fees:receipt:${id}`)),
+    ]);
+    const balance = j ? Number((await tx.execute<{ v: string }>(sql`select coalesce(sum(jl.debit_paise - jl.credit_paise), 0) v from fin_journal_lines jl join fin_journals fj on fj.id = jl.journal_id join fin_accounts a on a.id = jl.account_id
+      where a.system_key = 'student_dues' and jl.party_type = 'student' and jl.party_id = ${r.studentId}::uuid and (fj.date < ${j.date}::date or (fj.date = ${j.date}::date and fj.created_at <= ${j.at.toISOString()}::timestamptz))`))[0]!.v) : null;
+    const byBill = new Map<string, { bill: string; feePaise: number; latePaise: number }>();
+    for (const a of allocs) { const row = byBill.get(a.bill) ?? { bill: a.bill, feePaise: 0, latePaise: 0 }; if (a.late === "late") row.latePaise += a.amountPaise; else row.feePaise += a.amountPaise; byBill.set(a.bill, row); }
+    const verifyUrl = await this.verifyUrlIn(tx, "receipt", r.verifyToken);
+    return { r, data: receiptData({ number: r.number, date: r.date, amountPaise: r.amountPaise, advancePaise: r.advancePaise, status: r.status, payerName: r.payerName, note: r.note, snapshot: r.snapshot, verifyUrl,
+      methods: methods.map((m) => ({ method: m.method, amountPaise: m.amountPaise, reference: m.reference })), rows: [...byBill.values()], balanceAfterPaise: balance && balance > 0 ? balance : balance === null ? null : 0 }) };
+  }
+
   /** The receipt as a PDF in the school's layout (the version it was issued with). Every print is logged; from the second the PDF says DUPLICATE. */
   async receiptFile(id: string): Promise<{ filename: string; bytes: Uint8Array }> {
-    const doc = await this.viewer(async (tx, own) => {
-      const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
-      if (!r) throw new NotFoundError("Receipt");
-      this.assertVisible(own, r.studentId, "Receipt");
-      const [methods, allocs, [j]] = await Promise.all([
-        tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
-        tx.select({ bill: feeInvoices.label, late: feeInvoiceLines.kind, amountPaise: feeAllocations.amountPaise }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId)).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId))
-          .where(and(eq(feeAllocations.receiptId, id), isNull(feeAllocations.undoneAt))).orderBy(asc(feeInvoices.dueDate), asc(feeInvoiceLines.sort)),
-        tx.select({ date: finJournals.date, at: finJournals.createdAt }).from(finJournals).where(eq(finJournals.sourceKey, `fees:receipt:${id}`)),
-      ]);
-      const balance = j ? Number((await tx.execute<{ v: string }>(sql`select coalesce(sum(jl.debit_paise - jl.credit_paise), 0) v from fin_journal_lines jl join fin_journals fj on fj.id = jl.journal_id join fin_accounts a on a.id = jl.account_id
-        where a.system_key = 'student_dues' and jl.party_type = 'student' and jl.party_id = ${r.studentId}::uuid and (fj.date < ${j.date}::date or (fj.date = ${j.date}::date and fj.created_at <= ${j.at.toISOString()}::timestamptz))`))[0]!.v) : null;
-      const byBill = new Map<string, { bill: string; feePaise: number; latePaise: number }>();
-      for (const a of allocs) { const row = byBill.get(a.bill) ?? { bill: a.bill, feePaise: 0, latePaise: 0 }; if (a.late === "late") row.latePaise += a.amountPaise; else row.feePaise += a.amountPaise; byBill.set(a.bill, row); }
-      const verifyUrl = await this.verifyUrlIn(tx, "receipt", r.verifyToken);
-      return { r, data: receiptData({ number: r.number, date: r.date, amountPaise: r.amountPaise, advancePaise: r.advancePaise, status: r.status, payerName: r.payerName, note: r.note, snapshot: r.snapshot, verifyUrl,
-        methods: methods.map((m) => ({ method: m.method, amountPaise: m.amountPaise, reference: m.reference })), rows: [...byBill.values()], balanceAfterPaise: balance && balance > 0 ? balance : balance === null ? null : 0 }) };
-    });
+    const doc = await this.viewer((tx, own) => this.docIn(tx, own, id));
     const { bytes, copyNo } = await this.templates().print("receipt", doc.data, { docType: "fee_receipt", docId: id, version: doc.r.templateVersion ?? undefined });
     return { filename: `${doc.r.number.replace(/\//g, "-")}${copyNo > 1 ? "-duplicate" : ""}.pdf`, bytes };
   }
+
+  /** The receipt as the paper the screen shows: the same data and the same layout version as the PDF. Printing nothing, so nothing is logged. */
+  async document(id: string) {
+    const doc = await this.viewer((tx, own) => this.docIn(tx, own, id));
+    const view = await (doc.r.templateVersion ? this.templates().version("receipt", doc.r.templateVersion) : this.templates().current("receipt"));
+    return { config: view.config, data: applyHidden(view.config, doc.data) };
+  }
+
+  // ---------- the register ----------
+
+  /** Receipts of a period with the totals by method over every row that matches (not only this page). Class is a filter here as well. */
+  async register(query: ListQuery = {}) {
+    const q = listQuerySchema.parse(query);
+    return this.read("read", async (tx) => {
+      const f = q.filters;
+      const where = and(
+        f.from ? sql`${feeReceipts.date} >= ${f.from}` : undefined, f.to ? sql`${feeReceipts.date} <= ${f.to}` : undefined,
+        f.status ? eq(feeReceipts.status, f.status as Receipt["status"]) : undefined,
+        f.cashier ? eq(feeReceipts.collectedBy, f.cashier) : undefined,
+        f.method ? sql`exists (select 1 from fee_receipt_methods m where m.receipt_id = ${feeReceipts.id} and m.method = ${f.method})` : undefined,
+        f.classId ? sql`exists (select 1 from students s where s.id = ${feeReceipts.studentId} and s.class_id = ${f.classId}::uuid)` : undefined,
+        q.q ? or(ilike(feeReceipts.number, `%${q.q}%`), sql`${feeReceipts.snapshot}->>'studentName' ilike ${`%${q.q}%`}`, sql`${feeReceipts.snapshot}->>'admissionNo' ilike ${`%${q.q}%`}`) : undefined,
+      );
+      const [rows, [n], totals] = await Promise.all([
+        tx.select({ r: feeReceipts, cashier: users.name }).from(feeReceipts).leftJoin(users, eq(users.id, feeReceipts.collectedBy)).where(where).orderBy(desc(feeReceipts.date), desc(feeReceipts.number)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
+        tx.select({ n: sql<number>`count(*)::int` }).from(feeReceipts).where(where),
+        tx.select({ method: feeReceiptMethods.method, v: sql<string>`coalesce(sum(${feeReceiptMethods.amountPaise}), 0)` }).from(feeReceiptMethods).innerJoin(feeReceipts, eq(feeReceipts.id, feeReceiptMethods.receiptId)).where(and(where, inArray(feeReceipts.status, [...LIVE]))).groupBy(feeReceiptMethods.method),
+      ]);
+      const methods = rows.length ? await tx.select().from(feeReceiptMethods).where(inArray(feeReceiptMethods.receiptId, rows.map((x) => x.r.id))) : [];
+      const byMethod: Record<string, number> = {};
+      for (const t of totals) if (t.method !== "advance") byMethod[t.method] = Number(t.v);
+      return {
+        ...toPage(rows.map(({ r, cashier }) => ({
+          id: r.id, number: r.number, date: r.date, studentName: r.snapshot.studentName, classLabel: r.snapshot.classLabel, amountPaise: r.amountPaise, status: r.status, cashier: cashier ?? "-",
+          methods: methods.filter((m) => m.receiptId === r.id).map((m) => METHOD_LABEL[m.method]).join(", "),
+        })), Number(n?.n ?? 0), q),
+        byMethod, totalPaise: Object.values(byMethod).reduce((s, v) => s + v, 0),
+      };
+    });
+  }
+
+  /** People who have taken money, for the cashier filter. */
+  async cashiers() {
+    return this.read("read", (tx) => tx.selectDistinct({ id: users.id, name: users.name }).from(feeReceipts).innerJoin(users, eq(users.id, feeReceipts.collectedBy)).orderBy(asc(users.name)));
+  }
+
+  /** Up to 100 receipts as one PDF. Each is logged as a print, so one printed before comes out marked DUPLICATE. */
+  receiptsFile(ids: string[]) { return this.mergedFiles(ids, "receipts", (id) => this.receiptFile(id)); }
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
-import type { Tone } from "../dashboard/widgets/WidgetPrimitives";
+import type { Tone } from "../../lib/tone";
 import { Money } from "./Money";
 
 export interface KeyTotal {

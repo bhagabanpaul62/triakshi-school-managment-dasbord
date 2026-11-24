@@ -69,6 +69,8 @@ async function Rules({ svc }: { svc: SettingsService }) {
     { name: "lateFeeFirst", label: "Late fee first", type: "checkbox", placeholder: "A payment clears the late fee before the fee itself", section: "Fees" },
     { name: "autoUseAdvance", label: "Advances", type: "checkbox", placeholder: "Use extra money on the next invoice by itself", section: "Fees" },
     { name: "upiOn", label: "UPI", type: "checkbox", placeholder: "Families pay by UPI QR and enter the reference", section: "Fees" },
+    { name: "planNeedsFile", label: "Fee plans", type: "checkbox", placeholder: "A plan needs the committee's approval file before it can be sent for approval", section: "Fees" },
+    { name: "officeHours", label: "Fee office hours", hint: "Families see this line on their fees pages, with the school phone and address.", placeholder: "Mon to Sat, 9 am to 1 pm", section: "Fees" },
     { name: "holdReportCards", label: "Report cards", type: "checkbox", placeholder: "Hold report cards while fees are overdue", section: "Fees" },
     { name: "remindersOn", label: "Reminders", type: "checkbox", placeholder: "Send fee reminders", section: "Reminders" },
     { name: "reminderDays", label: "Days around the due date", hint: "Minus is before. Example: -7, 0, 3, 10, 30", section: "Reminders" },

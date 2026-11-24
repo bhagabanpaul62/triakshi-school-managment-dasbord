@@ -21,8 +21,14 @@ async function serve(make: (ctx: Ctx, params: Record<string, string>, url: URL) 
   }
 }
 
+const idsOf = (u: URL) => (u.searchParams.get("ids") ?? "").split(",").filter(Boolean);
+
 /** /app/fees/receipts/[id]/file */
 export const receiptRoute = (req: Request, p: Params) => serve((c, q) => new ReceiptService(c).receiptFile(q.id ?? q.paymentId!), req, p);
+/** /app/fees/receipts/print?ids=a,b: up to 100 receipts as one PDF, each logged as a print. */
+export const receiptsRoute = (req: Request, p: Params) => serve((c, _q, u) => new ReceiptService(c).receiptsFile(idsOf(u)), req, p);
+/** /app/fees/invoices/print?ids=a,b: up to 100 bills as one PDF. */
+export const invoicesRoute = (req: Request, p: Params) => serve((c, _q, u) => new InvoiceService(c).invoicesFile(idsOf(u)), req, p);
 /** /app/fees/invoices/[id]/file */
 export const invoiceRoute = (req: Request, p: Params) => serve((c, q) => new InvoiceService(c).invoiceFile(q.id!), req, p);
 /** /app/fees/students/[studentId]/statement?from=&to= */

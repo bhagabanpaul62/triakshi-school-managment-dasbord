@@ -16,6 +16,8 @@ export interface PlanDraft {
   uses: { concessionId: string; amountPaise: number }[];
 }
 type Plan = typeof feePlans.$inferSelect;
+/** A student the bills pass over, and where to go to fix it. One entry per student and reason. */
+export interface BillException { studentId: string; studentName: string; admissionNo: string; reason: "no_plan" | "left" | "already_billed" | "opted_out"; detail: string; href: string; fix: string }
 
 /**
  * Works out which bills the published plans call for. Issuing and previewing both read this, so the preview is exactly
@@ -26,7 +28,8 @@ export class PlanBilling extends FeesBase {
     const year = await this.yearOr(tx, o.yearId);
     const plans = await tx.select().from(feePlans).where(and(eq(feePlans.yearId, year.id), eq(feePlans.status, "published")));
     const skipped = { alreadyIssued: 0, noPlan: 0, left: 0 };
-    if (!plans.length) return { year, drafts: [] as PlanDraft[], skipped };
+    const exceptions: BillException[] = [];
+    if (!plans.length) return { year, drafts: [] as PlanDraft[], skipped, exceptions };
     const planIds = plans.map((p) => p.id);
     const [cls, lines, heads] = await Promise.all([
       tx.select().from(feePlanClasses).where(inArray(feePlanClasses.planId, planIds)),
@@ -57,21 +60,23 @@ export class PlanBilling extends FeesBase {
     const drafts: PlanDraft[] = [];
 
     for (const s of pool) {
+      const flag = (reason: BillException["reason"], detail: string, href: string, fix: string) => { if (!exceptions.some((e) => e.studentId === s.id && e.reason === reason)) exceptions.push({ studentId: s.id, studentName: s.name, admissionNo: s.admissionNo, reason, detail, href, fix }); };
       const pick = pickPlan(published, { classId: s.classId, admission: admissionKind(s.admissionDate, year), overrideRoot: overrides.find((x) => x.studentId === s.id)?.rootId });
-      if (!pick || !s.classId) { skipped.noPlan++; continue; }
+      if (!pick || !s.classId) { skipped.noPlan++; flag("no_plan", s.classId ? "No published plan covers this class" : "The student has no class", s.classId ? "/app/fees/plans" : `/app/students/${s.id}`, s.classId ? "Add the class to a plan" : "Set the class"); continue; }
       const plan = planById.get(pick.id)!, classId = s.classId;
       const mine = new Set(optIns.filter((x) => x.studentId === s.id).map((x) => x.headId));
       const keys = [...new Set(lines.filter((l) => l.planId === plan.id).flatMap((l) => dues.filter((d) => d.lineId === l.id).map((d) => d.dueKey)))].sort();
       const mineConcs = concs.filter((c) => c.studentId === s.id);
+      const notTaken = lines.filter((l) => l.planId === plan.id && l.optional && !mine.has(l.headId)).map((l) => headById.get(l.headId)!.name);
       const cands = keys.flatMap((key) => {
         const rows = lines.filter((l) => l.planId === plan.id && (!l.optional || mine.has(l.headId))).flatMap((l) => dues.filter((d) => d.lineId === l.id && d.dueKey === key).map((d) => ({ l, d })));
         if (!rows.length) return [];
         const dueOn = rows.map((r) => r.d.dueOn).sort()[0]!;
         // Not billed for what falls due after they left; no date means we cannot tell, so nothing more is billed.
-        if (s.status !== "active" && (!s.leftOn || dueOn > s.leftOn)) { if (!billed.has(`${s.id}:${key}`) && (!o.dueKeys || o.dueKeys.includes(key))) skipped.left++; return []; }
+        if (s.status !== "active" && (!s.leftOn || dueOn > s.leftOn)) { if (!billed.has(`${s.id}:${key}`) && (!o.dueKeys || o.dueKeys.includes(key))) { skipped.left++; flag("left", s.leftOn ? `Left on ${s.leftOn}` : "Left, with no leaving date", `/app/fees/students/${s.id}`, s.leftOn ? "Open their fees" : "Set the leaving date"); } return []; }
         // Joining mid-year: their joining month and later are billed, earlier ones are not.
         if (plan.joinRule === "due_after_joining" && admissionKind(s.admissionDate, year) === "new" && dueOn < monthStart(s.admissionDate!)) return [];
-        if (billed.has(`${s.id}:${key}`)) { if (!o.dueKeys || o.dueKeys.includes(key)) skipped.alreadyIssued++; return []; }
+        if (billed.has(`${s.id}:${key}`)) { if (!o.dueKeys || o.dueKeys.includes(key)) { skipped.alreadyIssued++; flag("already_billed", `Already billed for ${key}`, `/app/fees/invoices?studentId=${s.id}`, "Open their bills"); } return []; }
         return [{ key, rows, dueOn }];
       }).sort((a, b) => a.dueOn.localeCompare(b.dueOn) || a.key.localeCompare(b.key));
       // A yearly amount is a pool shared by the bills still to come; what each bill took is remembered so a cancelled bill gives it back.
@@ -89,7 +94,8 @@ export class PlanBilling extends FeesBase {
           grossPaise: priced.reduce((a, l) => a + l.amountPaise, 0), concessionPaise: conc.reduce((a, c) => a + c, 0), snapshot: null, uses,
         });
       });
+      if (notTaken.length && drafts.some((d) => d.studentId === s.id)) flag("opted_out", `Not billed: ${[...new Set(notTaken)].join(", ")} (optional, not taken)`, `/app/fees/plans/${plan.id}?tab=students`, "Change what they take");
     }
-    return { year, drafts, skipped };
+    return { year, drafts, skipped, exceptions };
   }
 }

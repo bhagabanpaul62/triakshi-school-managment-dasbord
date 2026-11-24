@@ -1,10 +1,21 @@
-import { sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { rupees, addDays, daysBetween, todayIST } from "@smw/feature-kit/money";
-import { FeesBase } from "./base";
-import { feeReminders } from "./schema";
+import { z } from "zod";
+import { FeesBase, invalid } from "./base";
+import { openOf } from "./calc";
+import { feeInvoices, feePromises, feeReminderStops, feeReminders } from "./schema";
 
 /** How far back a missed run still catches up; only the latest offset reached is sent, the earlier ones are marked so they never fire later. */
 const CATCH_UP_DAYS = 7;
+/**
+ * The log keeps one row per bill, due date and offset. A reminder sent by hand uses this plus the day number as its
+ * offset, so a bill can be reminded once on each day and never collides with the scheduled offsets (-60 to 365).
+ */
+const MANUAL_BASE = 1_000_000;
+const dayNumber = (day: string) => Math.round(Date.parse(`${day}T00:00:00Z`) / 86_400_000);
+
+const remindInput = z.object({ studentIds: z.array(z.uuid()).max(500).optional(), invoiceIds: z.array(z.uuid()).max(500).optional() }).refine((v) => v.studentIds?.length || v.invoiceIds?.length, { message: "Pick who to remind." });
+export type SkipReason = "stopped" | "promise" | "nothing_open" | "already_today" | "no_login";
 
 /**
  * Fee reminders for one school, in the school's own offsets (days before and after each due date). One notice per
@@ -53,5 +64,46 @@ export class ReminderService extends FeesBase {
         return [{ userId, kind: "fee_due" as const, title: d < 0 ? `Fee overdue: ${s.label}` : `Fee reminder: ${s.label}`, body: `${rupees(Number(s.open_paise))} ${when}.`, href: `/app/fees/invoices/${s.invoice_id}` }];
       }));
     });
+  }
+
+  /**
+   * "Remind now" from a list: one notice to each family login with what is open (on the picked bills, or on all of
+   * a picked student's bills). The same rules as the nightly run: not when the office stopped reminders, not while a
+   * promise to pay runs. A bill is reminded once a day. Returns who got one and who was skipped, with why.
+   */
+  async remindNow(input: unknown) {
+    this.authorize("collect", "write");
+    const o = this.parse(remindInput, input);
+    return this.write("collect", async (tx) => {
+      const today = todayIST();
+      const asked = o.invoiceIds?.length ? await this.loadInvoices(tx, inArray(feeInvoices.id, o.invoiceIds)) : [];
+      const studentIds = [...new Set([...(o.studentIds ?? []), ...asked.map((b) => b.studentId)])];
+      if (!studentIds.length) throw invalid("studentIds", "Those bills were not found.");
+      const [people, stops, promises, bills, done, logins] = await Promise.all([
+        this.studentLines(tx, inArray(sql`students.id`, studentIds)),
+        tx.select({ id: feeReminderStops.studentId }).from(feeReminderStops).where(inArray(feeReminderStops.studentId, studentIds)),
+        tx.select({ id: feePromises.studentId, on: feePromises.promisedOn }).from(feePromises).where(and(inArray(feePromises.studentId, studentIds), gte(feePromises.promisedOn, today))),
+        o.invoiceIds?.length ? Promise.resolve(asked) : this.loadInvoices(tx, and(inArray(feeInvoices.studentId, studentIds), eq(feeInvoices.status, "issued"))),
+        tx.select({ id: feeReminders.invoiceId }).from(feeReminders).where(and(eq(feeReminders.offsetDays, MANUAL_BASE + dayNumber(today)))),
+        this.studentUsers(tx, studentIds),
+      ]);
+      const stopped = new Set(stops.map((x) => x.id)), promised = new Map(promises.map((p) => [p.id, p.on])), remindedToday = new Set(done.map((d) => d.id));
+      const sent: { studentId: string; name: string; bills: number; totalPaise: number }[] = [], skipped: { studentId: string; name: string; reason: SkipReason; detail: string }[] = [];
+      for (const s of people) {
+        const skip = (reason: SkipReason, detail: string) => skipped.push({ studentId: s.id, name: s.name, reason, detail });
+        if (stopped.has(s.id)) { skip("stopped", "Reminders are stopped for this student."); continue; }
+        if (promised.has(s.id)) { skip("promise", `They promised to pay by ${promised.get(s.id)}.`); continue; }
+        const open = bills.filter((b) => b.studentId === s.id && b.status === "issued" && openOf(b) > 0);
+        if (!open.length) { skip("nothing_open", "Nothing is open."); continue; }
+        const fresh = open.filter((b) => !remindedToday.has(b.id));
+        if (!fresh.length) { skip("already_today", "Already reminded today."); continue; }
+        if (!logins.has(s.id)) { skip("no_login", "The family has no login to send a notice to."); continue; }
+        await tx.insert(feeReminders).values(fresh.map((b) => ({ schoolId: this.ctx.schoolId, invoiceId: b.id, studentId: s.id, offsetDays: MANUAL_BASE + dayNumber(today), dueOn: b.dueDate, sentOn: today }))).onConflictDoNothing();
+        const total = fresh.reduce((n, b) => n + openOf(b), 0), late = fresh.filter((b) => b.dueDate < today).length;
+        await this.tell(tx, [s.id], late ? "Fees are overdue" : "Fee reminder", `${rupees(total)} is open${late ? `, ${late} bill${late === 1 ? " is" : "s are"} past the due date` : ""}. Open your fees to pay.`, "/app/fees");
+        sent.push({ studentId: s.id, name: s.name, bills: fresh.length, totalPaise: total });
+      }
+      return { sent, skipped };
+    }, (r) => ({ action: "remind", entity: "Student", summary: `Sent ${r.sent.length} fee reminder${r.sent.length === 1 ? "" : "s"} by hand${r.skipped.length ? `, ${r.skipped.length} skipped` : ""}` }));
   }
 }

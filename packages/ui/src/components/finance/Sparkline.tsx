@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import { TONE, type Tone } from "../dashboard/widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../lib/tone";
 import { sparkPath } from "./logic";
 
 export interface SparklineProps {

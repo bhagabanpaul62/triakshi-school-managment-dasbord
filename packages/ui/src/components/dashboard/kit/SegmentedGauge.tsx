@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { TONE, type Tone } from "../widgets/WidgetPrimitives";
+import { TONE, type Tone } from "../../../lib/tone";
 import { CountUp } from "../motion";
 import { cn } from "../../../lib/utils";
 

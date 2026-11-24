@@ -44,7 +44,7 @@ describe("opening balances need approval", () => {
     // Another sheet for the same student is refused while this one waits.
     expect(await send([["R1", "1", "", "", ""]])).toMatchObject({ submitted: false, errors: [{ message: expect.stringContaining("waiting for approval") }] });
     const list = await new OpeningImport(accountant()).batches();
-    expect(list[0]).toMatchObject({ id: r.batchId, status: "pending", approvalStatus: "pending" });
+    expect(list[0]).toMatchObject({ id: r.batchId, status: "pending", approval: { status: "pending" } });
   });
 
   it("reject keeps the reason and posts nothing; resubmit asks again; approve posts everything once", async () => {
@@ -52,7 +52,7 @@ describe("opening balances need approval", () => {
     await decide(fx, "fees.opening", batch!.id, "reject", "Wrong year");
     expect(await batchStatus(batch!.id)).toBe("rejected");
     expect(await approvalOf("fees.opening", batch!.id)).toMatchObject({ status: "rejected", note: "Wrong year" });
-    expect((await new OpeningImport(accountant()).batches())[0]).toMatchObject({ approvalStatus: "rejected", decisionNote: "Wrong year" });
+    expect((await new OpeningImport(accountant()).batches())[0]).toMatchObject({ approval: { status: "rejected", note: "Wrong year" } });
     expect(await balance(fx.students.riya)).toMatchObject({ openPaise: 0 });
     await new OpeningImport(accountant()).resubmit(batch!.id);
     await expect(new OpeningImport(accountant()).resubmit(batch!.id)).rejects.toBeInstanceOf(ConflictError);
