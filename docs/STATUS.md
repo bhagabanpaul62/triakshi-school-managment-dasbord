@@ -3,7 +3,7 @@
 Finance was built on 2026-11-24 and 25 and tested locally. Git, CI and the demo server were last checked on 2026-11-24.
 
 ## Finance module (2026-11-25)
-Built on branch `feat/finance` (pushed to the fork; **not merged, no PR, not deployed**). Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
+Built on branch `feat/finance` (pushed to the fork; **PR open to `main`, not merged, not deployed**). Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
 
 | Part | State |
 |---|---|
@@ -17,7 +17,14 @@ Built on branch `feat/finance` (pushed to the fork; **not merged, no PR, not dep
 
 **Tested 2026-11-25, local, production build, fresh database:** 105 browser tests passed, 0 failed, 1 skipped (the console approval test: the seed has no pending school). They include the 13 money journeys and a crawl of every money link for 7 logins at desktop and phone width (0 problems). Unit: 1,493 passed in 35 packages. Typecheck 40/40, lint 0 errors, no schema drift. Two independent reviews (about 40 findings) were fixed.
 
-Needs the owner: a payroll professional to check the statutory rates, and `DATA_KEY` on any server before payroll is used (keep a copy).
+### Before real schools use it
+Logged 2026-11-25. All three are open.
+
+| # | What | Why | Done when |
+|---|---|---|---|
+| 1 | A payroll professional checks the rates in `features/payroll/rates.ts` before the first real salary run | They came from public sources. Rates we are less sure of are marked low confidence and show a warning on the pay run | The checked rates are in the code, or overridden on the Statutory screen |
+| 2 | Set `DATA_KEY` on the server before payroll is used, and keep a copy somewhere safe | It encrypts bank and ID numbers. Losing it loses the stored values; without it payroll refuses to save them | It is in the server's env and a copy is stored outside the server |
+| 3 | Rehearse the move of old fee data on a copy of the live data, after a backup (`move-fees --dry-run`, then bootstrap) | It worked on local data: 287 receipts, every difference explained. It has not been run on live data | The report on the copy explains every difference, and Finance shows no red "books do not match" panel |
 
 ## Where things stand
 | What | State |
@@ -33,6 +40,7 @@ Needs the owner: a payroll professional to check the statutory rates, and `DATA_
 PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
 
 ## Next
+0. Review and merge the finance PR, then do the three items in "Before real schools use it" before deploying it.
 1. Merge the PR for `63f18d5`, then deploy it to the demo. Both need the owner's go-ahead.
 2. Get the approved demo schools signed in; resend their sign-in email from the console school page where needed.
 3. Prove email delivery to outside inboxes. A sender on a domain of our own, verified in Brevo, is the likely fix (not confirmed).
