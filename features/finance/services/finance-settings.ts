@@ -30,8 +30,10 @@ export class SettingsService extends FinanceService {
       const locked = await this.hasEntriesThisYear(tx);
       if (basis !== before.basis && locked) throw new ConflictError("This financial year already has entries, so the basis cannot change until next financial year (April). Keep the current basis in Finance setup, Rules.");
       await tx.insert(finSettings).values({ schoolId: this.ctx.schoolId, basis, config }).onConflictDoUpdate({ target: finSettings.schoolId, set: { basis, config } });
-      return { ...config, basis, basisLocked: locked };
-    }, (r) => ({ action: "update", entity: "Finance settings", summary: "Changed the finance rules", meta: { basis: r.basis } }));
+      const after: FinanceConfig & { basis: string } = { ...config, basis };
+      const changed = (Object.keys(after) as (keyof typeof after)[]).filter((k) => JSON.stringify(after[k]) !== JSON.stringify(before[k]));
+      return { view: { ...config, basis, basisLocked: locked }, changes: Object.fromEntries(changed.map((k) => [k, { from: before[k] ?? null, to: after[k] ?? null }])) };
+    }, ({ changes }) => ({ action: "update", entity: "Finance settings", summary: `Changed the finance rules: ${Object.keys(changes).join(", ") || "no change"}`, meta: { changes } })).then((r) => r.view);
   }
 
   private async hasEntriesThisYear(tx: Tx) {

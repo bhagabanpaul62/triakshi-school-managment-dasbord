@@ -59,11 +59,12 @@ export default async function BankingPage({ searchParams }: { searchParams: Sear
                 <div className="flex flex-wrap items-center gap-2">
                   {statement.get(a.id) ? <Link href={`/app/finance/banking/${a.id}/import`} className={PRIMARY}>Import statement</Link> : null}
                   <Link href={`/app/finance/accounts/${a.accountId}`} className="inline-flex h-9 items-center rounded-full bg-white/[0.08] px-4 text-sm hover:bg-white/[0.12] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Ledger</Link>
-                  {canMove && !a.openingSet ? (
+                  {canMove && !a.openingSet && ctx.role === "admin" ? (
                     <FormModal title={`Opening balance of ${a.name}`} icon="money" hidden={{ accountId: a.id }} action={setOpening} submitLabel="Set" trigger={{ label: "Set opening balance", variant: "ghost", size: "sm" }}
                       description="What it held when you started using this system. It can be set once."
                       fields={[{ name: "amountPaise", label: "Amount", type: "money", required: true }, { name: "date", label: "As on", type: "date", required: true, max: today }]} values={{ date: today }} />
                   ) : null}
+                  {canMove && !a.openingSet && ctx.role !== "admin" ? <span className="text-xs text-[var(--ds-on-surface-muted)]">An admin sets the opening balance.</span> : null}
                 </div>
               </div>
             </Panel>

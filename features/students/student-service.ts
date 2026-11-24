@@ -332,8 +332,9 @@ export class StudentService extends CrudService<typeof students, Perm> {
   /** Money records outlive the student's page: a student with bills, receipts, advances or UPI slips is never deleted (mark them left instead). */
   protected async usage(tx: Tx, s: Student): Promise<[string, number][]> {
     const n = (table: string) => countIn(tx, table, by("student_id", s.id));
-    const [bills, receipts, advances, slips] = await Promise.all([n("fee_invoices"), n("fee_receipts"), n("fee_advances"), n("fee_upi_slips")]);
-    return [["fee bills", bills], ["fee receipts", receipts], ["advances or deposits", advances], ["UPI slips", slips]];
+    // Old receipts stay until a school is moved, and they cascade on delete: count them too.
+    const [bills, receipts, advances, slips, old] = await Promise.all([n("fee_invoices"), n("fee_receipts"), n("fee_advances"), n("fee_upi_slips"), n("fee_payments")]);
+    return [["fee bills", bills], ["fee receipts", receipts + old], ["advances or deposits", advances], ["UPI slips", slips]];
   }
 
   protected async beforeRemove(tx: Tx, existing: Student) {

@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
+import { ConflictError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { users, type Tx } from "@smw/db";
 import { postJournal, type Poster } from "@smw/feature-finance/posting";
 import { finAccounts, finApprovals } from "@smw/feature-finance/schema";
-import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, managers, need, onlyId, tell } from "./base";
+import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, makerMayDecide, managers, need, onlyId, tell } from "./base";
 import { ExpenseFiles, type UploadedFile } from "./files";
 import { day, method, optionalId, paiseAmount } from "./inputs";
 import { expClaims } from "./schema";
@@ -17,7 +17,7 @@ const claimInput = z.object({
   spentOn: day, amountPaise: paiseAmount, accountId: optionalId, costCentreId: optionalId,
   payWith: z.enum(["now", "salary"]).default("now"),
 });
-const decideInput = z.object({ accountId: optionalId, costCentreId: optionalId });
+const decideInput = z.object({ accountId: optionalId, costCentreId: optionalId, note: z.string().trim().max(300).optional() });
 
 /** Post an approved claim: the school owes the person. */
 export async function postClaim(tx: Tx, by: Poster, c: Claim) {
@@ -150,7 +150,7 @@ export class ClaimService extends ExpenseService {
       const [c] = await tx.select().from(expClaims).where(eq(expClaims.id, id)).for("update");
       if (!c) throw new NotFoundError("Claim");
       if (c.status !== "submitted") throw new ConflictError(`This claim is already ${c.status}.`);
-      if (c.userId === this.ctx.userId) throw new ForbiddenError("Someone else must approve your own claim.");
+      const own = await makerMayDecide(tx, this.ctx, [c.userId], pick.note);
       const accountId = pick.accountId ?? c.accountId;
       if (!accountId) throw new ValidationError({ accountId: "Choose which expense account this belongs to." });
       await checkAccount(tx, accountId, "expense"); await checkCentre(tx, pick.costCentreId);
@@ -158,10 +158,10 @@ export class ClaimService extends ExpenseService {
       if (c.amountPaise > settings.billLimitPaise) {
         await tx.update(expClaims).set({ accountId, costCentreId: pick.costCentreId ?? c.costCentreId }).where(eq(expClaims.id, id));
         const a = await this.askApproval(tx, { kind: "expenses.claim", refType: "exp_claim", refId: id, title: `Claim: ${c.title}`, amountPaise: c.amountPaise, reason: settings.billLimitPaise === 0 ? "Every claim needs an approver until a limit is set in Finance setup." : `Above the limit of ${rupees(settings.billLimitPaise)}.`, href: "/app/expenses/claims" });
-        return { outcome: "pending" as const, claim: c, approvalId: a.id };
+        return { outcome: "pending" as const, claim: c, approvalId: a.id, own };
       }
-      return { outcome: "approved" as const, claim: await approveClaim(tx, this.poster, id, { accountId, costCentreId: pick.costCentreId }), approvalId: null };
-    }, (r) => ({ action: r.outcome === "approved" ? "approve" : "submit", entity: "Claim", entityId: r.claim.id, summary: `${r.outcome === "approved" ? "Approved" : "Sent for approval"}: claim "${r.claim.title}" of ${rupees(r.claim.amountPaise)}` }));
+      return { outcome: "approved" as const, claim: await approveClaim(tx, this.poster, id, { accountId, costCentreId: pick.costCentreId }), approvalId: null, own };
+    }, (r) => ({ action: r.outcome === "approved" ? "approve" : "submit", entity: "Claim", entityId: r.claim.id, summary: `${r.outcome === "approved" ? "Approved" : "Sent for approval"}: claim "${r.claim.title}" of ${rupees(r.claim.amountPaise)}${r.own ? " (own claim, only admin)" : ""}` }));
   }
 
   async reject(id: string, reason: string) {

@@ -37,7 +37,7 @@ export function SplitBar({ parts, label, emptyText = "Nothing here yet." }: Spli
       {total === 0 ? (
         <p className="mt-3 text-sm text-[var(--ds-on-surface-muted)]">{emptyText}</p>
       ) : (
-        <ul className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+        <ul className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-x-6 gap-y-1">
           {parts.map((p, i) => {
             const row = (
               <>

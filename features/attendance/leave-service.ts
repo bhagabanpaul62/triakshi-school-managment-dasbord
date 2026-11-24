@@ -33,6 +33,12 @@ const BACKDATE_DAYS = 30;
 /** The note on the daily rows an approval wrote, so a reversal removes only those. */
 const LEAVE_NOTE = "On approved leave";
 
+/** Has payroll already approved this month's salary run? The app fills it in (attendance never imports payroll). */
+export type PayMonthGuard = (tx: Tx, month: string) => Promise<boolean>;
+let payMonthClosed: PayMonthGuard | null = null;
+/** App startup: tell leave how to ask payroll. Pass null to take it off. Without it, leave never refuses for payroll. */
+export const usePayMonthGuard = (guard: PayMonthGuard | null) => { payMonthClosed = guard; };
+
 /** Leave requests: a student or staff member applies, the class teacher or the admin decides, approval marks the days as leave. */
 export class LeaveService extends SchoolService<Perm> {
   protected feature = attendanceFeature;
@@ -205,6 +211,8 @@ export class LeaveService extends SchoolService<Perm> {
       if (!r) throw new NotFoundError("Leave request");
       if (r.status !== "pending") throw new ValidationError({ id: "This request is already decided" });
       await this.assertCanDecide(tx, r);
+      const own = data.decision === "approved" && await this.assertNotOwn(tx, r, data.note);
+      if (data.decision === "approved") await this.assertPayOpen(tx, r);
       // The status guard makes two concurrent decisions race on the row lock; the loser gets no row back.
       const won = await tx.update(leaveRequests).set({ status: data.decision, decidedBy: this.ctx.userId, decidedAt: new Date(), note: data.note ?? null })
         .where(and(eq(leaveRequests.id, r.id), eq(leaveRequests.status, "pending"))).returning({ id: leaveRequests.id });
@@ -219,8 +227,8 @@ export class LeaveService extends SchoolService<Perm> {
       const [who] = await tx.select({ email: users.email }).from(users).where(eq(users.id, r.requestedBy)).limit(1);
       const mail = notice(who?.email ?? null, title, body);
       if (mail) mails.push(mail);
-      return { request: r, marked };
-    }, (o) => ({ action: data.decision === "approved" ? "approve" : "reject", entity: "Leave request", entityId: o.request.id, summary: `${data.decision} leave ${o.request.fromDate} to ${o.request.toDate}, ${o.marked} days marked` }));
+      return { request: r, marked, own };
+    }, (o) => ({ action: data.decision === "approved" ? "approve" : "reject", entity: "Leave request", entityId: o.request.id, summary: `${data.decision} leave ${o.request.fromDate} to ${o.request.toDate}, ${o.marked} days marked${o.own ? " (own leave, only admin)" : ""}` }));
     await sendMails(mails);
     return { id: out.request.id, status: data.decision, marked: out.marked };
   }
@@ -238,6 +246,8 @@ export class LeaveService extends SchoolService<Perm> {
       if (!r) throw new NotFoundError("Leave request");
       if (r.status !== "approved" && r.status !== "rejected") throw new ValidationError({ id: "Only a decided request can be reversed" });
       await this.assertCanDecide(tx, r);
+      const own = await this.assertNotOwn(tx, r, data.note);
+      await this.assertPayOpen(tx, r);
       const to = r.status === "approved" ? "rejected" : "approved";
       if (to === "approved") await this.assertNoClash(tx, r, r.fromDate, r.toDate, r.id);
       const now = new Date();
@@ -252,10 +262,30 @@ export class LeaveService extends SchoolService<Perm> {
       const [who] = await tx.select({ email: users.email }).from(users).where(eq(users.id, r.requestedBy)).limit(1);
       const mail = notice(who?.email ?? null, title, data.note ? `${title}. ${data.note}` : title);
       if (mail) mails.push(mail);
-      return { request: r, from: r.status, to, days };
-    }, (o) => ({ action: "reverse", entity: "Leave request", entityId: o.request.id, summary: `Reversed leave ${o.request.fromDate} to ${o.request.toDate}: ${o.from} to ${o.to}, ${o.days} days ${o.to === "approved" ? "marked" : "cleared"}`, meta: { from: o.from, to: o.to } }));
+      return { request: r, from: r.status, to, days, own };
+    }, (o) => ({ action: "reverse", entity: "Leave request", entityId: o.request.id, summary: `Reversed leave ${o.request.fromDate} to ${o.request.toDate}: ${o.from} to ${o.to}, ${o.days} days ${o.to === "approved" ? "marked" : "cleared"}${o.own ? " (own leave, only admin)" : ""}`, meta: { from: o.from, to: o.to } }));
     await sendMails(mails);
     return { id: out.request.id, status: out.to, days: out.days };
+  }
+
+  /**
+   * Nobody approves or turns around their own leave. The one exception is the only active admin, who must write why.
+   * Same rule as the approvals desk in finance; answers true when the exception was used.
+   */
+  private async assertNotOwn(tx: Tx, r: typeof leaveRequests.$inferSelect, note?: string): Promise<boolean> {
+    if (r.requestedBy !== this.ctx.userId && r.userId !== this.ctx.userId) return false;
+    const others = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"), ne(users.id, this.ctx.userId))).limit(1);
+    if (others.length || this.ctx.role !== "admin") throw new ForbiddenError("This is your own leave, so someone else must decide it.");
+    if (!note) throw new ValidationError({ note: "You are the only admin, so write why you decide your own leave." });
+    return true;
+  }
+
+  /** Approving or turning around staff leave changes days that salary is cut from, so a month with an approved run is shut. */
+  private async assertPayOpen(tx: Tx, r: typeof leaveRequests.$inferSelect) {
+    if (r.kind !== "staff" || !payMonthClosed) return;
+    for (const { month } of await requestMonths(tx, r)) {
+      if (await payMonthClosed(tx, month)) throw new ConflictError(`Salary for ${month} is already approved; ask for a recall or adjust next month.`);
+    }
   }
 
   /** A typed staff request takes its days from the balance when approved. The person's lock makes two approvals line up. */
@@ -286,7 +316,7 @@ export class LeaveService extends SchoolService<Perm> {
     if (!s?.sectionId || !(await this.ownSectionIds(tx)).includes(s.sectionId)) throw new ForbiddenError("Only the class teacher or the admin can decide this.");
   }
 
-  /** Mark each school day of the request as leave: skips holidays and Sundays, never overwrites a day marked present. */
+  /** Mark each school day of the request as leave: skips holidays and Sundays, fills only days that are unmarked or marked absent, so present, late and half-day marks stay. */
   private async markDays(tx: Tx, r: typeof leaveRequests.$inferSelect): Promise<number> {
     const days = workingDays(r.fromDate, r.toDate, await holidaySet(tx, r.fromDate, r.toDate));
     if (days.length === 0) return 0;
@@ -295,14 +325,14 @@ export class LeaveService extends SchoolService<Perm> {
 
     if (r.kind === "staff") {
       const done = await tx.insert(staffAttendance).values(days.map((date) => ({ schoolId: this.ctx.schoolId, userId: r.userId!, date, status, note, markedBy: this.ctx.userId })))
-        .onConflictDoUpdate({ target: [staffAttendance.userId, staffAttendance.date], set: { status, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${staffAttendance.status} <> 'present'` })
+        .onConflictDoUpdate({ target: [staffAttendance.userId, staffAttendance.date], set: { status, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${staffAttendance.status} = 'absent'` })
         .returning({ id: staffAttendance.id });
       return done.length;
     }
     const [s] = await tx.select({ sectionId: students.sectionId }).from(students).where(eq(students.id, r.studentId!)).limit(1);
     if (!s?.sectionId) return 0;
     const done = await tx.insert(studentAttendance).values(days.map((date) => ({ schoolId: this.ctx.schoolId, studentId: r.studentId!, sectionId: s.sectionId!, date, status: "leave" as const, note, markedBy: this.ctx.userId })))
-      .onConflictDoUpdate({ target: [studentAttendance.studentId, studentAttendance.date], set: { status: "leave", sectionId: s.sectionId, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${studentAttendance.status} <> 'present'` })
+      .onConflictDoUpdate({ target: [studentAttendance.studentId, studentAttendance.date], set: { status: "leave", sectionId: s.sectionId, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${studentAttendance.status} = 'absent'` })
       .returning({ id: studentAttendance.id });
     return done.length;
   }

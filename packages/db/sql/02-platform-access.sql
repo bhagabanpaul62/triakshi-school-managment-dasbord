@@ -43,3 +43,10 @@ END $$;
 DROP TRIGGER IF EXISTS custom_design_requests_school_defaults ON custom_design_requests;
 CREATE TRIGGER custom_design_requests_school_defaults BEFORE INSERT ON custom_design_requests
   FOR EACH ROW EXECUTE FUNCTION school_design_request_defaults();
+
+-- The old fee tables are history: read by the one-time move (apps/school move-fees), never written again.
+DO $$ DECLARE t text; BEGIN
+  FOREACH t IN ARRAY ARRAY['fee_structures','fee_structure_items','installments','late_fee_rules','student_concessions','fee_charges','fee_payments','fee_payment_allocations','fee_reminders'] LOOP
+    IF to_regclass(t) IS NOT NULL THEN EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON %I FROM app_school', t); END IF;
+  END LOOP;
+END $$;

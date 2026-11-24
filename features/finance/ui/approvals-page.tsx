@@ -7,7 +7,6 @@ import type { FormResult } from "@smw/ui/shell/FormModal";
 import { cn } from "@smw/ui/utils";
 import { ApprovalService, type ApprovalHandlers } from "../approvals";
 import { ApprovalDeskService } from "../services/approval-desk";
-import { withdrawRequest } from "./actions";
 import { JournalService } from "../services/journals";
 import { ApprovalCard, type ApprovalCardData } from "./approval-card";
 import { kindLabel } from "./labels";
@@ -23,7 +22,7 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
  * Every request waiting for a second person, grouped by what it is. The route passes the merged handlers of all
  * modules and the two server actions, so finance imports none of the modules that ask.
  */
-export default async function ApprovalsPage({ searchParams, handlers, approve, reject }: { searchParams: Search; handlers: ApprovalHandlers; approve: (fd: FormData) => Promise<FormResult>; reject: (fd: FormData) => Promise<FormResult> }) {
+export default async function ApprovalsPage({ searchParams, handlers, approve, reject, withdraw }: { searchParams: Search; handlers: ApprovalHandlers; approve: (fd: FormData) => Promise<FormResult>; reject: (fd: FormData) => Promise<FormResult>; withdraw: (fd: FormData) => Promise<FormResult> }) {
   const ctx = await requireCtx();
   const svc = new ApprovalService(ctx, handlers);
   if (!svc.can("approve")) notFound();
@@ -62,7 +61,7 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
           {[...cards].map(([kind, items]) => (
             <section key={kind} aria-labelledby={`k-${kind}`}>
               <h2 id={`k-${kind}`} className="mb-3 text-[15px] font-medium">{kindLabel(kind)} <span className="ml-1 text-sm font-normal text-[var(--ds-on-surface-muted)]">{items.length}</span></h2>
-              <div className="flex flex-col gap-3">{items.map((a) => <ApprovalCard key={a.id} a={a} approve={approve} reject={reject} withdraw={withdrawRequest} canDecide />)}</div>
+              <div className="flex flex-col gap-3">{items.map((a) => <ApprovalCard key={a.id} a={a} approve={approve} reject={reject} withdraw={withdraw} canDecide />)}</div>
             </section>
           ))}
           {pageCount > 1 ? (

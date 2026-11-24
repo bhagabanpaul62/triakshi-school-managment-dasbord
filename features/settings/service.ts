@@ -598,7 +598,7 @@ export class ExportService extends SettingsService {
   }
 
   /** Every table with `column`, as `{ table: rows[] }` for rows where `column = value`. Table and column names come from the catalog, never from input. */
-  private async dump(tx: Tx, column: string, value: string, payroll = false): Promise<Record<string, unknown[]>> {
+  private async dump(tx: Tx, column: string, value: string, payroll = false): Promise<Record<string, Record<string, unknown>[]>> {
     const cols = await tx.execute<{ table_name: string; column_name: string }>(sql`
       select c.table_name, c.column_name from information_schema.columns c
       join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name and t.table_type = 'BASE TABLE'
@@ -610,11 +610,27 @@ export class ExportService extends SettingsService {
       if (SKIP_TABLES.has(c.table_name) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
       byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
     }
-    const out: Record<string, unknown[]> = {};
+    const out: Record<string, Record<string, unknown>[]> = {};
     for (const [table, names] of byTable) {
       const list = sql.join(names.map((n) => sql.identifier(n)), sql`, `);
       out[table] = [...await tx.execute(sql`select ${list} from ${sql.identifier(table)} where ${sql.identifier(column)} = ${value} order by 1`)];
     }
+    if (!payroll) await this.withoutPay(tx, out);
     return out;
+  }
+
+  /**
+   * The ledger carries pay too: per-person lines and memos of salary, loan and payout entries, and the requests for them.
+   * Without the payroll tick they go; the entries stay (so the books still add up) with their totals and no names.
+   */
+  private async withoutPay(tx: Tx, out: Record<string, Record<string, unknown>[]>) {
+    if (!out.fin_journals && !out.fin_journal_lines && !out.fin_approvals) return;
+    const ids = new Set((await tx.execute<{ id: string }>(sql`select id from fin_journals where source_type like 'payroll\_%'`)).map((r) => r.id));
+    if (out.fin_journals) out.fin_journals = out.fin_journals.map((j) => (ids.has(j.id as string) ? { ...j, memo: null } : j));
+    if (out.fin_journal_lines) {
+      out.fin_journal_lines = out.fin_journal_lines.filter((l) => !(ids.has(l.journal_id as string) && l.party_type === "staff"))
+        .map((l) => (ids.has(l.journal_id as string) ? { ...l, memo: null } : l));
+    }
+    if (out.fin_approvals) out.fin_approvals = out.fin_approvals.filter((a) => !String(a.kind).startsWith("payroll."));
   }
 }

@@ -79,9 +79,9 @@ export class AcademicYearService extends AcademicsCrud<typeof academicYears> {
     if (y.isCurrent) throw new ConflictError("Make another year current before deleting this one.");
     const ofYear = sql`section_id in (select id from sections where year_id = ${y.id})`;
     const n = (table: string, where = by("year_id", y.id)) => countIn(tx, table, where);
-    const counts = await Promise.all([n("exams"), n("fee_invoices"), n("fee_receipts", sql`date between ${y.startsOn}::date and ${y.endsOn}::date`), n("student_enrollments"), n("student_attendance", ofYear), n("assignments", ofYear), n("timetable_slots", ofYear)]);
+    const counts = await Promise.all([n("exams"), n("fee_invoices"), n("fee_receipts", sql`date between ${y.startsOn}::date and ${y.endsOn}::date`), n("student_enrollments"), n("student_attendance", ofYear), n("assignments", ofYear), n("timetable_slots", ofYear), n("fee_payments")]);
     const total = (...i: number[]) => i.reduce((t, k) => t + counts[k]!, 0);
-    return [["exams", total(0)], ["fee records", total(1, 2)], ["student enrolments", total(3)], ["attendance, assignment or timetable records", total(4, 5, 6)]];
+    return [["exams", total(0)], ["fee records", total(1, 2, 7)], ["student enrolments", total(3)], ["attendance, assignment or timetable records", total(4, 5, 6)]];
   }
 
   /** Make one year current; every other year stops being current. */

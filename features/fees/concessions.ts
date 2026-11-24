@@ -80,7 +80,7 @@ export class ConcessionService extends FeesBase {
     if (d.typeId && !type[0]) throw new NotFoundError("Concession type");
     if (d.headId && !head[0]) throw new NotFoundError("Fee head");
     const per = d.per ?? type[0]?.per ?? "year";
-    const values = { studentId: s.id, yearId: year.id, typeId: d.typeId ?? null, headId: d.headId ?? null, mode: d.mode, per, value: d.value, reason: d.reason, fileKey: d.fileKey ?? null, status: "pending" as const, createdBy: this.ctx.userId };
+    const values = { studentId: s.id, yearId: year.id, typeId: d.typeId ?? null, headId: d.headId ?? null, mode: d.mode, per, value: d.value, reason: d.reason, fileKey: this.ownFile(d.fileKey, "concessions", "file"), status: "pending" as const, createdBy: this.ctx.userId };
     const [row] = id ? await tx.update(feeConcessions).set(values).where(eq(feeConcessions.id, id)).returning() : await tx.insert(feeConcessions).values({ schoolId: this.ctx.schoolId, ...values }).returning();
     const worth = await this.estimateIn(tx, { ...values });
     const changes = new ChangeService(this.ctx);

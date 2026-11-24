@@ -17,6 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@smw/billing": "workspace:*",
     "@smw/db": "workspace:*",
     "@smw/feature-kit": "workspace:*",
     "@smw/runtime": "workspace:*",

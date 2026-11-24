@@ -6,6 +6,7 @@ import { finAccounts, finCashAccounts, finJournalLines, finJournals } from "../s
 import { loadFinanceSettings } from "../settings";
 import { FinanceService, day, schoolName } from "./common";
 import { reportToCsv, reportToPdf, type Report, type ReportColumn, type ReportRow } from "./report";
+import { shortDate } from "@smw/ui/format";
 
 /** The entry year close posts. Statements of income and spending leave it out so a closed year still shows its surplus. */
 export const YEAR_CLOSE_TYPE = "year-close";
@@ -90,7 +91,11 @@ async function balancesAsOn(tx: Tx, asOn: string): Promise<(Acc & { net: number 
   return rows<Record<string, unknown>>(res).map((x) => ({ id: String(x.id), code: String(x.code), name: String(x.name), type: x.type as Acc["type"], group: String(x.group), net: Number(x.net) }));
 }
 
+/** Accounts of one group together, groups in the order of their first account. */
+const byGroup = <T extends Acc>(list: T[]) => { const order = [...new Set(list.map((a) => a.group))]; return [...list].sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group)); };
 const label = (a: Acc) => `${a.code}  ${a.name}`;
+/** A balance sheet of a year still running stands as of today. */
+const asOn = (to: string) => `As on ${shortDate(to > todayIST() ? todayIST() : to)}`;
 const money = (key: string, labelText: string): ReportColumn => ({ key, label: labelText, kind: "money" });
 
 export class StatementService extends FinanceService {
@@ -305,7 +310,7 @@ export class StatementService extends FinanceService {
   private async balanceSheet(tx: Tx, r: Range, cmp: Range | null, subtitle: string) {
     const [cur, prev] = await Promise.all([balancesAsOn(tx, r.to), cmp ? balancesAsOn(tx, cmp.to) : null]);
     const pm = new Map((prev ?? []).map((a) => [a.id, a]));
-    const columns: ReportColumn[] = [{ key: "account", label: "Account" }, money("cur", `As on ${r.to}`), ...(cmp ? [money("prev", `As on ${cmp.to}`), money("change", "Change")] : [])];
+    const columns: ReportColumn[] = [{ key: "account", label: "Account" }, money("cur", asOn(r.to)), ...(cmp ? [money("prev", asOn(cmp.to)), money("change", "Change")] : [])];
     const both = (c: number, p: number) => ({ cur: c, ...(cmp ? { prev: p, change: c - p } : {}) });
     const out: ReportRow[] = [];
     const totals: Record<string, [number, number]> = {};
@@ -314,7 +319,7 @@ export class StatementService extends FinanceService {
     for (const [type, title, sign] of [["asset", "What the school owns", 1], ["liability", "What the school owes", -1], ["equity", "Funds", -1]] as const) {
       out.push({ style: "head", cells: { account: title } });
       let c = 0, p = 0, group = "";
-      for (const a of cur.filter((x) => x.type === type)) {
+      for (const a of byGroup(cur.filter((x) => x.type === type))) {
         const x = sign * a.net, y = sign * (pm.get(a.id)?.net ?? 0);
         if (!x && !y) continue;
         if (a.group !== group) { group = a.group; out.push({ cells: { account: a.group }, style: "sub" }); }

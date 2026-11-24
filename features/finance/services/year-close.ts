@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ne, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, countIn, pgErrorCode, type Ctx } from "@smw/feature-kit";
 import { addDays, addMonths, fyOf, fyRange, rupees, todayIST } from "@smw/feature-kit/money";
+import type { ApprovalHandler } from "../approvals";
 import { postJournal, reverseJournal, type Poster } from "../posting";
 import { systemAccounts } from "../chart";
 import { finApprovals, finJournals, finPeriods, finYearCloses } from "../schema";
@@ -19,6 +20,8 @@ export interface YearClosePreview {
   checks: CloseCheck[]; ready: boolean;
   lines: CloseLine[]; incomeTotalPaise: number; expenseTotalPaise: number; surplusPaise: number;
   reopenPending: boolean;
+  /** Closing was asked for and waits for a decision. */
+  closePending: boolean;
 }
 export interface YearCloseOptions {
   /** More ledger checks (fees, expenses, payroll), composed by the app. */
@@ -66,7 +69,7 @@ export class YearCloseService extends FinanceService {
     const [locks, mismatches, [pending], unmatched, counters, earlier] = await Promise.all([
       tx.select().from(finPeriods).where(and(eq(finPeriods.status, "closed"), sql`${finPeriods.month} between ${from} and ${to}`)),
       runControlChecks(tx, this.ctx.schoolId, this.opts.checks),
-      tx.select({ n: sql<number>`count(*)::int` }).from(finApprovals).where(eq(finApprovals.status, "pending")),
+      tx.select({ n: sql<number>`count(*)::int` }).from(finApprovals).where(and(eq(finApprovals.status, "pending"), ne(finApprovals.kind, "finance.year-close"))),
       unmatchedBankLines(tx),
       countIn(tx, "fee_counters", sql`closed_at is null`),
       pnlBalances(tx, addDays(from, -1)),
@@ -96,35 +99,61 @@ export class YearCloseService extends FinanceService {
       const income = balances.filter((b) => b.type === "income").reduce((s, b) => s - b.net, 0), expense = balances.filter((b) => b.type === "expense").reduce((s, b) => s + b.net, 0);
       return {
         fy, from, to, current, checks, ready: checks.every((c) => c.ok || !c.blocking) && current?.status !== "closed",
-        lines, incomeTotalPaise: income, expenseTotalPaise: expense, surplusPaise, reopenPending: Number(pending?.n ?? 0) > 0,
+        lines, incomeTotalPaise: income, expenseTotalPaise: expense, surplusPaise, reopenPending: Number(pending?.n ?? 0) > 0, closePending: current?.status === "pending",
       };
     });
   }
 
-  /** Close the year once: carry income and expense to the surplus, then lock all twelve months. */
-  async run(fyInput: string) {
+  private async assertClosable(tx: Tx, fy: string) {
+    const stop = (await this.checklist(tx, fy)).find((c) => c.blocking && !c.ok);
+    if (stop) throw new ConflictError(`${stop.label}: ${stop.detail}`);
+  }
+
+  /** Ask for the year to be closed. Nothing is posted or locked until another admin agrees (a school's only admin decides alone, with a reason). */
+  async requestClose(fyInput: string) {
     this.authorize("close", "write");
     const fy = this.parse(FY, fyInput), [, to] = fyRange(fy);
     return this.write("close", async (tx) => {
       const last = await this.latest(tx, fy, true);
       if (last?.status === "closed") throw new ConflictError(`${fy} is already closed. Ask for it to be reopened, with a reason, if something was missed.`);
-      const stop = (await this.checklist(tx, fy)).find((c) => c.blocking && !c.ok);
-      if (stop) throw new ConflictError(`${stop.label}: ${stop.detail}`);
+      if (last?.status === "pending") throw new ConflictError(`Closing ${fy} is already waiting for a decision.`);
+      await this.assertClosable(tx, fy);
+      const { surplusPaise } = closingLines(await pnlBalances(tx, to), (await systemAccounts(tx, this.ctx.schoolId)).surplus);
+      let row: { id: string } | undefined;
+      try {
+        [row] = await tx.insert(finYearCloses).values({ schoolId: this.ctx.schoolId, fy, run: (last?.run ?? 0) + 1, status: "pending", surplusPaise, closedBy: this.ctx.userId }).returning({ id: finYearCloses.id });
+      } catch (e) { if (pgErrorCode(e) === "23505") throw new ConflictError(`${fy} is being closed by someone else.`); throw e; }
+      const a = await this.askApproval(tx, { kind: "finance.year-close", refType: "YearClose", refId: row!.id, title: `Close financial year ${fy}`, amountPaise: Math.abs(surplusPaise), reason: `${surplusPaise >= 0 ? "Surplus" : "Deficit"} of ${rupees(Math.abs(surplusPaise))} moves to the accumulated surplus and twelve months lock.`, href: here(fy) });
+      return { fy, approvalId: a.id };
+    }, (r) => ({ action: "request-close", entity: "Financial year", summary: `Asked to close financial year ${r.fy}`, meta: { fy: r.fy } }));
+  }
+
+  /** The decision: carry income and expense to the surplus, then lock all twelve months. Runs inside the deciding transaction. */
+  async closeIn(tx: Tx, id: string, by: Poster) {
+      const [last] = await tx.select().from(finYearCloses).where(eq(finYearCloses.id, id)).for("update");
+      if (last?.status !== "pending") throw new NotFoundError("Year close");
+      const { fy, run } = last, [, to] = fyRange(fy);
+      await this.assertClosable(tx, fy);
       const system = await systemAccounts(tx, this.ctx.schoolId);
       const { lines, surplusPaise } = closingLines(await pnlBalances(tx, to), system.surplus);
-      const run = (last?.run ?? 0) + 1, months = Array.from({ length: 12 }, (_, i) => addMonths(fyRange(fy)[0], i));
+      const months = Array.from({ length: 12 }, (_, i) => addMonths(fyRange(fy)[0], i));
       // The closing entry belongs on the last day of the year even when that month was already closed, so the month is opened for this one entry and locked again with the rest.
       await tx.insert(finPeriods).values({ schoolId: this.ctx.schoolId, month: months[11]!, status: "open", reason: null, changedBy: this.ctx.userId }).onConflictDoUpdate({ target: [finPeriods.schoolId, finPeriods.month], set: { status: "open", reason: null } });
-      const posted = await postJournal(tx, this.poster, {
+      const posted = await postJournal(tx, by, {
         date: to, sourceKey: yearKey(fy, run), sourceType: YEAR_CLOSE_TYPE, kind: "auto", memo: `Year-end closing ${fy}: income and expenditure carried to the surplus`,
         lines: lines.map((l) => ({ account: { id: l.accountId }, debit: l.debitPaise, credit: l.creditPaise })),
       });
       for (const month of months) await tx.insert(finPeriods).values({ schoolId: this.ctx.schoolId, month, status: "closed", reason: `Year ${fy} closed`, changedBy: this.ctx.userId }).onConflictDoUpdate({ target: [finPeriods.schoolId, finPeriods.month], set: { status: "closed", reason: `Year ${fy} closed`, changedBy: this.ctx.userId } });
-      try {
-        await tx.insert(finYearCloses).values({ schoolId: this.ctx.schoolId, fy, run, journalId: posted?.id ?? null, status: "closed", surplusPaise, closedBy: this.ctx.userId });
-      } catch (e) { if (pgErrorCode(e) === "23505") throw new ConflictError(`${fy} is being closed by someone else.`); throw e; }
-      return { fy, run, journalId: posted?.id ?? null, surplusPaise };
-    }, (r) => ({ action: "year-close", entity: "Financial year", entityId: r.journalId, summary: `Closed financial year ${r.fy}: ${r.surplusPaise >= 0 ? "surplus" : "deficit"} of ${rupees(Math.abs(r.surplusPaise))} carried forward`, meta: { fy: r.fy, run: r.run } }));
+      await tx.update(finYearCloses).set({ journalId: posted?.id ?? null, status: "closed", surplusPaise }).where(eq(finYearCloses.id, id));
+      await this.audit(tx, { action: "year-close", entity: "Financial year", entityId: posted?.id ?? null, summary: `Closed financial year ${fy}: ${surplusPaise >= 0 ? "surplus" : "deficit"} of ${rupees(Math.abs(surplusPaise))} carried forward`, meta: { fy, run } });
+  }
+
+  /** The app merges this with the other handlers, with the checks every money module adds. */
+  static handler(opts: YearCloseOptions = {}): ApprovalHandler {
+    return {
+      approve: (tx, a, actor) => new YearCloseService(actor, opts).closeIn(tx, a.refId, { schoolId: a.schoolId, userId: a.requestedBy }),
+      async reject(tx, a) { await tx.delete(finYearCloses).where(and(eq(finYearCloses.id, a.refId), eq(finYearCloses.status, "pending"))); },
+    };
   }
 
   /** Ask to reopen a closed year. An admin other than the one who asks decides; nothing changes until then. */
@@ -141,7 +170,7 @@ export class YearCloseService extends FinanceService {
 
   /** Every year closed so far, newest first. */
   async history() {
-    return this.read("close", (tx) => tx.select().from(finYearCloses).orderBy(desc(finYearCloses.fy), desc(finYearCloses.run)));
+    return this.read("close", (tx) => tx.select().from(finYearCloses).where(ne(finYearCloses.status, "pending")).orderBy(desc(finYearCloses.fy), desc(finYearCloses.run)));
   }
 }
 

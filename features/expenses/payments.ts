@@ -10,7 +10,7 @@ import { finApprovals, finCashAccounts, finJournals } from "@smw/feature-finance
 import { CASH_NOTE_PAISE } from "./constants";
 import { LookupService } from "./lookups";
 import { ExpenseService, cashFor, journalIdOf, journalIdSql, need, onlyId } from "./base";
-import { netOf, openOf } from "./bills";
+import { accruedBills, netOf, openOf } from "./bills";
 import { day, method, note, paiseAmount } from "./inputs";
 import { expBillLines, expBills, expPaymentBills, expPayments, expVendors } from "./schema";
 
@@ -29,21 +29,25 @@ export const payInput = z.object({
 /** Cash basis: the expense is recognised in step with what is paid, so the parts add up to the bill's gross exactly. */
 const recognised = (gross: number, net: number, paid: number) => (paid >= net ? gross : Math.round((gross * paid) / net));
 
-export async function postPayment(tx: Tx, by: Poster, p: Payment, allocs: { bill: typeof expBills.$inferSelect; amountPaise: number }[], cashLedgerId: string, basis: "accrual" | "cash") {
+/**
+ * What a bill needs depends on how it was booked, not on today's basis: a bill that has its accrual entry is paid off
+ * against vendor dues; one without it (approved under the cash basis) books the expense now, in step with what is paid.
+ */
+export async function postPayment(tx: Tx, by: Poster, p: Payment, allocs: { bill: typeof expBills.$inferSelect; amountPaise: number }[], cashLedgerId: string) {
   const party = { type: "vendor" as const, id: p.vendorId };
+  const accrued = await accruedBills(tx, allocs.map((a) => a.bill.id));
   const lines: PostLine[] = [];
-  if (basis === "accrual") lines.push({ account: "vendor_dues", debit: p.amountPaise, party });
-  else {
-    let tds = 0;
-    for (const { bill, amountPaise } of allocs) {
-      // shortcut: parts are cut on the bill's original lines, so one line can differ by a paisa from its bill on many small part payments; the totals are exact.
-      const share = recognised(bill.grossPaise, netOf(bill), bill.paidPaise + amountPaise) - recognised(bill.grossPaise, netOf(bill), bill.paidPaise);
-      const bl = await tx.select().from(expBillLines).where(eq(expBillLines.billId, bill.id)).orderBy(asc(expBillLines.sort));
-      apportion(share, bl.map((l) => l.amountPaise)).forEach((v, i) => lines.push({ account: { id: bl[i]!.accountId }, debit: v, costCentreId: bl[i]!.costCentreId, memo: bill.billNo }));
-      tds += share - amountPaise;
-    }
-    lines.push({ account: "tds_payable", credit: tds, party });
+  let dues = 0, tds = 0;
+  for (const { bill, amountPaise } of allocs) {
+    if (accrued.has(bill.id)) { dues += amountPaise; continue; }
+    // shortcut: parts are cut on the bill's original lines, so one line can differ by a paisa from its bill on many small part payments; the totals are exact.
+    const share = recognised(bill.grossPaise, netOf(bill), bill.paidPaise + amountPaise) - recognised(bill.grossPaise, netOf(bill), bill.paidPaise);
+    const bl = await tx.select().from(expBillLines).where(eq(expBillLines.billId, bill.id)).orderBy(asc(expBillLines.sort));
+    apportion(share, bl.map((l) => l.amountPaise)).forEach((v, i) => lines.push({ account: { id: bl[i]!.accountId }, debit: v, costCentreId: bl[i]!.costCentreId, memo: bill.billNo }));
+    tds += share - amountPaise;
   }
+  if (dues) lines.push({ account: "vendor_dues", debit: dues, party });
+  if (tds) lines.push({ account: "tds_payable", credit: tds, party });
   lines.push({ account: { id: cashLedgerId }, credit: p.amountPaise });
   return postJournal(tx, by, { date: p.date, sourceKey: `expenses:payment:${p.id}`, sourceType: "exp_payment", sourceId: p.id, memo: `Payment ${p.number}`, lines });
 }
@@ -107,11 +111,10 @@ export class PaymentService extends ExpenseService {
       const cash = await cashFor(tx, this.ctx.schoolId, d.method, d.cashAccountId);
       const warnings = await this.warnings(tx, { vendorId: d.vendorId, date, method: d.method, amountPaise: total, cashLedgerId: cash.accountId });
       if (d.method === "cash" && warnings.some((w) => w.startsWith("Cash above")) && !d.reference) throw new ValidationError({ reference: "Cash above ₹10,000 to one vendor in a day needs a note here." });
-      const settings = await this.settings(tx);
       const number = await this.number(tx, "voucher", date);
       const [payment] = await tx.insert(expPayments).values({ schoolId: this.ctx.schoolId, number, vendorId: d.vendorId, date, amountPaise: total, method: d.method, cashAccountId: cash.id, reference: d.reference ?? null, createdBy: this.ctx.userId }).returning();
       await tx.insert(expPaymentBills).values(allocs.map((a) => ({ schoolId: this.ctx.schoolId, paymentId: payment!.id, billId: a.bill.id, amountPaise: a.amountPaise })));
-      await postPayment(tx, this.poster, payment!, allocs, cash.accountId, settings.basis);
+      await postPayment(tx, this.poster, payment!, allocs, cash.accountId);
       for (const a of allocs) await tx.update(expBills).set({ paidPaise: a.bill.paidPaise + a.amountPaise }).where(eq(expBills.id, a.bill.id));
       const journalId = await journalIdOf(tx, `expenses:payment:${payment!.id}`);
       const [j] = journalId ? await tx.select({ date: finJournals.date }).from(finJournals).where(eq(finJournals.id, journalId)) : [];

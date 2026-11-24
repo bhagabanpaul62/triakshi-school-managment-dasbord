@@ -26,6 +26,10 @@ export interface Snapshot { studentName: string; admissionNo: string; classLabel
 export interface StudentLine { id: string; name: string; admissionNo: string; classId: string | null; sectionId: string | null; status: string; leftOn: string | null; classLabel: string }
 /** An invoice with its lines and settlement parts, ready for the arithmetic in calc.ts. */
 export interface InvoiceFull extends Invoice { lines: InvoiceLine[]; parts: { dueOn: string; amountPaise: number }[] }
+/** The note of an advance put on open bills by itself (the setting "use the advance automatically"). Only these uses are given back on a reversal. */
+const AUTO_USE_NOTE = "Advance used on open bills";
+/** Receipts whose cheque has not cleared: what they hold is not the family's to use or take out yet. */
+const WAITING_RECEIPTS = sql`select id from fee_receipts where status = 'clearing'`;
 /** Money that landed on one bill line. */
 export interface Slice { invoiceId: string; lineId: string; lineKind: string; headId: string | null; studentId: string; amountPaise: number }
 
@@ -170,14 +174,14 @@ export abstract class FeesBase extends MoneyService<Perm> {
   }
 
   /** Put money on bill lines and record where each rupee went. `receiptId` null = an advance or deposit was used. */
-  protected async applyParts(tx: Tx, parts: { lineId: string; amountPaise: number }[], o: { receiptId: string | null; date: string }): Promise<Slice[]> {
+  protected async applyParts(tx: Tx, parts: { lineId: string; amountPaise: number }[], o: { receiptId: string | null; date: string; advanceId?: string }): Promise<Slice[]> {
     if (!parts.length) return [];
     const info = await tx.select({ lineId: feeInvoiceLines.id, invoiceId: feeInvoiceLines.invoiceId, lineKind: feeInvoiceLines.kind, headId: feeInvoiceLines.headId, studentId: feeInvoices.studentId })
       .from(feeInvoiceLines).innerJoin(feeInvoices, eq(feeInvoices.id, feeInvoiceLines.invoiceId)).where(inArray(feeInvoiceLines.id, parts.map((p) => p.lineId)));
     const by = new Map(info.map((i) => [i.lineId, i]));
     const slices = parts.map((p) => ({ ...by.get(p.lineId)!, amountPaise: p.amountPaise }));
     await this.bump(tx, "paid_paise", parts);
-    await tx.insert(feeAllocations).values(slices.map((s) => ({ schoolId: this.ctx.schoolId, receiptId: o.receiptId, invoiceLineId: s.lineId, studentId: s.studentId, amountPaise: s.amountPaise, date: o.date })));
+    await tx.insert(feeAllocations).values(slices.map((s) => ({ schoolId: this.ctx.schoolId, receiptId: o.receiptId, invoiceLineId: s.lineId, studentId: s.studentId, amountPaise: s.amountPaise, date: o.date, advanceId: o.advanceId ?? null })));
     return slices;
   }
 
@@ -189,6 +193,12 @@ export abstract class FeesBase extends MoneyService<Perm> {
     await tx.update(feeAllocations).set({ undoneAt: new Date() }).where(inArray(feeAllocations.id, rows.map((r) => r.id)));
     await this.bump(tx, "paid_paise", rows.map((r) => ({ lineId: r.lineId, amountPaise: -r.amountPaise })));
     return rows.map(({ id: _id, lineId, ...s }) => ({ ...s, lineId }));
+  }
+
+  /** A file key that came from outside must be one this school's own upload made (its folder is the school and the area). */
+  protected ownFile(key: string | null | undefined, area: string, field: string): string | null {
+    if (key && !key.startsWith(`${this.ctx.schoolId}/fees/${area}/`)) throw invalid(field, "That file was not uploaded here. Upload it again.");
+    return key ?? null;
   }
 
   // ---------- approvals ----------
@@ -315,17 +325,24 @@ export abstract class FeesBase extends MoneyService<Perm> {
 
   // ---------- advances and deposits ----------
 
-  /** The advance a student holds: the sum of their list (deposit rows are a different list). */
-  protected async advanceOf(tx: Tx, studentId: string): Promise<number> {
-    const [r] = await tx.select({ v: sum(feeAdvances.amountPaise) }).from(feeAdvances).where(and(eq(feeAdvances.studentId, studentId), ne(feeAdvances.kind, "deposit")));
+  /** The advance a student can use or take back: the sum of their list (deposit rows are a different list), without what waits for a cheque to clear. `all` counts that too. */
+  protected async advanceOf(tx: Tx, studentId: string, all = false): Promise<number> {
+    const [r] = await tx.select({ v: sum(feeAdvances.amountPaise) }).from(feeAdvances)
+      .where(and(eq(feeAdvances.studentId, studentId), ne(feeAdvances.kind, "deposit"), all ? undefined : sql`(${feeAdvances.refId} is null or ${feeAdvances.refId} not in (${WAITING_RECEIPTS}))`));
     return Number(r?.v ?? 0);
   }
 
+  /** What a student's cheques that have not cleared hold, as advance and as deposit. It joins the balances when they clear. */
+  async waitingOf(tx: Tx, studentId: string): Promise<{ advancePaise: number; depositPaise: number }> {
+    const [advance, deposit, advanceAll, depositAll] = await Promise.all([this.advanceOf(tx, studentId), this.depositHeld(tx, studentId), this.advanceOf(tx, studentId, true), this.depositHeld(tx, studentId, true)]);
+    return { advancePaise: advanceAll - advance, depositPaise: depositAll - deposit };
+  }
+
   /** Deposit the school holds for a student: what was paid on deposit lines plus its own list (opening, refunds, uses). */
-  protected async depositHeld(tx: Tx, studentId: string): Promise<number> {
+  protected async depositHeld(tx: Tx, studentId: string, all = false): Promise<number> {
     const [[paid], [list]] = await Promise.all([
       tx.select({ v: sum(feeAllocations.amountPaise) }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId))
-        .where(and(eq(feeAllocations.studentId, studentId), isNull(feeAllocations.undoneAt), eq(feeInvoiceLines.kind, "deposit"))),
+        .where(and(eq(feeAllocations.studentId, studentId), isNull(feeAllocations.undoneAt), eq(feeInvoiceLines.kind, "deposit"), all ? undefined : sql`(${feeAllocations.receiptId} is null or ${feeAllocations.receiptId} not in (${WAITING_RECEIPTS}))`)),
       tx.select({ v: sum(feeAdvances.amountPaise) }).from(feeAdvances).where(and(eq(feeAdvances.studentId, studentId), eq(feeAdvances.kind, "deposit"))),
     ]);
     return Number(paid?.v ?? 0) + Number(list?.v ?? 0);
@@ -341,7 +358,7 @@ export abstract class FeesBase extends MoneyService<Perm> {
       const open = await this.loadInvoices(tx, and(eq(feeInvoices.studentId, studentId), eq(feeInvoices.status, "issued")), true);
       const plan = allocatePlan(open.filter((i) => openOf(i) > 0).map((i) => calcOf(i)), balance, { lateFirst: settings.lateFeeFirst });
       const used = plan.parts.reduce((s, p) => s + p.amountPaise, 0);
-      if (used > 0) await this.spend(tx, studentId, "advance", plan.parts, date, "Advance used on open bills");
+      if (used > 0) await this.spend(tx, studentId, "advance", plan.parts, date, AUTO_USE_NOTE);
     }
   }
 
@@ -349,11 +366,31 @@ export abstract class FeesBase extends MoneyService<Perm> {
   protected async spend(tx: Tx, studentId: string, from: "advance" | "deposit", parts: { lineId: string; amountPaise: number }[], date: string, note: string) {
     const amount = parts.reduce((s, p) => s + p.amountPaise, 0);
     const [row] = await tx.insert(feeAdvances).values({ schoolId: this.ctx.schoolId, studentId, kind: from === "advance" ? "used" : "deposit", amountPaise: -amount, note, date }).returning({ id: feeAdvances.id });
-    const slices = await this.applyParts(tx, parts, { receiptId: null, date });
+    const slices = await this.applyParts(tx, parts, { receiptId: null, date, advanceId: row!.id });
     await this.post(tx, {
       date, sourceKey: `fees:${from}-used:${row!.id}`, sourceType: "fee_student", sourceId: studentId, memo: note,
       lines: [{ account: from === "advance" ? "student_advances" : "deposits_payable", debit: amount, party: { type: "student", id: studentId } }, ...(await this.creditLines(tx, slices))],
     });
     return amount;
+  }
+
+  /**
+   * An advance that was put on bills by itself is not lost when its receipt is reversed or bounces: take those uses back,
+   * newest first, until the advance can go. The bills reopen and each posting is mirrored. Returns what is still missing
+   * (money refunded or used in a settlement, which has to be undone first).
+   */
+  protected async giveBackAdvance(tx: Tx, studentId: string, needPaise: number, date: string, memo: string): Promise<number> {
+    let short = needPaise - await this.advanceOf(tx, studentId, true);
+    if (short <= 0) return 0;
+    const uses = await tx.select().from(feeAdvances).where(and(eq(feeAdvances.studentId, studentId), eq(feeAdvances.kind, "used"), eq(feeAdvances.note, AUTO_USE_NOTE),
+      sql`not exists (select 1 from fee_advances u where u.kind = 'undo' and u.ref_id = ${feeAdvances.id})`)).orderBy(desc(feeAdvances.date), desc(feeAdvances.createdAt), desc(feeAdvances.id));
+    for (const use of uses) {
+      if (short <= 0) break;
+      if (!(await this.undoAllocations(tx, eq(feeAllocations.advanceId, use.id))).length) continue;
+      await tx.insert(feeAdvances).values({ schoolId: this.ctx.schoolId, studentId, kind: "undo", amountPaise: -use.amountPaise, refId: use.id, note: memo, date });
+      await this.reverse(tx, `fees:advance-used:${use.id}`, memo, date);
+      short += use.amountPaise;
+    }
+    return Math.max(0, short);
   }
 }

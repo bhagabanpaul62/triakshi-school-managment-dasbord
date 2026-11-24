@@ -15,7 +15,7 @@ export const DEMO_PASSWORD = "demo12345";
 export const DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 const SCHOOLS = [
-  { slug: "greenvalley", name: "Green Valley Public School", status: "active" as const, plan: "growth", board: "CBSE", state: "Karnataka", city: "Bengaluru", preset: "ocean" },
+  { slug: "greenvalley", name: "Green Valley Public School", status: "active" as const, plan: "pro", board: "CBSE", state: "Karnataka", city: "Bengaluru", preset: "ocean" },
   { slug: "sunrise", name: "Sunrise International School", status: "trial" as const, plan: "starter", board: "ICSE", state: "Maharashtra", city: "Pune", preset: "maroon" },
 ];
 
@@ -54,7 +54,8 @@ async function main() {
   for (const s of ids) {
     const ctx: Ctx = { schoolId: s.id, userId: s.adminId, role: "admin", name: "Seed", features: new Set(FEATURES.map((f) => f.key)), readOnly: false };
     const state: Record<string, unknown> = { slug: s.slug, password: DEMO_PASSWORD, passwordHash: hash };
-    for (const f of FEATURES) {
+    // The books first: what the other modules spend and collect posts into them.
+    for (const f of [...FEATURES].sort((a, b) => Number(b.key === "finance") - Number(a.key === "finance"))) {
       const seed = SEEDS[f.key];
       if (!seed) continue;
       try { await seed(ctx, state); } catch (e) { console.error(`seed ${f.key} failed for ${s.slug}:`, e); throw e; }

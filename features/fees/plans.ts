@@ -140,13 +140,13 @@ export class PlanService extends FeesBase {
         const [cur] = await tx.select().from(feePlans).where(eq(feePlans.id, id)).for("update");
         if (!cur) throw new NotFoundError("Fee plan");
         if (cur.status !== "draft") throw new ConflictError("Only a draft can be edited. Make a new version instead.");
-        await tx.update(feePlans).set({ name: data.name, admissionType: data.admissionType, joinRule: data.joinRule, lateRule: data.lateRule ?? null, note: data.note ?? null, ...(data.approvalFileKey ? { approvalFileKey: data.approvalFileKey } : {}) }).where(eq(feePlans.id, id));
+        await tx.update(feePlans).set({ name: data.name, admissionType: data.admissionType, joinRule: data.joinRule, lateRule: data.lateRule ?? null, note: data.note ?? null, ...(data.approvalFileKey ? { approvalFileKey: this.ownFile(data.approvalFileKey, "plan-approvals", "approvalFile") } : {}) }).where(eq(feePlans.id, id));
         await tx.delete(feePlanClasses).where(eq(feePlanClasses.planId, id));
         await tx.delete(feePlanLines).where(eq(feePlanLines.planId, id));
       } else {
         const rootId = data.rootId ?? randomUUID();
         const [last] = await tx.select({ v: feePlans.version }).from(feePlans).where(eq(feePlans.rootId, rootId)).orderBy(desc(feePlans.version)).limit(1);
-        const [row] = await tx.insert(feePlans).values({ schoolId: this.ctx.schoolId, yearId: year.id, rootId, version: (last?.v ?? 0) + 1, name: data.name, admissionType: data.admissionType, joinRule: data.joinRule, lateRule: data.lateRule ?? null, note: data.note ?? null, approvalFileKey: data.approvalFileKey ?? null, createdBy: this.ctx.userId }).returning({ id: feePlans.id });
+        const [row] = await tx.insert(feePlans).values({ schoolId: this.ctx.schoolId, yearId: year.id, rootId, version: (last?.v ?? 0) + 1, name: data.name, admissionType: data.admissionType, joinRule: data.joinRule, lateRule: data.lateRule ?? null, note: data.note ?? null, approvalFileKey: this.ownFile(data.approvalFileKey, "plan-approvals", "approvalFile"), createdBy: this.ctx.userId }).returning({ id: feePlans.id });
         id = row!.id;
       }
       await this.writeChildren(tx, id, data.classIds, data.lines);
@@ -365,7 +365,7 @@ export class PlanService extends FeesBase {
   /** Attach (or, with null, take off) the committee's decision on a draft plan. The key must be one this school's upload made. */
   async setApprovalFile(id: string, key: string | null) {
     this.authorize("setup", "write");
-    if (key && !key.startsWith(`${this.ctx.schoolId}/fees/plan-approvals/`)) throw invalid("approvalFile", "That file was not uploaded here. Upload it again.");
+    this.ownFile(key, "plan-approvals", "approvalFile");
     return this.write("setup", async (tx) => {
       const [p] = await tx.select().from(feePlans).where(eq(feePlans.id, asId(id, "Fee plan"))).for("update");
       if (!p) throw new NotFoundError("Fee plan");

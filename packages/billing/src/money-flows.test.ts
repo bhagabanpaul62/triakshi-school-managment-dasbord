@@ -169,6 +169,13 @@ describe("credit notes", () => {
     await expect(new CreditNoteService(owner).cancelInvoice({ invoiceId: id, reason: "no longer needed" })).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it("only an owner gives goodwill or records money paid back while issuing", async () => {
+    const id = await paidInvoice(await newSchool());
+    const svc = new CreditNoteService(support);
+    await expect(svc.issue({ invoiceId: id, amountPaise: 100, kind: "goodwill", reason: "Sorry" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc.issue({ invoiceId: id, amountPaise: 100, kind: "refund", reason: "Paid back", refundMethod: "cash" })).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
   it("only owner and support issue; sales and unknown invoices are refused", async () => {
     const s = await newSchool();
     const r = await checkout(s);

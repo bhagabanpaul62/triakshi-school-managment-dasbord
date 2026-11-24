@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { closeDb, withSchool } from "@smw/db";
+import { closeDb, withConsole, withSchool } from "@smw/db";
 import { nextNumber } from "@smw/feature-finance/posting";
 import { academicYears, classes } from "@smw/feature-academics/schema";
 import { studentEnrollments, students } from "@smw/feature-students/schema";
@@ -19,11 +19,14 @@ afterAll(closeDb);
 const TODAY = "2026-11-24";
 const count = (schoolId: string, table: string, where = "true") => withSchool(schoolId, async (tx) => Number((await tx.execute<{ n: number }>(sql.raw(`select count(*)::int n from ${table} where ${where}`)))[0]!.n));
 
+/** The school role can no longer write the old fee tables, so the old app's rows are made with the console role. */
+const asOldApp: typeof withConsole = withConsole;
+
 /** A school as the old app left it: two classes, one structure (Tuition 10,000.01 + Exam 2,500 in three instalments), and students in every awkward state. */
 async function oldSchool(slug: string) {
   const school = await createTestSchool(slug, FEATURES);
   const id = school.id;
-  const w = await withSchool(id, async (tx) => {
+  const w = await asOldApp(async (tx) => {
     const [y] = await tx.insert(academicYears).values({ schoolId: id, name: "2026-27", startsOn: "2026-04-01", endsOn: "2027-03-31", isCurrent: true }).returning();
     const [c5, c6] = await tx.insert(classes).values([{ schoolId: id, name: "Class 5", grade: 5 }, { schoolId: id, name: "Class 6", grade: 6 }]).returning();
     const [tuition, exam] = await tx.insert(feeHeads).values([{ schoolId: id, name: "Tuition", kind: "tuition" }, { schoolId: id, name: "Exam", kind: "exam" }]).returning();
@@ -44,7 +47,7 @@ async function oldSchool(slug: string) {
   let receipt = 0;
   /** Record a payment exactly the way the old service did: the old calculator spreads it. */
   const pay = async (studentId: string, paidOn: string, method: "cash" | "upi" | "cheque", amountPaise: number, o: { cancel?: string; asClass?: string } = {}) => {
-    await withSchool(id, async (tx) => {
+    await asOldApp(async (tx) => {
       const old = await tx.select().from(feePayments).where(eq(feePayments.studentId, studentId));
       const structure = await loadStructure(tx, o.asClass ?? w.c5.id);
       const mine: OldPayment[] = [];
@@ -60,13 +63,13 @@ async function oldSchool(slug: string) {
   const loadStructure = async (tx: Parameters<Parameters<typeof withSchool>[1]>[0], classId: string) => {
     const [s] = await tx.select().from(feeStructures).where(eq(feeStructures.classId, classId));
     const [items, insts, rules] = await Promise.all([tx.select().from(feeStructureItems).where(eq(feeStructureItems.structureId, s!.id)), tx.select().from(installments).where(eq(installments.structureId, s!.id)), tx.select().from(lateFeeRules).where(eq(lateFeeRules.structureId, s!.id))]);
-    const names = new Map((await tx.select().from(feeHeads)).map((h) => [h.id, h]));
+    const names = new Map((await tx.select().from(feeHeads).where(eq(feeHeads.schoolId, id))).map((h) => [h.id, h]));
     return { id: s!.id, yearId: s!.yearId, classId: s!.classId, name: s!.name, items: items.map((i) => ({ headId: i.headId, headName: names.get(i.headId)!.name, headType: "income" as const, amountPaise: i.amountPaise })), installments: insts.map((i) => ({ id: i.id, name: i.name, dueDate: i.dueDate, amountPaise: i.amountPaise })), lateRules: rules.map((r) => ({ installmentId: r.installmentId, kind: r.kind, amountPaise: r.amountPaise, graceDays: r.graceDays, maxPaise: r.maxPaise })) };
   };
   const concede = (studentId: string, c: Partial<typeof studentConcessions.$inferInsert> & Pick<typeof studentConcessions.$inferInsert, "kind" | "value">) =>
-    withSchool(id, (tx) => tx.insert(studentConcessions).values({ schoolId: id, studentId, yearId: w.y.id, reason: "test", ...c }));
+    asOldApp((tx) => tx.insert(studentConcessions).values({ schoolId: id, studentId, yearId: w.y.id, reason: "test", ...c }));
   const charge = (studentId: string, key: string, dueDate: string, status: "active" | "cancelled" = "active") =>
-    withSchool(id, (tx) => tx.insert(feeCharges).values({ schoolId: id, studentId, yearId: w.y.id, kind: "transport", label: `Transport ${dueDate.slice(0, 7)}`, dueDate, amountPaise: 123_457, status, sourceKey: key }));
+    asOldApp((tx) => tx.insert(feeCharges).values({ schoolId: id, studentId, yearId: w.y.id, kind: "transport", label: `Transport ${dueDate.slice(0, 7)}`, dueDate, amountPaise: 123_457, status, sourceKey: key }));
   return { school, w, pay, concede, charge, mover: () => FeeMover.for(id) };
 }
 
@@ -131,10 +134,16 @@ describe("moving the old fee tables", () => {
   it("a payment that does not add up to its allocations stops the move and writes nothing", async () => {
     const t = await oldSchool("mv-bad");
     await t.pay(t.w.alice.id, "2026-04-08", "cash", 100_000);
-    await withSchool(t.school.id, (tx) => tx.execute(sql`update fee_payments set amount_paise = amount_paise + 1`));
+    await asOldApp((tx) => tx.execute(sql`update fee_payments set amount_paise = amount_paise + 1 where school_id = ${t.school.id}`));
     await expect(withSchool(t.school.id, (tx) => t.mover().run(tx, { today: TODAY }))).rejects.toThrow(/allocations add up/);
     expect(await count(t.school.id, "fee_invoices")).toBe(0);
     expect(await count(t.school.id, "fee_plans")).toBe(0);
+  });
+
+  it("the school role reads the old tables but cannot write them, so nothing is recorded after the move", async () => {
+    const t = await oldSchool("mv-locked");
+    await expect(withSchool(t.school.id, (tx) => tx.execute(sql`update fee_payments set amount_paise = amount_paise + 1`))).rejects.toThrow();
+    expect(await count(t.school.id, "fee_structures")).toBe(1);
   });
 
   it("a school with nothing old to move is left alone", async () => {

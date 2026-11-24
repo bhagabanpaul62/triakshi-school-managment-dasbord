@@ -232,7 +232,7 @@ export const STATE_MAP: Record<string, { label: string; tone: StateTone }> = {
   deposited: { label: "Deposited", tone: "info" },
   cleared: { label: "Cleared", tone: "success" },
   // request: concession, waiver, refund, bill, claim
-  pending: { label: "Pending", tone: "warning" },
+  pending: { label: "Waiting", tone: "warning" },
   approved: { label: "Approved", tone: "success" },
   rejected: { label: "Rejected", tone: "danger" },
   withdrawn: { label: "Withdrawn", tone: "default" },

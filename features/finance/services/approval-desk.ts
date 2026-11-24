@@ -1,6 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { schoolRoles, users, withSchool } from "@smw/db";
-import { ConflictError, FeatureOffError, NotFoundError, ReadOnlyError, SchoolService } from "@smw/feature-kit";
+import { ConflictError, FeatureOffError, NotFoundError, ReadOnlyError, SchoolService, type Ctx } from "@smw/feature-kit";
+import type { ApprovalHandlers } from "../approvals";
 import financeFeature from "../feature";
 import { finApprovals } from "../schema";
 import type { FinancePermission } from "./common";
@@ -8,6 +9,7 @@ import type { FinancePermission } from "./common";
 /** What a requester can do with their own request. Open to anyone who asked, so it does not need the approve grant (a cashier asks too). */
 export class ApprovalDeskService extends SchoolService<FinancePermission> {
   protected readonly feature = financeFeature;
+  constructor(ctx: Ctx, private readonly handlers: ApprovalHandlers = {}) { super(ctx); }
 
   /** Take back your own request while nobody has decided it. */
   async withdraw(id: string) {
@@ -17,6 +19,8 @@ export class ApprovalDeskService extends SchoolService<FinancePermission> {
       const [a] = await tx.select().from(finApprovals).where(eq(finApprovals.id, id)).for("update");
       if (!a || a.requestedBy !== this.ctx.userId) throw new NotFoundError("Request");
       if (a.status !== "pending") throw new ConflictError("This was already decided, so it cannot be withdrawn. Open the document to see what happened.");
+      const handler = this.handlers[a.kind];
+      await (handler?.withdraw ?? handler?.reject)?.call(handler, tx, a, this.ctx);
       const [row] = await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(eq(finApprovals.id, id)).returning();
       await this.audit(tx, { action: "withdraw", entity: "Approval", entityId: id, summary: `Withdrew: ${a.title}`, meta: { kind: a.kind, refId: a.refId } });
       return row!;

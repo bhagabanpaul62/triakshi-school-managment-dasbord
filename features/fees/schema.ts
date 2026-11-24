@@ -249,6 +249,10 @@ export const feeCounters = pgTable("fee_counters", {
   /** Null = no difference. pending = waits for approval; recount = the approval ended without posting (refused extra cash, or withdrawn); posted = in Cash differences; cashier = a shortage kept as owed by the cashier. */
   differenceState: text("difference_state").$type<"pending" | "recount" | "posted" | "cashier">(),
   differenceApprovalId: uuid("difference_approval_id"),
+  /** The first count that had a difference. Kept when the counter is reopened, so a recount cannot hide it. */
+  firstExpectedPaise: paise("first_expected_paise"),
+  firstCountedPaise: paise("first_counted_paise"),
+  firstReason: text("first_reason"),
 }, (t) => [...tenant(t, "fee_counters"), uniqueIndex("fee_counters_open").on(t.schoolId, t.userId).where(sql`closed_at is null`), uniqueIndex("fee_counters_day").on(t.schoolId, t.userId, t.day)]);
 
 /** Money received. Never edited; a wrong one is reversed with approval and keeps its number. May pay siblings' bills too. */
@@ -267,6 +271,8 @@ export const feeReceipts = pgTable("fee_receipts", {
   snapshot: jsonb("snapshot").$type<{ studentName: string; admissionNo: string; classLabel: string; guardian: string | null }>().notNull(),
   templateVersion: integer("template_version"),
   verifyToken: text("verify_token").notNull(),
+  /** Made by the collect form when it opens: a repeat of the same form returns this receipt instead of taking the money twice. */
+  requestId: text("request_id"),
   collectedBy: uuid("collected_by"),
   reverseReason: text("reverse_reason"),
   reversedAt: timestamp("reversed_at", { withTimezone: true }),
@@ -274,6 +280,7 @@ export const feeReceipts = pgTable("fee_receipts", {
   ...tenant(t, "fee_receipts"),
   uniqueIndex("fee_receipts_number").on(t.schoolId, t.number),
   uniqueIndex("fee_receipts_token").on(t.verifyToken),
+  uniqueIndex("fee_receipts_request").on(t.schoolId, t.requestId),
   index("fee_receipts_student").on(t.schoolId, t.studentId),
   index("fee_receipts_date").on(t.schoolId, t.date),
   check("fee_receipts_amount", sql`amount_paise > 0 and advance_paise >= 0 and advance_paise <= amount_paise`),
@@ -298,6 +305,8 @@ export const feeAllocations = pgTable("fee_allocations", {
   amountPaise: paise("amount_paise").notNull(),
   date: date("date").notNull(),
   undoneAt: timestamp("undone_at", { withTimezone: true }),
+  /** The advance use (a fee_advances row) that paid this, when no receipt did. Lets a reversal give that use back. */
+  advanceId: uuid("advance_id"),
 }, (t) => [...tenant(t, "fee_allocations"), index("fee_allocations_receipt").on(t.receiptId), index("fee_allocations_line").on(t.invoiceLineId), index("fee_allocations_student").on(t.schoolId, t.studentId), index("fee_allocations_date").on(t.schoolId, t.date), check("fee_allocations_amount", sql`amount_paise > 0`)]);
 
 /** A student's advance as a running list; the balance is the sum. */

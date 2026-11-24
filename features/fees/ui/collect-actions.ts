@@ -68,6 +68,7 @@ export async function submitSlip(fd: FormData) {
   return runAction(async () => {
     const ctx = await actionCtx();
     const o = input(fd);
+    delete o.fileKey;
     const file = fd.get("file");
     if (file instanceof File && file.size > 0) {
       if (!FILE_TYPES.includes(file.type)) throw new ValidationError({ file: "Attach a JPG, PNG or PDF." });

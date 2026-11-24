@@ -74,7 +74,7 @@ export default async function ConsoleInvoicePage({ params }: { params: Promise<{
 
         {creditable > 0 && canIssue ? (
           <Panel title="Issue a credit note">
-            <CreditNoteForm invoiceId={inv.id} invoiceNumber={inv.number} left={left} paid={inv.status === "paid"} refundablePaise={Math.max(0, refundableOf(inv))} action={issueCreditNote} />
+            <CreditNoteForm invoiceId={inv.id} invoiceNumber={inv.number} left={left} isOwner={staff.role === "owner"} paid={inv.status === "paid"} refundablePaise={Math.max(0, refundableOf(inv))} action={issueCreditNote} />
           </Panel>
         ) : creditable > 0 ? <p className="text-sm text-[var(--ds-on-surface-muted)]">Only an owner or support can issue credit notes.</p> : null}
 

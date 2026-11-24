@@ -204,6 +204,12 @@ describe("the balance sheet after random entries", () => {
 });
 
 describe("year close", () => {
+  const CLOSE = { ...financeApprovals, "finance.year-close": YearCloseService.handler() };
+  const closeYear = async (svc: YearCloseService, fy: string) => {
+    const { approvalId } = await svc.requestClose(fy);
+    await new ApprovalService(yc.as.admin, CLOSE).approve({ id: approvalId, note: "Only admin" });
+    return (await svc.history())[0]!;
+  };
   const FY = "2025-26";
   it("is blocked by what is waiting, then carries income and expense to the surplus, locks the year and cannot run twice", async () => {
     await post(yc, "2025-06-10", [{ account: "bank", debit: R(100_000) }, { account: "fee_income", credit: R(100_000) }]);
@@ -218,20 +224,25 @@ describe("year close", () => {
     expect(before.checks.find((c) => c.key === "approvals")).toMatchObject({ ok: false, blocking: true, href: "/app/finance/approvals" });
     expect(before).toMatchObject({ incomeTotalPaise: R(100_000), expenseTotalPaise: R(40_000), surplusPaise: R(60_000) });
     expect(before.lines.reduce((x, l) => x + l.debitPaise - l.creditPaise, 0)).toBe(0);
-    await expect(svc.run(FY)).rejects.toThrow(/waiting for a decision/);
+    await expect(svc.requestClose(FY)).rejects.toThrow(/waiting for a decision/);
     await new ApprovalService(yc.as.admin, financeApprovals).approve({ id: approvalId });
 
     expect((await svc.preview(FY)).ready).toBe(true);
     expect((await svc.preview("2026-27")).checks.find((c) => c.key === "ended")).toMatchObject({ ok: false });
-    await expect(svc.run("2026-27")).rejects.toThrow(/cannot close before then/);
-    await expect(new YearCloseService(yc.as.accountant).run(FY)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc.requestClose("2026-27")).rejects.toThrow(/cannot close before then/);
+    await expect(new YearCloseService(yc.as.accountant).requestClose(FY)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new YearCloseService(yc.as.accountant).preview(FY)).rejects.toBeInstanceOf(ForbiddenError);
 
-    const done = await svc.run(FY);
-    expect(done).toMatchObject({ fy: FY, run: 1, surplusPaise: R(60_000) });
+    // A refused request leaves nothing behind; an approved one closes once.
+    const no = await svc.requestClose(FY);
+    await expect(svc.requestClose(FY)).rejects.toThrow(/waiting for a decision/);
+    await new ApprovalService(yc.as.admin, CLOSE).reject({ id: no.approvalId });
+    expect((await svc.preview(FY)).closePending).toBe(false);
+    const done = await closeYear(svc, FY);
+    expect(done).toMatchObject({ fy: FY, run: 1, status: "closed", surplusPaise: R(60_000) });
     const [j] = await withSchool(yc.id, (tx) => tx.select().from(finJournals).where(eq(finJournals.id, done.journalId!)));
     expect(j).toMatchObject({ date: "2026-03-31", kind: "auto", sourceKey: `finance:year:${FY}`, sourceType: "year-close" });
-    await expect(svc.run(FY)).rejects.toThrow(/already closed/);
+    await expect(svc.requestClose(FY)).rejects.toThrow(/already closed/);
 
     const balances = Object.fromEntries((await new AccountService(yc.as.admin).withBalances()).map((x) => [x.name, x.balancePaise]));
     expect(balances).toMatchObject({ "Fee income": 0, Salaries: 0, "General expenses": 500, "Accumulated surplus": -R(60_000), Bank: R(60_000) });
@@ -279,7 +290,7 @@ describe("year close", () => {
     expect((await svc.history())[0]).toMatchObject({ fy: FY2, run: 1, status: "reopened", reopenReason: "Auditor found a missing bill" });
     await expect(svc.requestReopen(FY2, { reason: "Still open" })).rejects.toBeInstanceOf(ConflictError);
 
-    const again = await svc.run(FY2);
+    const again = await closeYear(svc, FY2);
     expect(again.run).toBe(2);
     const [j] = await withSchool(yc.id, (tx) => tx.select().from(finJournals).where(eq(finJournals.id, again.journalId!)));
     expect(j!.sourceKey).toBe(`finance:year:${FY2}:2`);

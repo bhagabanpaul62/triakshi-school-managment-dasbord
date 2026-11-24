@@ -74,7 +74,11 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Searc
                 summary={<p className="text-sm text-[var(--ds-on-surface-variant)]">The school then owes {r.userName} this amount. Above the bill limit it goes to an approver first.</p>} />
               <ConfirmMoney label="Turn down" action={rejectClaim} values={{ id: r.id }} amountPaise={r.amountPaise} danger confirmLabel="Turn down" reason={{ label: "Why? They will see this." }} final={false} consequence="They can edit the claim and send it again." />
             </> : null}
-            {manage && r.status === "submitted" && r.userId === ctx.userId ? <span className="px-2 text-xs text-[var(--ds-on-surface-muted)]">Someone else must decide</span> : null}
+            {manage && r.status === "submitted" && r.userId === ctx.userId ? (ctx.role === "admin"
+              ? <FormModal title={`Approve your own claim: ${r.title}`} icon="money" fields={[{ name: "accountId", label: "Expense account", type: "select", required: true, options: accountOptions }, { name: "note", label: "Why do you approve your own claim?", type: "textarea", required: true }]}
+                  values={{ accountId: r.accountId }} hidden={{ id: r.id }} action={approveClaim} submitLabel="Approve" trigger={{ label: "Approve", variant: "ghost", plus: false }}
+                  summary={<p className="text-sm text-[var(--ds-on-surface-variant)]">Only works when you are the only admin. Otherwise another admin must decide.</p>} />
+              : <span className="px-2 text-xs text-[var(--ds-on-surface-muted)]">Someone else must decide</span>) : null}
             {manage && r.status === "approved" ? <FormModal title={`Pay ${r.userName}`} icon="money" fields={[{ name: "method", label: "How", type: "select", required: true, options: [{ value: "cash", label: "Cash" }, { value: "upi", label: "UPI" }, { value: "bank_transfer", label: "Bank transfer" }] },
               { name: "cashAccountId", label: "From", type: "select", options: cash.map((c) => ({ value: c.id, label: c.name })), hint: "Blank uses the default cash box or bank." }]} values={{ method: "cash" }} hidden={{ id: r.id }} action={payClaim} submitLabel="Pay now" trigger={{ label: r.payWith === "salary" ? "Pay now instead" : "Pay now", variant: "secondary", plus: false }} /> : null}
           </span>

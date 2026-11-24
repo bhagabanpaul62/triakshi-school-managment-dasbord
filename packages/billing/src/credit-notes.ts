@@ -88,6 +88,7 @@ export class CreditNoteService extends PlatformService {
   async issue(input: unknown, now = new Date()) {
     this.require("owner", "support");
     const data = this.parse(creditNoteInput, input);
+    if (data.kind === "goodwill" || data.refundMethod) this.require("owner"); // gives money away, or says it was paid out
     const r = await this.tx(async (tx) => {
       const out = await CreditNoteIssuer.issue(tx, this.ctx.staffId, data, now);
       await this.audit(tx, "billing.credit_note_issued", `Credit note ${out.note.number} for invoice ${out.invoice.number} (${rupees(out.note.totalPaise)})`, out.note.schoolId, { creditNoteId: out.note.id, settlement: out.note.settlement });

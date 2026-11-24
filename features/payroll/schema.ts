@@ -18,6 +18,8 @@ export const payProfiles = pgTable("pay_profiles", {
   bankSealed: text("bank_sealed"), bankLast4: text("bank_last4"),
   bankName: text("bank_name"),
   ifsc: text("ifsc"),
+  /** When the account or IFSC last changed; a run flags changes of the last 30 days. */
+  bankChangedAt: timestamp("bank_changed_at", { withTimezone: true }),
   payBy: text("pay_by").$type<"bank" | "cash" | "cheque">().notNull().default("bank"),
   regime: text("regime").$type<"new" | "old">().notNull().default("new"),
   /** State for professional tax and labour welfare fund; null = the school's. */
@@ -162,7 +164,7 @@ export const payExits = pgTable("pay_exits", {
   lastDay: date("last_day").notNull(),
   reason: text("reason").notNull(),
   /** Leave encashment, notice, gratuity, recoveries: label, amount, kind, how it was worked out. */
-  lines: jsonb("lines").$type<{ kind: "earning" | "deduction" | "employer"; code: string; label: string; amountPaise: number; note?: string }[]>().notNull().default([]),
+  lines: jsonb("lines").$type<{ kind: "earning" | "deduction" | "employer"; code: string; label: string; amountPaise: number; note?: string; /** The claim or loan this line settles. */ refId?: string }[]>().notNull().default([]),
   status: text("status").$type<(typeof EXIT_STATUSES)[number]>().notNull().default("draft"),
   runId: uuid("run_id").references(() => payRuns.id, { onDelete: "restrict" }),
   createdBy: uuid("created_by"),
@@ -178,6 +180,11 @@ export const payDeclarations = pgTable("pay_declarations", {
   previousSalaryPaise: paise("previous_salary_paise").notNull().default(0),
   previousTdsPaise: paise("previous_tds_paise").notNull().default(0),
   note: text("note"),
+  /** What the person declared counts for tax only once the office has accepted it; any change clears this. */
+  acceptedBy: uuid("accepted_by"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  /** Why the office sent it back. */
+  returnedNote: text("returned_note"),
 }, (t) => [...tenant(t, "pay_declarations"), uniqueIndex("pay_declarations_unique").on(t.userId, t.fy)]);
 
 /** The school's own value for a statutory rate, over the built-in one. */

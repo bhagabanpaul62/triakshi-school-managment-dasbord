@@ -64,11 +64,15 @@ export default async function YearClosePage({ searchParams, options, run, reopen
               </div>
             </Panel>
           ) : (
-            <Panel title="Close the year">
-              <p className="pb-4 text-sm text-[var(--ds-on-surface-variant)]">{blocked ? `${blocked} thing${blocked === 1 ? "" : "s"} above must be fixed first.` : "Everything is in order. Closing posts one entry and locks the months. It can be undone only by a second admin, with a reason."}</p>
+            p.closePending ? (
+              <Panel title="Waiting for a decision">
+                <p className="text-sm text-[var(--ds-on-surface-variant)]">Closing {fy} was asked for. Nothing is posted or locked until it is approved. <Link href="/app/finance/approvals" className={LINK}>Open approvals</Link></p>
+              </Panel>
+            ) : <Panel title="Close the year">
+              <p className="pb-4 text-sm text-[var(--ds-on-surface-variant)]">{blocked ? `${blocked} thing${blocked === 1 ? "" : "s"} above must be fixed first.` : "Everything is in order. Another admin approves the close; if you are the only admin, you approve it yourself with a reason."}</p>
               {blocked ? <p className={MUTED}>The button appears when every item above is done.</p> : (
-                <ActionButton label={`Close ${fy}`} variant="default" action={run} values={{ fy }} successMessage={`${fy} closed`}
-                  confirm={{ title: `Close ${fy}?`, body: `A ${p.surplusPaise >= 0 ? "surplus" : "deficit"} of ₹${(Math.abs(p.surplusPaise) / 100).toLocaleString("en-IN")} moves to the accumulated surplus and all twelve months lock. A late entry will land in the next open month.`, confirmLabel: "Close the year", danger: true }} />
+                <ActionButton label={`Ask to close ${fy}`} variant="default" action={run} values={{ fy }} successMessage="Sent for approval"
+                  confirm={{ title: `Ask to close ${fy}?`, body: `Once approved, a ${p.surplusPaise >= 0 ? "surplus" : "deficit"} of ₹${(Math.abs(p.surplusPaise) / 100).toLocaleString("en-IN")} moves to the accumulated surplus and all twelve months lock. A late entry will land in the next open month.`, confirmLabel: "Send for approval" }} />
               )}
             </Panel>
           )}

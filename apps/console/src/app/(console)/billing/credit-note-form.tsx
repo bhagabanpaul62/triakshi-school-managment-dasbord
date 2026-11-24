@@ -18,13 +18,15 @@ export interface CreditNoteFormProps {
   paid: boolean;
   /** Cash that can still go back, for a paid invoice. */
   refundablePaise: number;
+  /** Goodwill and recording a refund give money away, so only an owner may. */
+  isOwner: boolean;
   action: (fd: FormData) => Promise<FormResult>;
 }
 
 const METHODS = [["bank_transfer", "Bank transfer"], ["cheque", "Cheque"], ["upi", "UPI"], ["cash", "Cash"]] as const;
 
 /** Credit note with the GST split and what will happen to the money shown before it is issued. */
-export function CreditNoteForm({ invoiceId, invoiceNumber, left, paid, refundablePaise, action }: CreditNoteFormProps) {
+export function CreditNoteForm({ invoiceId, invoiceNumber, left, paid, refundablePaise, isOwner, action }: CreditNoteFormProps) {
   const [amount, setAmount] = useState<number | null>(null);
   const [kind, setKind] = useState<"correction" | "refund" | "goodwill">("correction");
   const [settle, setSettle] = useState<"refund" | "credit">(refundablePaise > 0 ? "refund" : "credit");
@@ -38,7 +40,7 @@ export function CreditNoteForm({ invoiceId, invoiceNumber, left, paid, refundabl
   const split = valid ? splitCredit(left, amount) : null;
   const outcome = {
     adjusted: "The invoice is lowered, so the school owes less. If this is all of it, the invoice is cancelled.",
-    refund: "You pay this money back to the school, then record the refund here.",
+    refund: isOwner ? "You pay this money back to the school, then record the refund here." : "An owner pays this money back and records the refund.",
     credit: "The money stays with us as credit. The school's next invoice uses it.",
   }[goes];
 
@@ -61,7 +63,7 @@ export function CreditNoteForm({ invoiceId, invoiceNumber, left, paid, refundabl
           <select id="cn-kind" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className={INPUT}>
             <option value="correction">A mistake on the invoice</option>
             <option value="refund">Money back to the school</option>
-            <option value="goodwill">Goodwill</option>
+            {isOwner ? <option value="goodwill">Goodwill</option> : null}
           </select>
         </div>
       </div>
@@ -81,7 +83,7 @@ export function CreditNoteForm({ invoiceId, invoiceNumber, left, paid, refundabl
         {errors.reason ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{errors.reason}</p> : null}
       </div>
 
-      {goes === "refund" && paid ? (
+      {goes === "refund" && paid && isOwner ? (
         <details className="rounded-2xl bg-white/[0.035] p-4">
           <summary className="cursor-pointer text-sm">Already paid it back? Add the details now</summary>
           <div className="mt-3 grid gap-4 sm:grid-cols-3">

@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { and, asc, eq, inArray, lte } from "drizzle-orm";
-import { NotFoundError } from "@smw/feature-kit";
+import { and, asc, eq, inArray, like, lte } from "drizzle-orm";
+import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { addDays, addMonths, monthEnd, percentOf, todayIST } from "@smw/feature-kit/money";
 import { invoices, type Tx } from "@smw/db";
+import { dueOf } from "@smw/billing/amounts";
 import { systemAccounts } from "@smw/feature-finance/chart";
 import { finAccounts } from "@smw/feature-finance/schema";
 import { FREQUENCIES } from "./constants";
@@ -48,24 +49,54 @@ export async function draftRecurringBills(tx: Tx, schoolId: string, today = toda
   return made;
 }
 
-/** The school's own Triakshi invoices become draft bills, once each. Nothing posts until someone approves the bill. */
-export async function draftTriakshiBills(tx: Tx, schoolId: string) {
-  const list = await tx.select().from(invoices).where(inArray(invoices.status, ["issued", "paid"]));
-  if (!list.length) return 0;
-  let [vendor] = await tx.select().from(expVendors).where(eq(expVendors.name, "Triakshi"));
-  vendor ??= (await tx.insert(expVendors).values({ schoolId, name: "Triakshi", contactName: "Triakshi billing" }).onConflictDoNothing().returning())[0] ?? (await tx.select().from(expVendors).where(eq(expVendors.name, "Triakshi")))[0]!;
-  const [sub] = await tx.select({ id: finAccounts.id }).from(finAccounts).where(eq(finAccounts.code, "5150"));
-  const accountId = sub?.id ?? (await systemAccounts(tx, schoolId)).general_expense;
-  let made = 0;
-  for (const inv of list) {
-    if (!inv.totalPaise) continue;
-    const date = (inv.createdAt ?? new Date()).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    const [b] = await tx.insert(expBills).values({ schoolId, vendorId: vendor.id, billNo: inv.number, billDate: date, dueDate: inv.dueAt ? inv.dueAt.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : addDays(date, 14), grossPaise: inv.totalPaise, sourceKey: `triakshi:${inv.id}`, note: inv.description }).onConflictDoNothing().returning();
-    if (!b) continue;
-    await tx.insert(expBillLines).values({ schoolId, billId: b.id, accountId, label: inv.description, amountPaise: inv.totalPaise });
-    made++;
+const TRIAKSHI_KEY = "triakshi:";
+
+/** Our own vendor is found by the bills it made, never by name: a vendor a person named "Triakshi" is theirs. */
+async function triakshiVendor(tx: Tx, schoolId: string): Promise<string> {
+  const [made] = await tx.select({ vendorId: expBills.vendorId }).from(expBills).where(like(expBills.sourceKey, `${TRIAKSHI_KEY}%`)).limit(1);
+  if (made) return made.vendorId;
+  for (const name of ["Triakshi", "Triakshi (platform)"]) {
+    const [v] = await tx.insert(expVendors).values({ schoolId, name, contactName: "Triakshi billing" }).onConflictDoNothing().returning({ id: expVendors.id });
+    if (v) return v.id;
   }
-  return made;
+  throw new ConflictError("Two vendors already use the names Triakshi and Triakshi (platform). Rename one so our subscription bills can be made.");
+}
+
+/**
+ * Our Triakshi invoices become draft bills for what is still due, once each. A draft follows its invoice: a changed amount
+ * updates it, a paid, voided or fully credited invoice cancels it. A bill already sent for approval is left to its approver.
+ * Nothing posts until someone approves the bill. Answers how many drafts were made, changed or cancelled.
+ */
+export async function draftTriakshiBills(tx: Tx, schoolId: string) {
+  const list = await tx.select().from(invoices).where(inArray(invoices.status, ["issued", "paid", "void"]));
+  if (!list.length) return 0;
+  const bills = new Map((await tx.select().from(expBills).where(like(expBills.sourceKey, `${TRIAKSHI_KEY}%`))).map((b) => [b.sourceKey, b]));
+  let changed = 0, vendorId: string | undefined, accountId: string | undefined;
+  for (const inv of list) {
+    const due = dueOf(inv), bill = bills.get(`${TRIAKSHI_KEY}${inv.id}`);
+    if (bill) {
+      if (bill.status !== "draft") continue;
+      if (due <= 0) await tx.update(expBills).set({ status: "cancelled", note: `${bill.note ?? ""}\nCancelled: the invoice is ${inv.status === "issued" ? "fully credited" : inv.status}.`.trim() }).where(eq(expBills.id, bill.id));
+      else if (bill.grossPaise !== due) {
+        await tx.update(expBills).set({ grossPaise: due }).where(eq(expBills.id, bill.id));
+        await tx.update(expBillLines).set({ amountPaise: due }).where(eq(expBillLines.billId, bill.id));
+      } else continue;
+      changed++;
+      continue;
+    }
+    if (due <= 0) continue;
+    vendorId ??= await triakshiVendor(tx, schoolId);
+    if (!accountId) {
+      const [sub] = await tx.select({ id: finAccounts.id }).from(finAccounts).where(eq(finAccounts.code, "5150"));
+      accountId = sub?.id ?? (await systemAccounts(tx, schoolId)).general_expense;
+    }
+    const date = (inv.createdAt ?? new Date()).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const [b] = await tx.insert(expBills).values({ schoolId, vendorId, billNo: inv.number, billDate: date, dueDate: inv.dueAt ? inv.dueAt.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : addDays(date, 14), grossPaise: due, sourceKey: `${TRIAKSHI_KEY}${inv.id}`, note: inv.description }).onConflictDoNothing().returning();
+    if (!b) continue;
+    await tx.insert(expBillLines).values({ schoolId, billId: b.id, accountId, label: inv.description, amountPaise: due });
+    changed++;
+  }
+  return changed;
 }
 
 /** Everything the nightly job does for one school. */

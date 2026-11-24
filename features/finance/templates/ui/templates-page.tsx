@@ -30,7 +30,7 @@ export default async function TemplatesPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <PageHeader eyebrow="Finance setup" title="Document layouts" description="How receipts, invoices, statements, certificates, payslips and vouchers look when printed. Every save is a new version, so old documents reprint as they were issued."
-        actions={next ? <Link href={next} className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm hover:bg-white/[0.12]">Back to where you were</Link> : !context.canEdit ? null : <Link href="/app/finance/settings" className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm hover:bg-white/[0.12]">Finance setup</Link>} />
+        actions={next ? <Link href={next} className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm hover:bg-white/[0.12]">Back to where you were</Link> : !context.canEdit ? null : <Link href="/app/finance/settings" className="inline-flex h-10 shrink-0 whitespace-nowrap items-center rounded-full bg-white/[0.08] px-4 text-sm hover:bg-white/[0.12]">Finance setup</Link>} />
       <TemplateEditor key={`${kind}:${view.version}`} kind={kind} version={view.version} initial={view.config} canEdit={context.canEdit} editors={editors}
         schoolLogoUrl={context.schoolLogoUrl} next={next} qrSvg={qrSvg("https://school.example/verify/receipt/sample-token-0000")}
         versions={versions.map((v) => ({ version: v.version, when: when(v.createdAt), by: v.createdBy, isCurrent: v.isCurrent }))} />

@@ -2,7 +2,7 @@
 
 import { ValidationError } from "@smw/feature-kit";
 import { formToObject, serviceAction } from "@smw/runtime";
-import { AccountService, ApprovalDeskService, BankService, CashAccountService, CostCentreService, JournalService, PeriodService, SeriesService, SettingsService } from "../service";
+import { AccountService, BankService, CashAccountService, CostCentreService, JournalService, PeriodService, SeriesService, SettingsService } from "../service";
 
 const id = (fd: FormData) => String(fd.get("id"));
 const on = (fd: FormData) => fd.get("active") === "1";
@@ -37,7 +37,6 @@ export async function updateCostCentre(fd: FormData) { return serviceAction(Cost
 export async function deleteCostCentre(fd: FormData) { return serviceAction(CostCentreService, (s) => s.remove(id(fd)), "Cost centre deleted"); }
 export async function setCostCentreActive(fd: FormData) { return serviceAction(CostCentreService, (s) => s.setActive(id(fd), on(fd)), on(fd) ? "Cost centre switched on" : "Cost centre switched off"); }
 
-export async function withdrawRequest(fd: FormData) { return serviceAction(ApprovalDeskService, (s) => s.withdraw(id(fd)).then((r) => ({ id: r.id })), "Request withdrawn"); }
 
 /** The uploaded sheet as the service reads it. */
 async function sheet(fd: FormData) {

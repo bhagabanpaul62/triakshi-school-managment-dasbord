@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, sum } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, type ListQuery } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
@@ -7,7 +7,7 @@ import { finJournals, finPrints } from "@smw/feature-finance/schema";
 import { applyHidden } from "@smw/feature-finance/templates/config";
 import { users } from "@smw/db";
 import { receiptData } from "./documents";
-import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
+import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull, type Slice } from "./base";
 import { allocatePlan, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL } from "./constants";
 import { collectInput, reversalInput } from "./inputs";
@@ -28,6 +28,8 @@ export class ReceiptService extends FeesBase {
 
   /** collect() inside the caller's transaction (UPI slips). No permission check: the caller did it. */
   async collectIn(tx: Tx, data: Collect) {
+    const again = await this.repeatOf(tx, data);
+    if (again) return again;
     const date = await this.moneyDate(tx, data.date);
     const settings = await this.settings(tx);
     const total = data.methods.reduce((s, m) => s + m.amountPaise, 0);
@@ -45,6 +47,9 @@ export class ReceiptService extends FeesBase {
     if (owners.length !== wanted.length) throw new NotFoundError("Invoice");
     if (owners.some((o) => !family.has(o.s))) throw new ConflictError("A bill in this list belongs to a student who is not in this family. Collect it from that student's page.");
     await this.lockStudents(tx, [payer.id, ...owners.map((o) => o.s)]);
+    // Two clicks at once wait for each other on the student lock, so the second sees the first receipt here.
+    const second = await this.repeatOf(tx, data);
+    if (second) return second;
 
     const counter = await this.counterFor(tx, date, data.methods.some((m) => m.method === "cash"));
     let invoices = wanted.length ? await this.invoicesById(tx, wanted, true) : [];
@@ -57,14 +62,17 @@ export class ReceiptService extends FeesBase {
     const allocated = total - plan.leftover;
     if (advanceAsked) {
       const have = await this.advanceOf(tx, payer.id);
-      if (advanceAsked > have) throw new ConflictError(`The advance is only ${rupees(have)}. Use less, or take the rest in cash or UPI.`);
+      if (advanceAsked > have) {
+        const { advancePaise: waiting } = await this.waitingOf(tx, payer.id);
+        throw new ConflictError(`The advance is only ${rupees(have)}.${waiting ? ` ${rupees(waiting)} more waits for a cheque to clear.` : ""} Use less, or take the rest in cash or UPI.`);
+      }
       if (plan.leftover > total - advanceAsked) throw new ConflictError("The advance is more than what is due. Use less of it; an advance is not turned back into an advance.");
     }
 
     const [receipt] = await tx.insert(feeReceipts).values({
       schoolId: this.ctx.schoolId, number: await this.number(tx, "receipt", date), studentId: payer.id, date, amountPaise: total, advancePaise: plan.leftover,
       status: hasCheque ? "clearing" : "valid", counterId: counter?.id ?? null, payerName: data.payerName ?? null, note: data.note ?? null,
-      snapshot: await this.snapshot(tx, payer), templateVersion: await this.templateVersionIn(tx, "receipt"), verifyToken: newToken(), collectedBy: this.ctx.userId,
+      snapshot: await this.snapshot(tx, payer), templateVersion: await this.templateVersionIn(tx, "receipt"), verifyToken: newToken(), collectedBy: this.ctx.userId, requestId: data.requestId ?? null,
     }).returning();
     const id = receipt!.id;
 
@@ -88,6 +96,15 @@ export class ReceiptService extends FeesBase {
     const warnings = await this.cashWarning(tx, payer.id, date, settings.cashLimitPaise);
     await this.tell(tx, [...new Set([payer.id, ...slices.map((s) => s.studentId)])], "Payment received", `Receipt ${receipt!.number} for ${rupees(total)}.`, `/app/fees/receipts/${id}`);
     return { ...receipt!, allocatedPaise: allocated, allocations: slices, warnings };
+  }
+
+  /** The receipt this form already made, if it was sent before (a double click, a retry after a slow network). */
+  private async repeatOf(tx: Tx, data: Collect) {
+    if (!data.requestId) return null;
+    const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.requestId, data.requestId));
+    if (!r) return null;
+    if (r.studentId !== data.studentId) throw new ConflictError("This form was already used for another student. Open the collect screen again.");
+    return { ...r, allocatedPaise: r.amountPaise - r.advancePaise, allocations: [] as Slice[], warnings: [] as string[] };
   }
 
   /** The open counter of this person (cash needs one once the school uses counters); a closed day takes no more. */
@@ -153,12 +170,11 @@ export class ReceiptService extends FeesBase {
     await this.lockStudents(tx, [pre.studentId, ...hit.map((h) => h.s)]);
     const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, receiptId)).for("update");
     if (!LIVE.includes(r!.status as never)) throw new ConflictError(`This receipt is already ${r!.status}.`);
-    if (r!.advancePaise > 0 && (await this.advanceOf(tx, r!.studentId)) < r!.advancePaise) {
-      throw new ConflictError(`The ${rupees(r!.advancePaise)} advance from this receipt has already been used on other bills. Reverse or refund what used it first, then reverse this receipt.`);
-    }
     const [cheque] = await tx.select().from(feeCheques).where(eq(feeCheques.receiptId, receiptId));
     if (cheque?.status === "cleared") await this.reverse(tx, `fees:cheque-clear:${cheque.id}`, `Receipt ${r!.number} reversed`, date);
     await this.takeBack(tx, r!, date, `Receipt ${r!.number} reversed: ${reason}`);
+    // A cheque of a reversed receipt can never be deposited or cleared.
+    if (cheque) await tx.update(feeCheques).set({ status: "cancelled" }).where(eq(feeCheques.id, cheque.id));
     await tx.update(feeReceipts).set({ status: "reversed", reverseReason: reason, reversedAt: new Date() }).where(eq(feeReceipts.id, receiptId));
     await this.tell(tx, [r!.studentId], "Receipt reversed", `Receipt ${r!.number} was reversed: ${reason}`, `/app/fees/receipts/${r!.id}`);
     await this.audit(tx, { action: "reverse", entity: "Receipt", entityId: r!.id, summary: `Reversed receipt ${r!.number}: ${reason}` });
@@ -166,10 +182,25 @@ export class ReceiptService extends FeesBase {
 
   /** Undo what a receipt did (shared by a reversal and a bounced cheque): bills reopen, advances go back, the posting is mirrored. */
   async takeBack(tx: Tx, r: Receipt, date: string, memo: string) {
+    await this.assertDepositHere(tx, r);
+    if (r.advancePaise > 0 && (await this.giveBackAdvance(tx, r.studentId, r.advancePaise, date, memo)) > 0) {
+      throw new ConflictError(`The ${rupees(r.advancePaise)} advance from this receipt was refunded or used in a settlement. Cancel that refund or settlement first (on the student's page), then reverse this receipt.`);
+    }
     await this.undoAllocations(tx, eq(feeAllocations.receiptId, r.id));
     const rows = await tx.select().from(feeAdvances).where(and(eq(feeAdvances.refId, r.id), inArray(feeAdvances.kind, ["receipt", "used"])));
     if (rows.length) await tx.insert(feeAdvances).values(rows.map((a) => ({ schoolId: this.ctx.schoolId, studentId: a.studentId, kind: "undo" as const, amountPaise: -a.amountPaise, refId: r.id, note: memo, date })));
     await this.reverse(tx, `fees:receipt:${r.id}`, memo, date);
+    // Advance given back from a bigger use goes on the oldest open bills again.
+    await this.autoUseAdvance(tx, [r.studentId], date);
+  }
+
+  /** The deposit this receipt paid must still be held: one that was refunded or used cannot be taken back. */
+  private async assertDepositHere(tx: Tx, r: Receipt) {
+    const paid = await tx.select({ s: feeAllocations.studentId, v: sum(feeAllocations.amountPaise) }).from(feeAllocations).innerJoin(feeInvoiceLines, eq(feeInvoiceLines.id, feeAllocations.invoiceLineId))
+      .where(and(eq(feeAllocations.receiptId, r.id), isNull(feeAllocations.undoneAt), eq(feeInvoiceLines.kind, "deposit"))).groupBy(feeAllocations.studentId);
+    for (const p of paid) {
+      if ((await this.depositHeld(tx, p.s, true)) < Number(p.v)) throw new ConflictError(`The ${rupees(Number(p.v))} deposit from this receipt was already refunded or used on bills. Cancel that refund first (on the student's page), then reverse this receipt.`);
+    }
   }
 
   // ---------- reading ----------

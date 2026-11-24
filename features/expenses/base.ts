@@ -1,6 +1,6 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { MoneyService } from "@smw/feature-finance/base";
 import { cashAccount } from "@smw/feature-finance/posting";
 import { finAccounts, finCostCentres, finJournals } from "@smw/feature-finance/schema";
@@ -65,3 +65,15 @@ export function need<T>(row: T | undefined, what: string): T {
   return row;
 }
 export const conflict = (m: string) => new ConflictError(m);
+
+/**
+ * Maker is not approver. When the caller is one of the makers, only the sole active admin may go on, and must write why.
+ * Answers true when that exception was used, so the audit can say so (same rule as the approvals desk in finance).
+ */
+export async function makerMayDecide(tx: Tx, ctx: Ctx, makers: (string | null)[], note?: string): Promise<boolean> {
+  if (!makers.includes(ctx.userId)) return false;
+  const others = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"), ne(users.id, ctx.userId))).limit(1);
+  if (others.length || ctx.role !== "admin") throw new ForbiddenError("You made this or it pays you, so someone else must approve it.");
+  if (!note) throw new ConflictError("You are the only admin, so write why you approve your own request.");
+  return true;
+}

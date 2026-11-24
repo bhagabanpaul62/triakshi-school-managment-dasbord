@@ -42,6 +42,8 @@ export interface PayRates {
   config: { pf: boolean; esi: boolean; pt: boolean; lwf: boolean; tds: boolean };
   /** How each contribution is rounded: to the paisa, to the nearest rupee, or up to the next rupee. */
   rounding: Record<RoundKey, RoundMode>;
+  /** Rates that have no row for this month. A contribution that rests on one is asked for, never worked out as zero. */
+  missing?: string[];
 }
 export type RoundMode = "paise" | "nearest" | "up";
 export type RoundKey = "esi_employee" | "esi_employer" | "pf_employee" | "pf_employer" | "eps";
@@ -67,6 +69,12 @@ export interface PayInput {
   segments?: Segment[];
   /** Amounts a person typed for a statutory code: they win over the worked-out amount. */
   typed?: Record<string, number>;
+  /** A payment outside the month's salary: it withholds only the tax its own amount adds to the year. */
+  offCycle?: boolean;
+  /** Pay already worked out for the rest of the year (a month's taxable pay and how many months), for the tax of an off-cycle payment. */
+  taxBase?: { monthlyPaise: number; months: number };
+  /** The person's last month: the year's remaining tax is withheld now. */
+  finalMonth?: boolean;
 }
 export type FlagCode = "needs_input" | "no_pan" | "gross_mismatch" | "no_basic" | "net_negative";
 export interface Flag { code: FlagCode; line?: string; message: string }
@@ -81,6 +89,8 @@ export interface PayResult {
   netPaise: number;
   shortfallPaise: number;
   taxableGrossPaise: number;
+  /** The part of taxable pay that is typed once (a bonus, arrears) and is not repeated in later months. */
+  oneOffTaxablePaise: number;
   pfWagesPaise: number;
   /** Wages each contribution was worked on, stored with the pay so the returns never have to work them back. */
   epfWagesPaise: number; epsWagesPaise: number; edliWagesPaise: number; esiWagesPaise: number;
@@ -118,17 +128,26 @@ export function pfCeiling(segments: PayRates["pfCeilingSegments"]): number {
   return Math.round(segments.reduce((a, s) => a + s.days * s.paise, 0) / Math.max(1, days));
 }
 
-/** The year's income, tax and what to deduct this month, from this month's taxable pay and what came before. */
-export function taxProjection(p: Pick<PayInput, "month" | "ytd" | "declaration" | "profile">, taxableThisMonth: number, tax: TaxRates) {
-  const left = 13 - fyMonthIndex(p.month);
-  const d = p.declaration;
-  const income = (p.ytd?.taxableGrossPaise ?? 0) + taxableThisMonth * left + (d?.previousSalaryPaise ?? 0) + (d?.otherIncomePaise ?? 0);
-  const taxable = Math.max(0, income - tax.std - (p.profile.regime === "old" ? d?.deductionsPaise ?? 0 : 0));
+const regimeDeduction = (p: Pick<PayInput, "declaration" | "profile">) => (p.profile.regime === "old" ? p.declaration?.deductionsPaise ?? 0 : 0);
+const earlier = (p: Pick<PayInput, "ytd" | "declaration">) => (p.ytd?.taxableGrossPaise ?? 0) + (p.declaration?.previousSalaryPaise ?? 0) + (p.declaration?.otherIncomePaise ?? 0);
+
+/** The year's income, tax and what to deduct this month. `recurring` repeats in every month left; `oneOff` counts once. */
+export function taxProjection(p: Pick<PayInput, "month" | "ytd" | "declaration" | "profile">, recurring: number, tax: TaxRates, o: { oneOff?: number; final?: boolean } = {}) {
+  const left = o.final ? 1 : 13 - fyMonthIndex(p.month);
+  const income = earlier(p) + recurring * left + (o.oneOff ?? 0);
+  const taxable = Math.max(0, income - tax.std - regimeDeduction(p));
   const yearly = yearlyTax(taxable, tax);
-  const owed = yearly - (p.ytd?.tdsPaise ?? 0) - (d?.previousTdsPaise ?? 0);
+  const owed = yearly - (p.ytd?.tdsPaise ?? 0) - (p.declaration?.previousTdsPaise ?? 0);
   return { monthsLeft: left, incomePaise: income, taxablePaise: taxable, yearlyTaxPaise: yearly, monthlyPaise: Math.max(0, Math.round(owed / left)) };
 }
-const monthlyTds = (p: PayInput, taxableThisMonth: number, tax: TaxRates) => taxProjection(p, taxableThisMonth, tax).monthlyPaise;
+
+/** Tax on a payment outside the salary: the year's tax with it, less the year's tax without it, on the pay still expected. */
+export function marginalTds(p: Pick<PayInput, "ytd" | "declaration" | "profile">, oneOff: number, tax: TaxRates, base: { monthlyPaise: number; months: number }): number {
+  const yearly = (extra: number) => yearlyTax(Math.max(0, earlier(p) + base.monthlyPaise * base.months + extra - tax.std - regimeDeduction(p)), tax);
+  return Math.max(0, yearly(oneOff) - yearly(0));
+}
+/** Months of the financial year after this one (April = 12 ... March = 0). */
+export const monthsAfter = (month: string) => 12 - fyMonthIndex(month);
 
 /** What each earning component would be for a full month, before days are cut. */
 function fullAmounts(earn: EngineComponent[], gross: number, overrides: Record<string, number>): Map<string, number> {
@@ -182,7 +201,7 @@ export function computePay(p: PayInput): PayResult {
     have.parts.push(`${part.label}: ${rupees(it.amount)}`);
     items.set(key, have);
   }
-  let pfWages = 0, taxable = 0, basicPaid = 0;
+  let pfWages = 0, taxable = 0, basicPaid = 0, oneOff = 0;
   for (const it of items.values()) {
     add({ kind: "earning", code: it.code, label: it.label, amountPaise: it.amount, refId: it.refId, note: parts.length > 1 ? it.parts.join("; ") : null });
     if (it.wage) pfWages += it.amount;
@@ -193,7 +212,7 @@ export function computePay(p: PayInput): PayResult {
     if (a.kind !== "earning") continue;
     add({ kind: "earning", code: a.code, label: a.label, amountPaise: a.amountPaise, manual: true, refId: a.refId, note: a.note });
     if (a.wage) pfWages += a.amountPaise;
-    if (a.taxable !== false) taxable += a.amountPaise;
+    if (a.taxable !== false) { taxable += a.amountPaise; oneOff += a.amountPaise; }
   }
   const gross = lines.reduce((s, l) => s + l.amountPaise, 0);
   let claims = 0;
@@ -212,7 +231,12 @@ export function computePay(p: PayInput): PayResult {
   const ptOn = pr.ptApplies ?? r.config.pt;
   let pfWagesUsed = 0, epfWages = 0, epsWages = 0, esiWages = 0;
   const employer: Omit<PayLine, "sort">[] = [];
-  if (pfOn && pfWages > 0) {
+  const lacks = (keys: string[]) => {
+    const m = keys.filter((k) => r.missing?.includes(k));
+    if (m.length) flags.push({ code: "needs_input", line: "rates", message: `There is no ${m.map((k) => k.replace(/_/g, " ")).join(", ")} rule for this month. Add one under Statutory.` });
+    return m.length > 0;
+  };
+  if (pfOn && pfWages > 0 && !lacks(["pf_ceiling", "pf_employee_bp", "pf_employer_bp", "eps_bp", "edli_bp", "pf_admin_bp", "wage_exclusion_bp"])) {
     const wages = Math.max(pfWages, percentOf(gross, 10_000 - r.wageExclusionBp));
     pfWagesUsed = wages;
     const cap = pfCeiling(r.pfCeilingSegments);
@@ -227,7 +251,7 @@ export function computePay(p: PayInput): PayResult {
     employer.push({ kind: "employer", code: "edli", label: "EDLI", amountPaise: percentOf(capped, r.edliBp) });
     employer.push({ kind: "employer", code: "pf_admin", label: "PF admin charges", amountPaise: percentOf(base, r.pfAdminBp) });
   }
-  if (esiOn && gross > 0 && gross <= r.esiCeiling) {
+  if (esiOn && gross > 0 && !lacks(["esi_ceiling", "esi_employee_bp", "esi_employer_bp"]) && gross <= r.esiCeiling) {
     esiWages = gross;
     add({ kind: "deduction", code: "esi_employee", label: "ESI", amountPaise: share(gross, r.esiEmployeeBp, r.rounding.esi_employee) });
     employer.push({ kind: "employer", code: "esi_employer", label: "ESI, employer share", amountPaise: share(gross, r.esiEmployerBp, r.rounding.esi_employer) });
@@ -245,7 +269,8 @@ export function computePay(p: PayInput): PayResult {
     if (l && due && l.employerPaise) employer.push({ kind: "employer", code: "lwf_employer", label: "LWF, employer share", amountPaise: l.employerPaise });
   }
   if (r.config.tds && taxable > 0) {
-    typed("tds", "Income tax (TDS)", "deduction", r.tax ? monthlyTds(p, taxable, r.tax) : null, "There are no tax slabs for this year. Type the tax to deduct.");
+    const tds = !r.tax ? null : p.offCycle ? marginalTds(p, oneOff, r.tax, p.taxBase ?? { monthlyPaise: 0, months: 0 }) : taxProjection(p, taxable - oneOff, r.tax, { oneOff, final: p.finalMonth }).monthlyPaise;
+    typed("tds", "Income tax (TDS)", "deduction", tds, "There are no tax slabs for this year. Type the tax to deduct.");
     if (!pr.pan) flags.push({ code: "no_pan", message: "No PAN on file. Tax may be deducted at a higher rate." });
   }
 
@@ -265,7 +290,7 @@ export function computePay(p: PayInput): PayResult {
   const deductions = sum("deduction"), employerTotal = sum("employer");
   const net = gross + claims - deductions;
   if (net < 0) flags.push({ code: "net_negative", message: "Deductions are more than the pay." });
-  return { lines, grossPaise: gross, claimsPaise: claims, deductionsPaise: deductions, employerPaise: employerTotal, netPaise: net, shortfallPaise: Math.max(0, -net), taxableGrossPaise: taxable, pfWagesPaise: pfWagesUsed, epfWagesPaise: epfWages, epsWagesPaise: epsWages, edliWagesPaise: epsWages, esiWagesPaise: esiWages, flags };
+  return { lines, grossPaise: gross, claimsPaise: claims, deductionsPaise: deductions, employerPaise: employerTotal, netPaise: net, shortfallPaise: Math.max(0, -net), taxableGrossPaise: taxable, oneOffTaxablePaise: oneOff, pfWagesPaise: pfWagesUsed, epfWagesPaise: epfWages, epsWagesPaise: epsWages, edliWagesPaise: epsWages, esiWagesPaise: esiWages, flags };
 }
 
 /** The monthly wages gratuity and PF rest on: wage components, and never less than the share of pay the wage rule keeps. */

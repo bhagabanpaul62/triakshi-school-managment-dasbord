@@ -13,7 +13,7 @@ export const CONCESSION_STATUSES = ["pending", "approved", "rejected", "ended"] 
 export const RECEIPT_STATUSES = ["valid", "clearing", "bounced", "reversed"] as const;
 export const PAY_METHODS = ["cash", "cheque", "upi", "card", "bank_transfer", "advance"] as const;
 export const ADVANCE_KINDS = ["receipt", "used", "refund", "undo", "opening", "deposit"] as const;
-export const CHEQUE_STATUSES = ["received", "deposited", "cleared", "bounced"] as const;
+export const CHEQUE_STATUSES = ["received", "deposited", "cleared", "bounced", "cancelled"] as const;
 export const REFUND_SOURCES = ["advance", "deposit"] as const;
 export const SLIP_STATUSES = ["submitted", "verified", "rejected"] as const;
 /** The state a person sees; worked out from the totals and dates, never stored. */

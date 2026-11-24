@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { auditLogs, closeDb, invoices, withConsole, withSchool } from "@smw/db";
+import { auditLogs, closeDb, eq, invoices, withConsole, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { addDays, todayIST } from "@smw/feature-kit/money";
 import { createSchoolPair, createTestSchool, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryStorage, useServices } from "@smw/integrations";
 import { systemAccounts } from "@smw/feature-finance/chart";
 import { balanceOf } from "@smw/feature-finance/posting";
-import { finAccounts, finApprovals, finJournalLines, finJournals } from "@smw/feature-finance/schema";
+import { finAccounts, finApprovals, finJournalLines, finJournals, finSettings } from "@smw/feature-finance/schema";
 import { SettingsService } from "@smw/feature-finance/service";
 import { ApprovalService } from "@smw/feature-finance/approvals";
 import {
@@ -17,7 +17,7 @@ import seed from "./seed";
 
 const today = todayIST();
 const png = { name: "slip.png", type: "image/png", size: 4, bytes: new Uint8Array([1, 2, 3, 4]) };
-let a: TestSchool, b: TestSchool, c: TestSchool, d: TestSchool;
+let a: TestSchool, b: TestSchool, c: TestSchool, d: TestSchool, e: TestSchool;
 const feats = ["finance", "expenses", "staff", "academics", "notifications"];
 
 beforeAll(async () => {
@@ -25,6 +25,7 @@ beforeAll(async () => {
   ({ a, b } = await createSchoolPair(feats, "exp"));
   c = await createTestSchool("c-exp", feats);
   d = await createTestSchool("d-exp", feats);
+  e = await createTestSchool("e-exp", feats);
 });
 afterAll(closeDb);
 
@@ -229,6 +230,67 @@ describe("bills on the cash basis", () => {
   });
 });
 
+describe("maker and checker", () => {
+  it("the one who made the bill, or recorded the payment or receipt, may not approve it unless sole admin with a reason", async () => {
+    await limit(e, 0);
+    const v = await vendor(e, "Maker Vendor");
+    const x = await bill(e, v.id, "MK-1", [500_000], e.as.admin);
+    const sent = await new BillService(e.as.accountant).submit(x.id);
+    await expect(decide(e, e.as.admin).approve({ id: sent.approvalId })).rejects.toBeInstanceOf(ConflictError);
+    await decide(e, e.as.admin).approve({ id: sent.approvalId, note: "Only admin" });
+    expect((await new BillService(e.as.admin).get(x.id)).bill.status).toBe("approved");
+    limit(e, 10_000_000);
+    const p = await pay(e, v.id, [{ billId: x.id, amountPaise: 500_000 }], {}, e.as.admin);
+    const ask = await new PaymentService(e.as.accountant).requestReversal(p.payment.id, "Wrong vendor");
+    await expect(decide(e, e.as.admin).approve({ id: ask.id })).rejects.toBeInstanceOf(ConflictError);
+    const own = await new IncomeService(e.as.admin).record({ fromName: "Hall hire", accountId: (await chart(e)).other_income, label: "Hall", amountPaise: 10_000, method: "cash" });
+    const askIncome = await new IncomeService(e.as.accountant).requestReversal(own.id, "Wrong amount");
+    await expect(decide(e, e.as.admin).approve({ id: askIncome.id })).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("a claimant admin needs a reason; another person's claim does not; a teacher claimant stays refused", async () => {
+    const mine = new ClaimService(e.as.admin);
+    const claim = await mine.submit({ title: "Own taxi", spentOn: today, amountPaise: 20_000, accountId: await expenseAcc(e, "5140"), payWith: "now" }, png);
+    await expect(mine.approve(claim.id)).rejects.toBeInstanceOf(ConflictError);
+    expect((await mine.approve(claim.id, { note: "Only admin" })).outcome).toBe("approved");
+  });
+
+  it("withdrawing an approval frees the bill for editing and the claim for resending", async () => {
+    await limit(e, 0);
+    const v = await vendor(e, "Withdraw Vendor");
+    const x = await bill(e, v.id, "WD-1", [500_000]);
+    const sent = await new BillService(e.as.accountant).submit(x.id);
+    const claim = await new ClaimService(e.as.teacher).submit({ title: "Pens", spentOn: today, amountPaise: 20_000, accountId: await expenseAcc(e, "5140"), payWith: "now" }, png);
+    const ap = await withSchool(e.id, (tx) => tx.select().from(finApprovals));
+    const billAp = ap.find((r) => r.id === sent.approvalId)!;
+    await withSchool(e.id, (tx) => expensesApprovals["expenses.bill"]!.withdraw!(tx, billAp, e.as.accountant));
+    expect((await new BillService(e.as.accountant).get(x.id)).bill.status).toBe("draft");
+    await withSchool(e.id, (tx) => expensesApprovals["expenses.claim"]!.withdraw!(tx, { ...billAp, refId: claim.id }, e.as.teacher));
+    expect((await new ClaimService(e.as.teacher).get(claim.id)).claim.status).toBe("rejected");
+  });
+});
+
+describe("a bill booked before the basis changed", () => {
+  it("is paid off against vendor dues, so the expense is not booked twice", async () => {
+    const st = new SettingsService(e.as.admin);
+    await st.update({ ...(await st.get()), basis: "accrual", billLimitPaise: 10_000_000 });
+    const v = await vendor(e, "Straddle Vendor");
+    const acc = await expenseAcc(e, "5110");
+    const x = await bill(e, v.id, "SB-1", [300_000], e.as.accountant, acc);
+    await new BillService(e.as.accountant).submit(x.id);
+    const dues = await ledger(e, "vendor_dues"), spent = await accountTotal(e, acc);
+    await withSchool(e.id, (tx) => tx.update(finSettings).set({ basis: "cash" }));
+    await pay(e, v.id, [{ billId: x.id, amountPaise: 100_000 }]);
+    await pay(e, v.id, [{ billId: x.id, amountPaise: 200_000 }]);
+    expect(await accountTotal(e, acc)).toBe(spent);
+    expect(await ledger(e, "vendor_dues")).toBe(dues + 300_000);
+    const y = await bill(e, v.id, "SB-2", [100_000], e.as.accountant, acc);
+    await new BillService(e.as.accountant).submit(y.id);
+    await pay(e, v.id, [{ billId: y.id, amountPaise: 100_000 }]);
+    expect(await accountTotal(e, acc)).toBe(spent + 100_000);
+  });
+});
+
 describe("budgets", () => {
   it("warn lets a bill through with a warning; block sends it to an approver; alerts go once", async () => {
     await limit(a, 100_000_000);
@@ -263,7 +325,7 @@ describe("recurring and Triakshi bills", () => {
     const v = await vendor(a, "Landlord");
     const rec = new RecurringService(a.as.accountant);
     await rec.create({ vendorId: v.id, label: "Rent", frequency: "monthly", nextOn: today, dueDays: 5, lines: [{ accountId: await expenseAcc(a, "5110"), label: "Rent", amountPaise: 500_000 }] });
-    await withConsole((tx) => tx.insert(invoices).values({ schoolId: a.id, number: "TRI-0001", financialYear: "2026-27", status: "paid", description: "Triakshi plan", taxablePaise: 100_000, totalPaise: 118_000 }));
+    await withConsole((tx) => tx.insert(invoices).values({ schoolId: a.id, number: "TRI-0001", financialYear: "2026-27", status: "issued", description: "Triakshi plan", taxablePaise: 100_000, totalPaise: 118_000 }));
     const [r1, r2] = [await rec.runNow(), await rec.runNow()];
     expect([r1.recurring, r1.triakshi, r2.recurring, r2.triakshi]).toEqual([1, 1, 0, 0]);
     const rows = (await new BillService(a.as.accountant).list({ filters: { status: "draft" }, pageSize: 100 })).rows;
@@ -271,6 +333,29 @@ describe("recurring and Triakshi bills", () => {
     expect(rows.filter((x) => x.billNo === "TRI-0001")).toHaveLength(1);
     expect(await ledger(a, "vendor_dues")).toBe(await ledger(a, "vendor_dues"));
     expect((await rec.calendar(3)).length).toBeGreaterThan(0);
+  });
+});
+
+describe("triakshi invoices as bills", () => {
+  const inv = (n: string, status: "issued" | "paid" | "void", total: number, extra: Record<string, unknown> = {}) =>
+    withConsole((tx) => tx.insert(invoices).values({ schoolId: e.id, number: n, financialYear: "2026-27", status, description: `Plan ${n}`, taxablePaise: total, totalPaise: total, ...extra }).returning())
+      .then(([r]) => r!);
+  const setInv = (id: string, v: Partial<typeof invoices.$inferInsert>) => withConsole((tx) => tx.update(invoices).set(v).where(eq(invoices.id, id)));
+  const drafts = async () => (await new BillService(e.as.accountant).list({ pageSize: 100 })).rows.filter((x) => x.billNo.startsWith("TRX-"));
+
+  it("makes drafts only for what is still due, follows the invoice, and never uses a vendor a person named Triakshi", async () => {
+    await new VendorService(e.as.accountant).create({ name: "Triakshi" });
+    const [open, paid, voided] = [await inv("TRX-1", "issued", 100_000), await inv("TRX-2", "paid", 90_000), await inv("TRX-3", "void", 80_000)];
+    const rec = new RecurringService(e.as.accountant);
+    expect((await rec.runNow()).triakshi).toBe(1);
+    expect((await drafts()).map((x) => [x.billNo, x.grossPaise, x.vendorName])).toEqual([["TRX-1", 100_000, "Triakshi (platform)"]]);
+    await setInv(open.id, { creditedPaise: 30_000 });
+    await rec.runNow();
+    expect((await drafts())[0]).toMatchObject({ grossPaise: 70_000, status: "draft" });
+    await setInv(open.id, { creditedPaise: 100_000 });
+    await rec.runNow();
+    expect((await drafts())[0]!.status).toBe("cancelled");
+    expect([paid.id, voided.id]).toHaveLength(2);
   });
 });
 

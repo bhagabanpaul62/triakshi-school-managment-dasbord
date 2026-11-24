@@ -83,6 +83,8 @@ export const collectInput = z.object({
   parts: z.array(z.object({ invoiceId: f.id(), amountPaise: paise() })).max(60).optional(),
   payerName: f.optText(80),
   note: f.optText(300),
+  /** Made when the collect form opens. Sending the same form twice makes one receipt. */
+  requestId: f.optText(80),
 });
 export const reversalInput = z.object({ id: f.id(), reason: f.text(5, 300, "Say why this receipt is reversed") });
 

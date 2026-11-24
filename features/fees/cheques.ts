@@ -76,6 +76,8 @@ export class ChequeService extends FeesBase {
       await this.lockStudents(tx, [pre.s, ...hit.map((h) => h.s)]);
       const [c] = await tx.select().from(feeCheques).where(eq(feeCheques.id, d.id)).for("update");
       if (!from.includes(c!.status)) throw new ConflictError(`This cheque is ${c!.status}, so it cannot be marked ${verb}.`);
+      const [r] = await tx.select({ status: feeReceipts.status }).from(feeReceipts).where(eq(feeReceipts.id, c!.receiptId));
+      if (r?.status !== "clearing") throw new ConflictError(`The receipt of this cheque is ${r?.status}, so the cheque cannot be marked ${verb}. Only a receipt that waits for the cheque can be moved on.`);
       await run(tx, c!, d, await this.moneyDate(tx, d.date));
       return c!.id;
     }, (id) => ({ action: verb, entity: "Cheque", entityId: id, summary: `Cheque ${verb}` }));
@@ -93,7 +95,9 @@ export class ChequeService extends FeesBase {
     return this.step(input, ["deposited"], "cleared", async (tx, c, _d, date) => {
       const [acct] = await tx.select().from(finCashAccounts).where(eq(finCashAccounts.id, c.depositedTo!));
       await tx.update(feeCheques).set({ status: "cleared", clearedOn: date }).where(eq(feeCheques.id, c.id));
-      await tx.update(feeReceipts).set({ status: "valid" }).where(eq(feeReceipts.id, c.receiptId));
+      const [paid] = await tx.update(feeReceipts).set({ status: "valid" }).where(eq(feeReceipts.id, c.receiptId)).returning({ studentId: feeReceipts.studentId });
+      // The advance of this cheque is the family's to use now.
+      await this.autoUseAdvance(tx, [paid!.studentId], date);
       await this.post(tx, { date, sourceKey: `fees:cheque-clear:${c.id}`, sourceType: "fee_receipt", sourceId: c.receiptId, memo: `Cheque ${c.chequeNo} cleared`, lines: [{ account: { id: acct!.accountId }, debit: c.amountPaise }, { account: "cheques", credit: c.amountPaise }] });
     });
   }
@@ -103,9 +107,6 @@ export class ChequeService extends FeesBase {
     return this.step(input, ["received", "deposited"], "bounced", async (tx, c, d, date) => {
       if (!d.reason) throw invalid("reason", "Say why it bounced, like insufficient funds.");
       const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, c.receiptId)).for("update");
-      if (r!.advancePaise > 0 && (await this.advanceOf(tx, r!.studentId)) < r!.advancePaise) {
-        throw new ConflictError(`The ${rupees(r!.advancePaise)} advance from this cheque has already been used on other bills. Reverse or refund what used it first.`);
-      }
       await new ReceiptService(this.ctx).takeBack(tx, r!, date, `Cheque ${c.chequeNo} bounced: ${d.reason}`);
       await tx.update(feeCheques).set({ status: "bounced", bouncedOn: date, bounceReason: d.reason }).where(eq(feeCheques.id, c.id));
       await tx.update(feeReceipts).set({ status: "bounced" }).where(eq(feeReceipts.id, r!.id));

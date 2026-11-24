@@ -23,12 +23,13 @@ export class SlipService extends FeesBase {
       if (!upiOn) throw new ConflictError("The school has not turned on UPI payments. Pay at the school office, or ask them to enable it.");
       const own = await this.ownStudentIds(tx);
       if (!own.length) throw new ForbiddenError();
+      const fileKey = this.ownFile(d.fileKey, "slips", "file");
       const bills = await tx.select({ id: feeInvoices.id, s: feeInvoices.studentId, status: feeInvoices.status }).from(feeInvoices).where(inArray(feeInvoices.id, d.invoiceIds));
       if (bills.length !== new Set(d.invoiceIds).size || bills.some((b) => !own.includes(b.s))) throw new NotFoundError("Bill");
       if (bills.some((b) => b.status !== "issued")) throw new ConflictError("Pick bills that are issued and not cancelled.");
       if (d.paidOn > todayIST()) throw new ConflictError("The payment date cannot be in the future.");
       try {
-        const [row] = await tx.insert(feeUpiSlips).values({ schoolId: this.ctx.schoolId, studentId: bills[0]!.s, amountPaise: d.amountPaise, utr: d.utr, paidOn: d.paidOn, invoiceIds: d.invoiceIds, fileKey: d.fileKey ?? null }).returning();
+        const [row] = await tx.insert(feeUpiSlips).values({ schoolId: this.ctx.schoolId, studentId: bills[0]!.s, amountPaise: d.amountPaise, utr: d.utr, paidOn: d.paidOn, invoiceIds: d.invoiceIds, fileKey }).returning();
         return row!;
       } catch (e) {
         if (pgErrorCode(e) === "23505") throw new ConflictError("This UTR was already sent. If the school rejected it, check the reason on your fees page and send the right one.");

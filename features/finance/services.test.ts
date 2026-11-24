@@ -10,6 +10,7 @@ import { finApprovals, finJournalLines, finJournals } from "./schema";
 import {
   AccountService, ApprovalService, CashAccountService, ControlService, CostCentreService, FinanceDashboardService, JournalService, PeriodService, SeriesService, SettingsService, financeApprovals,
 } from "./service";
+import { ApprovalDeskService } from "./services/approval-desk";
 
 let a: TestSchool, b: TestSchool, c: TestSchool, d: TestSchool;
 const today = todayIST();
@@ -73,8 +74,9 @@ describe("cash accounts", () => {
     expect(bank).toMatchObject({ isDefault: true, upiId: "school@okbank", ifsc: "DEMO0001234" });
     await expect(admin.create({ name: "Bad", kind: "bank", upiId: "not-a-upi" })).rejects.toBeInstanceOf(ValidationError);
 
-    await svc.setOpening({ accountId: box.id, amountPaise: 100_000, date: today });
-    await expect(svc.setOpening({ accountId: box.id, amountPaise: 100_000, date: today })).rejects.toBeInstanceOf(ConflictError);
+    await expect(svc.setOpening({ accountId: box.id, amountPaise: 100_000, date: today })).rejects.toBeInstanceOf(ForbiddenError);
+    await admin.setOpening({ accountId: box.id, amountPaise: 100_000, date: today });
+    await expect(admin.setOpening({ accountId: box.id, amountPaise: 100_000, date: today })).rejects.toBeInstanceOf(ConflictError);
     await svc.transfer({ fromId: box.id, toId: bank.id, amountPaise: 40_000, date: today });
     await expect(svc.transfer({ fromId: box.id, toId: bank.id, amountPaise: 60_001, date: today })).rejects.toBeInstanceOf(ConflictError);
     await expect(svc.transfer({ fromId: box.id, toId: box.id, amountPaise: 1, date: today })).rejects.toBeInstanceOf(ValidationError);
@@ -272,8 +274,22 @@ describe("seed", () => {
     await seed(e.as.admin, {});
     await seed(e.as.admin, {});
     const cash = await new CashAccountService(e.as.admin).list();
-    expect(cash.map((x) => [x.kind, x.balancePaise])).toEqual([["bank", 50_000_000], ["cash", 2_500_000]]);
+    expect(cash.map((x) => [x.kind, x.balancePaise])).toEqual([["bank", 400_000_000], ["cash",  20_000_000]]);
     expect(cash.find((x) => x.kind === "bank")!.upiId).toBe("demoschool@okdemo");
     expect((await new CostCentreService(e.as.admin).list()).total).toBe(2);
+  });
+});
+
+describe("who may approve", () => {
+  it("whoever the document pays or who made it is treated like the requester; withdrawing frees the document", async () => {
+    const accounts = await chart(d), kind = "finance.journal";
+    const freed: string[] = [];
+    const handlers = { [kind]: { ...financeApprovals[kind]!, involved: async () => [d.users.admin], withdraw: async (_tx: unknown, x: { refId: string }) => { freed.push(x.refId); } } };
+    const one = await new JournalService(d.as.accountant).propose(manual(accounts));
+    await expect(new ApprovalService(d.as.admin, handlers).approve({ id: one.approvalId })).rejects.toThrow(/only admin/);
+    expect(await new ApprovalService(d.as.admin, handlers).approve({ id: one.approvalId, note: "Only admin" })).toMatchObject({ selfApproved: true });
+    const two = await new JournalService(d.as.accountant).propose(manual(accounts));
+    await new ApprovalDeskService(d.as.accountant, handlers).withdraw(two.approvalId);
+    expect(freed).toEqual([two.draftId]);
   });
 });

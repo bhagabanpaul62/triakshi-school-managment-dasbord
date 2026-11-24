@@ -66,11 +66,14 @@ export class RateBook {
       if (r && track) used.set(`${r.key}|${r.state ?? ""}|${r.from}`, r);
       return r;
     };
-    const num = (key: string, track: boolean) => get<number>(key, month, null, track)?.value ?? 0;
+    const missing = new Set<string>();
+    const num = (key: string, track: boolean) => { const r = get<number>(key, month, null, track); if (!r) missing.add(key); return r?.value ?? 0; };
     const segments: PayRates["pfCeilingSegments"] = [];
     for (let d = 1; d <= daysIn(month); d++) {
       const day = `${month.slice(0, 8)}${String(d).padStart(2, "0")}`;
-      const paise = get<number>("pf_ceiling", day, null, o.config.pf)?.value ?? 0;
+      const ceiling = get<number>("pf_ceiling", day, null, o.config.pf);
+      if (!ceiling) missing.add("pf_ceiling");
+      const paise = ceiling?.value ?? 0;
       const last = segments.at(-1);
       if (last && last.paise === paise) last.days++; else segments.push({ days: 1, paise });
     }
@@ -88,7 +91,7 @@ export class RateBook {
       pfCeilingSegments: segments, pfEmployeeBp: num("pf_employee_bp", o.config.pf), pfEmployerBp: num("pf_employer_bp", o.config.pf), epsBp: num("eps_bp", o.config.pf),
       edliBp: num("edli_bp", o.config.pf), pfAdminBp: num("pf_admin_bp", o.config.pf), wageExclusionBp: num("wage_exclusion_bp", o.config.pf),
       esiCeiling: num("esi_ceiling", o.config.esi), esiEmployeeBp: num("esi_employee_bp", o.config.esi), esiEmployerBp: num("esi_employer_bp", o.config.esi),
-      pt, lwf, tax, config: o.config,
+      pt, lwf, tax, config: o.config, missing: [...missing],
       rounding: Object.fromEntries((Object.keys(ROUND_DEFAULT) as RoundKey[]).map((k) => [k, get<RoundMode>(`round_${k}`, month, null, k.startsWith("esi") ? o.config.esi : o.config.pf)?.value ?? ROUND_DEFAULT[k]])) as Record<RoundKey, RoundMode>,
     };
     return { rates, used: [...used.values()] };

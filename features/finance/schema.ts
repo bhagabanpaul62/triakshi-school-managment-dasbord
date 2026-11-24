@@ -208,7 +208,7 @@ export const finYearCloses = pgTable("fin_year_closes", {
   run: integer("run").notNull().default(1),
   /** The closing entry; null when the year had no income or expense to carry. */
   journalId: uuid("journal_id").references(() => finJournals.id, { onDelete: "restrict" }),
-  status: text("status").$type<"closed" | "reopened">().notNull().default("closed"),
+  status: text("status").$type<"pending" | "closed" | "reopened">().notNull().default("closed"),
   surplusPaise: paise("surplus_paise").notNull().default(0),
   closedBy: uuid("closed_by"),
   reopenReason: text("reopen_reason"),

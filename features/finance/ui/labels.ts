@@ -7,6 +7,7 @@ export const APPROVAL_KIND_LABEL: Record<string, string> = {
   "finance.reverse": "Undo requests",
   "finance.bank-entry": "Bank entries",
   "finance.year-reopen": "Year reopen requests",
+  "finance.year-close": "Year close",
   "fees.plan": "Fee plans",
   "fees.concession": "Concessions",
   "fees.note": "Credit and debit notes",

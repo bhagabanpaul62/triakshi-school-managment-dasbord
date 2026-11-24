@@ -56,10 +56,10 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
                     <ul className="flex flex-col">
                       {rows.map((a) => (
                         <li key={a.id} className="flex min-h-11 items-center gap-3 rounded-xl px-2 py-1 text-sm hover:bg-white/[0.04]">
-                          <span className="w-12 shrink-0 font-mono text-xs text-[var(--ds-on-surface-muted)]">{a.code}</span>
+                          <span className="hidden w-12 shrink-0 font-mono sm:block text-xs text-[var(--ds-on-surface-muted)]">{a.code}</span>
                           <Link href={`/app/finance/accounts/${a.id}`} className="min-w-0 flex-1 truncate hover:underline focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">{a.name}</Link>
                           {!a.isActive ? <ToneBadge label="Off" tone="default" /> : null}
-                          <Money paise={a.shownPaise} className="w-28" />
+                          <Money paise={a.shownPaise} className="sm:w-28" />
                           {canEdit ? (
                             <span className="inline-flex items-center gap-1">
                               <FormModal title={`Edit ${a.name}`} icon="book" fields={a.systemKey ? renameOnly : createFields} values={a} hidden={{ id: a.id }} action={updateAccount} trigger={{ label: "Edit", variant: "ghost", size: "sm" }} />

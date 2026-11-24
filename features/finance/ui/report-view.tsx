@@ -10,7 +10,7 @@ const ROW_STYLE = { head: "bg-white/[0.04] font-medium", sub: "font-medium text-
 
 function Cell({ col, row }: { col: ReportColumn; row: ReportRow }) {
   const v = row.cells[col.key] ?? null, href = row.links?.[col.key];
-  const body = v === null || v === "" ? <span className="text-[var(--ds-on-surface-muted)]">-</span>
+  const body = v === null || v === "" ? row.style ? null : <span className="text-[var(--ds-on-surface-muted)]">-</span>
     : col.kind === "money" ? <Money paise={Number(v)} fixed={false} />
     : col.kind === "date" ? <>{shortDate(String(v))}</>
     : col.kind === "mono" ? <span className="font-mono text-xs">{String(v)}</span> : <>{String(v)}</>;

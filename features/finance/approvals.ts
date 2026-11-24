@@ -8,7 +8,14 @@ import { finApprovals } from "./schema";
 
 export type Approval = typeof finApprovals.$inferSelect;
 /** What a module does when its request is decided. Runs inside the deciding transaction; throw to refuse the decision. */
-export interface ApprovalHandler { approve(tx: Tx, a: Approval, actor: Ctx): Promise<void>; reject?(tx: Tx, a: Approval, actor: Ctx): Promise<void> }
+export interface ApprovalHandler {
+  approve(tx: Tx, a: Approval, actor: Ctx): Promise<void>;
+  reject?(tx: Tx, a: Approval, actor: Ctx): Promise<void>;
+  /** Frees the document when the requester takes the request back. Without it, withdrawing does what rejecting does. */
+  withdraw?(tx: Tx, a: Approval, actor: Ctx): Promise<void>;
+  /** Everyone besides the requester who may not approve it: who made or edited the document, and who gets the money. */
+  involved?(tx: Tx, a: Approval): Promise<(string | null)[]>;
+}
 /** Modules export their handlers; the app route merges them, so finance never imports fees, expenses or payroll. */
 export type ApprovalHandlers = Record<string, ApprovalHandler>;
 
@@ -59,16 +66,16 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
       const [a] = await tx.select().from(finApprovals).where(eq(finApprovals.id, id)).for("update");
       if (!a) throw new NotFoundError("Request");
       if (a.status !== "pending") throw new ConflictError("This was already decided.");
+      const handler = this.handlers[a.kind];
+      if (!handler) throw new Error(`No approval handler for ${a.kind}`);
       let selfApproved = false;
-      if (status === "approved" && a.requestedBy === this.ctx.userId) {
+      if (status === "approved" && [a.requestedBy, ...(await handler.involved?.(tx, a) ?? [])].includes(this.ctx.userId)) {
         // Maker is not approver, except in a school where nobody else can approve; then a reason is a must.
         const others = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"), ne(users.id, this.ctx.userId))).limit(1);
-        if (others.length || this.ctx.role !== "admin") throw new ForbiddenError("Someone else must approve what you asked for.");
+        if (others.length || this.ctx.role !== "admin") throw new ForbiddenError(a.requestedBy === this.ctx.userId ? "Someone else must approve what you asked for." : "You made this or it pays you, so someone else must approve it.");
         if (!note) throw new ConflictError("You are the only admin, so write why you approve your own request.");
         selfApproved = true;
       }
-      const handler = this.handlers[a.kind];
-      if (!handler) throw new Error(`No approval handler for ${a.kind}`);
       if (status === "approved") await handler.approve(tx, a, this.ctx); else await handler.reject?.(tx, a, this.ctx);
       const [row] = await tx.update(finApprovals).set({ status, decidedBy: this.ctx.userId, decidedAt: new Date(), note: note ?? null, selfApproved }).where(eq(finApprovals.id, id)).returning();
       if (a.requestedBy !== this.ctx.userId) {

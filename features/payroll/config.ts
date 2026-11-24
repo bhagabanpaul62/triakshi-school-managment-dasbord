@@ -11,8 +11,8 @@ export const payConfigInput = z.object({
   pf: flag, esi: flag, pt: flag, lwf: flag, tds: flag,
   /** State for professional tax when a person has none of their own. */
   state: z.string().trim().max(60).nullish().transform((v) => v || null),
-  /** How an unpaid day is valued: of the calendar month, of a fixed 30, or of the working days. */
-  lopBasis: z.enum(["calendar", "fixed30", "working"]).default("calendar"),
+  /** How an unpaid day is valued: of the calendar month or of a fixed 30. A "working days" choice saved earlier reads as the calendar month. */
+  lopBasis: z.enum(["calendar", "fixed30"]).catch("calendar").default("calendar"),
   /** Leave and notice are paid at gross divided by this. */
   dayDivisor: z.coerce.number().int().min(20).max(31).default(30),
   bankColumns: z.array(z.enum(BANK_COLUMNS)).min(1).default(["name", "account", "ifsc", "amount", "narration"]),

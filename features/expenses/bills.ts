@@ -5,7 +5,7 @@ import { percentOf, rupees, todayIST } from "@smw/feature-kit/money";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { users, type Tx } from "@smw/db";
 import { postJournal, type PostLine, type Poster } from "@smw/feature-finance/posting";
-import { finAccounts, finApprovals, finCostCentres } from "@smw/feature-finance/schema";
+import { finAccounts, finApprovals, finCostCentres, finJournals } from "@smw/feature-finance/schema";
 import { ExpenseService, checkAccount, checkCentre, checkVehicle, journalIdOf, journalIdSql, need } from "./base";
 import { budgetCheck } from "./budgets";
 import { ExpenseFiles, type UploadedFile } from "./files";
@@ -54,6 +54,13 @@ export async function postBill(tx: Tx, by: Poster, bill: Bill, lines: BillLine[]
   const out: PostLine[] = lines.map((l) => ({ account: { id: l.accountId }, debit: l.amountPaise, costCentreId: l.costCentreId, memo: l.label }));
   out.push({ account: "vendor_dues", credit: netOf(bill), party }, { account: "tds_payable", credit: bill.tdsPaise, party });
   return postJournal(tx, by, { date: bill.billDate, sourceKey: `expenses:bill:${bill.id}`, sourceType: "exp_bill", sourceId: bill.id, memo: `Bill ${bill.billNo}`, lines: out });
+}
+
+/** Which of these bills were booked on the accrual basis: they have their entry in the ledger. The school's basis today says nothing about them. */
+export async function accruedBills(tx: Tx, ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const keys = await tx.select({ k: finJournals.sourceKey }).from(finJournals).where(inArray(finJournals.sourceKey, ids.map((id) => `expenses:bill:${id}`)));
+  return new Set(keys.map(({ k }) => k!.slice("expenses:bill:".length)));
 }
 
 /** Move a draft or pending bill to approved and post it. Used by a direct approval and by the approval handler. */

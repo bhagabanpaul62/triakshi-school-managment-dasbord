@@ -73,7 +73,7 @@ export function ReportTable({ columns, groups, caption, csvHref, totalLabel = "T
           </thead>
           {live.map((g) => (
             <tbody key={g.label}>
-              <tr><th scope="rowgroup" colSpan={columns.length} className="px-4 pb-1 pt-4 text-left text-[13px] font-medium text-[var(--ds-on-surface)]">{g.label}</th></tr>
+              {live.length > 1 ? <tr><th scope="rowgroup" colSpan={columns.length} className="px-4 pb-1 pt-4 text-left text-[13px] font-medium text-[var(--ds-on-surface)]">{g.label}</th></tr> : null}
               {g.rows.map((r, ri) => (
                 <tr key={ri} className="transition-colors hover:bg-white/[0.04]">
                   {columns.map((c, i) => {
@@ -82,7 +82,7 @@ export function ReportTable({ columns, groups, caption, csvHref, totalLabel = "T
                   })}
                 </tr>
               ))}
-              <Fragment>{sumCols.length ? totalRow(`${g.label} total`, sumKeys(g.rows, sumCols), false) : null}</Fragment>
+              <Fragment>{live.length > 1 && sumCols.length ? totalRow(`${g.label} total`, sumKeys(g.rows, sumCols), false) : null}</Fragment>
             </tbody>
           ))}
           <tfoot className="sticky bottom-0 bg-[var(--ds-surface-container-high)]">{sumCols.length ? totalRow(totalLabel, grand, true) : null}</tfoot>

@@ -99,7 +99,7 @@ export class CounterService extends FeesBase {
 
   /**
    * The approval handler. Approved: the difference goes to Cash differences. Refused: a shortage stays with the cashier
-   * (Staff loans, in their name); extra cash stays unbooked until they count again.
+   * (Cashier dues, in their name); extra cash stays unbooked until they count again.
    */
   async decideIn(tx: Tx, id: string, approved: boolean) {
     const [c] = await tx.select().from(feeCounters).where(eq(feeCounters.id, id)).for("update");
@@ -110,7 +110,7 @@ export class CounterService extends FeesBase {
     if (approved || short) await this.postDifferenceIn(tx, c, approved ? "difference" : "cashier");
     await tx.update(feeCounters).set({ differenceState: state }).where(eq(feeCounters.id, id));
     const body = approved ? `The difference of ${rupees(Math.abs((c.countedPaise ?? 0) - (c.expectedPaise ?? 0)))} on ${c.day} was approved and written to Cash differences.`
-      : short ? `The shortage on ${c.day} was not approved. It now shows as owed by you (Staff loans) until it is settled.` : `The extra cash on ${c.day} was not approved. Count again: ask your admin to reopen it, or send it for approval again.`;
+      : short ? `The shortage on ${c.day} was not approved. It now shows as owed by you (Cashier dues) until it is settled.` : `The extra cash on ${c.day} was not approved. Count again: ask your admin to reopen it, or send it for approval again.`;
     await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: c.userId, kind: "fee_due" as const, title: approved ? "Counter difference approved" : "Counter difference not approved", body, href: "/app/fees/counter" }]);
   }
 
@@ -120,10 +120,12 @@ export class CounterService extends FeesBase {
     return this.write("collect", async (tx) => {
       const c = await this.mineIn(tx, id, "pending");
       await this.withdrawRequest(tx, "fees.counter_difference", id);
-      const [row] = await tx.update(feeCounters).set({ differenceState: "recount" }).where(eq(feeCounters.id, c.id)).returning();
-      return row!;
+      await this.withdrawIn(tx, id);
+      return c;
     }, (c) => ({ action: "withdraw", entity: "Counter", entityId: c.id, summary: "Withdrew the counter difference request" }));
   }
+
+  async withdrawIn(tx: Tx, id: string) { await tx.update(feeCounters).set({ differenceState: "recount" }).where(and(eq(feeCounters.id, id), eq(feeCounters.differenceState, "pending"))); }
 
   /** Ask for approval again after a refusal (extra cash) or a withdrawal. */
   async askAgain(id: string) {

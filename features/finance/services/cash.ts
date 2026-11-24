@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { uuidv7, type Tx } from "@smw/db";
-import { ConflictError, NotFoundError, ValidationError } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { balanceOf } from "../posting";
 import { CASH_KINDS, finAccounts, finCashAccounts, finJournalLines, finJournals } from "../schema";
@@ -130,6 +130,8 @@ export class CashAccountService extends FinanceService {
   /** What the account held when the books started. Once; a wrong one is reversed first (Journals), then set again. Negative = overdrawn. */
   async setOpening(input: unknown) {
     this.authorize("journal", "write");
+    // Money from nowhere with no second person, so only an admin may set it.
+    if (this.ctx.role !== "admin") throw new ForbiddenError("An admin sets opening balances. Ask yours to set this one.");
     const d = this.parse(openingInput, input);
     return this.write("journal", async (tx) => {
       if (d.date > todayIST()) throw new ValidationError({ date: "The date cannot be in the future." });
