@@ -16,7 +16,7 @@ export async function csvResponse<R>(req: Request, name: string, list: (query: R
     // A leading = + - @ would run as a formula in a spreadsheet; school names and references are typed by people.
     const safe = (v: unknown) => csvCell(typeof v === "string" && /^[=+\-@\t\r]/.test(v) ? `'${v}` : v);
     const body = [columns.map((c) => safe(c.label)).join(","), ...rows.map((r) => columns.map((c) => safe(c.value(r))).join(","))].join("\r\n");
-    return new Response(`﻿${body}`, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${name}.csv"`, "cache-control": "private, no-store" } });
+    return new Response(`\ufeff${body}`, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${name}.csv"`, "cache-control": "private, no-store" } });
   } catch (err) {
     if (err instanceof AppError) return Response.json({ error: err.message }, { status: err.status });
     throw err;

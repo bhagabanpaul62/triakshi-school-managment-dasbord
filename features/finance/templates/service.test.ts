@@ -14,7 +14,7 @@ afterAll(closeDb);
 
 const svc = (s: TestSchool, who: keyof TestSchool["as"] = "admin") => new TemplateService(s.as[who]);
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEklEQVQImWM4ISd3Qk6OAUIBAB8mBBGFRCvEAAAAAElFTkSuQmCC", "base64");
-const width = 
+
 describe("versions", () => {
   it("starts on the built-in layout, with the school's own name in the header", async () => {
     const cur = await svc(a).current("receipt");

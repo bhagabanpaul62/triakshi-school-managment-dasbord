@@ -84,7 +84,7 @@ export function TemplateEditor({ kind, version, initial, versions, canEdit, edit
     const r = await fn();
     if (!r.ok) { toast(r.error, "danger"); return; }
     toast(r.message ?? "Done");
-    then ? then() : router.refresh();
+    if (then) then(); else router.refresh();
   });
   const save = (goNext = false) => run(() => saveTemplate(kind, cfg), goNext && next ? () => router.push(next) : undefined);
 

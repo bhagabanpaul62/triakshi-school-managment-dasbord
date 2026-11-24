@@ -103,7 +103,6 @@ export class PdfBuilder {
         const next = line ? `${line} ${word}` : word;
         if (this.measure(next, size, bold) <= max) { line = next; continue; }
         if (line) lines.push(line);
-        line = "";
         let rest = word;
         while (this.measure(rest, size, bold) > max && [...rest].length > 1) {
           const chars = [...rest];
