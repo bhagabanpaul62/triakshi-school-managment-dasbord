@@ -234,6 +234,12 @@ describe("setup, forms and reports", () => {
     expect((await account(id)).balance.openPaise).toBe(150_000);
   });
 
+  it("the receipt prints the balance after its own payment, not before it", async () => {
+    const id = await newStudent(fx, "Balance One"); // owes 200,000
+    const r = await receipts().collect({ studentId: id, methods: upi(50_000, "UTR-BAL") });
+    expect((await receipts().document(r.id)).data.totals.find((t) => t[0] === "Balance after payment")?.[1]).toBe("₹1,500");
+  });
+
   it("15: a UPI slip only takes a file this school's upload made", async () => {
     await config(fx, { upiOn: true });
     const [bill] = await bills(fx, fx.students.riya);

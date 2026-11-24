@@ -124,11 +124,13 @@ describe("money records outlive everything", () => {
   it("the setup checklist says what is missing and where to go", async () => {
     const empty = await new SetupService((await createTestSchool("accc", FEATURES)).as.admin).status();
     expect(empty.steps.map((s) => [s.key, s.done])).toEqual([["year", false], ["cash", false], ["upi", false], ["heads", false], ["plan", false], ["issue", false], ["counter", false]]);
-    expect(empty.next).toMatchObject({ key: "year", href: "/app/academics" });
+    expect(empty.next).toMatchObject({ key: "year", href: "/app/academics/years" });
     const done = await new SetupService(fx.school.as.admin).status();
     expect(done.steps.find((s) => s.key === "plan")!.done).toBe(true);
     expect(done.steps.find((s) => s.key === "issue")!.done).toBe(true);
     expect(done.complete).toBe(false);
     expect((await new SetupService(fx.school.as.accountant).status()).steps.find((s) => s.key === "plan")!.who).toBeNull();
+    // A step only an admin may do names who can, instead of a link to a page that refuses.
+    expect((await new SetupService(fx.school.as.accountant).status()).steps.find((s) => s.key === "upi")!.who).toBe("an admin");
   });
 });

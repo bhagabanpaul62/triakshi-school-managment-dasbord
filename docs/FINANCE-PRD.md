@@ -1,6 +1,12 @@
 # PRD: School finance: fees, receipts, expenses, payroll, accounts and statements
 
-Status: **approved for build** on 2026-11-24 (decisions in section 14).
+Status: **built** 2026-11-25 on branch `feat/finance` (approved 2026-11-24, decisions in section 14). How it works now: [FINANCE](FINANCE.md).
+
+Built differently from this plan:
+- Statutory rates are dated rows in code (`features/payroll/rates.ts`) with a school override table, not a platform table.
+- Opening balances of cash and bank are set by an admin, not sent for approval.
+- Payroll before month end: days still to come count as worked.
+- The payment gateway and autopay for fees stay out (decision 14.1).
 Builds on [AUTH-PRD](AUTH-PRD.md) (roles, family = student login), [PEOPLE-PRD](PEOPLE-PRD.md) (staff records) and [ACADEMICS-PRD](ACADEMICS-PRD.md) (leave, transport, library).
 
 ## 1. Goal

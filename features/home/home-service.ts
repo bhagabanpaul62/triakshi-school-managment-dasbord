@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, count, eq, sql } from "drizzle-orm";
 import { AppError, FeatureOffError, ForbiddenError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { academicYears, classes, sections, terms } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";

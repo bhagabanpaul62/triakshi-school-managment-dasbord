@@ -16,7 +16,7 @@ import { CounterService, DeskService } from "../../service";
 import { CloseCounter } from "./counter-forms";
 import { OpenCounter } from "./open-counter";
 import { todayIST } from "@smw/feature-kit/money";
-import { DeskNav, H2, NoAccess, Notice, MoneySetup, NoticeLink, SECTION, can, day, one, type Search } from "./shared";
+import { DeskNav, H2, NoAccess, Notice, MoneySetup, SECTION, can, day, one, type Search } from "./shared";
 
 export const metadata = { title: "Cash counter" };
 

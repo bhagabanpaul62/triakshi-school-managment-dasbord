@@ -1,4 +1,4 @@
-# Finance build contract (read fully before coding)
+# Finance build contract (rules for anyone changing finance code; the guide to what is built is FINANCE.md)
 Repo: /Users/sumanjana/Desktop/triakshi-school-managment-dasbord. Spec: docs/FINANCE-PRD.md (sections 1, 5, 6, 7, 11). Feature rules: features/README.md.
 
 ## Rules for every agent

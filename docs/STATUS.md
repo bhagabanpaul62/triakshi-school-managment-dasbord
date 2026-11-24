@@ -1,6 +1,23 @@
-# Build status (2026-11-24)
+# Build status (2026-11-25)
 
-Git, CI and the demo server were checked on 2026-11-24. Test results are from the commit and PR they belong to; nothing was re-run that day.
+Finance was built on 2026-11-24 and 25 and tested locally. Git, CI and the demo server were last checked on 2026-11-24.
+
+## Finance module (2026-11-25)
+Built on branch `feat/finance` (pushed to the fork; **not merged, no PR, not deployed**). Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
+
+| Part | State |
+|---|---|
+| Ledger, approvals, banking, statements, month and year close | built |
+| Fees on frozen bills and receipts; old fee engine removed, old tables read only | built |
+| Expenses, petty cash, claims, budgets | built |
+| Payroll, loans, exits, statutory files; leave types and balances | built |
+| Triakshi billing: credit notes, refunds, account credit, TDS | built |
+| Move of old fee data (`move-fees`) | built; 287 receipts of old local data moved, every difference explained |
+| Migrations 0009, 0010, 0011 | run in order on an empty database; still to be rehearsed on a copy of the live data |
+
+**Tested 2026-11-25, local, production build, fresh database:** 105 browser tests passed, 0 failed, 1 skipped (the console approval test: the seed has no pending school). They include the 13 money journeys and a crawl of every money link for 7 logins at desktop and phone width (0 problems). Unit: 1,493 passed in 35 packages. Typecheck 40/40, lint 0 errors, no schema drift. Two independent reviews (about 40 findings) were fixed.
+
+Needs the owner: a payroll professional to check the statutory rates, and `DATA_KEY` on any server before payroll is used (keep a copy).
 
 ## Where things stand
 | What | State |
@@ -11,7 +28,7 @@ Git, CI and the demo server were checked on 2026-11-24. Test results are from th
 | CI | Passes for PR #2, PR #3 and `63f18d5`. |
 | Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
 | Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
-| Migrations | 0000–0008 in `packages/db/migrations`. 0005, 0006 and 0008 hold hand-written data steps: never regenerate them. |
+| Migrations on main | 0000–0008 in `packages/db/migrations`. 0005, 0006 and 0008 hold hand-written data steps: never regenerate them. |
 
 PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
 

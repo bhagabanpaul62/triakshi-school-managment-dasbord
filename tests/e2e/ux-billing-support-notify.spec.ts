@@ -43,7 +43,7 @@ test("admin: understand plan, compare plans, pay, download invoice", async ({ pa
   await expect(page.getByRole("heading", { name: /payment received/i })).toBeVisible();
   await shoot(page, "return-paid");
 
-  await page.getByRole("link", { name: /view invoice|back to billing|invoices/i }).first().click();
+  await page.locator("main").getByRole("link", { name: /view invoice|back to billing|invoices/i }).first().click();
   await page.waitForURL(/\/app\/billing/);
   await expect(page.getByText("Paid").first()).toBeVisible();
   await shoot(page, "billing-after-pay");
