@@ -1,6 +1,7 @@
 // What payroll reads from attendance and leave. Plain queries inside the caller's transaction, no permission check.
 import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
+import { todayIST } from "@smw/feature-kit/money";
 import { addDays, isSunday, monthDays as datesOf } from "./stats";
 import { balanceHalfDays, holidaySet, joiningDates, yearOf } from "./leave-ledger";
 import { halfDaysOfDay } from "./leave-days";
@@ -19,11 +20,13 @@ export type MonthDays = {
   paidLeaveHalfDays: number; unpaidLeaveHalfDays: number;
   /** Whole days, with .5 for the missing half of a half day. */
   absentDays: number;
-  /** Working days with no mark and no approved leave. */
+  /** Working days up to today with no mark and no approved leave. */
   unmarkedDays: number;
+  /** Working days still to come with no approved leave: nobody can mark them yet. */
+  comingDays: number;
 };
 
-const blank = (): MonthDays => ({ calendarDays: 0, sundays: 0, holidays: 0, workingDays: 0, present: 0, lateDays: 0, half: 0, paidLeaveHalfDays: 0, unpaidLeaveHalfDays: 0, absentDays: 0, unmarkedDays: 0 });
+const blank = (): MonthDays => ({ calendarDays: 0, sundays: 0, holidays: 0, workingDays: 0, present: 0, lateDays: 0, half: 0, paidLeaveHalfDays: 0, unpaidLeaveHalfDays: 0, absentDays: 0, unmarkedDays: 0, comingDays: 0 });
 
 /**
  * One month for each person. Days before the joining date and after the leaving date are not counted. A person whose login
@@ -42,6 +45,7 @@ export async function monthDays(tx: Tx, userIds: string[], month: string, opts: 
     joiningDates(tx, userIds),
     tx.select({ id: users.id, status: users.status }).from(users).where(inArray(users.id, userIds)),
   ]);
+  const today = todayIST();
   const mark = new Map(marks.map((m) => [`${m.userId}|${m.date}`, m.status]));
   const away = new Map<string, { paid: boolean; half: boolean }>();
   for (const { r, paid } of requests) for (let d = r.fromDate < first ? first : r.fromDate; d <= r.toDate && d <= last; d = addDays(d, 1)) away.set(`${r.userId}|${d}`, { paid: paid ?? true, half: !!r.halfDay });
@@ -67,6 +71,7 @@ export async function monthDays(tx: Tx, userIds: string[], month: string, opts: 
       else if (s === "leave") leave(2);
       else if (s === "half_day") { t.half++; if (a) leave(1); else t.absentDays += 0.5; }
       else if (a) { if (a.half) { t.half++; leave(1); } else leave(halfDaysOfDay(null)); }
+      else if (d > today) t.comingDays++;
       else t.unmarkedDays++;
     }
     out[id] = t;

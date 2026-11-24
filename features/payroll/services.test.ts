@@ -280,6 +280,9 @@ describe("run lifecycle", () => {
     const row = v.items.find((i) => i.name === "Asha Rao")!;
     expect([row.unpaidHalfDays, row.unmarkedDays]).toEqual([4, 2]);
     await expect(runs.setDays(row.id, { unpaidDays: 1 })).rejects.toBeInstanceOf(ConflictError);
+    await expect(runs.review(run.id)).rejects.toThrow();
+    await runs.countWorked(row.id);
+    expect((await runs.get(run.id)).blockers.filter((x) => x.code === "unmarked")).toHaveLength(0);
     // 2 unpaid days (1 absent + 1 leave day) cut the gross by 2 over the days of the month.
     const cal = new Date(Date.UTC(+month(7).slice(0, 4), +month(7).slice(5, 7), 0)).getUTCDate();
     expect(row.grossPaise).toBe(Math.round((4_000_000 * (2 * cal - 4)) / (2 * cal)));

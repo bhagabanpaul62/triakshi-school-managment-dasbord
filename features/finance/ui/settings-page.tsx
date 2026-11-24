@@ -35,16 +35,18 @@ const cashDetails: Field[] = [
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const settings = new SettingsService(ctx);
-  if (!settings.can("settings")) notFound();
+  // Whoever closes months works on that tab only.
+  const tabs = settings.can("settings") ? TABS : settings.can("close") ? TABS.filter((t) => t.id === "periods") : [];
+  if (!tabs.length) notFound();
   const sp = await searchParams;
-  const tab = TABS.some((t) => t.id === one(sp.tab)) ? one(sp.tab)! : "rules";
+  const tab = tabs.some((t) => t.id === one(sp.tab)) ? one(sp.tab)! : tabs[0]!.id;
   const next = one(sp.next)?.startsWith("/app/") ? one(sp.next) : undefined;
 
   return (
     <>
       <PageHeader eyebrow="Finance" title="Finance setup" description="The school's money rules, document numbering, month locks, bank accounts and cost centres."
         actions={next ? <Link href={next} className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm hover:bg-white/[0.12]">Back to where you were</Link> : null} />
-      <div className="pb-6"><UrlTabs tabs={TABS} value={tab} label="Finance setup" /></div>
+      <div className="pb-6"><UrlTabs tabs={tabs} value={tab} label="Finance setup" /></div>
       {tab === "rules" ? <Rules svc={settings} /> : null}
       {tab === "series" ? <Series ctx={ctx} /> : null}
       {tab === "periods" ? <Periods ctx={ctx} fy={one(sp.fy)} /> : null}

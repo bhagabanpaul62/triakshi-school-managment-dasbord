@@ -1,3 +1,4 @@
+import { shortDate } from "@smw/ui/format";
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
 import { PageHeader, PanelGrid } from "@smw/ui/shell/PageHeader";
@@ -95,7 +96,7 @@ export default async function FeesDashboardPage() {
                   {d.chase.map((r) => (
                     <li key={r.id}>
                       <Link href={`/app/fees/students/${r.id}`} className={row}>
-                        <span className="min-w-0"><span className="block truncate">{r.name}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">{r.classLabel}{r.nextDueDate ? ` · next due ${r.nextDueDate}` : ""}</span></span>
+                        <span className="min-w-0"><span className="block truncate">{r.name}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">{r.classLabel}{r.nextDueDate ? ` · next due ${shortDate(r.nextDueDate)}` : ""}</span></span>
                         <span className="flex items-center gap-3"><StateBadge state="overdue" /><Money paise={r.overdue} tone="danger" /></span>
                       </Link>
                     </li>

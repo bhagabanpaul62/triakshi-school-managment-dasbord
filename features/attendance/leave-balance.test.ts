@@ -260,7 +260,7 @@ describe("monthDays for payroll", () => {
     const out = await withSchool(b.id, (tx) => monthDays(tx, [t], M));
     expect(out[t]).toEqual({
       calendarDays: dates.length, sundays: dates.filter((x) => dow(x) === 0).length, holidays: 1, workingDays: working.length,
-      present: working.length - 6, lateDays: 1, half: 1, paidLeaveHalfDays: 2, unpaidLeaveHalfDays: 2, absentDays: 1.5, unmarkedDays: 1,
+      present: working.length - 6, lateDays: 1, half: 1, paidLeaveHalfDays: 2, unpaidLeaveHalfDays: 2, absentDays: 1.5, unmarkedDays: 1, comingDays: 0,
     });
   });
 

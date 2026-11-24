@@ -87,7 +87,8 @@ export class CounterService extends FeesBase {
   private differenceRequest(c: Counter) {
     const diff = (c.countedPaise ?? 0) - (c.expectedPaise ?? 0);
     const said = (d: number) => (d === 0 ? "matched" : `${rupees(Math.abs(d))} ${d < 0 ? "short" : "over"}`);
-    const firstDiff = c.firstCountedPaise === null ? null : c.firstCountedPaise - (c.firstExpectedPaise ?? 0);
+    const again = c.firstCountedPaise !== null && (c.firstCountedPaise !== c.countedPaise || c.firstExpectedPaise !== c.expectedPaise);
+    const firstDiff = !again ? null : c.firstCountedPaise! - (c.firstExpectedPaise ?? 0);
     const both = firstDiff === null ? "" : ` First count: the box should hold ${rupees(c.firstExpectedPaise ?? 0)}, counted ${rupees(c.firstCountedPaise ?? 0)} (${said(firstDiff)}${c.firstReason ? `: ${c.firstReason}` : ""}). Counted again: should hold ${rupees(c.expectedPaise ?? 0)}, counted ${rupees(c.countedPaise ?? 0)} (${said(diff)}).`;
     return { kind: "fees.counter_difference", refType: "fee_counter", refId: c.id, title: `Counter of ${c.day} is ${firstDiff !== null ? `counted again, ${said(diff)}` : said(diff)}`, amountPaise: Math.abs(diff) || Math.abs(firstDiff ?? 0),
       reason: `${c.differenceReason ?? ""}${both}`.trim(), href: "/app/fees/counter" };

@@ -43,6 +43,7 @@ export async function includePerson(fd: FormData) { return serviceAction(RunServ
 export async function addAdjustment(fd: FormData) { return serviceAction(RunService, (s) => s.addAdjustment(text(fd, "itemId"), { ...formToObject(fd), amountPaise: num(fd, "amountPaise") }), "Added"); }
 export async function removeAdjustment(fd: FormData) { return serviceAction(RunService, (s) => s.removeAdjustment(id(fd)), "Removed"); }
 export async function typeAmount(fd: FormData) { return serviceAction(RunService, (s) => s.setTyped(text(fd, "itemId"), text(fd, "code"), num(fd, "amountPaise")), "Amount saved"); }
+export async function countWorked(fd: FormData) { return serviceAction(RunService, (s) => s.countWorked(text(fd, "itemId")).then(() => ({ id: text(fd, "itemId") })), "Counted as worked"); }
 export async function setDays(fd: FormData) { return serviceAction(RunService, (s) => s.setDays(text(fd, "itemId"), formToObject(fd)), "Days saved"); }
 
 // payouts

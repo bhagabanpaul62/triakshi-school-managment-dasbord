@@ -121,6 +121,12 @@ export class ReportService extends PayrollService {
   }
 
   /** The EPFO return file for a month: one line per person, fields joined by "#~#". The wages are the ones stored with each person's pay when it was worked out. */
+  /** How many people the PF return of a month would list. Zero means there is no file yet. */
+  async ecrCount(rawMonth: string): Promise<number> {
+    const month = monthStart(`${rawMonth.slice(0, 7)}-01`);
+    return this.read("read", async (tx) => (await this.month(tx, month)).filter((r) => r.sum((c) => c === "pf_employee") > 0).length);
+  }
+
   async ecr(rawMonth: string): Promise<{ filename: string; text: string; count: number }> {
     this.authorize("manage", "read");
     const month = monthStart(`${rawMonth.slice(0, 7)}-01`);

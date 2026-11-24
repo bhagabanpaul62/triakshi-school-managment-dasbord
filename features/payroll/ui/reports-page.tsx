@@ -34,7 +34,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   return (
     <>
       <PageHeader eyebrow="Payroll" title="Reports" description="Registers and files for the books, the bank and the offices. Each downloads as a file."
-        actions={<>{svc.can("manage") && (name === "register" || name === "pt" || name === "tds" || name === "esi") ? <a href={`/app/payroll/files/ecr?month=${month}`} download className={PILL_BTN}>PF return file</a> : null}</>} />
+        actions={<>{svc.can("manage") && (name === "register" || name === "pt" || name === "tds" || name === "esi") && await svc.ecrCount(month) ? <a href={`/app/payroll/files/ecr?month=${month}`} download className={PILL_BTN}>PF return file</a> : null}</>} />
       <PayNav active="reports" manager />
       <nav aria-label="Reports" className="mb-5 flex flex-wrap gap-2">
         {(Object.keys(REPORT_NAMES) as ReportName[]).filter((k) => k !== "statement").map((k) => (

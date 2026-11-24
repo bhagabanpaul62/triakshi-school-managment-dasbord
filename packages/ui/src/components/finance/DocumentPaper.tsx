@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "../../lib/utils";
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { DocumentConfig, DocumentData, DocumentField, DocumentKind, DocumentLayout } from "./document-types";
 
@@ -152,7 +153,7 @@ export function DocumentPaper({ config, data, kind, mode = "screen", className }
   const thumb = mode === "thumb";
 
   return (
-    <div ref={box} className={className} data-fin-thumb={thumb ? "" : undefined}>
+    <div ref={box} className={cn("min-w-0 max-w-full overflow-x-auto", className)} data-fin-thumb={thumb ? "" : undefined}>
       <style>{PRINT_CSS}</style>
       <div
         data-fin-print={thumb ? undefined : ""}

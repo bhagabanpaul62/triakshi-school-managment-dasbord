@@ -134,7 +134,8 @@ export class PlanService extends FeesBase {
       const [approval, { planNeedsFile }] = await Promise.all([this.approvalsIn(tx, ["fees.plan"], [id]).then((m) => m.get(id) ?? null), this.settings(tx)]);
       // The file route checks the caller is signed in to this school and redirects to a short-lived signed link, so an approver can open it too.
       const approvalFile = plan.approvalFileKey ? { name: plan.approvalFileKey.split("/").pop()!.replace(/^[0-9a-f-]{36}-/, ""), href: `/api/files/${plan.approvalFileKey}` } : null;
-      return { plan, classes: cls, lines: full, versions, totalPaise, approval, approvalFile, fileRequired: planNeedsFile };
+      const clash = plan.status === "draft" ? await this.clashIn(tx, plan) : null;
+      return { plan, classes: cls, lines: full, versions, totalPaise, approval, approvalFile, fileRequired: planNeedsFile, clash };
     });
   }
 
@@ -285,10 +286,17 @@ export class PlanService extends FeesBase {
     const cls = await tx.select({ classId: feePlanClasses.classId, name: classes.name }).from(feePlanClasses).innerJoin(classes, eq(classes.id, feePlanClasses.classId)).where(eq(feePlanClasses.planId, p.id));
     const lines = await tx.select({ id: feePlanLines.id }).from(feePlanLines).where(eq(feePlanLines.planId, p.id));
     if (!cls.length || !lines.length) throw new ConflictError("A plan needs classes and at least one fee.");
-    // Another plan of the same kind of admission on a class would make two prices for one student.
-    const clash = await tx.select({ cls: classes.name, plan: feePlans.name }).from(feePlans).innerJoin(feePlanClasses, eq(feePlanClasses.planId, feePlans.id)).innerJoin(classes, eq(classes.id, feePlanClasses.classId))
-      .where(and(eq(feePlans.yearId, p.yearId), eq(feePlans.status, "published"), ne(feePlans.rootId, p.rootId), eq(feePlans.admissionType, p.admissionType), inArray(feePlanClasses.classId, cls.map((c) => c.classId)))).limit(1);
-    if (clash[0]) throw new ConflictError(`${clash[0].cls} already has a published plan (${clash[0].plan}) for the same kind of admission.`);
+    const clash = await this.clashIn(tx, p);
+    if (clash) throw new ConflictError(`${clash.cls} already has a published plan (${clash.plan}) for the same kind of admission. Make a new version of that plan instead.`);
+  }
+
+  /** Another published plan of the same kind of admission on one of these classes would make two prices for one student. */
+  private async clashIn(tx: Tx, p: Plan): Promise<{ id: string; cls: string; plan: string } | null> {
+    const cls = await tx.select({ classId: feePlanClasses.classId }).from(feePlanClasses).where(eq(feePlanClasses.planId, p.id));
+    if (!cls.length) return null;
+    const [clash] = await tx.select({ id: feePlans.id, cls: classes.name, plan: feePlans.name }).from(feePlans).innerJoin(feePlanClasses, eq(feePlanClasses.planId, feePlans.id)).innerJoin(classes, eq(classes.id, feePlanClasses.classId))
+      .where(and(eq(feePlans.yearId, p.yearId), eq(feePlans.status, "published"), ne(feePlans.rootId, p.rootId), eq(feePlans.admissionType, p.admissionType), inArray(feePlanClasses.classId, cls.map((c) => c.classId)))).orderBy(asc(classes.grade)).limit(1);
+    return clash ?? null;
   }
 
   /** Make a plan live and retire the older version of its root. Used by the approval and by seeds. No permission check. */

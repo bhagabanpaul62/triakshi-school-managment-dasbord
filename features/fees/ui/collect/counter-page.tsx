@@ -50,13 +50,14 @@ export default async function CounterPage({ searchParams }: { searchParams: Sear
   const sp = await searchParams;
   const counters = new CounterService(ctx);
   const [cur, history, config] = await Promise.all([counters.current(), counters.history(), new DeskService(ctx).config()]);
+  const closedToday = history.some((h) => h.userId === ctx.userId && h.day === config.today && h.closedAt);
   const justClosed = history.find((h) => h.id === one(sp.closed));
   const canMove = allows(ctx, financeFeature, "journal"), approver = allows(ctx, financeFeature, "approve"), admin = ctx.role === "admin";
 
   return (
     <>
       <PageHeader eyebrow="Fees" title="Cash counter" description="Open with a float, take money all day, count it at the end, hand it over or bank it."
-        actions={cur ? <CloseCounter counterId={cur.counter.id} expectedPaise={cur.expectedPaise} primary /> : justClosed ? <OpenCounter /> : null} />
+        actions={cur ? <CloseCounter counterId={cur.counter.id} expectedPaise={cur.expectedPaise} primary /> : null} />
       <DeskNav ctx={ctx} current="/app/fees/counter" />
 
       {justClosed ? (
@@ -93,8 +94,8 @@ export default async function CounterPage({ searchParams }: { searchParams: Sear
       ) : (
         <>
           {!justClosed ? (
-            <Notice tone="info" action={<OpenCounter />}>
-              {history.some((h) => h.userId === ctx.userId && h.day === config.today && h.closedAt) ? "Your counter for today is closed, and a closed day takes no more money. Open a new one tomorrow, or ask an admin." : "Your counter is closed. Open it with the cash already in the box to take cash today."}
+            <Notice tone="info" action={closedToday ? undefined : <OpenCounter />}>
+              {closedToday ? "Your counter for today is closed, and a closed day takes no more money. Open a new one tomorrow, or ask an admin." : "Your counter is closed. Open it with the cash already in the box to take cash today."}
             </Notice>
           ) : null}
           {!config.usesCounters ? <EmptyLine title="Nobody has opened a counter yet." hint="Until the first one is opened, cash can be taken without it. Once it is, cash needs an open counter." /> : null}

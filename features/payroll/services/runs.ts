@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNotNull, lt, lte, ne, sql } from "drizzle-orm
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
-import { monthStart, todayIST } from "@smw/feature-kit/money";
+import { monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
 import { finApprovals } from "@smw/feature-finance/schema";
 import { computeMonth, refreshTotals, saveItem, ratesOf, TYPED_CODES, type CalcEnv, type ItemRow, type LineRow } from "../compute";
 import { monthLabel } from "../csv";
@@ -88,6 +88,7 @@ export class RunService extends PayrollService {
       const names = new Map([...people].map(([id, p]) => [id, p.name]));
       const blockers = reviewBlockers(run, items.filter((i) => !i.skippedReason), names, lines, profiles, this.attendanceOn);
       const warnings: Warning[] = [];
+      if (this.attendanceOn && run.status === "draft" && run.kind === "monthly" && monthEnd(run.month) > todayIST()) warnings.push({ code: "early", message: "The month is not over. The days still to come are paid as worked; take any later absence off next month." });
       const recent = new Date(Date.now() - 30 * 86_400_000);
       for (const v of live) {
         const changed = profiles.find((x) => x.userId === v.userId)?.bankChangedAt;
@@ -308,6 +309,17 @@ export class RunService extends PayrollService {
       await tx.update(payItems).set(set).where(eq(payItems.id, itemId));
       await this.touch(tx, run, item.userId);
     }, () => ({ action: "set_days", entity: "PayItem", entityId: itemId, summary: "Changed days or hours" }));
+  }
+
+  /** Days nobody marked: pay them as worked, on record with who decided. */
+  async countWorked(itemId: string): Promise<void> {
+    await this.write("manage", async (tx) => {
+      const { item, run } = await this.itemOf(tx, itemId);
+      await this.notSelf(tx, item.userId, "count your own unmarked days as worked");
+      await tx.update(payItems).set({ unmarkedOk: item.unmarkedDays }).where(eq(payItems.id, itemId));
+      await this.touch(tx, run, item.userId);
+      return item.unmarkedDays;
+    }, (n) => ({ action: "set_days", entity: "PayItem", entityId: itemId, summary: `Counted ${n} unmarked day${n === 1 ? "" : "s"} as worked` }));
   }
 
   // ---------------------------------------------------------------- lifecycle

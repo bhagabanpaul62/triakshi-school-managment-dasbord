@@ -15,9 +15,11 @@ export const DEMO_PASSWORD = "demo12345";
 /** Fixed TOTP secret for the local console owner, so tests can compute codes. Local only. */
 export const DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
-const SCHOOLS = [
+const SCHOOLS: { slug: string; name: string; status: "active" | "trial"; plan: string; board: string; state: string; city: string; preset: string; bare?: boolean }[] = [
   { slug: "greenvalley", name: "Green Valley Public School", status: "active" as const, plan: "pro", board: "CBSE", state: "Karnataka", city: "Bengaluru", preset: "ocean" },
   { slug: "sunrise", name: "Sunrise International School", status: "trial" as const, plan: "starter", board: "ICSE", state: "Maharashtra", city: "Pune", preset: "maroon" },
+  // First day: a school with an admin and an accountant and nothing else.
+  { slug: "riverside", name: "Riverside School", status: "active" as const, plan: "pro", board: "CBSE", state: "Kerala", city: "Kochi", preset: "ocean", bare: true },
 ];
 
 const ROLE_USERS: { role: SchoolRole; loginId: string; name: string }[] = [
@@ -53,6 +55,7 @@ async function main() {
   });
 
   for (const s of ids) {
+    if (SCHOOLS.find((x) => x.slug === s.slug)?.bare) continue;
     const ctx: Ctx = { schoolId: s.id, userId: s.adminId, role: "admin", name: "Seed", features: new Set(FEATURES.map((f) => f.key)), readOnly: false };
     const state: Record<string, unknown> = { slug: s.slug, password: DEMO_PASSWORD, passwordHash: hash };
     // The books first: what the other modules spend and collect posts into them.

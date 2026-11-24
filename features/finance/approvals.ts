@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { users, type Tx } from "@smw/db";
+import { schoolRoles, users, withSchool, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, SchoolService, allows, type Ctx, type Page, type ListQuery, listQuerySchema, toPage } from "@smw/feature-kit";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import financeFeature from "./feature";
@@ -21,12 +21,17 @@ export type ApprovalHandlers = Record<string, ApprovalHandler>;
 
 export interface ApprovalRequest { kind: string; refType: string; refId: string; title: string; amountPaise: number; reason: string; href?: string }
 
+/** Who may decide a request: active admins and anyone whose custom role holds finance:approve, besides one person. */
+export async function approversOf(tx: Tx, exceptUserId: string): Promise<{ id: string; name: string }[]> {
+  return tx.select({ id: users.id, name: users.name }).from(users).leftJoin(schoolRoles, eq(schoolRoles.id, users.roleId))
+    .where(and(eq(users.status, "active"), ne(users.id, exceptUserId), or(eq(users.role, "admin"), sql`${"finance:approve"} = any(${schoolRoles.grants})`)));
+}
+
 /** Ask for approval from inside the caller's transaction. One open request per document. */
 export async function requestApproval(tx: Tx, ctx: Ctx, r: ApprovalRequest): Promise<Approval> {
   const [row] = await tx.insert(finApprovals).values({ schoolId: ctx.schoolId, requestedBy: ctx.userId, ...r }).onConflictDoNothing().returning();
   if (!row) throw new ConflictError("This is already waiting for approval.");
-  const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"), ne(users.id, ctx.userId)));
-  await NotificationWriter.insert(tx, ctx.schoolId, admins.map((a) => ({ userId: a.id, kind: "fee_due" as const, title: "Approval needed", body: r.title, href: "/app/finance/approvals" })));
+  await NotificationWriter.insert(tx, ctx.schoolId, (await approversOf(tx, ctx.userId)).map((a) => ({ userId: a.id, kind: "fee_due" as const, title: "Approval needed", body: r.title, href: "/app/finance/approvals" })));
   return row;
 }
 
@@ -48,6 +53,16 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
       const ids = [...new Set(rows.flatMap((r) => [r.requestedBy, r.decidedBy]).filter((x): x is string => !!x))];
       const names = new Map(ids.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))).map((u) => [u.id, u.name]) : []);
       return toPage(rows.map((r) => ({ ...r, requestedByName: names.get(r.requestedBy) ?? null, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null })), Number(n?.n ?? 0), q);
+    });
+  }
+
+  /** What I asked for myself, newest first: open to everyone, so a cashier sees where their request stands. */
+  async mine(): Promise<(Approval & { decidedByName: string | null })[]> {
+    return withSchool(this.ctx.schoolId, async (tx) => {
+      const rows = await tx.select().from(finApprovals).where(eq(finApprovals.requestedBy, this.ctx.userId)).orderBy(desc(finApprovals.createdAt)).limit(100);
+      const ids = [...new Set(rows.flatMap((r) => r.decidedBy ?? []))];
+      const names = new Map(ids.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))).map((u) => [u.id, u.name]) : []);
+      return rows.map((r) => ({ ...r, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null }));
     });
   }
 

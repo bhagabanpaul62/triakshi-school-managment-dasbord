@@ -17,8 +17,9 @@ import { FormModal } from "@smw/ui/shell/FormModal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { shortDate } from "@smw/ui/format";
 import { PayoutService } from "../services/payouts";
+import { ReportService } from "../services/reports";
 import { ADJUSTMENT_CODES, RunService, type ItemDetail, type RunView } from "../services/runs";
-import { addAdjustment, addPerson, confirmBank, cancelRun, includePerson, recomputeRun, removeAdjustment, withdrawRequest, reopenRun, requestRecall, retryPayout, reviewRun, setDays, skipPerson, submitRun, switchPayBy, typeAmount, markFailed, markPaid } from "./actions";
+import { addAdjustment, addPerson, confirmBank, countWorked, cancelRun, includePerson, recomputeRun, removeAdjustment, withdrawRequest, reopenRun, requestRecall, retryPayout, reviewRun, setDays, skipPerson, submitRun, switchPayBy, typeAmount, markFailed, markPaid } from "./actions";
 import { NoAccess, PILL_BTN, PRIMARY_BTN, PayNav, RUN_KIND_LABEL, monthName, one, type Search } from "./common";
 import { PeekByUrl } from "./peek-by-url";
 
@@ -106,7 +107,8 @@ export default async function RunPage({ params, searchParams }: { params: Promis
               <li key={i} className="flex flex-wrap items-center justify-between gap-2"><span>{b.message}</span>
                 <span className="flex gap-2">
                   {b.fix === "switch_pay_by" && manage ? <ActionButton action={switchPayBy} values={{ userId: b.userId!, payBy: "cash" }} label="Pay by cash" variant="secondary" /> : null}
-                  <Link href={b.href} className="underline">Fix it</Link>
+                  {b.fix === "count_worked" && manage ? <ActionButton action={countWorked} values={{ itemId: b.itemId! }} label="Count as worked" variant="secondary" /> : null}
+                  <Link href={b.href} className="underline">{b.fix === "count_worked" ? "Open attendance" : "Fix it"}</Link>
                 </span>
               </li>
             ))}
@@ -146,7 +148,7 @@ export default async function RunPage({ params, searchParams }: { params: Promis
             <li><a className="underline" href={`/app/payroll/files/register-csv?run=${id}`} download>Salary register (CSV)</a></li>
             {["approved", "paid"].includes(run.status) ? <li><a className="underline" href={`/app/payroll/files/bank-file?run=${id}`} download>Bank file (CSV)</a></li> : null}
             <li><Link className="underline" href={`/app/payroll/reports?report=bank&runId=${id}`}>Bank advice</Link></li>
-            {manage ? <li><a className="underline" href={`/app/payroll/files/ecr?month=${run.month.slice(0, 7)}`} download>PF return file</a></li> : null}
+            {manage && await new ReportService(ctx).ecrCount(run.month) ? <li><a className="underline" href={`/app/payroll/files/ecr?month=${run.month.slice(0, 7)}`} download>PF return file</a></li> : null}
             <li><Link className="underline" href={`/app/payroll/reports?report=esi&period=${run.month.slice(0, 7)}`}>ESI sheet</Link></li>
             <li><Link className="underline" href={`/app/payroll/reports?report=pt&period=${run.month.slice(0, 7)}`}>Professional tax register</Link></li>
             <li><Link className="underline" href={`/app/payroll/reports?report=tds&period=${run.month.slice(0, 7)}`}>Income tax register</Link></li>

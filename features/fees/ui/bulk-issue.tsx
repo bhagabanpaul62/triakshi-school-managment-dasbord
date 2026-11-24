@@ -1,5 +1,6 @@
 "use client";
 
+import { shortDate } from "@smw/ui/format";
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Button } from "@smw/ui/ui/button";
@@ -116,7 +117,7 @@ export function BulkIssue({ years, classes, dueKeys }: { years: { id: string; na
               </dl>
               <div className="custom-scrollbar overflow-x-auto">
                 <table className="w-full min-w-[560px] text-sm"><thead><tr className="text-left text-xs text-[var(--ds-on-surface-muted)]"><th className="py-2 font-normal">Student</th><th className="py-2 font-normal">Bill</th><th className="py-2 font-normal">Due</th><th className="py-2 text-right font-normal">Billed</th><th className="py-2 text-right font-normal">Concession</th><th className="py-2 text-right font-normal">Pays</th></tr></thead>
-                  <tbody>{shown.map((r, i) => <tr key={`${r.studentId}${i}`} className="border-t border-white/[0.06]"><td className="py-2"><Link href={`/app/fees/students/${r.studentId}`} className={LINK}>{r.studentName}</Link> <span className={MUTED}>{r.admissionNo}</span></td><td className="py-2">{r.label}</td><td className="py-2 whitespace-nowrap">{r.dueOn}</td><td className="py-2 text-right"><Money paise={r.grossPaise} /></td><td className="py-2 text-right"><Money paise={r.concessionPaise || null} /></td><td className="py-2 text-right"><Money paise={r.duePaise} /></td></tr>)}</tbody></table>
+                  <tbody>{shown.map((r, i) => <tr key={`${r.studentId}${i}`} className="border-t border-white/[0.06]"><td className="py-2"><Link href={`/app/fees/students/${r.studentId}`} className={LINK}>{r.studentName}</Link> <span className={MUTED}>{r.admissionNo}</span></td><td className="py-2">{r.label}</td><td className="py-2 whitespace-nowrap">{shortDate(r.dueOn)}</td><td className="py-2 text-right"><Money paise={r.grossPaise} /></td><td className="py-2 text-right"><Money paise={r.concessionPaise || null} /></td><td className="py-2 text-right"><Money paise={r.duePaise} /></td></tr>)}</tbody></table>
               </div>
               {preview.rows.length > SHOWN && !all ? <button type="button" onClick={() => setAll(true)} className="mt-3 text-sm underline underline-offset-4">Show all {preview.rows.length} bills</button> : null}
             </>

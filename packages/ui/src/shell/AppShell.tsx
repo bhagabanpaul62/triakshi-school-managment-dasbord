@@ -117,7 +117,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
           </button>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">{topbar}</div>
         </header>
-        <main className="min-w-0 flex-1 px-4 pb-12 sm:px-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 pb-12 sm:px-8">{/* A block of auto height: a panel that fills its grid cell must not stretch over the page when it stands alone. */}<div>{children}</div></main>
       </div>
     </div>
   );

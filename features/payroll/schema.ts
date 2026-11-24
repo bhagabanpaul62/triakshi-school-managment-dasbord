@@ -104,6 +104,8 @@ export const payItems = pgTable("pay_items", {
   paidHalfDays: integer("paid_half_days").notNull(),
   unpaidHalfDays: integer("unpaid_half_days").notNull().default(0),
   unmarkedDays: integer("unmarked_days").notNull().default(0),
+  /** How many unmarked days someone decided to count as worked. More than that blocks review again. */
+  unmarkedOk: integer("unmarked_ok"),
   hours: numeric("hours", { precision: 8, scale: 2 }),
   grossPaise: paise("gross_paise").notNull().default(0),
   deductionsPaise: paise("deductions_paise").notNull().default(0),

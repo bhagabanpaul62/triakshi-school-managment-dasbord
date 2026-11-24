@@ -1,5 +1,6 @@
 "use client";
 
+import { shortDate } from "@smw/ui/format";
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@smw/ui/ui/button";
@@ -93,7 +94,7 @@ export function SettlementBuilder({ studentId, studentName, bills, advancePaise,
         <div className="grid gap-5 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,20rem)]">
           <div className="flex min-w-0 flex-col gap-4">
             <fieldset><legend className="mb-2 text-sm font-medium">Bills in the deal</legend>
-              <ul className="flex flex-col gap-1">{bills.map((b) => <li key={b.id}><label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl bg-white/[0.04] px-3 py-2 text-sm"><span className="flex items-center gap-3"><input type="checkbox" checked={picked.includes(b.id)} onChange={() => setPicked((x) => (x.includes(b.id) ? x.filter((i) => i !== b.id) : [...x, b.id]))} className="accent-[var(--ds-primary)]" /><span>{b.number ?? b.label}<span className={`${MUTED} ml-2`}>{b.label}, due {b.dueDate}</span></span></span><Money paise={b.openPaise + b.accruedLatePaise} /></label></li>)}</ul>
+              <ul className="flex flex-col gap-1">{bills.map((b) => <li key={b.id}><label className="flex min-h-11 cursor-pointer items-center justify-between gap-3 rounded-xl bg-white/[0.04] px-3 py-2 text-sm"><span className="flex items-center gap-3"><input type="checkbox" checked={picked.includes(b.id)} onChange={() => setPicked((x) => (x.includes(b.id) ? x.filter((i) => i !== b.id) : [...x, b.id]))} className="accent-[var(--ds-primary)]" /><span>{b.number ?? b.label}<span className={`${MUTED} ml-2`}>{b.label}, due {shortDate(b.dueDate)}</span></span></span><Money paise={b.openPaise + b.accruedLatePaise} /></label></li>)}</ul>
             </fieldset>
             <label className="flex items-center gap-3 text-sm"><input type="checkbox" checked={waive} onChange={(e) => setWaive(e.target.checked)} className="accent-[var(--ds-primary)]" />Waive the late fee (built up and charged)</label>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -122,7 +123,7 @@ export function SettlementBuilder({ studentId, studentName, bills, advancePaise,
               <dl className="flex flex-col gap-1 text-sm">
                 {rows.map(([k, v]) => v === 0 && k !== "Open now" ? null : <div key={k} className="flex justify-between gap-3"><dt className="text-[var(--ds-on-surface-muted)]">{k}</dt><dd><Money paise={v} /></dd></div>)}
                 <div className="mt-1 flex justify-between gap-3 border-t border-white/[0.12] pt-2 font-medium"><dt>Family pays</dt><dd><Money paise={shown.remainingPaise} size="lg" /></dd></div>
-                {shown.parts.length ? <div className="mt-3"><dt className={`${MUTED} mb-1`}>Dated parts</dt>{shown.parts.map((x, i) => <dd key={i} className="flex justify-between"><span>{x.dueOn}</span><Money paise={x.amountPaise} /></dd>)}</div> : null}
+                {shown.parts.length ? <div className="mt-3"><dt className={`${MUTED} mb-1`}>Dated parts</dt>{shown.parts.map((x, i) => <dd key={i} className="flex justify-between"><span>{shortDate(x.dueOn)}</span><Money paise={x.amountPaise} /></dd>)}</div> : null}
               </dl>
             )}
             <p className={`${MUTED} mt-3`}>Reminders and the late fee follow the new dates from the day it is approved.</p>

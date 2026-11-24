@@ -25,7 +25,23 @@ const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 export default async function ApprovalsPage({ searchParams, handlers, approve, reject, withdraw }: { searchParams: Search; handlers: ApprovalHandlers; approve: (fd: FormData) => Promise<FormResult>; reject: (fd: FormData) => Promise<FormResult>; withdraw: (fd: FormData) => Promise<FormResult> }) {
   const ctx = await requireCtx();
   const svc = new ApprovalService(ctx, handlers);
-  if (!svc.can("approve")) notFound();
+  if (!svc.can("approve")) {
+    if (ctx.role === "student") notFound();
+    const mine = await svc.mine(), waitingFor = await new ApprovalDeskService(ctx).approvers(ctx.userId);
+    return (
+      <>
+        <PageHeader eyebrow="Finance" title="My requests" description="What you asked for and where each request stands." />
+        {mine.length === 0 ? <EmptyLine title="You have not asked for anything yet." hint="Reversals, concessions, refunds and other requests you send for approval show up here." /> : (
+          <div className="flex flex-col gap-3">{mine.map((r) => (
+            <ApprovalCard key={r.id} approve={approve} reject={reject} withdraw={withdraw} canDecide={false} a={{
+              id: r.id, title: r.title, amountPaise: r.amountPaise, reason: r.reason, href: r.href, status: r.status, requestedByName: ctx.name, decidedByName: r.decidedByName,
+              createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null, note: r.note, selfApproved: r.selfApproved, mine: true, waitingFor,
+            }} />
+          ))}</div>
+        )}
+      </>
+    );
+  }
   const sp = await searchParams;
   const status = one(sp.status) ?? "pending", page = Math.max(1, Number(one(sp.page)) || 1);
   const { rows, total, pageCount } = await svc.list({ page, pageSize: PAGE, filters: { status, kind: one(sp.kind) } });

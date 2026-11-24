@@ -9,6 +9,7 @@ import { INPUT } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { MoneyInput } from "@smw/ui/finance/MoneyInput";
 import { Money } from "@smw/ui/finance/Money";
+import { addDays } from "@smw/feature-kit/money";
 import { RecordPicker, type PickerOption } from "@smw/ui/finance/RecordPicker";
 import { previewBill, saveBill, findVendors } from "./actions";
 
@@ -71,7 +72,7 @@ export function BillForm({ accounts, centres, vehicles, today, vendor, bill, def
         <div className="grid gap-4 sm:grid-cols-3">
           <label className={field}>Bill number<input name="billNo" defaultValue={bill?.billNo} required className={INPUT} aria-invalid={errors.billNo ? true : undefined} />{errors.billNo ? <span className="text-xs text-[var(--ds-color-danger-400)]">{errors.billNo}</span> : null}</label>
           <label className={field}>Bill date<input type="date" name="billDate" value={billDate} max={today} onChange={(e) => setBillDate(e.target.value)} required className={INPUT} /></label>
-          <label className={field}>Due date<input type="date" name="dueDate" defaultValue={bill?.dueDate} required className={INPUT} aria-invalid={errors.dueDate ? true : undefined} />{errors.dueDate ? <span className="text-xs text-[var(--ds-color-danger-400)]">{errors.dueDate}</span> : null}</label>
+          <label className={field}>Due date<input type="date" name="dueDate" defaultValue={bill?.dueDate ?? addDays(today, 30)} required className={INPUT} aria-invalid={errors.dueDate ? true : undefined} />{errors.dueDate ? <span className="text-xs text-[var(--ds-color-danger-400)]">{errors.dueDate}</span> : null}</label>
         </div>
 
         <fieldset className="flex flex-col gap-3">

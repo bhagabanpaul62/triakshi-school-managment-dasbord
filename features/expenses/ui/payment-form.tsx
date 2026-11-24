@@ -1,5 +1,6 @@
 "use client";
 
+import { shortDate } from "@smw/ui/format";
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -58,7 +59,7 @@ export function PaymentForm({ vendor, open, chosen, cashAccounts, today }: Payme
           {open.map((b) => (
             <div key={b.id} className="grid items-center gap-2 rounded-2xl bg-white/[0.03] p-3 sm:grid-cols-[auto_1fr_10rem]">
               <input type="checkbox" aria-label={`Pay bill ${b.billNo}`} checked={b.id in amounts} className="h-5 w-5 accent-[var(--ds-primary)]" onChange={(e) => setAmounts((a) => { const n = { ...a }; if (e.target.checked) n[b.id] = b.openPaise; else delete n[b.id]; return n; })} />
-              <Link href={`/app/expenses/bills?bill=${b.id}`} className="min-w-0 text-sm"><span className="block">{b.billNo}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">due {b.dueDate} · owes <Money paise={b.openPaise} /></span></Link>
+              <Link href={`/app/expenses/bills?bill=${b.id}`} className="min-w-0 text-sm"><span className="block">{b.billNo}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">due {shortDate(b.dueDate)} · owes <Money paise={b.openPaise} /></span></Link>
               {b.id in amounts ? <MoneyInput label={`Amount for ${b.billNo}`} labelHidden valuePaise={amounts[b.id]} max={b.openPaise} onChange={(p) => setAmounts((a) => ({ ...a, [b.id]: p }))} /> : <span className="text-xs text-[var(--ds-on-surface-muted)]">Not in this payment</span>}
             </div>
           ))}

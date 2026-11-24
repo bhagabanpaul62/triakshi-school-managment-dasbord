@@ -1,7 +1,7 @@
-import { and, eq, ne, sql } from "drizzle-orm";
-import { schoolRoles, users, withSchool } from "@smw/db";
+import { eq } from "drizzle-orm";
+import { withSchool } from "@smw/db";
 import { ConflictError, FeatureOffError, NotFoundError, ReadOnlyError, SchoolService, type Ctx } from "@smw/feature-kit";
-import type { ApprovalHandlers } from "../approvals";
+import { approversOf, type ApprovalHandlers } from "../approvals";
 import financeFeature from "../feature";
 import { finApprovals } from "../schema";
 import type { FinancePermission } from "./common";
@@ -29,13 +29,6 @@ export class ApprovalDeskService extends SchoolService<FinancePermission> {
 
   /** Who a pending request waits for: the other active admins and anyone whose custom role holds finance:approve. */
   async approvers(exceptUserId: string): Promise<string[]> {
-    return withSchool(this.ctx.schoolId, async (tx) => {
-      const active = and(eq(users.status, "active"), ne(users.id, exceptUserId));
-      const [admins, custom] = await Promise.all([
-        tx.select({ name: users.name }).from(users).where(and(eq(users.role, "admin"), active)),
-        tx.select({ name: users.name }).from(users).innerJoin(schoolRoles, eq(schoolRoles.id, users.roleId)).where(and(active, sql`${"finance:approve"} = any(${schoolRoles.grants})`)),
-      ]);
-      return [...new Set([...admins, ...custom].map((u) => u.name))];
-    });
+    return withSchool(this.ctx.schoolId, async (tx) => [...new Set((await approversOf(tx, exceptUserId)).map((u) => u.name))]);
   }
 }

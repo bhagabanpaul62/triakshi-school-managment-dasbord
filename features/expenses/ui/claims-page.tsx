@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { shortDate } from "@smw/ui/format";
 import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
@@ -42,7 +43,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Searc
   const rows = page.rows.map((r) => {
     const d = details.get(r.id);
     const note = r.status === "rejected" ? `Turned down: ${d?.approval?.note ?? "no reason written"}` : r.state === "pending" ? `Waiting for ${d?.waitingFor.join(" or ") ?? "an approver"}` : r.status === "submitted" ? "Waiting for an accountant or admin"
-      : r.status === "approved" ? (r.payWith === "salary" ? "Will be paid with salary" : "Approved, payment to follow") : r.status === "paid" ? `Paid ${r.paidOn ?? ""}` : "";
+      : r.status === "approved" ? (r.payWith === "salary" ? "Will be paid with salary" : "Approved, payment to follow") : r.status === "paid" ? `Paid ${r.paidOn ? shortDate(r.paidOn) : ""}` : "";
     return { ...r, note };
   });
   const newClaim = <FormModal {...form("New claim")} icon="money" size="lg" action={saveClaim} submitLabel="Send claim" values={{ spentOn: todayIST(), payWith: "now" }} trigger={{ label: "New claim", plus: true }} summary={<p className="text-sm text-[var(--ds-on-surface-variant)]">An accountant checks it, then you are paid back.</p>} />;
