@@ -65,7 +65,7 @@ export const BackLink = ({ href, children }: { href: string; children: ReactNode
 /** A bill or student id shown as a link, never bare. */
 export const Ref = ({ href, children }: { href: string; children: ReactNode }) => <Link href={href} className="underline underline-offset-4 hover:text-[var(--ds-primary)]">{children}</Link>;
 
-export const SECTION = "rounded-3xl bg-[var(--ds-surface-container-low)] p-5";
+export const SECTION = "min-w-0 rounded-3xl bg-[var(--ds-surface-container-low)] p-5";
 export const H2 = "mb-3 text-sm font-medium text-[var(--ds-on-surface-variant)]";
 /** `YYYY-MM-DD` or a timestamp as "10 Nov 2026" (server and browser agree: fixed zone). */
 export const day = (d: string | Date) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });

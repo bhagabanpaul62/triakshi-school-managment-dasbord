@@ -461,12 +461,10 @@ test("J1 first day: nothing is set up; the checklist leads, step by step, to the
   await expect(admin.locator("main")).toContainText(/set up your books/i);
   // The bank account and the UPI ID.
   await admin.goto(river("finance/settings?tab=cash"));
-  await admin.getByRole("button", { name: /new account|add/i }).first().click();
-  await dialog(admin).getByLabel("Name", { exact: false }).first().fill("Riverside bank");
-  const kind = dialog(admin).getByLabel(/kind|type/i);
-  if (await kind.count()) await kind.first().selectOption("bank");
-  await dialog(admin).getByLabel("UPI ID").fill("riverside@okbank");
-  await dialog(admin).getByRole("button", { name: /add|save|create/i }).last().click();
+  await admin.getByRole("button", { name: "New cash or bank account" }).click();
+  await dialog(admin).locator("input[name=name]").fill("Riverside bank");
+  await dialog(admin).locator("input[name=upiId]").fill("riverside@okbank");
+  await dialog(admin).getByRole("button", { name: "Add" }).click();
   await expect(admin.locator("main")).toContainText("Riverside bank", { timeout: 20_000 });
   // What it held when the books started.
   await admin.goto(river("finance/banking"));

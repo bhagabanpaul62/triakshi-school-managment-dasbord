@@ -50,7 +50,7 @@ test("admin: understand plan, compare plans, pay, download invoice", async ({ pa
 
   const [dl] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("link", { name: /download invoice .* as pdf/i }).first().click(),
+    page.getByRole("link", { name: /download (invoice|receipt) .* as pdf/i }).first().click(),
   ]);
   expect(dl.suggestedFilename()).toMatch(/\.pdf$/);
 });

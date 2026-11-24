@@ -23,7 +23,7 @@ export function KeyTotals({ items, className }: KeyTotalsProps) {
   return (
     <dl className={cn("grid grid-cols-2 gap-x-6 gap-y-4 sm:flex sm:flex-wrap sm:items-end sm:gap-x-10", className)}>
       {items.map((it) => (
-        <div key={it.label} className="min-w-0">
+        <div key={it.label} className={cn("min-w-0", it.strong && "max-sm:col-span-2")}>
           <dt className="truncate text-[13px] text-[var(--ds-on-surface-variant)]">{it.label}</dt>
           <dd className="mt-1">
             <Money paise={it.paise} tone={it.tone} size={it.strong ? "xl" : "lg"} />
