@@ -3,7 +3,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { auditLogs, uuidv7, type Tx } from "@smw/db";
 import { systemCtx } from "@smw/feature-kit";
-import { apportion, fyOf, todayIST } from "@smw/feature-kit/money";
+import { apportion, todayIST } from "@smw/feature-kit/money";
 import { cashAccount, type PostLine } from "@smw/feature-finance/posting";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { studentEnrollments, students } from "@smw/feature-students/schema";

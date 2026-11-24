@@ -18,8 +18,9 @@ import { FinanceDashboardService } from "../services/dashboard";
 import type { ControlCheck } from "../services/control";
 import { canOpen } from "./access";
 import { JOURNAL_KIND_LABEL } from "./labels";
-import { MoneyTrend } from "./money-trend";
+import { MoneyTrend } from "@smw/ui/finance/MoneyTrend";
 import { FLAT, LINK, MUTED, PILL, ROW } from "./styles";
+import { monthName } from "@smw/ui/format";
 
 export const metadata = { title: "Finance" };
 
@@ -102,7 +103,7 @@ export default async function FinanceDashboardPage({ checks }: { checks?: Contro
         </div>
 
         <div className="lg:col-span-8">
-          <Panel title="Money in and out, 12 months" className="h-full"><MoneyTrend months={o.trend} /></Panel>
+          <Panel title="Money in and out, 12 months" className="h-full"><MoneyTrend height={240} rows={o.trend.map((m) => ({ label: monthName(m.month), in: m.inPaise, out: m.outPaise }))} series={[{ key: "in", label: "Money in", accent: true }, { key: "out", label: "Money out", dashed: true }]} /></Panel>
         </div>
         <div className="lg:col-span-4">
           <Panel title="Needs attention" className="h-full">

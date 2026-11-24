@@ -4,7 +4,7 @@ import { PageHeader, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { Panel } from "@smw/ui/kit/Panel";
 import { StatCard } from "@smw/ui/kit/StatCard";
-import { TrendArea } from "@smw/ui/kit/TrendArea";
+import { MoneyTrend } from "@smw/ui/finance/MoneyTrend";
 import { HatchedBars } from "@smw/ui/kit/HatchedBars";
 import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { AgeingBar } from "@smw/ui/finance/AgeingBar";
@@ -82,7 +82,7 @@ export default async function FeesDashboardPage() {
         ) : (
           <>
             <Panel title="Money collected" action={<Link href="/app/fees/reports" className="text-sm underline underline-offset-4">Reports</Link>} className="lg:col-span-7">
-              <TrendArea data={trend.map((t) => ({ month: t.label, collected: t.paise / 100 }))} xKey="month" series={[{ key: "collected", label: "Collected", accent: true }]} height={220} format={(v) => paise(v * 100)} />
+              <MoneyTrend rows={trend.map((t) => ({ label: t.label, collected: t.paise }))} series={[{ key: "collected", label: "Collected", accent: true }]} />
               <p className="mt-3 text-xs text-[var(--ds-on-surface-muted)]">This year: <Money paise={s.collectedThisYear} size="sm" /> collected of <Money paise={s.billedThisYear} size="sm" /> billed.</p>
             </Panel>
             <Panel title="Outstanding by age" action={<Link href="/app/fees/dues" className="text-sm underline underline-offset-4">All dues</Link>} className="lg:col-span-5">

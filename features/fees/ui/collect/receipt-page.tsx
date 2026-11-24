@@ -14,6 +14,7 @@ import { METHOD_LABEL } from "../../constants";
 import { ReceiptService } from "../../service";
 import { requestReversal, withdrawReversal } from "../collect-actions";
 import { BackLink, H2, NoAccess, Notice, Ref, SECTION, can, day } from "./shared";
+import { JournalLink } from "@smw/feature-finance/ui/journal-link";
 
 export const metadata = { title: "Receipt" };
 
@@ -95,7 +96,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
             <section className={SECTION} aria-label="Records">
               <h2 className={H2}>Records</h2>
               <ul className="flex flex-col gap-2 text-sm">
-                <li>Ledger entry: {journalId ? <Link href={`/app/finance/journals/${journalId}`} className="underline underline-offset-4">Open the journal entry</Link> : <span className="text-[var(--ds-on-surface-muted)]">not posted</span>}</li>
+                <li><JournalLink id={journalId} /></li>
                 <li>Student: <Ref href={`/app/fees/students/${r.studentId}`}>{r.snapshot.studentName}</Ref></li>
                 <li className="text-[var(--ds-on-surface-muted)]">Printed {prints.length} time{prints.length === 1 ? "" : "s"}{prints.length ? ": " + prints.map((p) => `${p.copyNo === 1 ? "original" : `copy ${p.copyNo}`} by ${p.by ?? "someone"} on ${day(p.at)}`).join("; ") : ". The first print is the original."}</li>
               </ul>

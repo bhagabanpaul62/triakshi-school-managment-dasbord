@@ -12,7 +12,7 @@ import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { Money } from "@smw/ui/finance/Money";
 import { paise as rupees, shortDate } from "@smw/ui/format";
 import { DashboardService } from "../services/dashboard";
-import { CostTrend } from "./cost-trend";
+import { MoneyTrend } from "@smw/ui/finance/MoneyTrend";
 import { PRIMARY_BTN, PayNav, monthName } from "./common";
 
 export const metadata = { title: "Payroll" };
@@ -57,7 +57,7 @@ export default async function PayrollDashboardPage() {
         </div>
         <div className="lg:col-span-8">
           <Panel title="Salary cost, 12 months" className="h-full">
-            {d.trend.length ? <CostTrend months={d.trend} /> : <EmptyLine title="No approved runs yet." hint="The cost of each approved month shows here." />}
+            {d.trend.length ? <MoneyTrend rows={d.trend.map((m) => ({ label: monthName(m.month), cost: m.costPaise }))} series={[{ key: "cost", label: "Salary cost", accent: true }]} /> : <EmptyLine title="No approved runs yet." hint="The cost of each approved month shows here." />}
           </Panel>
         </div>
         <div className="lg:col-span-4">

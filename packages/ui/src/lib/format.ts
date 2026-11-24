@@ -44,3 +44,6 @@ export const initials = (name: string) =>
 
 /** Money for a tile, from paise: whole rupees below a lakh ("₹86,500"), compact above ("₹1.2L") so it fits a phone. */
 export const tilePaise = (p: number) => (Math.abs(p) >= 10_000_000 ? formatMoneyCompact(p / 100) : paise(Math.round(p / 100) * 100));
+
+/** "Nov" from "2026-11-01". */
+export const monthName = (day: string) => new Date(`${day.slice(0, 10).padEnd(10, "-01")}T00:00:00Z`).toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" });

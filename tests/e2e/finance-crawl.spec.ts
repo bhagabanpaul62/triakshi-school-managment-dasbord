@@ -5,7 +5,7 @@ import { login, loginStudent, SCHOOL } from "./helpers";
 // person was shown, or a page wider than a phone fails the run.
 const SLUG = "greenvalley";
 const SECTIONS = /^\/app\/(finance|fees|expenses|payroll|billing|attendance\/(leave|my-leave))/;
-const FILE = /\/(pdf|csv|file|voucher|receipt|slip|template|statement|tuition-certificate|no-dues|bank-file)(\/|$|\?)|\/export\/|\/files\//;
+const FILE = /\/(pdf|csv|file|voucher|receipt|slip|template|statement|tuition-certificate|no-dues|bank-file)(\/|$|\?)|\/export(\/|$|\?)|\/files\//;
 const MAX = Number(process.env.CRAWL_MAX ?? 220);
 
 /** One page per shape: ids and most query values collapse, so a list of 300 bills is visited once. */
@@ -67,6 +67,6 @@ for (const [role, id, starts] of [
 
 test("family: every link works", async ({ page }) => {
   test.setTimeout(600_000);
-  await loginStudent(page, SLUG, "GR0001 01012023", "");
+  await loginStudent(page, SLUG, "GR0001", "01012023");
   expect((await crawl(page, ["/app/fees"], "family")).join("\n")).toBe("");
 });

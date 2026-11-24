@@ -3,7 +3,7 @@ import { requireCtx } from "@smw/runtime";
 import { PageHeader, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { Panel } from "@smw/ui/kit/Panel";
 import { BigStat } from "@smw/ui/kit/BigStat";
-import { TrendArea } from "@smw/ui/kit/TrendArea";
+import { MoneyTrend } from "@smw/ui/finance/MoneyTrend";
 import { HatchedBars } from "@smw/ui/kit/HatchedBars";
 import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { buttonVariants } from "@smw/ui/ui/button";
@@ -45,7 +45,7 @@ export default async function ExpensesDashboard() {
               delta={delta === null ? undefined : `${delta > 0 ? "+" : ""}${delta}% on last month`} tone={delta !== null && delta > 15 ? "warning" : "default"}
               hint={d.hasBudgets ? `Budget for the month: ${paise(d.budgetMonthPaise)}` : <Link href="/app/expenses/budgets" className="underline underline-offset-4">Set a budget</Link>} />
             <div className="mt-6">
-              <TrendArea data={d.monthly.map((m) => ({ month: m.month, spend: m.paise / 100 }))} xKey="month" series={[{ key: "spend", label: "Spend", accent: true }]} height={200} format={(v) => paise(v * 100)} />
+              <MoneyTrend height={200} rows={d.monthly.map((m) => ({ label: m.month, spend: m.paise }))} series={[{ key: "spend", label: "Spend", accent: true }]} />
             </div>
           </Panel>
           <Panel title="Owed to vendors" action={<Link href="/app/expenses/bills?status=unpaid" className="text-sm underline underline-offset-4">All unpaid bills</Link>} className="lg:col-span-5">

@@ -54,9 +54,7 @@ export const BackLink = ({ href, children }: { href: string; children: ReactNode
   <Link href={href} className="mb-3 inline-flex min-h-10 items-center text-sm text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface)] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">‹ {children}</Link>
 );
 
-export function JournalLink({ id, label = "Ledger entry" }: { id: string | null | undefined; label?: string }) {
-  return id ? <Link href={`/app/finance/journals/${id}`} className="text-sm underline underline-offset-4">{label}</Link> : null;
-}
+export { JournalLink } from "@smw/feature-finance/ui/journal-link";
 
 /** A small button-looking link. */
 export const PillLink = ({ href, children, primary, prefetch }: { href: string; children: ReactNode; primary?: boolean; prefetch?: boolean }) => (

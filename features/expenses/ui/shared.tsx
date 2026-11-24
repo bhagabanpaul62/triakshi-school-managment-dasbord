@@ -62,7 +62,4 @@ export const BackLink = ({ href, children }: { href: string; children: ReactNode
 export const OneRecord = ({ all }: { all: string }) => (
   <p role="status" className="mb-4 flex flex-wrap items-center gap-3 text-sm"><span className="rounded-full bg-white/[0.08] px-3 py-1">Showing one record</span><Link href={all} className="underline underline-offset-4">Show all</Link></p>
 );
-export const journalHref = (id: string | null | undefined) => (id ? `/app/finance/journals/${id}` : null);
-export function JournalLink({ id, label = "Ledger entry" }: { id: string | null | undefined; label?: string }) {
-  return id ? <Link href={`/app/finance/journals/${id}`} className="text-sm underline underline-offset-4">{label}</Link> : <span className="text-sm text-[var(--ds-on-surface-muted)]">Not posted yet</span>;
-}
+export { JournalLink } from "@smw/feature-finance/ui/journal-link";
