@@ -346,6 +346,7 @@ describe("import", () => {
     const msgs = report.rows.map((r) => r.errors.join(" | "));
     expect(msgs[0]).toBe("");
     expect(report.rows[0]!.classSection).toContain("joins");
+    expect(report.rows[0]!.joining).toBe(true);
     expect(msgs[1]).toBe("");
     expect(msgs[2]).toContain("already has this name and birth date");
     expect(msgs[3]).toBe("");

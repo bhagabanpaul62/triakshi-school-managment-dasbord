@@ -1,26 +1,12 @@
 import { z } from "zod";
 import { f } from "@smw/feature-kit";
-import { GENDERS, GUARDIAN_RELATIONS } from "./schema";
+import { CONSENT_METHODS, CONSENT_PURPOSES, DOCUMENT_KINDS, GENDERS, GUARDIAN_RELATIONS } from "./constants";
 import { LEAVE_REASONS } from "./util";
+export { CONSENT_METHODS, CONSENT_PURPOSES, DOCUMENT_KINDS };
 
 const blank = (v: unknown) => (v === "" || v === null ? undefined : v);
 const optEnum = <T extends readonly [string, ...string[]]>(values: T) => z.preprocess(blank, z.enum(values).optional());
 
-export const CONSENT_PURPOSES = [
-  { value: "data_processing", label: "Data processing" },
-  { value: "photo_on_website", label: "Photo on the school website" },
-  { value: "photo_in_media", label: "Photo in print and social media" },
-  { value: "trips_outings", label: "Trips and outings" },
-  { value: "whatsapp_updates", label: "WhatsApp and SMS updates" },
-] as const;
-export const CONSENT_METHODS = ["paper_form", "in_person", "online"] as const;
-export const DOCUMENT_KINDS = [
-  { value: "birth_certificate", label: "Birth certificate" },
-  { value: "transfer_certificate", label: "Transfer certificate" },
-  { value: "report_card", label: "Previous report card" },
-  { value: "address_proof", label: "Address proof" },
-  { value: "other", label: "Other" },
-] as const;
 
 /** Fields of a student, before the cross-field rule below (zod objects with rules cannot be reshaped). */
 const studentFields = z.object({

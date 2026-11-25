@@ -40,6 +40,7 @@ export function ImportForm({ check, commit }: { check: Action; commit: Action })
   });
 
   const problems = report?.rows.filter((r) => r.errors.length) ?? [];
+  const later = report?.rows.filter((r) => r.joining && !r.errors.length) ?? [];
 
   return (
     <div className="flex flex-col gap-3">
@@ -97,6 +98,12 @@ export function ImportForm({ check, commit }: { check: Action; commit: Action })
               </table>
             </div>
           )}
+          {later.length ? (
+            <div className="mt-4 rounded-2xl bg-white/[0.04] px-4 py-3 text-sm">
+              <p className="font-medium">{later.length === 1 ? "1 child starts later" : `${later.length} children start later`}. They are not counted against the plan until their day.</p>
+              <ul className="mt-1 list-disc pl-5 text-[var(--ds-on-surface-variant)]">{later.map((r) => <li key={r.line}>Row {r.line}: {r.name}, {r.classSection}</li>)}</ul>
+            </div>
+          ) : null}
           <p className="mt-4 text-xs text-[var(--ds-on-surface-muted)]">Row numbers match the lines in your file (line 1 is the header). The import is all or nothing.</p>
         </Panel>
       ) : null}

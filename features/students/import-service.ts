@@ -30,9 +30,9 @@ const YES = new Set(["yes", "y", "true", "1"]);
 /** An uploaded .xlsx or .csv. A plain string is read as CSV text. */
 export type ImportFile = string | { name: string; bytes: Uint8Array };
 
-export interface ImportRowReport { line: number; admissionNo: string | null; name: string | null; classSection: string | null; errors: string[] }
+export interface ImportRowReport { line: number; admissionNo: string | null; name: string | null; classSection: string | null; errors: string[]; /** A child who starts on a later day: shown apart in the check. */ joining: boolean }
 export interface ImportReport { total: number; valid: number; failed: number; rows: ImportRowReport[]; limitMessage: string | null }
-interface Analysed extends ImportRowReport { input: StudentInput | null; joining: boolean }
+interface Analysed extends ImportRowReport { input: StudentInput | null }
 
 /** "09-03-2014" or "09/03/2014" -> "2014-03-09"; anything else is left for the validator. */
 const isoDate = (v: string) => v.replace(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/, (_, d: string, m: string, y: string) => `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`);
@@ -90,7 +90,7 @@ export class ImportService extends StudentRecordService {
 
   private report(rows: Analysed[], limitMessage: string | null): ImportReport {
     const failed = rows.filter((r) => r.errors.length).length;
-    return { total: rows.length, valid: rows.length - failed, failed, rows: rows.map(({ input: _input, joining: _joining, ...r }) => r), limitMessage };
+    return { total: rows.length, valid: rows.length - failed, failed, rows: rows.map(({ input: _input, ...r }) => r), limitMessage };
   }
 
   private async analyse(tx: Tx, file: ImportFile): Promise<Analysed[]> {

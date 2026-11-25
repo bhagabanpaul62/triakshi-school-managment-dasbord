@@ -4,10 +4,8 @@ import { boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, u
 import { schoolColumns, tenant, users } from "@smw/db";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 
-/** "joining": accepted, not started. May be billed and may pay; in no register, audience or plan count; login off until `joinsOn`. */
-export const STUDENT_STATUSES = ["joining", "active", "alumni", "left"] as const;
-export { WITHDREW_BEFORE_JOINING } from "./constants";
-export const GENDERS = ["male", "female", "other"] as const;
+import type { GENDERS, GUARDIAN_RELATIONS, STUDENT_STATUSES } from "./constants";
+export { GENDERS, GUARDIAN_RELATIONS, STUDENT_STATUSES, WITHDREW_BEFORE_JOINING } from "./constants";
 
 export const students = pgTable("students", {
   ...schoolColumns(),
@@ -63,7 +61,6 @@ export const students = pgTable("students", {
   index("students_status").on(t.schoolId, t.status),
 ]);
 
-export const GUARDIAN_RELATIONS = ["father", "mother", "guardian"] as const;
 
 export const guardians = pgTable("guardians", {
   ...schoolColumns(),

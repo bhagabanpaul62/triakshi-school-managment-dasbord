@@ -59,7 +59,7 @@ export async function studentPhaseOf(tx: Tx, schoolId: string, userId: string): 
 }
 
 /** Topics a left student's family may still be told about: fees, results and account security. Nothing else, and nothing once closed. */
-export const LEFT_TOPIC = /^(fees|exam)\.|^account\.security$/;
+export const LEFT_TOPIC = /^(fees|exam)\.|^(account\.security|privacy\.request)$/;
 export function mayHear(phase: StudentPhase | null | undefined, topic: string, now = new Date()): boolean {
   const a = accessOf(phase, now);
   return a.kind === "full" || (a.kind === "left" && LEFT_TOPIC.test(topic));

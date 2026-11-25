@@ -1,6 +1,5 @@
 import type { Field } from "@smw/ui/shell/FormModal";
-import { CONSENT_METHODS, CONSENT_PURPOSES, DOCUMENT_KINDS } from "../inputs";
-import { GUARDIAN_RELATIONS, STUDENT_STATUSES } from "../schema";
+import { CONSENT_METHODS, CONSENT_PURPOSES, DOCUMENT_KINDS, GUARDIAN_RELATIONS, STUDENT_STATUSES } from "../constants";
 import { addDays, LEAVE_REASONS, today } from "../util";
 
 type Option = { value: string; label: string };

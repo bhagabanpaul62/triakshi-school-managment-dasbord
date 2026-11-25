@@ -57,7 +57,7 @@ export default async function AdmitPage({ params }: { params: Promise<{ id: stri
       </KpiRow>
       {cap.message ? <p className={`pb-3 text-sm ${cap.blocked ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-variant)]"}`}>{cap.message}{cap.blocked ? <> <Link className="underline" href="/app/billing">Upgrade the plan</Link></> : null}</p> : null}
       {seats && seats.left <= 0 ? <p className="pb-3 text-sm text-[var(--ds-color-warning-400)]">No seat is left in {seats.className} on your own count. You can still admit; change the seats in the enquiry settings if this is wrong.</p> : null}
-      {j.notice ? <p className="pb-3 text-sm text-[var(--ds-on-surface-variant)]">{j.notice} <Link className="underline" href="/app/academics/classes">Set up classes and sections</Link></p> : null}
+      {j.notice ? <p className="pb-3 text-sm text-[var(--ds-on-surface-variant)]">{j.notice} <Link className="underline" href={j.years.every((y) => y.isCurrent) ? "/app/academics/years" : "/app/academics/classes"}>{j.years.every((y) => y.isCurrent) ? "Add next year" : "Set up classes and sections"}</Link></p> : null}
       <div className="flex max-w-3xl flex-col gap-3">
         {cap.blocked ? <EmptyLine title="Your plan is full, so new students cannot be admitted." hint="Upgrade the plan, or link this enquiry to a student who is already in the school below." /> : (
           <Panel title="Admit as a new student">
