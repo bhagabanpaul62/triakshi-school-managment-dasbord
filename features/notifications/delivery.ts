@@ -2,6 +2,7 @@ import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { env, schoolUrl } from "@smw/config";
 import { schools, users, withConsole, withSchool, type Tx } from "@smw/db";
 import { SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { schoolOrigins } from "@smw/runtime/host";
 import { emailHtml, escapeHtml, pushConfigured, services, type EmailSender, type Mail } from "@smw/integrations";
 import { todayIST, addDays } from "@smw/feature-kit/money";
 import { chunks } from "./constants";
@@ -99,7 +100,7 @@ export interface Batch {
   notes: Map<string, Notification>;
   people: Map<string, Person>;
   prefs: Map<string, typeof notificationPrefs.$inferSelect>;
-  schools: Map<string, { name: string; slug: string }>;
+  schools: Map<string, { name: string; slug: string; origin?: string }>;
   subs: Map<string, (typeof pushSubscriptions.$inferSelect)[]>;
 }
 
@@ -116,11 +117,12 @@ export async function load(rows: Delivery[]): Promise<Batch> {
       many(sids, (p) => tx.select({ id: schools.id, name: schools.name, slug: schools.slug }).from(schools).where(inArray(schools.id, p))),
       rows.some((r) => r.channel === "push") ? many(uids, (p) => tx.select().from(pushSubscriptions).where(inArray(pushSubscriptions.userId, p))) : [],
     ]);
+    const origins = await schoolOrigins(tx, sch);
     const subMap = new Map<string, typeof subs>();
     for (const s of subs) subMap.set(`${s.schoolId}:${s.userId}`, [...(subMap.get(`${s.schoolId}:${s.userId}`) ?? []), s]);
     return {
       notes: new Map(notes.map((n) => [n.id, n])), people: new Map(people.map((p) => [p.id, p])),
-      prefs: new Map(prefs.map((p) => [`${p.schoolId}:${p.userId}`, p])), schools: new Map(sch.map((s) => [s.id, s])), subs: subMap,
+      prefs: new Map(prefs.map((p) => [`${p.schoolId}:${p.userId}`, p])), schools: new Map(sch.map((s) => [s.id, { ...s, origin: origins.get(s.id) }])), subs: subMap,
     };
   });
 }
@@ -311,10 +313,10 @@ export async function emailTarget(person: Person, note: Notification, row: Deliv
 interface Plan extends EmailTarget { row: Delivery; note: Notification; person: Person }
 
 /** One mail for one or more rows with the same address, words and link (brothers and sisters). */
-function compose(school: { name: string; slug: string }, g: Plan[], noUnsubscribe: boolean): Pick<Mail, "subject" | "text" | "html"> {
+export function compose(school: { name: string; slug: string; origin?: string }, g: Plan[], noUnsubscribe: boolean): Pick<Mail, "subject" | "text" | "html"> {
   const { note, limited } = g[0]!;
   const names = [...new Set(g.map((p) => p.person.name))];
-  const url = schoolUrl(school.slug, note.href ?? "/app/notifications");
+  const url = `${school.origin ?? schoolUrl(school.slug)}${note.href ?? "/app/notifications"}`;
   const subject = `${limited ? topicOf(note.topic).label : note.title} · ${school.name}`;
   const forLine = names.length > 1 || g[0]!.guardian ? `For ${names.join(" and ")}` : "";
   const body = limited ? "Sign in to read it." : note.body ?? "";

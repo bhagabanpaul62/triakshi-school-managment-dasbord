@@ -1,7 +1,7 @@
 /** Ready-made pages a school can start from, and the default site of a new school. Pure (no React). */
 import { HOME_SLUG, SECTION_META, mk, type Page, type Section, type SectionData, type SiteContent, type SchoolInfo } from "./content";
 
-export const PAGE_TEMPLATE_KEYS = ["blank", "about", "academics", "admissions", "fees", "facilities", "gallery", "news", "contact", "disclosure"] as const;
+export const PAGE_TEMPLATE_KEYS = ["blank", "about", "academics", "admissions", "fees", "facilities", "gallery", "news", "contact", "disclosure", "documents"] as const;
 export type PageTemplateKey = (typeof PAGE_TEMPLATE_KEYS)[number];
 
 interface PageTemplate {
@@ -143,7 +143,7 @@ export const PAGE_TEMPLATES: Record<PageTemplateKey, PageTemplate> = {
     }),
   },
   news: {
-    name: "News and events", description: "Your public announcements and upcoming events, filled in automatically.", slug: "news", title: "News and events",
+    name: "News and events", description: "Your public announcements and upcoming events, filled in automatically. It takes the address /news, so it replaces the plain notices page the site makes by itself.", slug: "news", title: "News and events",
     build: (s) => ({
       intro: "Notices, circulars and what is coming up.",
       seo: { title: `News and events at ${s.name}`, description: `Latest notices and upcoming events at ${s.name}.` },
@@ -167,32 +167,23 @@ export const PAGE_TEMPLATES: Record<PageTemplateKey, PageTemplate> = {
     }),
   },
   disclosure: {
-    name: "Mandatory public disclosure", description: "The CBSE disclosure page: general information, documents, results, staff and infrastructure tables.", slug: "disclosure", title: "Mandatory public disclosure",
+    name: "Mandatory public disclosure", description: "The disclosure page in five parts: general information, documents, results, staff and infrastructure. Fill it in under Website, Disclosure.", slug: "disclosure", title: "Mandatory public disclosure",
     build: (s) => ({
-      intro: "Information published as required by CBSE.",
-      seo: { title: `Mandatory public disclosure | ${s.name}`, description: `CBSE mandatory public disclosure of ${s.name}.` },
-      sections: [
-        mk("table", { heading: "A. General information", columns: ["Information", "Details"], rows: [
-          ["Name of the school", s.name], ["Affiliation number", "Add"], ["School code", "Add"], ["Complete address with pin code", [s.address, s.city].filter(Boolean).join(", ") || "Add"],
-          ["Principal's name and qualification", "Add"], ["School email", s.email ?? "Add"], ["Contact number", s.phone ?? "Add"],
-        ] }),
-        mk("table", { heading: "B. Documents and information", intro: "Paste the link of each document in the second column. It becomes a View button.", columns: ["Document", "Link"], rows: [
-          ["Affiliation or upgradation letter and recent extension", "Add link"], ["Society, trust or company registration certificate", "Add link"], ["No objection certificate (NOC) from the state government", "Add link"],
-          ["Recognition certificate under the RTE Act, 2009", "Add link"], ["Building safety certificate", "Add link"], ["Fire safety certificate", "Add link"],
-          ["DEO certificate or self-certification by the school", "Add link"], ["Water, health and sanitation certificates", "Add link"],
-        ] }),
-        mk("table", { heading: "C. Result and academics", columns: ["Document", "Link"], rows: [
-          ["Fee structure of the school", "/fees"], ["Annual academic calendar", "Add link"], ["List of the school management committee (SMC)", "Add link"],
-          ["List of parent teacher association (PTA) members", "Add link"], ["Board examination results of the last three years", "Add link"],
-        ] }),
-        mk("table", { heading: "D. Staff (teaching)", columns: ["Information", "Details"], rows: [
-          ["Principal", "Add"], ["Total number of teachers (PGT, TGT, PRT)", "Add"], ["Teacher to section ratio", "Add"], ["Special educator", "Add"], ["Counsellor and wellness teacher", "Add"],
-        ] }),
-        mk("table", { heading: "E. School infrastructure", columns: ["Information", "Details"], rows: [
-          ["Total campus area (in square metres)", "Add"], ["Number and size of classrooms (in square metres)", "Add"], ["Number and size of laboratories, including computer labs", "Add"],
-          ["Internet facility", "Add"], ["Number of girls' toilets", "Add"], ["Number of boys' toilets", "Add"], ["Link of the YouTube video of the school inspection", "Add link"],
-        ] }),
-      ],
+      intro: "Information published as required by the board.",
+      seo: { title: `Mandatory public disclosure | ${s.name}`, description: `Mandatory public disclosure of ${s.name}.` },
+      sections: [mk("disclosure", { heading: "Mandatory public disclosure", data: { values: {} } })],
+    }),
+  },
+  documents: {
+    name: "Documents and downloads", description: "Prospectus, circulars, fee notices and certificates, grouped, with date and size.", slug: "documents", title: "Documents",
+    build: (s) => ({
+      intro: `Forms, notices and certificates from ${s.name}.`,
+      seo: { title: `Documents | ${s.name}`, description: `Download the prospectus, circulars and forms of ${s.name}.` },
+      sections: [mk("documents", { heading: "Documents and downloads", intro: "Replace these with your own files. Upload them under Website, Media.", items: [
+        { label: "Prospectus", url: "https://example.org/prospectus.pdf", group: "Admissions" },
+        { label: "Fee structure", url: "https://example.org/fees.pdf", group: "Fees" },
+        { label: "Academic calendar", url: "https://example.org/calendar.pdf", group: "Academics" },
+      ] })],
     }),
   },
 };

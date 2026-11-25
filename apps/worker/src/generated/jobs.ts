@@ -14,7 +14,11 @@ import messages from "@smw/feature-messages/jobs";
 import notifications from "@smw/feature-notifications/jobs";
 import payroll from "@smw/feature-payroll/jobs";
 import requests from "@smw/feature-requests/jobs";
+import settings from "@smw/feature-settings/jobs";
+import setup from "@smw/feature-setup/jobs";
+import support from "@smw/feature-support/jobs";
 import timetable from "@smw/feature-timetable/jobs";
 import transport from "@smw/feature-transport/jobs";
+import website from "@smw/feature-website/jobs";
 
-export const FEATURE_JOBS = [announcements, assignments, attendance, billing, domains, events, expenses, fees, finance, library, meetings, messages, notifications, payroll, requests, timetable, transport];
+export const FEATURE_JOBS = [announcements, assignments, attendance, billing, domains, events, expenses, fees, finance, library, meetings, messages, notifications, payroll, requests, settings, setup, support, timetable, transport, website];

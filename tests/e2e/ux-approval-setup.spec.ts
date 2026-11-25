@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
-import { consoleLogin, expectHealthy, MARKETING, PASSWORD, SCHOOL } from "./helpers";
+import { CONSOLE, consoleLogin, expectHealthy, MARKETING, PASSWORD, SCHOOL } from "./helpers";
 
 const OUT = "test-results/ux-approval-setup";
 mkdirSync(OUT, { recursive: true });
@@ -85,7 +85,7 @@ test.describe("approval and setup journey", () => {
     const cpage = await cctx.newPage();
     cpage.setDefaultTimeout(240_000);
     await consoleLogin(cpage);
-    await cpage.goto("http://localhost:4102/approvals", { timeout: 240_000 });
+    await cpage.goto(`${CONSOLE}/approvals`, { timeout: 240_000 });
     await cpage.getByRole("link", { name: new RegExp(slug) }).first().click();
     await shot(cpage, "04-console-review");
     await cpage.getByRole("button", { name: "Approve", exact: true }).click();
@@ -171,7 +171,7 @@ test.describe("approval and setup journey", () => {
     const cpage = await cctx.newPage();
     cpage.setDefaultTimeout(240_000);
     await consoleLogin(cpage);
-    await cpage.goto("http://localhost:4102/approvals", { timeout: 240_000 });
+    await cpage.goto(`${CONSOLE}/approvals`, { timeout: 240_000 });
     await cpage.getByRole("link", { name: new RegExp(slug) }).first().click();
     await cpage.getByRole("button", { name: "Reject", exact: true }).click();
     await cpage.getByLabel("Reason").fill("We could not find this school in the UDISE register.");

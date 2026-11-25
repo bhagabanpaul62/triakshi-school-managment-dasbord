@@ -15,6 +15,8 @@ const LABELS: Record<string, string> = {
 };
 /** Words that differ by module ("approve" means notices here, money requests in finance). Checked before LABELS. */
 const FEATURE_LABELS: Record<string, string> = {
+  "website:read": "See the website editor", "website:manage": "Edit the website draft", "website:publish": "Publish the website", "website:pipeline": "Manage the enquiry desk (settings, import, export, delete)",
+  "support:use": "Ask Triakshi support", "support:all": "See every support ticket of the school",
   "announcements:approve": "Approve notices", "announcements:manage": "Manage templates, categories and any notice", "announcements:whole": "Publish to the whole school without approval",
   "meetings:use": "Run parent-teacher meetings", "messages:manage": "Manage message settings and limits",
   "notifications:manage": "Change communication settings", "requests:office": "Work the office inbox", "requests:manage": "Manage request categories and reports",
@@ -23,7 +25,7 @@ export const permissionLabel = (key: string, feature?: string) => FEATURE_LABELS
 
 /** What every signed-in staff member needs to use the app at all: always granted, never shown in the matrix. */
 export const BASELINE_GRANTS = ["home:view", "notifications:read", "messages:use", "settings:read", "payroll:self",
-  "announcements:read", "events:read", "requests:use"] as const;
+  "announcements:read", "events:read", "requests:use", "setup:task"] as const;
 
 /**
  * A custom role may never hold the school-control powers: settings (except the baseline settings:read that only opens
@@ -83,3 +85,11 @@ export const ROLE_TEMPLATES: readonly { name: string; description: string; grant
   { name: "Exam coordinator", description: "Sets up exams, report cards and results.", grants: ["academics:read", "exams:read", "exams:manage", "exams:marks", "exams:remarks", "exams:coscholastic"] },
   { name: "Timetable in-charge", description: "Builds the timetable and arranges cover for absent teachers.", grants: ["academics:read", "timetable:read", "timetable:manage"] },
 ];
+
+/** What a person with these grants can do, as plain lines per module: `[{ name: "Fees", items: ["View", "Collect money"] }]`. Only modules the school has. */
+export function grantsInWords(grants: readonly string[], catalogue: Catalogue, enabled: ReadonlySet<string>): { key: string; name: string; items: string[] }[] {
+  const held = new Set(grants);
+  return matrixFor(catalogue, enabled, true)
+    .map((m) => ({ key: m.key, name: m.name, items: m.permissions.filter((p) => held.has(p.grant)).map((p) => p.label) }))
+    .filter((m) => m.items.length);
+}

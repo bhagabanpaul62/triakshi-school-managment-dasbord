@@ -27,7 +27,7 @@ export function LeaveList({ rows, empty, actions, highlight }: { rows: LeaveRow[
               <p className="mt-1 break-words text-sm text-[var(--ds-on-surface-muted)]">{r.reason}</p>
               {r.waitingFor ? <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Waiting for {r.waitingFor} to decide.</p> : null}
               {r.note ? <p className="mt-1 break-words text-xs text-[var(--ds-on-surface-muted)]">{r.status === "rejected" ? "Why not: " : "Note: "}{r.note}</p> : null}
-              {r.fileUrl ? <Link href={r.fileUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-[var(--ds-primary)] underline">{r.fileName ?? "Attachment"}</Link> : null}
+              {r.fileUrl ? <Link href={r.fileUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-xs text-[var(--ds-primary-text)] underline">{r.fileName ?? "Attachment"}</Link> : null}
             </div>
             {actions ? <div className="flex shrink-0 items-center gap-2">{actions(r)}</div> : null}
           </li>

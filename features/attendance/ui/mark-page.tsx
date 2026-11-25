@@ -37,7 +37,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
     return (
       <>
         <PageHeader eyebrow="Academics" title="Attendance" description="Your attendance this school year."
-          actions={svc.can("leave") ? <span className="inline-flex items-center gap-3"><Link href="/app/attendance/my-leave" className="text-sm text-[var(--ds-primary)] underline">My leave</Link><ApplyLeave kids={await new LeaveService(ctx).applicants()} /></span> : undefined} />
+          actions={svc.can("leave") ? <span className="inline-flex items-center gap-3"><Link href="/app/attendance/my-leave" className="text-sm text-[var(--ds-primary-text)] underline">My leave</Link><ApplyLeave kids={await new LeaveService(ctx).applicants()} /></span> : undefined} />
         <SelfView ctx={ctx} month={month ?? todayIST().slice(0, 7)} />
       </>
     );
@@ -55,7 +55,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
         <PageHeader eyebrow="Academics" title="Attendance" description="Attendance here is taken period by period." actions={<AttendanceNav items={attendanceNavFor(ctx)} active="/app/attendance" />} />
         <Panel>
           <WidgetEmptyState title="Mark from My classes." description="Open My classes to mark the periods you teach or cover today. The day's attendance is worked out from them." />
-          <p className="mt-3 text-center"><Link href="/app/attendance/periods" className="text-sm text-[var(--ds-primary)] underline">Open My classes</Link></p>
+          <p className="mt-3 text-center"><Link href="/app/attendance/periods" className="text-sm text-[var(--ds-primary-text)] underline">Open My classes</Link></p>
         </Panel>
       </>
     );

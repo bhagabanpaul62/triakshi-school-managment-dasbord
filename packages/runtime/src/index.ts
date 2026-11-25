@@ -8,10 +8,11 @@ import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { SchoolAuth, type ValidSession } from "@smw/auth";
 import { secureCookies } from "@smw/config";
-import { eq, modules, planModules, schoolModuleOverrides, schools, withSchool } from "@smw/db";
+import { and, eq, modules, planModules, schoolDomains, schoolModuleOverrides, schools, withSchool } from "@smw/db";
 import { ForbiddenError, resolveEntitlements, UnauthenticatedError, type Ctx } from "@smw/feature-kit";
-import { themeOf, type Theme } from "@smw/themes";
-import { REQUEST_ID_HEADER, requestHost, resolveSchoolByHost } from "./host";
+import { safeImage, themeOf, type Theme } from "@smw/themes";
+import { supportSessionAllowed } from "./support-session";
+import { REQUEST_ID_HEADER, healthyMain, requestHost, resolveSchoolByHost } from "./host";
 import { runAction } from "./action";
 
 export const SESSION_COOKIE = "smw_session";
@@ -28,6 +29,8 @@ export interface CurrentSchool {
   studentCap: number;
   features: Set<string>;
   readOnly: boolean;
+  /** Host of the main address, when it is verified and not broken. Null = the free address. */
+  primaryHost: string | null;
   row: typeof schools.$inferSelect;
 }
 
@@ -40,10 +43,12 @@ export const getSchool = cache(async (): Promise<CurrentSchool> => {
   return withSchool(id, async (tx) => {
     const [row] = await tx.select().from(schools).where(eq(schools.id, id)).limit(1);
     if (!row) notFound();
-    const [mods, plan, overrides] = await Promise.all([
+    const [mods, plan, overrides, primary] = await Promise.all([
       tx.select().from(modules),
       row.planId ? tx.select().from(planModules).where(eq(planModules.planId, row.planId)) : Promise.resolve([]),
       tx.select().from(schoolModuleOverrides),
+      tx.select({ hostname: schoolDomains.hostname, health: schoolDomains.health, certExpiresAt: schoolDomains.certExpiresAt, records: schoolDomains.records }).from(schoolDomains)
+        .where(and(eq(schoolDomains.isPrimary, true), eq(schoolDomains.kind, "custom"), eq(schoolDomains.status, "verified"))).limit(1),
     ]);
     const ent = resolveEntitlements({
       status: row.status,
@@ -52,9 +57,10 @@ export const getSchool = cache(async (): Promise<CurrentSchool> => {
       overrides,
     });
     return {
-      id: row.id, slug: row.slug, name: row.name, status: row.status, logoUrl: row.logoUrl,
+      id: row.id, slug: row.slug, name: row.name, status: row.status, logoUrl: safeImage(row.logoUrl),
       theme: themeOf(row.theme), setupCompleted: !!row.setupCompletedAt, trialEndsAt: row.trialEndsAt,
       studentCap: row.studentCap, features: ent.enabled, readOnly: ent.readOnly, row,
+      primaryHost: primary[0] && healthyMain(primary[0]) ? primary[0].hostname : null,
     };
   });
 });
@@ -64,7 +70,9 @@ export const getSession = cache(async (): Promise<ValidSession | null> => {
   const school = await getSchool();
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const s = await new SchoolAuth(school.id).validate(token);
-  return s && s.user.schoolId === school.id ? s : null;
+  if (!s || s.user.schoolId !== school.id) return null;
+  // The school may have said "never" since the visit began: the next request ends it, unless an owner entered in an emergency.
+  return (await supportSessionAllowed(school, s.supportStaffId)) ? s : null;
 });
 
 async function buildCtx(): Promise<{ ctx: Ctx; mustChange: boolean } | null> {
@@ -110,7 +118,9 @@ export async function clearSessionCookie() {
   (await cookies()).delete(SESSION_COOKIE);
 }
 
+export { primaryRedirect, type PrimaryRedirectInput } from "./primary";
 export { runAction, formToObject, type ActionResult } from "./action";
+export { trustedClientIp } from "./ip";
 
 /**
  * The body of almost every server action: build the service for the signed-in user, run one method, return an ActionResult.

@@ -41,7 +41,7 @@ export function SubjectsMatrix({ board: initial, bandCounts, assigned, next, bac
           {BOARDS.map((b) => <option key={b} value={b}>{b === "State" ? "State board and others" : b}</option>)}
         </select>
       </label>
-      <div className="-mx-1 mt-5 overflow-x-auto px-1">
+      <div className="-mx-1 mt-5 relative overflow-x-auto px-1">
         <table className="w-full min-w-[34rem] border-separate border-spacing-y-1 text-sm">
           <thead>
             <tr className="text-left font-mono text-[11px] uppercase tracking-[0.05em] text-[var(--ds-on-surface-muted)]">

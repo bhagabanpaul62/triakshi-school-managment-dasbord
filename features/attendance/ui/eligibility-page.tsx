@@ -41,7 +41,7 @@ export default async function EligibilityPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-[var(--ds-on-surface)]">{r.name}</p>
                   <p className="truncate text-xs text-[var(--ds-on-surface-muted)]">{r.sectionLabel ?? `Class ${r.grade}`} · {r.absent} absent</p>
-                  {r.condonation ? <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Condoned: {r.condonation.reason}{r.condonation.note ? `, ${r.condonation.note}` : ""}{r.condonation.fileUrl ? <> · <a href={r.condonation.fileUrl} target="_blank" rel="noreferrer" className="text-[var(--ds-primary)] underline">{r.condonation.fileName ?? "Document"}</a></> : null}</p> : null}
+                  {r.condonation ? <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Condoned: {r.condonation.reason}{r.condonation.note ? `, ${r.condonation.note}` : ""}{r.condonation.fileUrl ? <> · <a href={r.condonation.fileUrl} target="_blank" rel="noreferrer" className="text-[var(--ds-primary-text)] underline">{r.condonation.fileName ?? "Document"}</a></> : null}</p> : null}
                 </div>
                 <span className={`text-sm tabular-nums ${TEXT.danger}`}>{r.pct}%</span>
                 <ToneBadge label={r.eligible ? "Eligible (condoned)" : "Not eligible"} tone={r.eligible ? "success" : "danger"} />

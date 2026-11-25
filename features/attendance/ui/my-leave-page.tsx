@@ -38,7 +38,7 @@ export default async function MyLeavePage({ searchParams }: { searchParams: Prom
         actions={<span className="inline-flex flex-wrap items-center gap-3"><AttendanceNav items={attendanceNavFor(ctx)} active="/app/attendance/my-leave" />{apply}</span>} />
       {noTypes ? (
         <Panel><p className="text-sm text-[var(--ds-on-surface)]">No leave types are set up yet, so leave cannot be requested.</p>
-          <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">{admin ? <>Add them first: <Link href="/app/attendance/leave-types" className="text-[var(--ds-primary)] underline">Leave types</Link>.</> : "Ask the school admin to set up leave types."}</p></Panel>
+          <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">{admin ? <>Add them first: <Link href="/app/attendance/leave-types" className="text-[var(--ds-primary-text)] underline">Leave types</Link>.</> : "Ask the school admin to set up leave types."}</p></Panel>
       ) : balances.length ? <div className="mb-4"><LeaveBars rows={balances} /></div> : null}
       <LeaveList rows={rows} highlight={typeof created === "string" ? created : undefined}
         empty={{ title: "No leave requests yet.", description: "Use Apply for leave when you need days off.", action: apply ?? undefined }}

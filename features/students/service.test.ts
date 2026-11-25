@@ -485,7 +485,11 @@ describe("student logins", () => {
     expect(slips.find((x) => x.name === "Slip One")).toMatchObject({ loginId: one.admissionNo, password: "09032012" });
     expect(schoolName).toBe(`School ${a.slug.toUpperCase()}`);
 
+    // producing slips is written to the audit log (getting started reads it); an empty run writes nothing
+    const printed = async (id: string) => Number([...(await withConsole((tx) => tx.execute(sql`select count(*)::int as n from audit_logs where school_id = ${id} and action = 'print_slips'`)))][0]!.n);
+    expect(await printed(a.id)).toBe(1);
     expect((await new CredentialService(b.as.admin).slips(c12)).slips).toEqual([]);
+    expect(await printed(b.id)).toBe(0);
     await expect(new CredentialService(a.as.teacher).slips(c12)).rejects.toBeInstanceOf(ForbiddenError);
   });
 

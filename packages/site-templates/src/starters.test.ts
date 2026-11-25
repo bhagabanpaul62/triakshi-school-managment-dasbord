@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { HOME_SLUG, TEMPLATE_KEYS, siteContentSchema, type SchoolInfo, type SiteContent } from "./content";
+import { HOME_SLUG, TEMPLATE_KEYS, pageSchema, siteContentSchema, type SchoolInfo, type SiteContent } from "./content";
+import { PAGE_TEMPLATE_KEYS, buildPage } from "./pages";
 import { starterSite } from "./starters";
 
 const school: SchoolInfo = { name: "Green Valley Public School", city: "Bengaluru", board: "CBSE", address: "12 MG Road", phone: "9876543210", email: "office@gv.test" };
@@ -40,5 +41,11 @@ describe("starter sites", () => {
   it("gives the five designs five different hero headings", () => {
     const headings = TEMPLATE_KEYS.map(heroHeading);
     expect(new Set(headings).size).toBe(TEMPLATE_KEYS.length);
+  });
+
+  it("every page template passes the page schema, and disclosure and documents use their own sections", () => {
+    for (const k of PAGE_TEMPLATE_KEYS) expect(pageSchema.safeParse(buildPage(k, school)).success, k).toBe(true);
+    expect(buildPage("disclosure", school).sections.map((s) => s.type)).toEqual(["disclosure"]);
+    expect(buildPage("documents", school).sections.map((s) => s.type)).toEqual(["documents"]);
   });
 });

@@ -7,7 +7,7 @@ import { argon2, createHash, randomBytes, randomInt, timingSafeEqual } from "nod
 import { promisify } from "node:util";
 import * as OTPAuth from "otpauth";
 import {
-  and, auditLogs, desc, eq, gt, inArray, isNull, ne, oneTimeTokens, or, platformStaff, schoolRoles, sessions, sql, staffSessions, users,
+  and, auditLogs, desc, eq, gt, inArray, isNull, loginEvents, ne, oneTimeTokens, or, platformStaff, schoolRoles, sessions, sql, staffSessions, users,
   withConsole, withSchool, type SchoolRole, type StaffRole, type Tx,
 } from "@smw/db";
 
@@ -52,9 +52,19 @@ export class Tokens {
  */
 export class RateLimiter {
   private hits = new Map<string, { count: number; resetAt: number }>();
+  private nextSweep = 0;
   constructor(private readonly limit: number, private readonly windowMs: number) {}
+  /** Forget keys whose window is over, once a window, so a flood of different keys cannot grow the map for ever. Changes no answer. */
+  private sweep(now: number) {
+    if (now < this.nextSweep) return;
+    this.nextSweep = now + this.windowMs;
+    for (const [k, h] of this.hits) if (h.resetAt <= now) this.hits.delete(k);
+  }
+  /** Keys held right now (for tests). */
+  get size() { return this.hits.size; }
   /** True when the call is allowed. */
   take(key: string, now = Date.now()): boolean {
+    this.sweep(now);
     const h = this.hits.get(key);
     if (!h || h.resetAt <= now) { this.hits.set(key, { count: 1, resetAt: now + this.windowMs }); return true; }
     h.count++;
@@ -80,6 +90,25 @@ export const forgotAcctLimiter = new RateLimiter(3, 3_600_000);
 
 /** Code checks: 10 an hour per school and typed login, on top of the per-IP limit. */
 export const otpAcctLimiter = new RateLimiter(10, 3_600_000);
+
+/**
+ * Rows a failed sign-in may write: 30 per 15 minutes per address and 300 per school, whatever was typed, so a script trying a thousand
+ * different names cannot fill the table. Past the cap one summary row is written per window, then nothing.
+ */
+const ipEventLimiter = new RateLimiter(30, 15 * 60_000);
+const schoolEventLimiter = new RateLimiter(300, 15 * 60_000);
+const overflowLimiter = new RateLimiter(1, 15 * 60_000);
+
+/** Writes of "rate limited" and bad support-link events: 3 per 15 minutes per school and login, so a flood cannot become a flood of rows. */
+const eventLimiter = new RateLimiter(3, 15 * 60_000);
+
+/** "Chrome on Windows": the device family a new-device check compares. */
+export function deviceFamily(ua: string | null | undefined): string {
+  if (!ua) return "Unknown device";
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\/|Opera/.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
+  const os = /Android/.test(ua) ? "Android" : /iPhone|iPad|iOS/.test(ua) ? "iOS" : /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : null;
+  return os ? `${browser} on ${os}` : browser;
+}
 
 /** Verified against when a login is unknown or has no password, so every login costs one Argon2 run. */
 let dummyHash: Promise<string> | undefined;
@@ -145,6 +174,8 @@ export interface SessionUser {
 }
 export interface ValidSession { sessionId: string; user: SessionUser; readOnly: boolean; supportStaffId: string | null; expiresAt: Date }
 
+export interface SignInMeta { ip?: string; userAgent?: string }
+
 export class LoginError extends Error {
   constructor(readonly reason: "invalid" | "rate_limited" | "disabled") { super(reason); }
 }
@@ -153,20 +184,61 @@ export class LoginError extends Error {
 export class SchoolAuth {
   constructor(private readonly schoolId: string) {}
 
-  /** Log in by email, phone or login ID (admission number for students). Returns the raw session token. */
-  async login(identifier: string, password: string, meta: { ip?: string; userAgent?: string } = {}) {
+  /** Log in by email, phone or login ID (admission number for students). Returns the raw session token. Every try, good or bad, is written to login_events. */
+  async login(identifier: string, password: string, meta: SignInMeta & { method?: "password" | "api" } = {}) {
     const id = identifier.trim().toLowerCase();
+    const method = meta.method ?? "password";
     const ipKey = `ip:${meta.ip ?? "?"}`;
-    if (loginIpFailLimiter.blocked(ipKey) || !loginLimiter.take(`acct:${this.schoolId}:${id}`)) throw new LoginError("rate_limited");
-    return withSchool(this.schoolId, async (tx) => {
-      const user = await this.findByLogin(tx, identifier);
-      const ok = await Passwords.verify(user?.passwordHash || await fakeHash(), password);
-      if (!user || !ok || user.role === "parent") { loginIpFailLimiter.take(ipKey); throw new LoginError("invalid"); }
-      if (user.status !== "active") throw new LoginError("disabled");
-      loginLimiter.reset(`acct:${this.schoolId}:${id}`);
-      await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
-      return { ...(await this.createSession(tx, user.id, { ...meta })), mustChangePassword: user.mustChangePassword };
+    let known: string | undefined;
+    try {
+      if (loginIpFailLimiter.blocked(ipKey) || !loginLimiter.take(`acct:${this.schoolId}:${id}`)) throw new LoginError("rate_limited");
+      return await withSchool(this.schoolId, async (tx) => {
+        const user = await this.findByLogin(tx, identifier);
+        known = user?.id;
+        const ok = await Passwords.verify(user?.passwordHash || await fakeHash(), password);
+        if (!user || !ok || user.role === "parent") { loginIpFailLimiter.take(ipKey); throw new LoginError("invalid"); }
+        if (user.status !== "active") throw new LoginError("disabled");
+        loginLimiter.reset(`acct:${this.schoolId}:${id}`);
+        await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
+        const seen = await this.recordSuccess(tx, user.id, identifier, method, meta);
+        return { ...(await this.createSession(tx, user.id, { ...meta })), mustChangePassword: user.mustChangePassword, userId: user.id, ...seen };
+      });
+    } catch (e) {
+      if (e instanceof LoginError) await this.logFailure(e.reason, known, identifier, method, meta);
+      throw e;
+    }
+  }
+
+  /** The success row, with whether this device family has signed in as this person before. */
+  private async recordSuccess(tx: Tx, userId: string, identifier: string, method: "password" | "code" | "reset" | "api", meta: SignInMeta) {
+    const earlier = await tx.select({ ua: loginEvents.userAgent }).from(loginEvents)
+      .where(and(eq(loginEvents.userId, userId), eq(loginEvents.outcome, "success"))).orderBy(desc(loginEvents.createdAt)).limit(200);
+    const family = deviceFamily(meta.userAgent);
+    const newDevice = !earlier.some((r) => deviceFamily(r.ua) === family);
+    await tx.insert(loginEvents).values({
+      schoolId: this.schoolId, userId, identifier: identifier.trim().toLowerCase().slice(0, 80), outcome: "success", method,
+      ip: meta.ip ?? null, userAgent: meta.userAgent?.slice(0, 300) ?? null, newDevice,
     });
+    return { newDevice, firstSignIn: earlier.length === 0 };
+  }
+
+  /** A failed try in its own transaction (the failing one rolled back). Never throws: a log problem must not change what the person is told. */
+  private async logFailure(reason: LoginError["reason"] | "bad_code", userId: string | undefined, identifier: string, method: "password" | "code" | "reset" | "api" | "support", meta: SignInMeta) {
+    const key = identifier.trim().toLowerCase();
+    if ((reason === "rate_limited" || method === "support") && !eventLimiter.take(`${this.schoolId}:${method}:${key}`)) return;
+    const ipKey = `${this.schoolId}:${meta.ip ?? "?"}`;
+    // Over the cap: the first overflow of a window leaves one summary row, the rest leave nothing.
+    const capped = meta.ip && !ipEventLimiter.take(ipKey) ? ipKey : !schoolEventLimiter.take(this.schoolId) ? this.schoolId : null;
+    if (capped && !overflowLimiter.take(capped)) return;
+    const outcome = capped ? "rate_limited" as const : method === "support" ? "support_failed" as const : reason === "rate_limited" ? "rate_limited" as const : reason === "disabled" ? "disabled" as const : reason === "bad_code" && userId ? "bad_code" as const : userId ? "bad_password" as const : "unknown_login" as const;
+    try {
+      await withSchool(this.schoolId, (tx) => tx.insert(loginEvents).values({
+        schoolId: this.schoolId, userId: capped ? null : userId ?? null, identifier: capped ? (capped === this.schoolId ? "many tries on this school" : "many tries from this address") : key.slice(0, 80), outcome, method,
+        ip: meta.ip ?? null, userAgent: meta.userAgent?.slice(0, 300) ?? null,
+      }));
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "login event not written", err: String(err) }));
+    }
   }
 
   private async findByLogin(tx: Tx, identifier: string) {
@@ -177,11 +249,12 @@ export class SchoolAuth {
     return user;
   }
 
-  /** Sign in a user whose identity was just proven by a one-time link. */
-  async startSession(userId: string, meta: { ip?: string; userAgent?: string } = {}) {
+  /** Sign in a user whose identity was just proven by a one-time link or code. */
+  async startSession(userId: string, meta: SignInMeta = {}) {
     return withSchool(this.schoolId, async (tx) => {
-      await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId));
-      return this.createSession(tx, userId, meta);
+      const [u] = await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId)).returning({ loginId: users.loginId });
+      const seen = await this.recordSuccess(tx, userId, u?.loginId ?? "", "reset", meta);
+      return { ...(await this.createSession(tx, userId, meta)), ...seen };
     });
   }
 
@@ -362,30 +435,41 @@ export class SchoolAuth {
   }
 
   /** Run `fn` for the user a login resolves to, with the code checked first. Wrong codes throw OtpError after the try is saved. */
-  private async withOtp<T>(identifier: string, use: OtpUse, code: string, ip: string, fn: (tx: Tx, user: typeof users.$inferSelect, meta: { newEmail?: string }) => Promise<T>) {
-    if (!loginLimiter.take(`otp-ip:${ip}`) || !otpAcctLimiter.take(`${this.schoolId}:${identifier.trim().toLowerCase()}`)) throw new LoginError("rate_limited");
+  private async withOtp<T>(identifier: string, use: OtpUse, code: string, meta: SignInMeta, fn: (tx: Tx, user: typeof users.$inferSelect, meta: { newEmail?: string }) => Promise<T>) {
+    const method = use === "login" ? "code" as const : "reset" as const;
+    const ip = meta.ip ?? "?";
+    if (!loginLimiter.take(`otp-ip:${ip}`) || !otpAcctLimiter.take(`${this.schoolId}:${identifier.trim().toLowerCase()}`)) {
+      await this.logFailure("rate_limited", undefined, identifier, method, meta);
+      throw new LoginError("rate_limited");
+    }
+    let found: typeof users.$inferSelect | undefined;
     const out = await withSchool(this.schoolId, async (tx): Promise<{ err: OtpError } | { value: T }> => {
       const user = await this.findByLogin(tx, identifier);
+      found = user;
       // A disabled account is refused before its code is touched.
       if (!user || user.status !== "active" || user.role === "parent") return { err: new OtpError("none") };
       const r = await this.checkOtp(tx, user.id, use, code);
       return r.ok ? { value: await fn(tx, user, r.meta) } : { err: r.err };
     });
-    if ("err" in out) throw out.err;
+    if ("err" in out) {
+      await this.logFailure(found?.status === "disabled" ? "disabled" : "bad_code", found?.id, identifier, method, meta);
+      throw out.err;
+    }
     return out.value;
   }
 
   /** Sign in with a code instead of a password. Still reports must-change so the caller can gate. */
-  async loginWithCode(identifier: string, code: string, meta: { ip?: string; userAgent?: string } = {}) {
-    return this.withOtp(identifier, "login", code, meta.ip ?? "?", async (tx, user) => {
+  async loginWithCode(identifier: string, code: string, meta: SignInMeta = {}) {
+    return this.withOtp(identifier, "login", code, meta, async (tx, user) => {
       await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
-      return { ...(await this.createSession(tx, user.id, meta)), mustChangePassword: user.mustChangePassword };
+      const seen = await this.recordSuccess(tx, user.id, identifier, "code", meta);
+      return { ...(await this.createSession(tx, user.id, meta)), mustChangePassword: user.mustChangePassword, userId: user.id, ...seen };
     });
   }
 
   /** Same result as a reset link: policy applied, sessions ended, must-change cleared. A weak password keeps the code alive. */
   async resetPasswordWithCode(identifier: string, code: string, next: string, ip = "?") {
-    return this.withOtp(identifier, "reset", code, ip, async (tx, user) => {
+    return this.withOtp(identifier, "reset", code, { ip }, async (tx, user) => {
       await this.applyReset(tx, user.id, next, "Set a new password with an email code");
       return user.id;
     });
@@ -531,14 +615,24 @@ export class SchoolAuth {
     return row ?? null;
   }
 
-  /** Exchange a console-issued support token for a 30-minute session (read-only unless the owner allowed writes). */
-  async supportLogin(token: string, meta: { ip?: string; userAgent?: string } = {}) {
-    return withSchool(this.schoolId, async (tx) => {
-      const row = await this.consumeToken(tx, "support_login", token);
-      if (!row?.userId) throw new LoginError("invalid");
-      const m = row.meta as { staffId: string; allowWrites?: boolean };
-      return this.createSession(tx, row.userId, { ...meta, supportStaffId: m.staffId, readOnly: !m.allowWrites, minutes: SUPPORT_SESSION_MINUTES });
-    });
+  /** Exchange a console-issued support token for a 30-minute session (read-only unless the owner allowed writes). Written to login_events as "support". */
+  async supportLogin(token: string, meta: SignInMeta = {}) {
+    try {
+      return await withSchool(this.schoolId, async (tx) => {
+        const row = await this.consumeToken(tx, "support_login", token);
+        if (!row?.userId) throw new LoginError("invalid");
+        const m = row.meta as { staffId: string; allowWrites?: boolean };
+        const [u] = await tx.select({ loginId: users.loginId }).from(users).where(eq(users.id, row.userId)).limit(1);
+        await tx.insert(loginEvents).values({
+          schoolId: this.schoolId, userId: row.userId, identifier: (u?.loginId ?? "").toLowerCase().slice(0, 80), outcome: "support", method: "support",
+          ip: meta.ip ?? null, userAgent: meta.userAgent?.slice(0, 300) ?? null, supportStaffId: m.staffId,
+        });
+        return this.createSession(tx, row.userId, { ...meta, supportStaffId: m.staffId, readOnly: !m.allowWrites, minutes: SUPPORT_SESSION_MINUTES });
+      });
+    } catch (e) {
+      if (e instanceof LoginError) await this.logFailure("invalid", undefined, "support link", "support", meta);
+      throw e;
+    }
   }
 
   async resetPassword(token: string, next: string) {

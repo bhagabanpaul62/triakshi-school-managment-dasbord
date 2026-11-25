@@ -1,79 +1,22 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq } from "drizzle-orm";
+import { RateLimiter } from "@smw/auth";
 import { env } from "@smw/config";
-import { plans, schoolDomains, schools, withConsole, type Tx } from "@smw/db";
-import { ConflictError, LimitError, NotFoundError, SchoolService, rethrowUnique, type Ctx } from "@smw/feature-kit";
-import { services, type DnsResolver } from "@smw/integrations";
+import { plans, schoolDomainEvents, schoolDomains, schools, type Tx } from "@smw/db";
+import { ConflictError, LimitError, NotFoundError, SchoolService, ValidationError, auditChanges, rethrowUnique, type Ctx } from "@smw/feature-kit";
 import domainsFeature from "./feature";
-import { MAX_DOMAINS, dnsInstructions, domainInput } from "./hostname";
-import { DomainVerifier, type VerifyResult } from "./verifier";
+import { MAX_DOMAINS, dnsInstructions, domainInput, pairOf, sitesIp } from "./hostname";
+import { COULD_NOT_CHECK, DomainVerificationJob, addEvent, healthyMain, type SchoolDomain } from "./monitor";
+import { staffReleaseReason } from "./state";
+
+export { DomainVerificationJob, VERIFY_WINDOW_MS, nextDomainState, type SchoolDomain } from "./monitor";
+/** Every check makes DNS and network calls. Shared by all instances. */
+export const checkLimiter = new RateLimiter(20, 10 * 60_000);
 
 type Perm = keyof typeof domainsFeature.permissions;
-export type SchoolDomain = typeof schoolDomains.$inferSelect;
+export type DomainEvent = typeof schoolDomainEvents.$inferSelect;
 
-/** DNS is rechecked every 10 minutes for this long, then the domain is marked failed. */
-export const VERIFY_WINDOW_MS = 72 * 3_600_000;
-
-/** What happens to a domain after one DNS check. Pure. */
-export function nextDomainState(d: Pick<SchoolDomain, "createdAt">, r: VerifyResult, now: Date) {
-  if (r.ok) return { status: "verified" as const, verifiedAt: now, lastCheckedAt: now, checkError: null };
-  const expired = now.getTime() - d.createdAt.getTime() >= VERIFY_WINDOW_MS;
-  return {
-    status: expired ? ("failed" as const) : ("pending" as const),
-    lastCheckedAt: now,
-    checkError: expired ? `${r.error ?? "DNS records not found."} We stopped checking after 3 days. Fix the records and press Check now.` : (r.error ?? null),
-  };
-}
-
-/** The platform side of verification: checks DNS and saves the result. Runs in the worker and behind "Check now". */
-export class DomainVerificationJob {
-  constructor(
-    dns: DnsResolver = services().dns,
-    private readonly rootDomain = env().ROOT_DOMAIN,
-    private readonly now: () => Date = () => new Date(),
-  ) { this.verifier = new DomainVerifier(dns); }
-  private readonly verifier: DomainVerifier;
-
-  /** Check one domain and save the outcome (platform access: this is the only writer of status). */
-  async checkDomain(d: SchoolDomain): Promise<SchoolDomain> {
-    const result = await this.verifier.verify(d.hostname, d.verifyToken, this.rootDomain);
-    const patch = nextDomainState(d, result, this.now());
-    const row = await withConsole(async (tx) => {
-      const [saved] = await tx.update(schoolDomains).set(patch).where(eq(schoolDomains.id, d.id)).returning();
-      if (saved && patch.status === "verified") {
-        // The free <slug> address is primary from signup; the first verified custom domain takes over (one primary per school).
-        const [hasPrimary] = await tx.select({ id: schoolDomains.id }).from(schoolDomains)
-          .where(and(eq(schoolDomains.schoolId, d.schoolId), eq(schoolDomains.kind, "custom"), eq(schoolDomains.isPrimary, true))).limit(1);
-        if (!hasPrimary) {
-          await tx.update(schoolDomains).set({ isPrimary: false }).where(eq(schoolDomains.schoolId, d.schoolId));
-          await tx.update(schoolDomains).set({ isPrimary: true }).where(eq(schoolDomains.id, d.id));
-        }
-      }
-      return saved;
-    });
-    return row ?? d;
-  }
-
-  /** The worker job "domains.verify-pending": every pending custom domain, once. */
-  async run() {
-    const pending = await withConsole((tx) => tx.select().from(schoolDomains)
-      .where(and(eq(schoolDomains.status, "pending"), eq(schoolDomains.kind, "custom"))).orderBy(asc(schoolDomains.createdAt)));
-    const out = { checked: 0, verified: 0, failed: 0 };
-    for (const d of pending) {
-      try {
-        const saved = await this.checkDomain(d);
-        out.checked++;
-        if (saved.status === "verified") out.verified++;
-        if (saved.status === "failed") out.failed++;
-      } catch (err) {
-        console.error(JSON.stringify({ level: "error", msg: "domain check failed", domain: d.hostname, err: String(err) }));
-      }
-    }
-    return out;
-  }
-}
-
-/** A school's own domains: add, show DNS records, check, choose primary, remove. Needs a plan with customDomain on. */
+/** A school's own domains: add, show DNS records, check, choose main, remove. Adding needs a plan with customDomain on. */
 export class DomainService extends SchoolService<Perm> {
   protected feature = domainsFeature;
 
@@ -83,7 +26,33 @@ export class DomainService extends SchoolService<Perm> {
     return this.read("read", (tx) => tx.select().from(schoolDomains).where(eq(schoolDomains.kind, "custom")).orderBy(asc(schoolDomains.createdAt)));
   }
 
-  /** Does the school's plan include custom domains? */
+  /** Why Triakshi released this domain, while the school may not bring it back; null when it may check. */
+  async staffBlock(id: string): Promise<string | null> {
+    return this.read("read", async (tx) => {
+      const d = await this.find(tx, id);
+      if (d.status !== "failed") return null;
+      return staffReleaseReason(await tx.select().from(schoolDomainEvents).where(eq(schoolDomainEvents.domainId, id)).orderBy(desc(schoolDomainEvents.createdAt), desc(schoolDomainEvents.id)).limit(20));
+    });
+  }
+
+  /** The free <slug> address, as a row (so it can be made main again). */
+  async free(): Promise<SchoolDomain | null> {
+    return this.read("read", async (tx) => (await tx.select().from(schoolDomains).where(eq(schoolDomains.kind, "subdomain")).limit(1))[0] ?? null);
+  }
+
+  async get(id: string): Promise<SchoolDomain> {
+    return this.read("read", (tx) => this.find(tx, id));
+  }
+
+  /** What happened to one domain, newest first. */
+  async events(id: string): Promise<DomainEvent[]> {
+    return this.read("read", async (tx) => {
+      await this.find(tx, id);
+      return tx.select().from(schoolDomainEvents).where(eq(schoolDomainEvents.domainId, id)).orderBy(desc(schoolDomainEvents.createdAt), desc(schoolDomainEvents.id)).limit(60);
+    });
+  }
+
+  /** Does the school's plan include custom domains? Existing domains keep working when it does not. */
   async planAllows(): Promise<{ allowed: boolean; planName: string | null }> {
     return this.read("read", async (tx) => {
       const [row] = await tx.select({ limits: plans.limits, name: plans.name }).from(schools)
@@ -92,39 +61,49 @@ export class DomainService extends SchoolService<Perm> {
     });
   }
 
+  /** Add a domain, and with `pair` its www or bare twin in the same step. Returns the one that was typed. */
   async add(input: unknown): Promise<SchoolDomain> {
     this.authorize("manage", "write");
-    const { hostname } = this.parse(domainInput(env().ROOT_DOMAIN), input);
+    const { hostname, pair } = this.parse(domainInput(env().ROOT_DOMAIN), input);
+    const twin = pair ? pairOf(hostname) : null;
+    if (pair && !twin) throw new ValidationError({ hostname: "Only a bare domain (school.in) and its www form can be added together." });
+    const names = twin ? [hostname, twin] : [hostname];
     if (!(await this.planAllows()).allowed) throw new LimitError("Custom domains are not part of your plan. Upgrade in Billing to use your own domain.");
     return this.write("manage", async (tx) => {
       const [n] = await tx.select({ n: count() }).from(schoolDomains).where(eq(schoolDomains.kind, "custom"));
-      if ((n?.n ?? 0) >= MAX_DOMAINS) throw new LimitError(`You can add up to ${MAX_DOMAINS} domains. Remove one first.`);
-      try {
-        const [row] = await tx.insert(schoolDomains).values({
-          schoolId: this.ctx.schoolId, hostname, kind: "custom", status: "pending", verifyToken: randomBytes(18).toString("base64url"),
-        }).returning();
-        return row!;
-      } catch (err) { return rethrowUnique(err, "This domain is already added. If it is yours, contact support."); }
-    }, (r) => ({ action: "create", entity: "Domain", entityId: r.id, summary: `Added domain ${r.hostname}` }));
+      if ((n?.n ?? 0) + names.length > MAX_DOMAINS) throw new LimitError(`You can have up to ${MAX_DOMAINS} domains. Remove one first.`);
+      const rows: SchoolDomain[] = [];
+      for (const h of names) {
+        try {
+          const [row] = await tx.insert(schoolDomains).values({ schoolId: this.ctx.schoolId, hostname: h, kind: "custom", status: "pending", verifyToken: randomBytes(18).toString("base64url") }).returning();
+          await addEvent(tx, row!, "added", null, this.ctx.name);
+          rows.push(row!);
+        } catch (err) { return rethrowUnique(err, `${h} is already in your list.`); }
+      }
+      return rows[0]!;
+    }, (r) => ({ action: "create", entity: "Domain", entityId: r.id, summary: `Added domain ${names.join(" and ")}` }));
   }
 
-  private async find(tx: Tx, id: string) {
-    const [row] = await tx.select().from(schoolDomains).where(and(eq(schoolDomains.id, id), eq(schoolDomains.kind, "custom"))).limit(1);
-    if (!row) throw new NotFoundError("Domain");
+  private async find(tx: Tx, id: string, kinds: ("custom" | "subdomain")[] = ["custom"]) {
+    const [row] = await tx.select().from(schoolDomains).where(eq(schoolDomains.id, id)).limit(1);
+    if (!row || !kinds.includes(row.kind)) throw new NotFoundError("Domain");
     return row;
   }
 
   /** The DNS records to add at the registrar. */
   async instructions(id: string) {
     const d = await this.read("read", (tx) => this.find(tx, id));
-    return dnsInstructions(d, env().ROOT_DOMAIN, process.env.SITES_IP || "203.0.113.10");
+    return dnsInstructions(d, env().ROOT_DOMAIN, sitesIp());
   }
 
-  async remove(id: string): Promise<{ id: string; hostname: string }> {
+  /** A live domain is removed only when its name is typed; the free address then becomes the main one. */
+  async remove(id: string, confirm?: string): Promise<{ id: string; hostname: string }> {
     const gone: { d?: SchoolDomain } = {};
     await this.write("manage", async (tx) => {
       const removed = (gone.d = await this.find(tx, id));
+      if (removed.status === "verified" && (confirm ?? "").trim().toLowerCase() !== removed.hostname) throw new ValidationError({ confirm: `Type ${removed.hostname} to confirm.` });
       await tx.delete(schoolDomains).where(eq(schoolDomains.id, id));
+      await addEvent(tx, removed, "removed", null, this.ctx.name);
       if (removed.isPrimary) {
         const [next] = await tx.select({ id: schoolDomains.id }).from(schoolDomains)
           .where(and(eq(schoolDomains.kind, "custom"), eq(schoolDomains.status, "verified"))).orderBy(asc(schoolDomains.createdAt)).limit(1);
@@ -136,23 +115,41 @@ export class DomainService extends SchoolService<Perm> {
     return { id, hostname: gone.d?.hostname ?? "" };
   }
 
+  /** Make a live domain, or the free address, the main one. A domain with a broken record cannot be main. */
   async setPrimary(id: string): Promise<{ id: string }> {
     return this.write("manage", async (tx) => {
-      const d = await this.find(tx, id);
+      const d = await this.find(tx, id, ["custom", "subdomain"]);
       if (d.status !== "verified") throw new ConflictError("Only a verified domain can be the main domain.");
+      if (d.health === "broken") throw new ConflictError(`${d.hostname} is not reaching your school right now. Fix its records first.`);
+      if (d.kind === "custom" && !healthyMain(d)) throw new ConflictError(`${d.hostname} is getting its secure certificate. Open https://${d.hostname} once, press Check again, and make it main when the certificate works.`);
       await tx.update(schoolDomains).set({ isPrimary: false }).where(eq(schoolDomains.isPrimary, true));
       await tx.update(schoolDomains).set({ isPrimary: true }).where(eq(schoolDomains.id, id));
+      await addEvent(tx, d, "primary", "Made the main domain.", this.ctx.name);
       return { id };
     }, (r) => ({ action: "update", entity: "Domain", entityId: r.id, summary: "Changed the main domain" }));
   }
 
-  /** Run the DNS check for one domain now. */
+  /** Visitors on the other addresses are sent to the main domain (on), or every address shows the site (off). */
+  async setRedirect(on: boolean): Promise<{ on: boolean }> {
+    let changes: ReturnType<typeof auditChanges> = {};
+    return this.write("manage", async (tx) => {
+      const [before] = await tx.select().from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
+      const [after] = await tx.update(schools).set({ redirectToPrimary: on }).where(eq(schools.id, this.ctx.schoolId)).returning();
+      changes = auditChanges(before!, after!);
+      return { on };
+    }, (r) => ({ action: "update", entity: "Domain", summary: r.on ? "Turned on sending visitors to the main domain" : "Turned off sending visitors to the main domain", meta: { changes } }));
+  }
+
+  /** Run the DNS and certificate check for one domain now. */
   async checkNow(id: string): Promise<SchoolDomain> {
     this.authorize("manage", "write");
+    if (!checkLimiter.take(this.ctx.schoolId)) throw new LimitError("You have checked many times just now. Wait ten minutes; we also check by ourselves.");
     const d = await this.read("manage", (tx) => this.find(tx, id));
-    if (d.status === "verified") return d;
-    const saved = await this.job.checkDomain(d);
-    await this.write("manage", async () => undefined, () => ({
+    const blocked = await this.staffBlock(id);
+    if (blocked) throw new ConflictError(`Released by Triakshi: ${blocked} Ask support (/app/support/new).`);
+    const saved = await this.job.check(d, this.ctx.name);
+    if (saved.checkError === COULD_NOT_CHECK) throw new ConflictError(COULD_NOT_CHECK);
+    await this.write("manage", async (tx) => { await addEvent(tx, d, "checked", saved.status === "verified" ? `Health: ${saved.health}` : `Status: ${saved.status}`, this.ctx.name); }, () => ({
       action: "update", entity: "Domain", entityId: id, summary: `Checked DNS for ${d.hostname}: ${saved.status}`,
     }));
     return saved;

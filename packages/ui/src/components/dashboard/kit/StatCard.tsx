@@ -52,7 +52,7 @@ export function StatCard({
         <div className="flex min-w-0 items-center gap-2.5">
           {icon ? <IconChip>{icon}</IconChip> : null}
           <p className="flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--ds-on-surface-variant)]">
-            <span className="truncate">{label}</span>
+            <span className="line-clamp-2 leading-tight">{label}</span>
             {tooltip}
           </p>
         </div>

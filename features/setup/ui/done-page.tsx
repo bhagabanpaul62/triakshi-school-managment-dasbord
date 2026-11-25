@@ -2,7 +2,7 @@ import Link from "next/link";
 import { IconBook, IconCash, IconUsers, type Icon } from "@tabler/icons-react";
 import { ArrowButton, IconChip } from "@smw/ui/kit/Panel";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
-import { backHref, stepHref } from "../steps";
+import { stepHref } from "../steps";
 import { FinishButton } from "./finish-button";
 import { SetupService } from "../service";
 import { SetupFrame, loadWizard } from "./frame";
@@ -61,7 +61,10 @@ export default async function DonePage() {
             Still open: {open.map((s, i) => <span key={s.key}>{i ? ", " : ""}<Link href={stepHref(s.key)} className="text-[var(--ds-on-surface-variant)] underline">{s.label.toLowerCase()}</Link></span>)}. Do them whenever you like.
           </p>
         ) : null}
-        <div className="mt-8"><Link href="/app" className="inline-flex h-10 items-center rounded-full bg-[var(--ds-primary)] px-6 text-sm font-medium text-[var(--ds-on-primary)]">Open my dashboard</Link></div>
+        <div className="mt-8 flex flex-wrap items-center gap-4">
+          <Link href="/app/getting-started" className="inline-flex h-10 items-center rounded-full bg-[var(--ds-primary)] px-6 text-sm font-medium text-[var(--ds-on-primary)]">See what to do next</Link>
+          <Link href="/app" className="flex min-h-10 items-center text-sm text-[var(--ds-on-surface-variant)] hover:text-[var(--ds-on-surface)]">Open my dashboard</Link>
+        </div>
       </SetupFrame>
     );
   }
@@ -75,7 +78,7 @@ export default async function DonePage() {
       <ul className="mt-6 flex flex-col gap-2">
         {shown.map((s) => (
           <li key={s.key} className="flex items-center gap-3 rounded-2xl bg-white/[0.04] px-4 py-3">
-            <ToneBadge label={s.done ? "Done" : s.required ? "Needed" : "Skipped"} tone={s.done ? "success" : s.required ? "warning" : "default"} />
+            <ToneBadge label={s.done ? "Done" : s.required ? "Needed" : s.skipped ? "Later" : "To do"} tone={s.done ? "success" : s.required ? "warning" : "default"} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-[var(--ds-on-surface)]">{s.label}</p>
               <p className="truncate text-xs text-[var(--ds-on-surface-muted)]">{s.summary ?? s.blurb}</p>
@@ -84,7 +87,7 @@ export default async function DonePage() {
           </li>
         ))}
       </ul>
-      <FinishButton ready={p.ready} back={backHref("website", p.available) ?? stepHref("year")} />
+      <FinishButton ready={p.ready} back={stepHref(p.available[p.available.length - 1] ?? "year")} />
     </SetupFrame>
   );
 }

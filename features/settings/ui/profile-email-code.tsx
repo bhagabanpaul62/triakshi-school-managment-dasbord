@@ -24,10 +24,10 @@ export function EmailCodeBox({ action, send, openLabel = "Have an email code? En
     const openIt = () => send
       ? start(async () => { const r = await send(); if (r.ok) { toast(r.message ?? "Code sent"); setOpen(true); } else toast(r.error ?? "Could not send the code", "danger"); })
       : setOpen(true);
-    return <button type="button" disabled={pending} onClick={openIt} className="mt-4 min-h-10 text-sm text-[var(--ds-on-surface-variant)] underline underline-offset-4 hover:text-[var(--ds-on-surface)] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">{pending ? "Sending…" : openLabel}</button>;
+    return <button type="button" disabled={pending} onClick={openIt} className="mt-2 block min-h-10 self-start text-left text-sm text-[var(--ds-on-surface-variant)] underline underline-offset-4 hover:text-[var(--ds-on-surface)] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">{pending ? "Sending…" : openLabel}</button>;
   }
   return (
-    <form className="mt-4 flex flex-col gap-2 sm:max-w-xs" onSubmit={(e) => {
+    <form className="mt-2 flex flex-col gap-2 sm:max-w-xs" onSubmit={(e) => {
       e.preventDefault();
       start(async () => {
         const fd = new FormData();

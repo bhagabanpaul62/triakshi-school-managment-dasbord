@@ -206,6 +206,31 @@ export class DuesService extends FeesBase {
 
   async classOptions() { return this.read("read", (tx) => tx.execute<{ id: string; name: string }>(sql`select id, name from classes order by grade`).then(asRows)); }
 
+  /** What is open per class, from one run of the slices query (home asked `report` once per class). Classes with nothing open are left out; students who left stay in, as in the report. */
+  async dueByClass(): Promise<{ classId: string; name: string; duePaise: number }[]> {
+    return this.read("read", async (tx) => asRows(await tx.execute<{ id: string; name: string; due: string }>(sql`with ${SLICES}
+      select c.id, c.name, sum(sl.open_paise) due from slices sl join students s on s.id = sl.student_id join classes c on c.id = s.class_id
+      where sl.open_paise > 0 group by c.id, c.name, c.grade order by c.grade, c.name`)).map((r) => ({ classId: r.id, name: r.name, duePaise: num(r.due) })));
+  }
+
+  /**
+   * The students who owe most past their due date, worst first: the same rows, order and figures as the first page of the overdue dues report,
+   * from the slices query alone (the full report also totals every student and loads bills, which a dashboard does not need).
+   */
+  async worstOverdue(limit = 6): Promise<{ id: string; name: string; classLabel: string; overdue: number; nextDueDate: string | null; phone: string | null }[]> {
+    return this.read("read", async (tx) => {
+      const today = todayIST();
+      return asRows(await tx.execute<{ id: string; name: string; class_label: string; overdue: string; next_due: string | null; phone: string | null }>(sql`with ${SLICES},
+        a as (select student_id, sum(open_paise) open, coalesce(sum(open_paise) filter (where due_on < ${today}::date), 0) overdue, min(due_on) filter (where open_paise > 0) next_due
+              from slices where open_paise > 0 group by student_id)
+        select s.id, s.name, coalesce(c.name || coalesce('-' || sec.name, ''), '-') class_label, a.overdue, a.next_due,
+          (select g.phone from student_guardians sg join guardians g on g.id = sg.guardian_id where sg.student_id = s.id and g.phone is not null order by sg.is_primary desc, g.name limit 1) phone
+        from a join students s on s.id = a.student_id left join classes c on c.id = s.class_id left join sections sec on sec.id = s.section_id
+        where a.overdue > 0 order by a.overdue desc, a.open desc, s.name, s.id limit ${limit}`))
+        .map((r) => ({ id: r.id, name: r.name, classLabel: r.class_label, overdue: num(r.overdue), nextDueDate: r.next_due ?? null, phone: r.phone ?? null }));
+    });
+  }
+
   // ---------- the dashboard ----------
 
   /** The headline numbers, by SQL aggregate. */

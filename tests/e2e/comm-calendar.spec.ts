@@ -831,20 +831,19 @@ test.describe("J13 custom roles", () => {
   // Whatever happens, the cashier login goes back to what it was.
   test.afterAll(() => { sql(`update users set role = 'staff', role_id = ${login0 ? `'${login0}'` : "null"} where school_id = '${GREEN}' and login_id = 'cashier'`); });
 
-  /** The office gives a staff login a ready-made role through Settings, Users, Manage, Change role. */
+  /** The office gives a staff login a ready-made role through Settings, Users, the person's page, Change role. */
   async function assign(admin: Page, who: string, roleLabel: string) {
     await admin.goto(at(""));
     await menu(admin, /^Settings$/);
-    await admin.getByRole("tab", { name: /Users/ }).click();
+    await admin.goto(at("settings/users"));
     await admin.getByPlaceholder(/Search by name, email or login/).fill(who);
     const row = admin.getByRole("row").filter({ hasText: who });
     await expect(row).toHaveCount(1);
-    await row.getByRole("button", { name: "Manage" }).click();
-    await dialog(admin).getByRole("button", { name: "Change role" }).click();
+    await row.getByRole("link").first().click();
+    await admin.getByRole("button", { name: "Change role" }).click();
     await dialog(admin).getByLabel(/^Role/).selectOption({ label: roleLabel });
     await dialog(admin).getByRole("button", { name: "Save" }).click();
-    await expect(admin.getByText(new RegExp(`^${roleLabel} · `)).first()).toBeVisible({ timeout: 15_000 });
-    await admin.keyboard.press("Escape");
+    await expect(admin.getByText(roleLabel, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
   }
 
   const WANT: Record<string, { sees: string[]; hidden: string[]; writeNotice: "publish" | "approval" | "no"; addEvent: boolean }> = {

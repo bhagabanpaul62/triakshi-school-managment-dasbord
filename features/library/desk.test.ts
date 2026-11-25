@@ -227,3 +227,20 @@ describe("overdue reminders", () => {
     expect((await new OverdueReminders(systemCtx(b.id, ["library"])).run(addDays(today, 30))).reminded).toBe(0);
   });
 });
+
+describe("loans due today (home links its count here)", () => {
+  it("status=due-today lists the books still out whose due date is today, and only those", async () => {
+    const svc = new LoanService(a.as.admin), x = await makeBook(a, 3);
+    const out = async (copy: number, dueOn: string) => {
+      const loan = await svc.issue({ copyId: x.copies[copy]!.id, studentId: (await makeStudent(a)).id });
+      await withSchool(a.id, (tx) => tx.update(loans).set({ dueOn }).where(eq(loans.id, loan.id)));
+      return loan.id;
+    };
+    const [now, soon] = [await out(0, today), await out(1, addDays(today, 3))];
+    await out(2, addDays(today, -2));
+    const got = await svc.list({ filters: { status: "due-today" }, pageSize: 100 });
+    expect(got.rows.map((r) => r.id)).toEqual([now]);
+    expect(got.rows.map((r) => r.id)).not.toContain(soon);
+    expect((await new LoanService(b.as.admin).list({ filters: { status: "due-today" } })).rows).toEqual([]);
+  });
+});

@@ -39,7 +39,7 @@ export function SavedViews({ views, active, basePath, params = {}, param = "view
             <Link href={href(v.key)} aria-current={v.key === active ? "page" : undefined}
               className={cn("flex h-9 items-center gap-2 whitespace-nowrap rounded-full px-4 text-[13px] font-medium transition-colors", FOCUS, v.key === active ? "bg-white/[0.12] text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface-variant)]")}>
               {v.label}
-              {v.count !== undefined ? <span className="rounded-full bg-white/[0.1] px-1.5 py-px text-[11px] tabular-nums text-[var(--ds-on-surface-variant)]">{v.count}</span> : null}
+              {v.count !== undefined ? <span className="rounded-full bg-white/[0.1] px-1.5 py-px text-[11px] tabular-nums text-[var(--ds-on-surface)]">{v.count}</span> : null}
             </Link>
           </li>
         ))}

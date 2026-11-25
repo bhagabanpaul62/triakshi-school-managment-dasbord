@@ -1,83 +1,72 @@
+import Link from "next/link";
 import type { Ctx } from "@smw/feature-kit";
-import { relative } from "@smw/ui/format";
 import { IconChip, Inset, Panel } from "@smw/ui/kit/Panel";
-import { FormModal } from "@smw/ui/shell/FormModal";
+import { FormModal, type Field } from "@smw/ui/shell/FormModal";
 import { MenuIconView } from "@smw/ui/shell/icons";
-import { PanelGrid } from "@smw/ui/shell/PageHeader";
-import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
-import { ExportService, FilePolicy } from "../service";
-import { exportSchoolData, exportStudentData } from "./actions";
-import { exportSchoolFields, studentExportFields } from "./fields";
+import { PageHeader, PanelGrid } from "@smw/ui/shell/PageHeader";
+import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
+import { ExportService } from "../export-service";
+import { askSchoolExport } from "./data-actions";
+import { ExportList } from "./export-list";
+import { ExportStudent } from "./export-person";
+import { moduleLabel } from "./labels";
 
-const size = (bytes: number | null) => (bytes == null ? "" : bytes < 1_048_576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`);
-
-/** Settings tab 3: take your data out (DPDP). Say what is in the file and where to get it. */
-export async function ExportTab({ ctx }: { ctx: Ctx }) {
+/** Take your data out (DPDP). The page says what is in the file, how long it stays, and where each export has got to. */
+export async function ExportTab({ ctx, error }: { ctx: Ctx; error?: string }) {
+  if (ctx.supportStaffId) return <Panel><WidgetEmptyState title="Exports are not available in a support session." description="Only the school can take its own data out." /></Panel>;
   const svc = new ExportService(ctx);
-  const [recent, students] = await Promise.all([svc.recent(), svc.studentOptions()]);
+  const [recent, modules] = await Promise.all([svc.recent(), Promise.resolve(svc.modules())]);
+  const busy = recent.some((r) => r.status === "queued" || r.status === "running");
+  const fields: Field[] = [
+    { name: "modules", label: "Modules to include", type: "multiselect", wide: true, options: modules.map((m) => ({ value: m, label: moduleLabel(m) })), hint: "Choose none to take everything. The school, its people and the audit log are always in." },
+    { name: "includeFiles", label: "Public files", type: "checkbox", placeholder: "Include logos and pictures shown on the website", wide: true },
+    { name: "includePayroll", label: "Payroll", type: "checkbox", placeholder: "Include salaries and payslips", hint: "PAN and bank numbers are never exported.", wide: true },
+    { name: "includePrivate", label: "Private conversations", type: "checkbox", placeholder: "Include private conversations and requests", wide: true,
+      hint: "Messages between staff and families, and requests. Reports and reviews also need the safeguarding permission." },
+    { name: "reason", label: "Why do you need them?", type: "textarea", wide: true, hint: "Only needed if you ticked private conversations. It is saved in the audit log." },
+  ];
   return (
-    <PanelGrid>
-      <div className="lg:col-span-5">
-        <Panel title="Export your data" className="h-full">
-          <div className="flex flex-col gap-3">
-            <Inset>
-              <div className="flex items-start gap-3">
-                <IconChip><MenuIconView name="class" className="h-4 w-4" /></IconChip>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-[var(--ds-on-surface)]">Whole school</p>
-                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Students, parents, staff, classes, attendance, fees, marks and settings. Private conversations and requests are left out unless you tick them.</p>
-                  <div className="mt-3">
-                    <FormModal title="Export all school data" icon="upload" description="One file with every student, fee and mark. It holds personal data, so keep it safe. The export is logged."
-                      fields={exportSchoolFields}
-                      action={exportSchoolData} submitLabel="Export" successMessage="Export ready. Download it under Your exports." trigger={{ label: "Export all school data", variant: "default" }} />
-                  </div>
-                </div>
-              </div>
-            </Inset>
-            <Inset>
-              <div className="flex items-start gap-3">
-                <IconChip><MenuIconView name="user" className="h-4 w-4" /></IconChip>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-[var(--ds-on-surface)]">One student</p>
-                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Their profile, attendance, fees, marks, and the conversations and requests about them. Use it when a parent asks for their child&apos;s records.</p>
-                  <div className="mt-3">
-                    {students.length ? (
-                      <FormModal title="Export one student" icon="upload" fields={studentExportFields(students)} action={exportStudentData} submitLabel="Export"
-                        summary="One file with only this student's records" successMessage="Export ready. Download it under Your exports." trigger={{ label: "Export one student", variant: "secondary" }} />
-                    ) : <p className="text-xs text-[var(--ds-on-surface-muted)]">Add students first, then you can export one.</p>}
-                  </div>
-                </div>
-              </div>
-            </Inset>
-            <p className="text-xs text-[var(--ds-on-surface-muted)]">Never included: passwords, sign-in tokens, phone push keys and calendar links. Files are JSON, readable in any text editor, and only admins can download them.</p>
-          </div>
-        </Panel>
-      </div>
-      <div className="lg:col-span-7">
-        <Panel title="Your exports" className="h-full">
-          {recent.length === 0 ? (
-            <WidgetEmptyState title="Nothing exported yet" description="Run an export on the left. The file appears here, ready to download." />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {recent.map((e) => (
-                <li key={e.id}>
-                  <Inset>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm text-[var(--ds-on-surface)]" title={e.label}>{e.label}</p>
-                        <p className="text-xs text-[var(--ds-on-surface-muted)]">{[relative(e.createdAt), e.requestedByName, size(e.sizeBytes)].filter(Boolean).join(" · ")}</p>
-                      </div>
-                      {e.status === "ready" && e.fileKey ? (
-                        <a href={FilePolicy.url(e.fileKey)} download aria-label={`Download ${e.label}`} className="inline-flex h-10 shrink-0 items-center rounded-full bg-white/[0.08] px-4 text-xs text-[var(--ds-on-surface)] transition-colors hover:bg-white/[0.14] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Download</a>
-                      ) : <ToneBadge label="Failed" tone="danger" />}
+    <>
+      <PageHeader eyebrow="Your data" title="Export your data" description="One ZIP file with a spreadsheet (CSV) for every table, a README and a list of row counts. It is made in the background and kept for 7 days." />
+      {error ? <p role="alert" className="mb-4 rounded-2xl bg-[var(--ds-color-danger-500)]/10 p-4 text-sm text-[var(--ds-color-danger-300)]">{error}</p> : null}
+      <PanelGrid>
+        <div className="lg:col-span-5">
+          <Panel title="Ask for an export" className="h-full">
+            <div className="flex flex-col gap-3">
+              {busy ? <p className="rounded-2xl bg-white/[0.05] p-3 text-sm text-[var(--ds-on-surface)]">One export is being made. You can ask for the next when it is ready.</p> : null}
+              <Inset>
+                <div className="flex items-start gap-3">
+                  <IconChip><MenuIconView name="class" className="h-4 w-4" /></IconChip>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-[var(--ds-on-surface)]">Whole school</p>
+                    <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Students, parents, staff, classes, attendance, fees, marks and settings. Private conversations and salaries are left out unless you tick them.</p>
+                    <div className="mt-3">
+                      <FormModal title="Export school data" icon="upload" description="It holds personal data of children and families, so keep the file safe. The export is logged."
+                        fields={fields} action={askSchoolExport} submitLabel="Make the export" successMessage="Your export is queued." trigger={{ label: "Export school data", variant: "default", plus: false }} />
                     </div>
-                  </Inset>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
-    </PanelGrid>
+                  </div>
+                </div>
+              </Inset>
+              <Inset>
+                <div className="flex items-start gap-3">
+                  <IconChip><MenuIconView name="user" className="h-4 w-4" /></IconChip>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-[var(--ds-on-surface)]">One student</p>
+                    <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">When a parent asks for their child&apos;s records. For a staff member&apos;s copy, open the request in <Link href="/app/settings/privacy" className="underline">Privacy requests</Link>.</p>
+                    <div className="mt-3"><ExportStudent /></div>
+                  </div>
+                </div>
+              </Inset>
+              <p className="text-xs text-[var(--ds-on-surface-muted)]">Never included: passwords, sign-in tokens, phone push keys, calendar links, PAN and bank numbers. Only admins can download, every download is logged, and exports work even when the school is read-only.</p>
+            </div>
+          </Panel>
+        </div>
+        <div className="lg:col-span-7">
+          <Panel title="Your exports" className="h-full">
+            {recent.length === 0 ? <WidgetEmptyState title="Nothing exported yet" description="Ask for an export on the left. It appears here and you are told when it is ready." /> : <ExportList items={recent} />}
+          </Panel>
+        </div>
+      </PanelGrid>
+    </>
   );
 }

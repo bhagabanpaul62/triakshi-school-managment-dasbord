@@ -52,7 +52,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
               >
                 <span className={active ? "text-[var(--ds-primary-text)]" : ""}><MenuIconView name={it.icon} /></span>
                 <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                {it.badge ? <span className="rounded-full bg-[var(--ds-color-primary-500)]/20 px-2 text-[11px] tabular-nums text-[var(--ds-primary-text)]">{it.badge}</span> : null}
+                {it.badge ? <span className="rounded-full bg-[var(--ds-color-primary-500)]/20 px-2 text-[11px] tabular-nums text-[var(--ds-on-surface)]">{it.badge}</span> : null}
               </Link>
             );
           })}

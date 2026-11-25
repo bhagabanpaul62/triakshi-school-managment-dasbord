@@ -52,8 +52,22 @@ export const supportLoginInput = z.object({
   userId: f.optId(),
   reason: f.text(5, 300, "Say why you are logging in (at least 5 characters)"),
   allowWrites: f.bool(),
+  /** Entry against the school's own setting. Owner only, and the school is told. */
+  emergency: f.bool(),
 });
-export const replyInput = z.object({ body: f.text(1, 5000, "Write a reply") });
+export const replyInput = z.object({ body: f.text(1, 5000, "Write a reply"), solve: f.bool() });
+export const noteInput = z.object({ body: f.text(1, 5000, "Write a note") });
+export const savedReplyInput = z.object({ title: f.text(2, 80, "Give it a short name"), body: f.text(1, 5000, "Write the reply") });
+export const noticeInput = z.object({
+  title: f.text(3, 120, "Give the notice a title"),
+  body: f.text(3, 2000, "Say what is happening"),
+  tone: z.preprocess((v) => v || "info", z.enum(["info", "warning", "danger", "success"])),
+  audience: z.preprocess((v) => v || "all", z.enum(["all", "plan", "school"])),
+  planKey: f.optText(40),
+  schoolId: f.optId(),
+  startsAt: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.date().optional()),
+  endsAt: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.date().optional()),
+});
 
 /** Ids and enum filters arrive from URLs and forms; reject bad ones as 404/validation instead of a Postgres cast error. */
 export function assertId(id: unknown, what = "Record"): string {

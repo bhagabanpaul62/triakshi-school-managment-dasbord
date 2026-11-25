@@ -467,8 +467,8 @@ test.describe("J14 first day at an empty school", () => {
     // 1. is there a way to the checklist from the first screen?
     await admin.goto(rvAt(""));
     await expect(admin.getByRole("heading", { name: /^good (morning|afternoon|evening)/i })).toBeVisible();
-    const toChecklist = admin.getByRole("link", { name: /talking to families|first steps|get started|set up communication|finish setup/i });
-    expect.soft(await toChecklist.count(), "Home must lead to the first-day checklist (it lives only at /app/setup/done, which nothing links to)").toBeGreaterThan(0);
+    const toChecklist = admin.getByRole("link", { name: /do this next|see all tasks|getting started|finish setup/i });
+    await expect(toChecklist.first(), "Home leads to the getting-started list").toBeVisible();
     await admin.goto(rvAt("setup/done"));
     await expect(admin.getByText(/talking to families: \d of 4 done/i)).toBeVisible();
 
@@ -482,7 +482,7 @@ test.describe("J14 first day at an empty school", () => {
       await admin.goto(rvAt("setup/done"));
       await admin.locator("li", { hasText: label }).getByRole("link", { name: /do it|open/i }).click();
       await admin.waitForURL(url);
-      await expect(admin.locator("main").getByText(shows).first(), `${label} opens a screen that does that`).toBeVisible();
+      await expect(admin.locator("main").getByText(shows).filter({ visible: true }).first(), `${label} opens a screen that does that`).toBeVisible();
       await expect(admin.getByText(/not found|something went wrong|you do not have|no permission|only an admin/i), `${label}: no refusal`).toHaveCount(0);
     }
 

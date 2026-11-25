@@ -31,25 +31,42 @@ export function isApex(hostname: string): boolean {
 }
 
 export const domainInput = (rootDomain: string) =>
-  z.object({ hostname: z.string().trim().min(1, "Enter your domain") }).transform((v, ctx) => {
+  z.object({ hostname: z.string().trim().min(1, "Enter your domain"), pair: z.unknown().optional() }).transform((v, ctx) => {
     const r = checkHostname(v.hostname, rootDomain);
     if (!r.ok) { ctx.issues.push({ code: "custom", message: r.error, input: v.hostname, path: ["hostname"] }); return z.NEVER; }
-    return { hostname: r.hostname };
+    return { hostname: r.hostname, pair: v.pair === true || v.pair === "true" || v.pair === "on" };
   });
 
-export interface DnsRecord { type: "TXT" | "CNAME" | "A"; name: string; value: string }
+/** The part of a name the registrar's screen asks for: relative to the registered domain, "@" for the domain itself. */
+export function shortName(fullName: string, hostname: string): string {
+  const labels = hostname.split(".");
+  const zone = labels.slice(-(TWO_PART_SUFFIXES.has(labels.slice(-2).join(".")) ? 3 : 2)).join(".");
+  return fullName === zone ? "@" : fullName.endsWith(`.${zone}`) ? fullName.slice(0, -zone.length - 1) : fullName;
+}
+
+/** The www form of a bare domain and the bare form of a www one, or null when the name is neither. */
+export function pairOf(hostname: string): string | null {
+  if (isApex(hostname)) return `www.${hostname}`;
+  return hostname.startsWith("www.") && isApex(hostname.slice(4)) ? hostname.slice(4) : null;
+}
+
+export interface DnsRecord { key: "txt" | "cname" | "a"; type: "TXT" | "CNAME" | "A"; name: string; short: string; value: string }
 export interface DnsInstructions { records: DnsRecord[]; apex: boolean; notes: string[] }
 
 /** The DNS records the school adds at its registrar. `sitesIp` is the server's fixed address (env SITES_IP) for bare domains. */
 export function dnsInstructions(d: { hostname: string; verifyToken: string }, rootDomain: string, sitesIp: string): DnsInstructions {
   const apex = isApex(d.hostname);
-  const records: DnsRecord[] = [{ type: "TXT", name: `_smw-verify.${d.hostname}`, value: `smw-verify=${d.verifyToken}` }];
+  const txtName = `_smw-verify.${d.hostname}`;
+  const records: DnsRecord[] = [{ key: "txt", type: "TXT", name: txtName, short: shortName(txtName, d.hostname), value: `smw-verify=${d.verifyToken}` }];
   const notes = ["DNS changes can take from a few minutes up to a few hours to show up. We check every 10 minutes for 3 days."];
   if (apex) {
-    records.push({ type: "A", name: d.hostname, value: sitesIp });
-    notes.push(`A bare domain cannot use a CNAME, so point an A record to ${sitesIp}. Visitors to ${d.hostname} are sent on to www.${d.hostname}; also add www.${d.hostname} here and set it as your main domain.`);
+    records.push({ key: "a", type: "A", name: d.hostname, short: "@", value: sitesIp });
+    notes.push(`A bare domain cannot use a CNAME, so it points to ${sitesIp} with an A record. Add www.${d.hostname} too and make it your main domain: ${d.hostname} then sends visitors on to it.`);
   } else {
-    records.push({ type: "CNAME", name: d.hostname, value: `sites.${rootDomain}` });
+    records.push({ key: "cname", type: "CNAME", name: d.hostname, short: shortName(d.hostname, d.hostname), value: `sites.${rootDomain}` });
   }
   return { records, apex, notes };
 }
+
+/** The server's fixed address for bare domains (env SITES_IP). */
+export const sitesIp = () => process.env.SITES_IP || "203.0.113.10";

@@ -6,8 +6,8 @@ import { schoolUrl } from "@smw/config";
 import { ForbiddenError, UnauthenticatedError, ValidationError } from "@smw/feature-kit";
 import { UploadError, authMails, services, trySend, uploadKey } from "@smw/integrations";
 import { accountMailer } from "@smw/feature-notifications/delivery";
-import { formToObject, getSchool, getSession, runAction, type ActionResult } from "@smw/runtime";
-import { FilePolicy } from "../service";
+import { formToObject, getSchool, getSession, runAction, serviceAction, type ActionResult } from "@smw/runtime";
+import { FilePolicy, ProfileService } from "../service";
 import { profileInput } from "../inputs";
 
 /** The signed-in person on this host. Support sessions and read-only schools cannot change an account. */
@@ -155,4 +155,10 @@ export async function signOutOtherDevices(): Promise<ActionResult> {
     await auth.logoutOthers(user.id, session.sessionId);
     return null;
   }, "Signed out everywhere else");
+}
+
+/** Turn the new-device email on or off for myself. */
+export async function setNewDeviceAlert(fd: FormData) {
+  const on = fd.get("on") === "1";
+  return serviceAction(ProfileService, (s) => s.setNewDeviceAlert(on), on ? "We will email you about new devices" : "No more emails about new devices");
 }

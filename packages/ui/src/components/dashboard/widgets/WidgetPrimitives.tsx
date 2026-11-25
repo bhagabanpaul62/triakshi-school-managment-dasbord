@@ -217,6 +217,8 @@ export function EntityList({
     subtitle?: ReactNode;
     meta?: ReactNode;
     badge?: ReactNode;
+    /** A link or button of its own (a Call link). It sits beside the row, never inside the row's link: an <a> in an <a> breaks hydration. */
+    action?: ReactNode;
     /** Avatar or icon chip shown before the text. */
     leading?: ReactNode;
     accent?: Tone;
@@ -250,7 +252,7 @@ export function EntityList({
         {visible.map((item, index) => {
           const href = item.href;
           const interactive = Boolean(href || item.onClick);
-          const rowClassName = cn("flex items-center gap-3 rounded-2xl px-3 py-2.5", interactive && ROW_HOVER);
+          const rowClassName = item.action ? "flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5" : cn("flex items-center gap-3 rounded-2xl px-3 py-2.5", interactive && ROW_HOVER);
           const rowContent = (
             <>
               {item.leading ? <span className="shrink-0">{item.leading}</span> : null}
@@ -299,6 +301,7 @@ export function EntityList({
           } else {
             row = <div className={rowClassName}>{rowContent}</div>;
           }
+          if (item.action) row = <div className={cn("flex items-center gap-1 rounded-2xl pr-2", interactive && ROW_HOVER)}>{row}{item.action}</div>;
 
           // Past the first screenful the stagger adds delay without adding polish.
           return index < ROW_LIMIT_FOR_MOTION ? (

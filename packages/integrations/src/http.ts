@@ -22,10 +22,13 @@ export const pdfResponse = (bytes: Uint8Array, fileName: string) => new Response
   headers: { "content-type": "application/pdf", "content-disposition": disposition("inline", fileName), ...PRIVATE },
 });
 
-/** One CSV cell. A cell that starts like a formula gets an apostrophe so a spreadsheet never runs it. */
+/** A plain number or phone number ("+91 98111 00000", "-5", "080-2345 6789"): digits, with a leading sign and single spaces or hyphens between groups. Not a formula. */
+const PLAIN_NUMBER = /^[+-]?\d+(?:[ -]\d+)*$/;
+
+/** One CSV cell. A cell that starts like a formula gets an apostrophe so a spreadsheet never runs it; a plain number or phone number is left as it is. */
 export const csvCell = (v: unknown) => {
   const s = v == null ? "" : v instanceof Date ? v.toISOString() : String(v);
-  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+  const safe = /^[=+\-@\t\r]/.test(s) && !PLAIN_NUMBER.test(s) ? `'${s}` : s;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 export const csvLine = (cells: unknown[]) => `${cells.map(csvCell).join(",")}\r\n`;

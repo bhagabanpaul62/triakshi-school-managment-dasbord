@@ -53,3 +53,36 @@ export async function finishSetup() {
     return r;
   }, "Setup finished");
 }
+
+export async function skipStep(input: { step: string }) {
+  return serviceAction(SetupService, (s) => s.skipStep(input));
+}
+
+export async function askUs(input: { step: string; body: string }) {
+  return serviceAction(SetupService, (s) => s.askUs(input), "Sent. You will be told here when we reply.");
+}
+
+/** A pasted sheet or an uploaded file, as the bytes the staff import reads. Paste is tab or comma separated; the first row names the columns. */
+async function sheetFrom(fd: FormData): Promise<{ name: string; bytes: Uint8Array }> {
+  const file = fd.get("file");
+  if (file instanceof File && file.size > 0) return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+  return { name: "pasted.csv", bytes: new TextEncoder().encode(String(fd.get("text") ?? "")) };
+}
+export async function checkStaffSheet(fd: FormData) {
+  return runAction(async () => new SetupService(await actionCtx()).checkStaffSheet(await sheetFrom(fd)));
+}
+export async function importStaffSheet(fd: FormData) {
+  return runAction(async () => new SetupService(await actionCtx()).importStaffSheet(await sheetFrom(fd)), "Staff added");
+}
+
+export async function addStudents(input: { rows: { name: string; sectionId: string; guardianName: string; guardianPhone: string }[] }) {
+  return serviceAction(SetupService, (s) => s.addStudents(input));
+}
+
+export async function saveClassTeachers(input: { picks: { sectionId: string; teacherId: string }[] }) {
+  return serviceAction(SetupService, (s) => s.saveClassTeachers(input), "Class teachers saved");
+}
+
+export async function addTeam(fd: FormData) {
+  return serviceAction(SetupService, (s) => s.addTeam(formToObject(fd)), "Login added");
+}

@@ -6,7 +6,7 @@ import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { ChatBubble } from "@smw/ui/comm/ChatBubble";
 import { ConversationLog } from "@smw/ui/comm/ConversationLog";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT } from "@smw/ui/tone";
 import { cn } from "@smw/ui/utils";
 import type { ThreadData } from "../core";
 import { REVIEWED_LINE, SafeguardService } from "../safeguard";

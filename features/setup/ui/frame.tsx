@@ -7,6 +7,7 @@ import { Panel } from "@smw/ui/kit/Panel";
 import { LABEL } from "@smw/ui/tone";
 import { SetupService, type SetupProgress } from "../service";
 import { DONE_HREF, stepHref, stepMeta, type StepKey } from "../steps";
+import { AskUs } from "./ask-us";
 
 /** Every wizard page starts here: only the admin of a school with the wizard may be in it. */
 export async function loadWizard() {
@@ -50,7 +51,7 @@ export function SetupFrame({ current, progress: p, children }: { current: StepKe
           </div>
         </div>
         <p className="mt-2 text-xs text-[var(--ds-on-surface-muted)]">{remaining(p)}</p>
-        <nav aria-label="Setup steps" className="-mx-1 mt-5 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0">
+        <nav aria-label="Setup steps" className="-mx-1 mt-5 flex gap-1 relative overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0">
           {shown.map((s, i) => {
             const active = s.key === current;
             return (
@@ -60,7 +61,7 @@ export function SetupFrame({ current, progress: p, children }: { current: StepKe
                   {s.done ? <IconCheck className="h-3.5 w-3.5" aria-label="Done" /> : i + 1}
                 </span>
                 <span className="whitespace-nowrap">{s.label}</span>
-                {!s.required && !s.done ? <span className="hidden text-[11px] text-[var(--ds-on-surface-muted)] lg:inline">Optional</span> : null}
+                {!s.required && !s.done ? <span className="hidden text-[11px] text-[var(--ds-on-surface-muted)] lg:inline">{s.skipped ? "Later" : "Optional"}</span> : null}
               </Link>
             );
           })}
@@ -78,6 +79,8 @@ export function SetupFrame({ current, progress: p, children }: { current: StepKe
           <header className="pb-6 pt-1">
             <h1 className="text-[28px] font-medium tracking-tight text-[var(--ds-on-surface)]">{meta.label}</h1>
             <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">{meta.blurb}</p>
+            <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Opens up: {meta.unlocks}</p>
+            {p.canAsk ? <AskUs step={meta.key} label={meta.label} /> : null}
           </header>
         ) : null}
         <Panel className="p-5 sm:p-7">{children}</Panel>

@@ -6,7 +6,7 @@ export interface EditField {
   name: string;
   label: string;
   /** "lines" is a string[] typed one per line; "list" is an array of objects; "rows" is the string[][] of a table. Default "text". */
-  kind?: "text" | "textarea" | "number" | "email" | "select" | "image" | "lines" | "list" | "rows";
+  kind?: "text" | "textarea" | "number" | "email" | "select" | "image" | "lines" | "list" | "rows" | "file" | "date";
   required?: boolean; hint?: string; placeholder?: string;
   /** Half width on wide screens. */
   half?: boolean;
@@ -53,6 +53,15 @@ export const EDITOR_FIELDS: Record<SectionType, EditField[]> = {
   table: [heading, intro, { name: "columns", label: "Column titles", kind: "lines", required: true, hint: "One per line, two to six columns." },
     { name: "rows", label: "Rows", kind: "rows", hint: "A cell that holds a link (https://... or /page) becomes a View button." }, { name: "note", label: "Note under the table" }],
   links: [heading, intro, { name: "items", label: "Links", kind: "list", itemLabel: "link", max: 30, item: [{ name: "label", label: "Name", required: true, half: true }, { name: "href", label: "Link", placeholder: "https://... or /page", required: true, half: true }] }],
+  video: [heading, intro, { name: "url", label: "Video link", required: true, placeholder: "https://www.youtube.com/watch?v=..." }, { name: "title", label: "What the video shows", required: true, hint: "Read out to visitors who cannot see it." }],
+  documents: [heading, intro, { name: "items", label: "Documents", kind: "list", itemLabel: "document", max: 60, item: [
+    { name: "label", label: "Name", required: true, half: true }, { name: "group", label: "Group", placeholder: "Circulars", half: true }, { name: "url", label: "File", kind: "file", required: true }, { name: "date", label: "Date", kind: "date", half: true }] }],
+  people: [heading, intro, { name: "items", label: "People", kind: "list", itemLabel: "person", max: 40, item: [
+    { name: "name", label: "Name", required: true, half: true }, { name: "role", label: "Role", half: true }, { name: "text", label: "Short line", kind: "textarea" }, { name: "imageUrl", label: "Photo", kind: "image" }] }],
+  achievers: [heading, intro, { name: "items", label: "Names", kind: "list", itemLabel: "achiever", max: 40, item: [
+    { name: "name", label: "Name", required: true, half: true }, { name: "result", label: "Result", required: true, half: true }, { name: "year", label: "Year", half: true }, { name: "imageUrl", label: "Photo", kind: "image" }] }],
+  contact_form: [{ ...heading, required: true }, { name: "intro", label: "Short note", kind: "textarea" }],
+  disclosure: [{ ...heading, required: true }, { name: "intro", label: "Short note", kind: "textarea", hint: "The rows are filled under Website, Disclosure." }],
   cta: [{ name: "heading", label: "Headline", required: true }, { name: "text", label: "Supporting line", kind: "textarea" },
     { name: "ctaLabel", label: "Button text", required: true, half: true }, { name: "ctaHref", label: "Button link", placeholder: "/admissions", required: true, half: true }],
 };

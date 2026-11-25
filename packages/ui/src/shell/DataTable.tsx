@@ -136,7 +136,7 @@ export function DataTable({ columns, rows, total, page, pageCount, rowHref, sear
         </div>
       ) : (
         // relative: the sr-only Actions header is absolutely positioned; without a positioned ancestor here it escapes the scroll box and widens the whole page on phones.
-        <div className={cn("custom-scrollbar relative -mx-4 overflow-x-auto sm:-mx-6 transition-opacity", pending && "opacity-60")}>
+        <div role="region" aria-label="Table" tabIndex={0} className={cn("custom-scrollbar relative -mx-4 overflow-x-auto focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)] sm:-mx-6 transition-opacity", pending && "opacity-60")}>
           {/* On a phone each row becomes a card: identity on top, the rest under it with their labels. */}
           <table className="w-full text-sm max-sm:block sm:min-w-[640px]">
             <thead className="max-sm:hidden">

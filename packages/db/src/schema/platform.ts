@@ -1,7 +1,7 @@
 // Platform tables: schools, plans, modules, identity, billing, support. School-owned feature tables live in features/*/schema.ts.
 import { sql } from "drizzle-orm";
 import {
-  boolean, index, integer, jsonb, pgPolicy, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, bigint,
+  boolean, index, integer, jsonb, pgPolicy, pgSequence, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, bigint,
 } from "drizzle-orm/pg-core";
 import { createdAt, id, schoolColumns, tenant, updatedAt } from "../columns";
 
@@ -12,6 +12,7 @@ export const SCHOOL_ROLES = ["admin", "accountant", "teacher", "student", "paren
 export const CUSTOM_ROLE_BASES = ["staff", "teacher"] as const;
 export const STAFF_ROLES = ["owner", "support", "sales"] as const;
 export const MODULE_STAGES = ["alpha", "beta", "ga"] as const;
+export const SUPPORT_ACCESS = ["always", "until", "never"] as const;
 export type SchoolStatus = (typeof SCHOOL_STATUSES)[number];
 export type SchoolRole = (typeof SCHOOL_ROLES)[number];
 export type StaffRole = (typeof STAFF_ROLES)[number];
@@ -65,6 +66,21 @@ export const schools = pgTable("schools", {
   email: text("email"),
   gstin: text("gstin"),
   udiseCode: text("udise_code"),
+  affiliationNo: text("affiliation_no"),
+  schoolCode: text("school_code"),
+  schoolType: text("school_type"),
+  medium: text("medium"),
+  establishedYear: integer("established_year"),
+  district: text("district"),
+  pincode: text("pincode"),
+  website: text("website"),
+  headName: text("head_name"),
+  headQualification: text("head_qualification"),
+  /** May Triakshi staff open this school: always, only while `support_access_until` is in the future, or never. */
+  supportAccess: text("support_access").$type<(typeof SUPPORT_ACCESS)[number]>().notNull().default("always"),
+  supportAccessUntil: timestamp("support_access_until", { withTimezone: true }),
+  /** Public pages on any other address of this school redirect to its main domain. */
+  redirectToPrimary: boolean("redirect_to_primary").notNull().default(true),
   timezone: text("timezone").notNull().default("Asia/Kolkata"),
   academicYearStartMonth: integer("academic_year_start_month").notNull().default(4),
   theme: jsonb("theme").$type<Record<string, unknown>>(),
@@ -90,7 +106,33 @@ export const schoolDomains = pgTable("school_domains", {
   lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
   checkError: text("check_error"),
   isPrimary: boolean("is_primary").notNull().default(false),
-}, (t) => [...tenant(t, "school_domains"), uniqueIndex("school_domains_hostname").on(t.hostname)]);
+  /** Of a verified domain: each record on its own. Written by the platform only. */
+  health: text("health").$type<"ok" | "warning" | "broken">(),
+  failingSince: timestamp("failing_since", { withTimezone: true }),
+  txtMissingSince: timestamp("txt_missing_since", { withTimezone: true }),
+  records: jsonb("records").$type<DomainRecordCheck[]>().notNull().default([]),
+  certExpiresAt: timestamp("cert_expires_at", { withTimezone: true }),
+  dnsProvider: text("dns_provider"),
+  toldAt: timestamp("told_at", { withTimezone: true }),
+}, (t) => [
+  ...tenant(t, "school_domains"),
+  // An unproven claim blocks nobody: only one school can hold a verified name, and a school lists a name once.
+  uniqueIndex("school_domains_verified_hostname").on(t.hostname).where(sql`${t.status} = 'verified'`),
+  uniqueIndex("school_domains_school_hostname").on(t.schoolId, t.hostname),
+]);
+
+/** One DNS or certificate check of a domain, as the school sees it. */
+export interface DomainRecordCheck { key: "txt" | "cname" | "a" | "https"; ok: boolean; expected: string; found: string[]; note?: string }
+
+/** What happened to a domain. Written by the platform and by the school's own actions; never edited. */
+export const schoolDomainEvents = pgTable("school_domain_events", {
+  ...schoolColumns(),
+  domainId: uuid("domain_id"),
+  hostname: text("hostname").notNull(),
+  kind: text("kind").$type<"added" | "checked" | "verified" | "failing" | "recovered" | "failed" | "released" | "primary" | "removed" | "lost">().notNull(),
+  detail: text("detail"),
+  byName: text("by_name"),
+}, (t) => [...tenant(t, "school_domain_events"), index("school_domain_events_domain").on(t.schoolId, t.domainId, t.createdAt)]);
 
 export const schoolModuleOverrides = pgTable("school_module_overrides", {
   ...schoolColumns(),
@@ -137,6 +179,8 @@ export const users = pgTable("users", {
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   /** When the person proved they own `email` (a code or link sent to it). Cleared whenever the email changes. */
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+  /** Mail me when a new device signs in. Null = the default of the role (on for admins and accountants). */
+  alertNewDevice: boolean("alert_new_device"),
 }, (t) => [
   ...tenant(t, "users"),
   uniqueIndex("users_school_login").on(t.schoolId, sql`lower(${t.loginId})`),
@@ -168,6 +212,21 @@ export const oneTimeTokens = pgTable("one_time_tokens", {
   usedAt: timestamp("used_at", { withTimezone: true }),
 }, (t) => [...tenant(t, "one_time_tokens"), uniqueIndex("ott_token").on(t.tokenHash)]);
 
+export const LOGIN_OUTCOMES = ["success", "bad_password", "bad_code", "unknown_login", "disabled", "rate_limited", "support", "support_failed"] as const;
+/** Every sign-in attempt on a school's host. `userId` is null when the login was not known. Append-only for the school. */
+export const loginEvents = pgTable("login_events", {
+  ...schoolColumns(),
+  userId: uuid("user_id"),
+  /** What was typed, cut to 80 characters; never a password. */
+  identifier: text("identifier").notNull(),
+  outcome: text("outcome").$type<(typeof LOGIN_OUTCOMES)[number]>().notNull(),
+  method: text("method").$type<"password" | "code" | "reset" | "support" | "api">().notNull(),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+  newDevice: boolean("new_device").notNull().default(false),
+  supportStaffId: uuid("support_staff_id"),
+}, (t) => [...tenant(t, "login_events"), index("login_events_school_time").on(t.schoolId, t.createdAt), index("login_events_user").on(t.schoolId, t.userId, t.createdAt)]);
+
 export const auditLogs = pgTable("audit_logs", {
   ...schoolColumns(),
   actorUserId: uuid("actor_user_id"),
@@ -179,7 +238,7 @@ export const auditLogs = pgTable("audit_logs", {
   summary: text("summary"),
   meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
   ip: text("ip"),
-}, (t) => [...tenant(t, "audit_logs"), index("audit_school_time").on(t.schoolId, t.createdAt)]);
+}, (t) => [...tenant(t, "audit_logs"), index("audit_school_time").on(t.schoolId, t.createdAt), index("audit_school_module").on(t.schoolId, t.module, t.createdAt)]);
 
 export const platformStaff = pgTable("platform_staff", {
   id: id(),
@@ -345,15 +404,33 @@ export const webhookEvents = pgTable("webhook_events", {
 
 // ---------- support and design requests ----------
 
+export const supportTicketNumber = pgSequence("support_ticket_number", { startWith: 1001 });
+export const TICKET_CATEGORIES = ["question", "problem", "billing", "data", "onboarding", "idea", "closure"] as const;
+
 export const supportTickets = pgTable("support_tickets", {
   ...schoolColumns(),
+  /** "T-1042": one series for the whole platform, set by the database on insert. */
+  number: integer("number").notNull().default(sql`nextval('support_ticket_number')`),
   subject: text("subject").notNull(),
+  category: text("category").$type<(typeof TICKET_CATEGORIES)[number]>().notNull().default("question"),
   status: text("status").$type<"open" | "pending" | "resolved" | "closed">().notNull().default("open"),
   priority: text("priority").$type<"low" | "normal" | "high" | "urgent">().notNull().default("normal"),
   createdByUserId: uuid("created_by_user_id"),
   assignedStaffId: uuid("assigned_staff_id"),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true }).defaultNow(),
-}, (t) => [...tenant(t, "support_tickets")]);
+  /** Where it was written: page path and browser. Shown to the writer, who can leave it out. */
+  context: jsonb("context").$type<{ page?: string; browser?: string; article?: string }>().notNull().default({}),
+  followUpOf: uuid("follow_up_of"),
+  replyDueAt: timestamp("reply_due_at", { withTimezone: true }),
+  firstReplyAt: timestamp("first_reply_at", { withTimezone: true }),
+  overdueToldAt: timestamp("overdue_told_at", { withTimezone: true }),
+  pendingSince: timestamp("pending_since", { withTimezone: true }),
+  remindedAt: timestamp("reminded_at", { withTimezone: true }),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  rating: integer("rating"),
+  ratingNote: text("rating_note"),
+}, (t) => [...tenant(t, "support_tickets"), uniqueIndex("support_tickets_number").on(t.number), index("support_tickets_status").on(t.status, t.lastMessageAt)]);
 
 export const supportMessages = pgTable("support_messages", {
   ...schoolColumns(),
@@ -361,7 +438,90 @@ export const supportMessages = pgTable("support_messages", {
   authorUserId: uuid("author_user_id"),
   authorStaffId: uuid("author_staff_id"),
   body: text("body").notNull(),
+  /** Shown to the school as "Triakshi support" when staff wrote it. */
+  staffName: text("staff_name"),
+  /** When the school's people were told of a staff message (job `support.tell`). */
+  toldAt: timestamp("told_at", { withTimezone: true }),
 }, (t) => [...tenant(t, "support_messages"), index("support_messages_ticket").on(t.ticketId)]);
+
+export const supportFiles = pgTable("support_files", {
+  ...schoolColumns(),
+  ticketId: uuid("ticket_id").notNull().references(() => supportTickets.id, { onDelete: "cascade" }),
+  messageId: uuid("message_id").notNull().references(() => supportMessages.id, { onDelete: "cascade" }),
+  fileKey: text("file_key").notNull(),
+  fileName: text("file_name").notNull(),
+  contentType: text("content_type").notNull(),
+  size: integer("size").notNull(),
+}, (t) => [...tenant(t, "support_files"), index("support_files_ticket").on(t.ticketId)]);
+
+/** Staff-only notes on a ticket. The school's database role has no rights on this table at all. */
+export const supportNotes = pgTable("support_notes", {
+  id: id(),
+  ticketId: uuid("ticket_id").notNull().references(() => supportTickets.id, { onDelete: "cascade" }),
+  staffId: uuid("staff_id").notNull(),
+  body: text("body").notNull(),
+  createdAt: createdAt(),
+}, (t) => [index("support_notes_ticket").on(t.ticketId)]);
+
+/** Console-only. */
+export const supportSavedReplies = pgTable("support_saved_replies", {
+  id: id(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  createdBy: uuid("created_by"),
+  createdAt: createdAt(),
+});
+
+/** A help article opened or judged. No person is stored. */
+export const supportViews = pgTable("support_views", {
+  ...schoolColumns(),
+  article: text("article").notNull(),
+  useful: boolean("useful"),
+}, (t) => [...tenant(t, "support_views"), index("support_views_article").on(t.article)]);
+
+/** Each time Triakshi staff opened a school, written when the link is made and when it is used. The school reads it. */
+export const supportVisits = pgTable("support_visits", {
+  ...schoolColumns(),
+  staffId: uuid("staff_id").notNull(),
+  staffName: text("staff_name").notNull(),
+  asUserId: uuid("as_user_id").notNull(),
+  asUserName: text("as_user_name").notNull(),
+  reason: text("reason").notNull(),
+  readOnly: boolean("read_only").notNull(),
+  /** Entry against the school's setting, by an owner. */
+  emergency: boolean("emergency").notNull().default(false),
+  enteredAt: timestamp("entered_at", { withTimezone: true }),
+  toldAt: timestamp("told_at", { withTimezone: true }),
+}, (t) => [...tenant(t, "support_visits"), index("support_visits_time").on(t.schoolId, t.createdAt)]);
+
+/** Messages from Triakshi to schools (planned work, a problem, solved). Console writes; a school sees its own audience. */
+export const platformNotices = pgTable("platform_notices", {
+  id: id(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  tone: text("tone").$type<"info" | "warning" | "danger" | "success">().notNull().default("info"),
+  audience: text("audience").$type<"all" | "plan" | "school">().notNull().default("all"),
+  planKey: text("plan_key"),
+  schoolId: uuid("school_id"),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }),
+  createdBy: uuid("created_by"),
+  createdAt: createdAt(),
+}, (t) => [index("platform_notices_time").on(t.startsAt)]);
+
+/** A nightly picture of how far a school has come. Written by the worker, read by the console. */
+export const schoolSetupStatus = pgTable("school_setup_status", {
+  ...schoolColumns(),
+  percent: integer("percent").notNull(),
+  done: integer("done").notNull(),
+  total: integer("total").notNull(),
+  nextKey: text("next_key"),
+  nextLabel: text("next_label"),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  students: integer("students").notNull().default(0),
+  firstAttendanceOn: text("first_attendance_on"),
+  facts: jsonb("facts").$type<Record<string, unknown>>().notNull().default({}),
+}, (t) => [...tenant(t, "school_setup_status"), uniqueIndex("school_setup_status_school").on(t.schoolId)]);
 
 export const customDesignRequests = pgTable("custom_design_requests", {
   ...schoolColumns(),

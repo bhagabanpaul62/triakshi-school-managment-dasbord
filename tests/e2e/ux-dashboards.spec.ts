@@ -8,7 +8,7 @@ const SIZES = { desktop: { width: 1440, height: 900 }, phone: { width: 390, heig
 test.setTimeout(300_000);
 
 const one = (q: string) =>
-  execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
+  execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d ${process.env.E2E_DB ?? "smw"} -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
 const schoolId = (slug: string) => one(`select id from schools where slug='${slug}'`);
 
 async function shot(page: Page, name: string) {
@@ -70,12 +70,12 @@ test.describe("dashboards: the home page of every role", () => {
     await login(page, "greenvalley", "admin");
     await home(page, "admin");
     await expect(page.getByText("Students", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText(/attendance today/i).first()).toBeVisible();
-    await expect(page.getByText(/outstanding/i).first()).toBeVisible();
-    await expect(page.getByText(/needs attention/i)).toBeVisible();
+    await expect(page.getByText("Present today", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Dues", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Needs attention", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/\d{4}-\d{2}-\d{2}T/)).toHaveCount(0);
-    await page.getByRole("link", { name: /^Outstanding/ }).first().click();
-    await expect(page).toHaveURL(/\/app\/fees/);
+    await page.getByRole("link", { name: /^Dues/ }).first().click();
+    await expect(page).toHaveURL(/\/app\/fees\/dues/);
   });
 
   test("accountant: collections and who to chase", async ({ page }) => {
@@ -88,8 +88,8 @@ test.describe("dashboards: the home page of every role", () => {
   test("teacher: my day", async ({ page }) => {
     await login(page, "greenvalley", "teacher");
     await home(page, "teacher");
-    await expect(page.getByText(/periods today/i)).toBeVisible();
-    await expect(page.getByText(/attendance to mark/i)).toBeVisible();
+    await expect(page.getByText(/now and next|no classes today/i).first()).toBeVisible();
+    await expect(page.getByText(/registers to mark|all marked for today|not a class teacher|no attendance today/i).first()).toBeVisible();
   });
 
   test("student: today, due work, attendance, results", async ({ page }) => {

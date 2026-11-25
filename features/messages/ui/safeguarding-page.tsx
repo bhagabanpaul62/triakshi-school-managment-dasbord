@@ -5,7 +5,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { SavedViews } from "@smw/ui/comm/SavedViews";
 import { relative, shortDate as dateOnly } from "@smw/ui/format";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT } from "@smw/ui/tone";
 import { cn } from "@smw/ui/utils";
 import { REPORT_CATEGORIES } from "../constants";
 import { SafeguardService } from "../safeguard";

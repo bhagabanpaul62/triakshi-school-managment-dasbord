@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { NotFoundError, listQueryFrom } from "@smw/feature-kit";
-import { AuditAdminService, PlanAdminService, SchoolAdminService } from "@smw/platform";
+import { AuditAdminService, PlanAdminService, SchoolAdminService, supportMayEnter, supportRefusal } from "@smw/platform";
 import { requireStaff } from "@smw/runtime/console";
 import { EntityHeader } from "@smw/ui/kit/EntityHeader";
 import { Fact, FactList } from "@smw/ui/kit/FactList";
@@ -23,6 +23,7 @@ import { SimpleTable } from "@/components/simple-table";
 import { DOMAIN_LABELS, DOMAIN_TONES, PRIORITY_TONES, SCHOOL_LABELS, SCHOOL_TONES, STAGE_LABELS, STAGE_TONES, TICKET_LABELS, TICKET_TONES } from "@/lib/tones";
 import { changePlan, createSupportLogin, extendTrial, makeSchoolReadOnly, reactivateSchool, removeOverride, resendSchoolSignIn, scheduleDeletion, setOverride, suspendSchool } from "../../actions";
 import { SupportLoginDialog } from "./support-login-dialog";
+import { SetupPanel } from "./setup-panel";
 
 export const metadata = { title: "School" };
 
@@ -63,12 +64,12 @@ export default async function SchoolPage({ params, searchParams }: { params: Pro
   const unpaid = invoiceRows.filter((i) => i.status === "issued");
   const overdue = unpaid.filter((i) => i.dueAt && i.dueAt.getTime() < now);
   const openTickets = ticketRows.filter((t) => t.status === "open" || t.status === "pending");
-  const brokenDomains = domainRows.filter((d) => d.status === "failed");
+  const brokenDomains = domainRows.filter((d) => d.status === "failed" || d.health === "broken");
 
   const actions: ReactNode = (
     <>
       {underReview ? <ReviewActions id={id} name={s.name} status={s.status} adminEmail={s.email} canDecide={isOwner} /> : null}
-      {canStatus ? <SupportLoginDialog schoolId={id} users={admins.filter((a) => a.status === "active").map((a) => ({ id: a.id, name: a.name }))} canWrite={isOwner} action={createSupportLogin} /> : null}
+      {canStatus ? <SupportLoginDialog schoolId={id} users={admins.filter((a) => a.status === "active").map((a) => ({ id: a.id, name: a.name }))} canWrite={isOwner} action={createSupportLogin} access={{ allowed: supportMayEnter(s), message: supportRefusal(s) }} /> : null}
       {canSales && !underReview ? <FormModal title="Extend trial" icon="clock" fields={[{ name: "days", label: "Add days", type: "number", required: true, min: 1, max: 365 }]} values={{ days: 14 }} hidden={{ id }} action={extendTrial} submitLabel="Extend"
         trigger={{ label: "Extend trial", variant: "secondary" }} summary={s.trialEndsAt ? `Ends ${shortDate(s.trialEndsAt)} now` : "No trial date yet"} /> : null}
       {canSales ? <FormModal title="Change plan" icon="receipt" fields={[{ name: "planId", label: "Plan", type: "select", required: true, options: plans.filter((p) => p.isLatest && p.isActive).map((p) => ({ value: p.id, label: `${p.name} (up to ${p.studentCap} students)` })) }]}
@@ -123,6 +124,7 @@ export default async function SchoolPage({ params, searchParams }: { params: Pro
             {needs.length ? <SummaryRows rows={needs} /> : <p className="px-1 text-sm text-[var(--ds-on-surface-muted)]">Nothing here needs a person. The school is within its student cap, billing is current and no tickets are open.</p>}
           </Panel>
         </div>
+        <SetupPanel id={id} />
         <KpiRow>
           <StatCard label="Students" value={`${studentCount}`} icon={icon("users")} meta={`of ${s.studentCap} allowed`} viz={<div className="w-24"><TickBar value={capPct} tone={capTone} /></div>} />
           <StatCard label="Plan" value={plan ? plan.name : "None"} icon={icon("receipt")} meta={plan ? `Version ${plan.version}` : "Not on a plan"} />
@@ -204,9 +206,11 @@ export default async function SchoolPage({ params, searchParams }: { params: Pro
     body = (
       <Panel title="Domains">
         <SimpleTable rows={rows} empty={{ title: "No domains.", description: "Every school gets a subdomain when it is created." }} columns={[
-          { label: "Address", cell: (d) => <span className="font-mono text-xs">{d.hostname}{d.isPrimary ? "  (main)" : ""}</span> },
+          { label: "Address", cell: (d) => <Link href={`/domains/${d.id}`} className="font-mono text-xs hover:underline">{d.hostname}{d.isPrimary ? "  (main)" : ""}</Link> },
           { label: "Kind", cell: (d) => (d.kind === "custom" ? "Custom domain" : "Subdomain"), hideOnMobile: true },
           { label: "Status", cell: (d) => <ToneBadge label={DOMAIN_LABELS[d.status] ?? d.status} tone={DOMAIN_TONES[d.status]} /> },
+          { label: "Health", cell: (d) => (d.health ? <ToneBadge label={d.health === "ok" ? "Healthy" : d.health === "warning" ? "Needs a look" : "Broken"} tone={d.health === "ok" ? "success" : d.health === "warning" ? "warning" : "danger"} /> : "-") },
+          { label: "Certificate until", cell: (d) => (d.certExpiresAt ? shortDate(d.certExpiresAt) : "-"), hideOnMobile: true },
           { label: "Last checked", cell: (d) => (d.lastCheckedAt ? dateTime(d.lastCheckedAt) : "-"), hideOnMobile: true },
         ]} />
       </Panel>

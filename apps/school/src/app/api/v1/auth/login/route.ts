@@ -1,5 +1,6 @@
 import { AppError } from "@smw/feature-kit";
-import { LoginError, SchoolAuth } from "@smw/auth";
+import { LoginError, SchoolAuth, deviceFamily } from "@smw/auth";
+import { mailNewDevice } from "@/lib/new-device";
 import { apiHandler, readJson, schoolFromRequest } from "@smw/runtime/bearer";
 import { loginBody } from "../../_schemas";
 
@@ -9,10 +10,11 @@ export const POST = apiHandler(async (req) => {
   const school = await schoolFromRequest(req);
   const auth = new SchoolAuth(school.id);
   try {
-    const { token, expiresAt, mustChangePassword } = await auth.login(body.identifier, body.password, {
+    const { token, expiresAt, mustChangePassword, userId, ...seen } = await auth.login(body.identifier, body.password, {
       ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined,
-      userAgent: req.headers.get("user-agent") ?? "mobile-api",
+      userAgent: req.headers.get("user-agent") ?? "mobile-api", method: "api",
     });
+    void mailNewDevice(school, userId, seen, deviceFamily(req.headers.get("user-agent")));
     const session = await auth.validate(token);
     // When true, every other route answers 403 password_change_required until POST /api/v1/auth/change-password.
     return { token, expiresAt: expiresAt.toISOString(), mustChangePassword, user: session && { id: session.user.id, name: session.user.name, role: session.user.role, email: session.user.email, avatarUrl: session.user.avatarUrl } };

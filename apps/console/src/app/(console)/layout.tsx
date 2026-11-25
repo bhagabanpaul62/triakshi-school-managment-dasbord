@@ -19,6 +19,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     { label: "Business", items: [
       { label: "Billing", href: "/billing", icon: "billing" },
       { label: "Support", href: "/support", icon: "support" },
+      { label: "Notices", href: "/notices", icon: "megaphone" },
       { label: "Design requests", href: "/design-requests", icon: "palette" },
     ] },
     { label: "Team", items: [

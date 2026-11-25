@@ -45,7 +45,10 @@
     "@smw/feature-library": "workspace:*",
     "@smw/feature-requests": "workspace:*",
     "@smw/feature-setup": "workspace:*",
-    "@smw/feature-meetings": "workspace:*"
+    "@smw/feature-meetings": "workspace:*",
+    "@smw/feature-finance": "workspace:*",
+    "@smw/feature-payroll": "workspace:*",
+    "@smw/feature-expenses": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

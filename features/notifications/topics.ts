@@ -43,6 +43,14 @@ export const TOPICS = {
   "work.cover": t("work", "Cover duty", true, "instant", { priority: 2 }),
   "work.decision": t("work", "Decisions on your requests", true, "digest"),
   "work.update": t("work", "Other updates", false, "digest"),
+  "enquiry.new": t("work", "New admission enquiries", true, "digest"),
+  "enquiry.followup": t("work", "Enquiry follow-ups due", true, "digest"),
+  "domain.problem": t("work", "Website address problems", true, "instant", { priority: 3 }),
+  "support.reply": t("work", "Replies from Triakshi support", true, "instant", { priority: 3 }),
+  "account.security": t("work", "Account security", true, "instant", { mustTell: true, priority: 2 }),
+  "export.ready": t("work", "Data exports", false, "digest"),
+  "privacy.request": t("work", "Privacy requests", true, "digest"),
+  "setup.task": t("work", "Setup tasks given to you", true, "digest"),
   "payroll.payslip": t("work", "Payslips and salary", true, "digest"),
 } as const satisfies Record<string, Topic>;
 export type TopicKey = keyof typeof TOPICS;
@@ -50,6 +58,7 @@ export type TopicKey = keyof typeof TOPICS;
 const TOPIC_MODULE: Partial<Record<TopicKey, string>> = {
   "request.update": "requests", "request.work": "requests", "meeting.open": "meetings", "meeting.changed": "meetings", "meeting.reminder": "meetings",
   "library.due": "library", "transport.notice": "transport", "payroll.payslip": "payroll",
+  "enquiry.new": "website", "enquiry.followup": "website", "domain.problem": "domains",
 };
 export const hiddenTopics = (on: ReadonlySet<string>) => (Object.keys(TOPIC_MODULE) as TopicKey[]).filter((k) => !on.has(TOPIC_MODULE[k]!));
 export const topicOf = (k: TopicKey): Topic => TOPICS[k];

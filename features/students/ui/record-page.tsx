@@ -22,6 +22,7 @@ import { DOCUMENT_KINDS } from "../inputs";
 import {
   addGuardian, deleteDocument, deleteStudent, recordConsent, removeGuardian, resetStudentLogin, setPrimaryGuardian, updateStudent, uploadDocument, uploadPhoto,
 } from "./actions";
+import { cameFromEnquiry } from "../came-from";
 import { consentFields, documentFields, guardianFields, GENDER_OPTIONS, photoFields, studentFields } from "./fields";
 import { Avatar, RowList, type RowItem } from "./parts";
 import { RecordTabs } from "./record-tabs";
@@ -56,9 +57,9 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
   const { student: s } = ov;
   const canWrite = students.can("write");
 
-  const [photoUrl, guardians, look, login] = await Promise.all([
+  const [photoUrl, guardians, look, login, enquiry] = await Promise.all([
     new PhotoService(ctx).url(id), guardianSvc.forStudent(id), canWrite ? students.lookups() : null,
-    canWrite ? new CredentialService(ctx).loginStatus(id) : null,
+    canWrite ? new CredentialService(ctx).loginStatus(id) : null, cameFromEnquiry(ctx, id),
   ]);
   // Mail to a family goes to the primary guardian.
   const familyEmail = (guardians.find((g) => g.isPrimary) ?? guardians[0])?.email;
@@ -85,7 +86,7 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
         leading={<Avatar name={s.name} src={photoUrl} size={56} />}
         title={s.name}
         chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}{s.rteQuota ? <ToneBadge label="RTE quota" tone="info" /> : null}{emailStopped ? <EmailNotWorking fixHref="?tab=guardians" /> : null}</>}
-        meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null]}
+        meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null, enquiry ? <Link key="enquiry" href={`/app/enquiries/${enquiry.id}`} className="underline underline-offset-4">Came from enquiry {enquiry.ref ?? ""}</Link> : null]}
         actions={canWrite ? (<>
           <FormModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit")} values={{ ...s }} hidden={{ id: s.id }}
             action={updateStudent} trigger={{ label: "Edit", variant: "secondary" }} />

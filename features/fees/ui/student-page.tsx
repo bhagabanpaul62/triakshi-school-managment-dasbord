@@ -45,8 +45,9 @@ export default async function StudentFeesPage({ params, searchParams }: { params
   const [heads, types, stopped, broken] = await Promise.all([
     concede ? new HeadService(ctx).options().then((h) => h.filter((x) => x.isActive).map((x) => ({ id: x.id, name: x.name }))) : [],
     concede ? new ConcessionTypeService(ctx).list({ page: 1, pageSize: 100 }).then((p) => p.rows.filter((t) => t.isActive).map((t) => ({ id: t.id, name: t.name, mode: t.mode, value: t.value, headId: t.headId, per: t.per }))) : [],
-        lookup.reminderStop(studentId),
-    new PromiseService(ctx).broken().then((b) => b.find((x) => x.studentId === studentId) ?? null),
+    // Both are staff reads; a family opens this page with fees:self.
+    staff ? lookup.reminderStop(studentId) : null,
+    !staff ? null : new PromiseService(ctx).broken().then((b) => b.find((x) => x.studentId === studentId) ?? null),
   ]);
   const openBills = a.invoices.filter((i) => i.status === "issued" && i.openPaise > 0).sort((x, y) => x.dueDate.localeCompare(y.dueDate));
   const overdue = openBills.filter((i) => i.state === "overdue");

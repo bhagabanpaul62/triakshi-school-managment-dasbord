@@ -29,7 +29,7 @@ export class People {
 /** Run one worker job now, as the worker would. */
 export const job = (name: string, data: object = {}) => execFileSync("pnpm", ["--filter", "@smw/worker", "job", name, JSON.stringify(data)], { stdio: "pipe" }).toString();
 /** Read or nudge the local database (dates in the past cannot be made in the UI). Never use it to skip a step a person would take. */
-export const sql = (q: string) => execFileSync("docker", ["exec", "smw-dev-postgres-1", "psql", "-U", "postgres", "-d", "smw", "-Atc", q]).toString().trim();
+export const sql = (q: string) => execFileSync("docker", ["exec", "smw-dev-postgres-1", "psql", "-U", "postgres", "-d", process.env.E2E_DB ?? "smw", "-Atc", q]).toString().trim();
 export const says = (page: Page, text: RegExp) => expect(page.getByText(text).first()).toBeVisible({ timeout: 20_000 });
 export async function mails(to: string): Promise<{ Subject: string; ID: string }[]> {
   const r = await fetch(`http://localhost:8025/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=50`);

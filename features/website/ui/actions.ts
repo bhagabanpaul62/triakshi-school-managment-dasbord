@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { ValidationError } from "@smw/feature-kit";
 import { actionCtx, formToObject, runAction, serviceAction } from "@smw/runtime";
-import { EnquiryService, SiteService, ThemeService } from "../service";
+import { SiteService, ThemeService } from "../service";
 
 const str = (fd: FormData, k: string) => String(fd.get(k) ?? "");
 
@@ -75,14 +75,4 @@ export async function saveTheme(fd: FormData) {
     revalidatePath("/", "layout");
     return theme;
   }, "Theme saved");
-}
-
-export async function updateEnquiry(fd: FormData) {
-  return serviceAction(EnquiryService, (s) => s.update(str(fd, "id"), formToObject(fd)), "Enquiry updated");
-}
-export async function createEnquiry(fd: FormData) {
-  return serviceAction(EnquiryService, (s) => s.create(formToObject(fd)), "Enquiry added");
-}
-export async function deleteEnquiry(fd: FormData) {
-  return serviceAction(EnquiryService, (s) => s.remove(str(fd, "id")), "Enquiry deleted");
 }

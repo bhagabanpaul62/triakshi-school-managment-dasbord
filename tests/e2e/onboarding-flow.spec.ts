@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 // postgres-js comes from @smw/db; the root workspace does not depend on it directly.
 import postgres from "../../packages/db/node_modules/postgres";
-import { consoleLogin, MARKETING } from "./helpers";
+import { CONSOLE, consoleLogin, MARKETING } from "./helpers";
 
 // The way into a school after signup: one email = one account, the approval email opens "Set up your account" when no
 // password was set, and every sign-in button arrives with the email already filled in. Production build only.
@@ -68,7 +68,7 @@ test("approved before setting a password: the approval email opens Set up your a
   const cctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const cpage = await cctx.newPage();
   await consoleLogin(cpage);
-  await cpage.goto(`http://localhost:4102/approvals/${school!.id}`, { timeout: 120_000 });
+  await cpage.goto(`${CONSOLE}/approvals/${school!.id}`, { timeout: 120_000 });
   await cpage.getByRole("button", { name: "Approve", exact: true }).click();
   await cpage.getByRole("button", { name: /approve and email/i }).click();
   await expect(cpage.getByText(/approved|trial/i).first()).toBeVisible({ timeout: 60_000 });
@@ -91,7 +91,7 @@ test("approved before setting a password: the approval email opens Set up your a
   expect(admin).toEqual({ status: "active", verified: true });
 
   // the console can send the way in again; with a password set it is sign-in with the email filled in
-  await cpage.goto(`http://localhost:4102/schools/${school!.id}`, { timeout: 120_000 });
+  await cpage.goto(`${CONSOLE}/schools/${school!.id}`, { timeout: 120_000 });
   const since = Date.now();
   await cpage.getByRole("button", { name: "Resend sign-in email" }).click();
   await cpage.getByRole("dialog").getByRole("button", { name: "Send" }).click();

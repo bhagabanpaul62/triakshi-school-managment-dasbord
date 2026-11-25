@@ -43,6 +43,10 @@
     "@smw/feature-events": "workspace:*",
     "@smw/feature-meetings": "workspace:*",
     "@smw/feature-messages": "workspace:*",
-    "@smw/feature-requests": "workspace:*"
+    "@smw/feature-requests": "workspace:*",
+    "@smw/feature-support": "workspace:*",
+    "@smw/feature-setup": "workspace:*",
+    "@smw/feature-website": "workspace:*",
+    "@smw/feature-settings": "workspace:*"
   }
 }

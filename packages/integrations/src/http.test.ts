@@ -5,6 +5,10 @@ describe("csv and file names", () => {
   it("quotes what needs it and defuses formulas", () => {
     expect(csvText([["Sharma, Riya", "=SUM(A1)", null, 7]])).toBe(`"Sharma, Riya",'=SUM(A1),,7\r\n`);
   });
+  it("leaves a plain phone number as it is, and still defuses a formula that only starts like one", () => {
+    expect(csvText([["+919811100000", "+91 98111 00000", "-5", "080-2345 6789"]])).toBe("+919811100000,+91 98111 00000,-5,080-2345 6789\r\n");
+    expect(csvText([["+cmd|' /C calc'!A0", "@SUM(1)", "-2+3a", "=1+1", "+"]])).toBe(`'+cmd|' /C calc'!A0,'@SUM(1),'-2+3a,'=1+1,'+\r\n`);
+  });
   it("makes a short file-name part", () => {
     expect(slugOf("Half-yearly exam!", "x")).toBe("half-yearly-exam");
     expect(slugOf("!!!", "notice")).toBe("notice");

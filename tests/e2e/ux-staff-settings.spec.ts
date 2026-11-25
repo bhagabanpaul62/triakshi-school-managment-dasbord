@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { job } from "./comm-lib";
 import { login as signIn, SCHOOL } from "./helpers";
 
 /** Sign in, retrying: the shared dev server reloads the page when other work changes files mid-submit. */
@@ -161,11 +162,12 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
   });
 
   await test.step("admin edits the school profile and uploads a logo that shows in the sidebar", async () => {
-    await page.goto(`${SCHOOL(SLUG)}/app/settings`, { timeout: 240_000 });
+    await page.goto(`${SCHOOL(SLUG)}/app/settings/school`, { timeout: 240_000 });
     await expect(page.getByText("Profile completeness")).toBeVisible({ timeout: 60_000 });
     await shot(page, "settings-school");
     await shot(page, "settings-school", true);
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    // Each group is saved on its own: the phone is in "Contact and address".
+    await page.locator("section").filter({ has: page.getByRole("heading", { name: "Contact and address" }) }).getByRole("button", { name: "Edit", exact: true }).click();
     const d = page.getByRole("dialog");
     await d.getByLabel(/^phone/i).fill("9812345678");
     await d.getByRole("button", { name: "Save" }).click();
@@ -180,16 +182,16 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
   });
 
   await test.step("admin manages users and roles", async () => {
-    await page.goto(`${SCHOOL(SLUG)}/app/settings?tab=users`);
-    await expect(page.getByText("Admins", { exact: true })).toBeVisible({ timeout: 60_000 });
+    await page.goto(`${SCHOOL(SLUG)}/app/settings/users`);
+    await expect(page.getByText("Admins", { exact: true }).first()).toBeVisible({ timeout: 60_000 });
     await shot(page, "settings-users");
     await shot(page, "settings-users", true);
     await page.getByPlaceholder("Search by name, email or login").fill(run);
     const row = page.getByRole("row", { name: new RegExp(NAME) });
     await expect(row).toBeVisible();
-    // Role sits in the person's Manage dialog, next to password, access link and sign-out.
-    await row.getByRole("button", { name: "Manage" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Change role" }).click();
+    // Role sits on the person's own page, next to password, access link and sign-out.
+    await row.getByRole("link").first().click();
+    await page.getByRole("button", { name: "Change role" }).click();
     await expect(page.getByRole("dialog").last().getByLabel(/^role/i).locator("option", { hasText: /^Teacher$/ })).toBeAttached();
     await shot(page, "settings-role-modal");
     await page.keyboard.press("Escape");
@@ -208,19 +210,22 @@ test("staff and settings journeys", async ({ page, browser, request }) => {
   });
 
   await test.step("admin exports school data and finds the file", async () => {
-    await page.goto(`${SCHOOL(SLUG)}/app/settings?tab=export`);
+    await page.goto(`${SCHOOL(SLUG)}/app/settings/export`);
     await expect(page.getByText("Whole school")).toBeVisible({ timeout: 60_000 });
     await shot(page, "export-before");
-    await page.getByRole("button", { name: "Export all school data" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Export" }).click();
-    await expect(page.getByRole("link", { name: /Download All school data/ }).first()).toBeVisible({ timeout: 240_000 });
+    await page.getByRole("button", { name: "Export school data" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Make the export" }).click();
+    await expect(page.getByText("Your export is queued.")).toBeVisible({ timeout: 30_000 });
+    job("settings.exports");
+    // It is made in the background; the list refreshes itself until the file is ready.
+    await expect(page.getByRole("link", { name: /^Download/ }).first()).toBeVisible({ timeout: 240_000 });
     await shot(page, "export-after");
     await shot(page, "export-after", true);
   });
 
   await test.step("no horizontal scroll on a phone", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const path of ["/app/staff", "/app/settings", "/app/settings?tab=users", "/app/settings?tab=export", "/app/audit", "/app/profile"]) {
+    for (const path of ["/app/staff", "/app/settings", "/app/settings/school", "/app/settings/users", "/app/settings/export", "/app/audit", "/app/profile"]) {
       await page.goto(`${SCHOOL(SLUG)}${path}`);
       await page.waitForLoadState("networkidle").catch(() => undefined);
       const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

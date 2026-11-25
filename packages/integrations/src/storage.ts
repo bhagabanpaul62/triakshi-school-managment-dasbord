@@ -1,3 +1,4 @@
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import { DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, CreateBucketCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "@smw/config";
@@ -7,6 +8,8 @@ export interface StoredFile { key: string; size: number; contentType: string }
 /** Private file storage. Keys always start with the school id: `<schoolId>/<area>/<uuid>-<name>`. */
 export interface FileStorage {
   put(key: string, body: Uint8Array | Buffer, contentType: string): Promise<StoredFile>;
+  /** Store a file from disk without holding it in memory (S3: streamed with its length). */
+  putFile(key: string, path: string, contentType: string): Promise<StoredFile>;
   /** Short-lived URL to read a private file. */
   signedUrl(key: string, seconds?: number): Promise<string>;
   get(key: string): Promise<Uint8Array>;
@@ -59,6 +62,12 @@ export class S3Storage implements FileStorage {
     await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType }));
     return { key, size: body.byteLength, contentType };
   }
+  async putFile(key: string, path: string, contentType: string) {
+    await this.ensureBucket();
+    const size = statSync(path).size;
+    await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: createReadStream(path), ContentLength: size, ContentType: contentType }));
+    return { key, size, contentType };
+  }
   async signedUrl(key: string, seconds = 300) {
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), { expiresIn: seconds });
   }
@@ -82,6 +91,7 @@ export class MemoryStorage implements FileStorage {
     this.files.set(key, { body: new Uint8Array(body), contentType });
     return { key, size: body.byteLength, contentType };
   }
+  async putFile(key: string, path: string, contentType: string) { return this.put(key, readFileSync(path), contentType); }
   async signedUrl(key: string) { return `memory://${key}`; }
   async get(key: string) { const f = this.files.get(key); if (!f) throw new Error("not found"); return f.body; }
   async delete(key: string) { this.files.delete(key); }

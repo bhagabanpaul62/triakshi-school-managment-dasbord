@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { login, loginStudent, SCHOOL } from "./helpers";
 
 const sql = (q: string) =>
-  execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
+  execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d ${process.env.E2E_DB ?? "smw"} -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
 
 const school = "greenvalley";
 const sid = () => sql(`select id from schools where slug='${school}'`);

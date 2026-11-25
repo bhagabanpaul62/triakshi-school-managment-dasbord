@@ -37,7 +37,7 @@ export default async function LoansPage({ searchParams }: { searchParams: Promis
         columns={columns} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount}
         searchPlaceholder="Search book or borrower"
         filters={[
-          { key: "status", label: "Status", options: [{ value: "open", label: "Out" }, { value: "overdue", label: "Overdue" }, { value: "returned", label: "Returned" }] },
+          { key: "status", label: "Status", options: [{ value: "open", label: "Out" }, { value: "due-today", label: "Due today" }, { value: "overdue", label: "Overdue" }, { value: "returned", label: "Returned" }] },
           { key: "kind", label: "Borrower", options: [{ value: "student", label: "Students" }, { value: "staff", label: "Staff" }] },
         ]}
         empty={{ title: "No loans match.", description: "Issue a book from the Library page and it shows up here.", action: <Link href="/app/library" className={buttonVariants({ className: "rounded-full" })}>Go to the issue desk</Link> }}

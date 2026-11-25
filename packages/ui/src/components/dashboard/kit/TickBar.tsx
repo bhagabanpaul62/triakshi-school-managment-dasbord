@@ -10,12 +10,15 @@ export function TickBar({
   value,
   tone = "info",
   delay = 0,
+  label = "Progress",
   className,
 }: {
   /** 0-100 */
   value: number;
   tone?: Tone;
   delay?: number;
+  /** The meter's name for screen readers: what is being measured. */
+  label?: string;
   className?: string;
 }) {
   const reduce = useReducedMotion();
@@ -28,6 +31,7 @@ export function TickBar({
         className,
       )}
       role="meter"
+      aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(pct)}

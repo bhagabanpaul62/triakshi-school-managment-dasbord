@@ -48,7 +48,7 @@ export function StudentsImport({ existing, next, back, skip }: { existing: numbe
         <li>
           <p className="font-medium text-[var(--ds-on-surface)]">1. Get the template</p>
           <p className="mt-1 text-[var(--ds-on-surface-muted)]">Name, class and section are required. Leave the admission number blank and we number them for you. Class and section must match what you just created.</p>
-          <a href="/app/students/import/template" download className="mt-2 inline-block text-[var(--ds-primary)] hover:underline">Download students-template.csv</a>
+          <a href="/app/students/import/template" download className="mt-2 inline-block text-[var(--ds-primary-text)] hover:underline">Download students-template.csv</a>
         </li>
         <li>
           <label htmlFor="students-csv" className="font-medium text-[var(--ds-on-surface)]">2. Choose your filled file</label>

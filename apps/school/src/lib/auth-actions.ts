@@ -8,6 +8,8 @@ import { authMails, trySend } from "@smw/integrations";
 import { accountMailer } from "@smw/feature-notifications/delivery";
 import { clearSessionCookie, getSchool, setSessionCookie, SESSION_COOKIE } from "@smw/runtime";
 import { cookies } from "next/headers";
+import { mailNewDevice } from "./new-device";
+import { deviceFamily } from "@smw/auth";
 
 export type LoginState = { error?: string } | undefined;
 
@@ -19,9 +21,11 @@ export async function login(_prev: LoginState, fd: FormData): Promise<LoginState
   const h = await headers();
   let mustChange: boolean;
   try {
-    const { token, expiresAt, mustChangePassword } = await new SchoolAuth(school.id).login(id, password, { ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined, userAgent: h.get("user-agent") ?? undefined });
+    const userAgent = h.get("user-agent") ?? undefined;
+    const { token, expiresAt, mustChangePassword, userId, ...seen } = await new SchoolAuth(school.id).login(id, password, { ip: h.get("x-forwarded-for")?.split(",")[0] ?? undefined, userAgent });
     await setSessionCookie(token, expiresAt);
     mustChange = mustChangePassword;
+    void mailNewDevice(school, userId, seen, deviceFamily(userAgent));
   } catch (e) {
     if (e instanceof LoginError) {
       return { error: e.reason === "rate_limited" ? "Too many attempts. Wait 15 minutes and try again." : e.reason === "disabled" ? "This account is disabled. Ask your school office." : "That login ID or password is not right." };
@@ -88,8 +92,11 @@ export async function resetWithCode(_prev: ResetCodeState, fd: FormData): Promis
     const userId = await auth.resetPasswordWithCode(String(fd.get("identifier") ?? ""), code, password, await ipOf());
     const who = await auth.contactOf(userId);
     if (who?.email) void trySend(accountMailer(school.id), { to: who.email, ...authMails.passwordChanged(school.name, who.name) });
-    const { token, expiresAt } = await auth.startSession(userId, { ip: await ipOf(), userAgent: h.get("user-agent") ?? undefined });
-    await setSessionCookie(token, expiresAt);
+    const userAgent = h.get("user-agent") ?? undefined;
+    const started = await auth.startSession(userId, { ip: await ipOf(), userAgent });
+    await setSessionCookie(started.token, started.expiresAt);
+    // Signing in from a reset is still a sign-in: a new device is told, like any other.
+    void mailNewDevice(school, userId, started, deviceFamily(userAgent));
   } catch (e) { return codeError(e); }
   redirect("/app");
 }
@@ -102,9 +109,11 @@ export async function loginWithCode(_prev: ResetCodeState, fd: FormData): Promis
   const h = await headers();
   let mustChange: boolean;
   try {
-    const r = await new SchoolAuth(school.id).loginWithCode(String(fd.get("identifier") ?? ""), code, { ip: await ipOf(), userAgent: h.get("user-agent") ?? undefined });
+    const userAgent = h.get("user-agent") ?? undefined;
+    const r = await new SchoolAuth(school.id).loginWithCode(String(fd.get("identifier") ?? ""), code, { ip: await ipOf(), userAgent });
     await setSessionCookie(r.token, r.expiresAt);
     mustChange = r.mustChangePassword;
+    void mailNewDevice(school, r.userId, r, deviceFamily(userAgent));
   } catch (e) { return codeError(e); }
   if (mustChange) redirect("/app/change-password");
   const next = String(fd.get("next") ?? "");

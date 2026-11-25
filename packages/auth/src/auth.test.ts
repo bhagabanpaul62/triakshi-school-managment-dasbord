@@ -1,8 +1,8 @@
 // Proves the school auth flows against a real database: forgot password, one-time links, password policy, sessions, rate limits.
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, eq, oneTimeTokens, schools, sessions, sql, users, withConsole, withSchool } from "@smw/db";
+import { closeDb, desc, eq, loginEvents, oneTimeTokens, schools, sessions, sql, users, withConsole, withSchool } from "@smw/db";
 import {
-  LoginError, OtpError, Passwords, PasswordError, RateLimiter, SchoolAuth, checkPassword, forgotAcctLimiter, forgotIpLimiter, loginIpFailLimiter, loginLimiter, otpAcctLimiter, otpMessage,
+  deviceFamily, LoginError, OtpError, Passwords, PasswordError, RateLimiter, SchoolAuth, checkPassword, forgotAcctLimiter, forgotIpLimiter, loginIpFailLimiter, loginLimiter, otpAcctLimiter, otpMessage,
 } from "./index";
 
 let schoolId: string;
@@ -183,6 +183,15 @@ describe("RateLimiter", () => {
     const rl = new RateLimiter(2, 1000);
     expect([rl.take("k", 0), rl.take("k", 1), rl.take("k", 2)]).toEqual([true, true, false]);
     expect(rl.take("k", 1001)).toBe(true);
+  });
+
+  it("forgets keys whose window is over, and answers the same as before", () => {
+    const rl = new RateLimiter(2, 1000);
+    for (let i = 0; i < 100; i++) rl.take(`k${i}`, 0);
+    expect(rl.size).toBe(100);
+    expect(rl.take("fresh", 5000)).toBe(true);
+    expect(rl.size).toBe(1);
+    expect([rl.take("k1", 5001), rl.take("k1", 5002), rl.take("k1", 5003)]).toEqual([true, true, false]);
   });
 
   it("blocked() reads the window without counting", () => {
@@ -410,5 +419,108 @@ describe("disabled and retired accounts", () => {
     const sess = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id));
     expect(await auth.validate(sess.token)).toBeNull();
     expect((await auth.sendOtp("par1@auth.test", "login")).send).toBeUndefined();
+  });
+});
+
+describe("login events (every way in, and every way refused)", () => {
+  const CHROME_WIN = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/120.0 Safari/537.36";
+  const CHROME_WIN_NEW = "Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/131.0 Safari/537.36";
+  const SAFARI_MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605 Version/17 Safari/605";
+  const events = (identifier: string) => withSchool(schoolId, (tx) => tx.select().from(loginEvents).where(eq(loginEvents.identifier, identifier)).orderBy(desc(loginEvents.createdAt)));
+  const open = async (id: string, extra: Partial<typeof users.$inferInsert> = {}) => newUser({ loginId: id, email: id, passwordHash: await Passwords.hash("OldPass#123"), ...extra });
+  beforeEach(() => { loginIpFailLimiter.reset("ip:?"); });
+
+  it("deviceFamily ignores the browser version", () => {
+    expect(deviceFamily(CHROME_WIN)).toBe(deviceFamily(CHROME_WIN_NEW));
+    expect(deviceFamily(CHROME_WIN)).not.toBe(deviceFamily(SAFARI_MAC));
+  });
+
+  it("a password sign-in is written; the same device family is not new the second time, another one is", async () => {
+    const u = await open("ev1@auth.test");
+    const first = await auth.login("ev1@auth.test", "OldPass#123", { ip: "1.1.1.1", userAgent: CHROME_WIN });
+    expect(first).toMatchObject({ newDevice: true, firstSignIn: true });
+    const again = await auth.login("EV1@auth.test", "OldPass#123", { userAgent: CHROME_WIN_NEW });
+    expect(again).toMatchObject({ newDevice: false, firstSignIn: false });
+    const other = await auth.login("ev1@auth.test", "OldPass#123", { userAgent: SAFARI_MAC });
+    expect(other.newDevice).toBe(true);
+    const rows = await events("ev1@auth.test");
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.outcome === "success" && r.method === "password" && r.userId === u.id)).toBe(true);
+    expect(rows.map((r) => r.newDevice).sort()).toEqual([false, true, true]);
+  });
+
+  it("a script trying many different names from one address leaves at most 30 rows and one summary row, and the answers stay the same", async () => {
+    for (let i = 0; i < 45; i++) await expect(auth.login(`spray-${i}@auth.test`, "wrong-pass-1", { ip: "7.7.7.7" })).rejects.toMatchObject({ reason: "invalid" });
+    const rows = await withSchool(schoolId, (tx) => tx.select().from(loginEvents).where(eq(loginEvents.ip, "7.7.7.7")));
+    expect(rows.filter((r) => r.identifier.startsWith("spray-"))).toHaveLength(30);
+    expect(rows.filter((r) => r.identifier === "many tries from this address")).toEqual([expect.objectContaining({ outcome: "rate_limited", userId: null })]);
+  });
+
+  it("a bad support link is its own outcome, not an unknown login", async () => {
+    await expect(auth.supportLogin("not-a-token", { ip: "7.7.7.8" })).rejects.toBeInstanceOf(LoginError);
+    const rows = await withSchool(schoolId, (tx) => tx.select().from(loginEvents).where(eq(loginEvents.ip, "7.7.7.8")));
+    expect(rows).toEqual([expect.objectContaining({ outcome: "support_failed", method: "support" })]);
+  });
+
+  it("wrong password, unknown login, disabled account and a rate limit each leave their own row; the answers do not change", async () => {
+    const u = await open("ev2@auth.test");
+    await expect(auth.login("ev2@auth.test", "wrong-pass-1", { ip: "9.9.9.9" })).rejects.toMatchObject({ reason: "invalid" });
+    await expect(auth.login("ghost-ev@auth.test", "wrong-pass-1", { ip: "9.9.9.9" })).rejects.toMatchObject({ reason: "invalid" });
+    const [bad] = await events("ev2@auth.test");
+    expect(bad).toMatchObject({ outcome: "bad_password", userId: u.id, ip: "9.9.9.9", method: "password" });
+    const [ghost] = await events("ghost-ev@auth.test");
+    expect(ghost).toMatchObject({ outcome: "unknown_login", userId: null });
+    await withConsole((tx) => tx.update(users).set({ status: "disabled" }).where(eq(users.id, u.id)));
+    await expect(auth.login("ev2@auth.test", "OldPass#123")).rejects.toMatchObject({ reason: "disabled" });
+    expect((await events("ev2@auth.test"))[0]!.outcome).toBe("disabled");
+    for (let i = 0; i < 12; i++) await auth.login("ev3@auth.test", "x-wrong-pass").catch(() => undefined);
+    const limited = (await events("ev3@auth.test")).filter((r) => r.outcome === "rate_limited");
+    expect(limited.length).toBeGreaterThan(0);
+    expect(limited.length).toBeLessThanOrEqual(3);
+    loginLimiter.reset(`acct:${schoolId}:ev3@auth.test`);
+  });
+
+  it("an identifier is cut to 80 characters and never holds the password", async () => {
+    await auth.login("x".repeat(200), "secret-pass-123").catch(() => undefined);
+    const rows = await withSchool(schoolId, (tx) => tx.select().from(loginEvents).where(eq(loginEvents.identifier, "x".repeat(80))));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(rows)).not.toContain("secret-pass-123");
+  });
+
+  it("a code sign-in is a success with method code; a wrong code is bad_code, and an unknown login is unknown_login", async () => {
+    await open("ev4@auth.test");
+    const code = await sendCode(auth, "ev4@auth.test", "login");
+    await auth.loginWithCode("ev4@auth.test", "000000", { userAgent: CHROME_WIN }).catch(() => undefined);
+    await auth.loginWithCode("ev4@auth.test", code!, { userAgent: CHROME_WIN });
+    await auth.loginWithCode("nobody-ev@auth.test", "123456").catch(() => undefined);
+    const rows = await events("ev4@auth.test");
+    expect(rows.map((r) => `${r.method}:${r.outcome}`).sort()).toEqual(["code:bad_code", "code:success"]);
+    expect((await events("nobody-ev@auth.test"))[0]).toMatchObject({ outcome: "unknown_login", method: "code", userId: null });
+  });
+
+  it("reset by link or code signs in as method reset; a wrong reset code is a failure of method reset", async () => {
+    const u = await open("ev5@auth.test");
+    await auth.startSession(u.id, { userAgent: CHROME_WIN });
+    const code = await sendCode(auth, "ev5@auth.test", "reset");
+    await auth.resetPasswordWithCode("ev5@auth.test", "111111", "Maple-River-42").catch(() => undefined);
+    await auth.resetPasswordWithCode("ev5@auth.test", code!, "Maple-River-42");
+    const rows = await events("ev5@auth.test");
+    expect(rows.map((r) => `${r.method}:${r.outcome}`).sort()).toEqual(["reset:bad_code", "reset:success"]);
+  });
+
+  it("the api bearer login is written as method api", async () => {
+    await open("ev6@auth.test");
+    await auth.login("ev6@auth.test", "OldPass#123", { userAgent: "mobile-api", method: "api" });
+    expect((await events("ev6@auth.test"))[0]).toMatchObject({ method: "api", outcome: "success" });
+  });
+
+  it("a support session is written as support with the staff id, and a bad support link is a failure row", async () => {
+    const u = await open("ev7@auth.test");
+    const staff = "00000000-0000-4000-8000-0000000000aa";
+    const token = await withConsole((tx) => auth.issueToken(tx, "support_login", { userId: u.id, minutes: 5, meta: { staffId: staff } }));
+    await auth.supportLogin(token, { ip: "2.2.2.2", userAgent: CHROME_WIN });
+    expect((await events("ev7@auth.test"))[0]).toMatchObject({ outcome: "support", method: "support", supportStaffId: staff, userId: u.id });
+    await expect(auth.supportLogin("not-a-token")).rejects.toBeInstanceOf(LoginError);
+    expect((await events("support link"))[0]).toMatchObject({ outcome: "support_failed", method: "support" });
   });
 });

@@ -101,7 +101,9 @@ describe("editor fields", () => {
     for (const t of SECTION_TYPES as readonly SectionType[]) {
       const shape = SECTION_DATA[t].shape as Record<string, unknown>;
       for (const f of EDITOR_FIELDS[t]) expect(shape, `${t}.${f.name}`).toHaveProperty(f.name);
-      expect(Object.keys(shape).filter((k) => !EDITOR_FIELDS[t].some((f) => f.name === k)), `${t} has a field the editor cannot reach`).toEqual([]);
+      // The disclosure rows and their date are filled on the Disclosure screen, not in the section editor.
+      const screen = t === "disclosure" ? ["data", "updatedOn"] : [];
+      expect(Object.keys(shape).filter((k) => !screen.includes(k) && !EDITOR_FIELDS[t].some((f) => f.name === k)), `${t} has a field the editor cannot reach`).toEqual([]);
     }
   });
   it("a cleared optional field is saved as not set, and table cells may stay empty", () => {
