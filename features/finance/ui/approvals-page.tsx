@@ -34,7 +34,7 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
         {mine.length === 0 ? <EmptyLine title="You have not asked for anything yet." hint="Reversals, concessions, refunds and other requests you send for approval show up here." /> : (
           <div className="flex flex-col gap-3">{mine.map((r) => (
             <ApprovalCard key={r.id} approve={approve} reject={reject} withdraw={withdraw} canDecide={false} a={{
-              id: r.id, title: r.title, amountPaise: r.amountPaise, reason: r.reason, href: r.href, status: r.status, requestedByName: ctx.name, decidedByName: r.decidedByName,
+              id: r.id, title: r.title, amountPaise: r.amountPaise, unit: r.kind === "fees.plan" ? "a year per child" : undefined, reason: r.reason, href: r.href, status: r.status, requestedByName: ctx.name, decidedByName: r.decidedByName,
               createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null, note: r.note, selfApproved: r.selfApproved, mine: true, waitingFor,
             }} />
           ))}</div>
@@ -53,7 +53,7 @@ export default async function ApprovalsPage({ searchParams, handlers, approve, r
     const draft = r.kind === "finance.journal" ? drafts[r.refId] : undefined;
     const list = cards.get(r.kind) ?? [];
     list.push({
-      id: r.id, title: r.title, amountPaise: r.amountPaise, reason: r.reason, href: r.href, status: r.status, requestedByName: r.requestedByName, decidedByName: r.decidedByName,
+      id: r.id, title: r.title, amountPaise: r.amountPaise, unit: r.kind === "fees.plan" ? "a year per child" : undefined, reason: r.reason, href: r.href, status: r.status, requestedByName: r.requestedByName, decidedByName: r.decidedByName,
       createdAt: r.createdAt.toISOString(), decidedAt: r.decidedAt?.toISOString() ?? null, note: r.note, selfApproved: r.selfApproved, mine: r.requestedBy === ctx.userId, waitingFor, lines: draft?.lines,
     });
     cards.set(r.kind, list);

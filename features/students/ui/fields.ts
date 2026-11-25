@@ -17,7 +17,14 @@ export interface JoiningOptions {
   classes: Option[];
   years: Option[];
   /** Sections of the years that are current or later; the label names the year. */
-  sections: Option[];
+  sections: (Option & { yearId?: string })[];
+}
+
+/** Once a year is chosen, "Planned section" lists only sections of that year. A section picked for another year drops out of the list and so is cleared. */
+export function forYear(fields: Field[], yearId: string): Field[] {
+  if (!yearId) return fields;
+  return fields.map((f) => f.name === "joinsSectionId" && f.options?.some((o) => (o as { yearId?: string }).yearId)
+    ? { ...f, options: f.options.filter((o) => (o as { yearId?: string }).yearId === yearId) } : f);
 }
 
 export const LEAVE_REASON_OPTIONS: Option[] = LEAVE_REASONS.map((r) => ({ value: r.value, label: r.label }));

@@ -232,8 +232,8 @@ test.describe("admin journeys K7-K11", () => {
     const schoolId = sql(`select id from schools where slug = '${SLUG}'`);
     const row = () => `school_id = '${schoolId}' and hostname = '${www}'`;
     const hit = async (host: string, path: string) => {
-      const api = await playwright.request.newContext({ baseURL: `http://127.0.0.1:${process.env.SCHOOL_PORT}` });
-      const r = await api.get(path, { headers: { Host: `${host}:${process.env.SCHOOL_PORT}` }, maxRedirects: 0 });
+      const api = await playwright.request.newContext({ baseURL: `http://127.0.0.1:${process.env.SCHOOL_PORT ?? "4100"}` });
+      const r = await api.get(path, { headers: { Host: `${host}:${process.env.SCHOOL_PORT ?? "4100"}` }, maxRedirects: 0 });
       const out = { status: r.status(), location: r.headers().location ?? "", body: r.status() === 200 ? await r.text() : "" };
       await api.dispose();
       return out;

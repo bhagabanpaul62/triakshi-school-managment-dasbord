@@ -6,6 +6,7 @@ import { FieldGrid, keepValues, type Field, type FormResult } from "@smw/ui/shel
 import { RecordPicker } from "@smw/ui/finance/RecordPicker";
 import { Button } from "@smw/ui/ui/button";
 import { toast } from "@smw/ui/shell/toast";
+import { forYear } from "@smw/feature-students/ui/admit-fields";
 import { ageHint, Hint, OpenRecord, type AgeInfo } from "@smw/feature-students/ui/admit-notes";
 
 type Done = { studentId: string; marked: boolean; message?: string; capacityMessage?: string | null };
@@ -15,6 +16,7 @@ type Action = (fd: FormData) => Promise<FormResult & { data?: unknown }>;
 export function AdmitForm({ enquiryId, fields, values, action, age }: { enquiryId: string; fields: Field[]; values: Record<string, unknown>; action: Action; age: AgeInfo }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hint, setHint] = useState<string | null>(null);
+  const [year, setYear] = useState(String(values.joinsYearId ?? ""));
   const [lost, setLost] = useState<Done | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -29,7 +31,7 @@ export function AdmitForm({ enquiryId, fields, values, action, age }: { enquiryI
     if (d.marked) finish(d); else { setLost(d); toast("The student was admitted, but the enquiry was not marked", "danger"); }
   });
   return (
-    <form id={formId} onSubmit={keepValues(run)} onChange={(e) => setHint(ageHint(new FormData(e.currentTarget), age))} className="flex flex-col gap-5" noValidate>
+    <form id={formId} onSubmit={keepValues(run)} onChange={(e) => { const fd = new FormData(e.currentTarget); setYear(String(fd.get("joinsYearId") ?? "")); setHint(ageHint(fd, age)); }} className="flex flex-col gap-5" noValidate>
       <Hint text={hint} />
       {lost ? (
         <div role="alert" className="flex flex-col gap-2 rounded-2xl bg-[var(--ds-color-danger-500)]/10 p-4 text-sm">
@@ -37,7 +39,7 @@ export function AdmitForm({ enquiryId, fields, values, action, age }: { enquiryI
           <div className="flex flex-wrap gap-2"><Button type="submit" className="rounded-full" isLoading={pending}>Try marking again</Button><Button asChild variant="secondary" className="rounded-full"><a href={`/app/students/${lost.studentId}`}>Open the student</a></Button></div>
         </div>
       ) : null}
-      <fieldset disabled={!!lost} className="contents"><FieldGrid fields={fields} values={values} errors={errors} /></fieldset>
+      <fieldset disabled={!!lost} className="contents"><FieldGrid fields={forYear(fields, year)} values={values} errors={errors} /></fieldset>
       <OpenRecord href={errors._open} />
       {lost ? null : <div><Button type="submit" className="rounded-full" isLoading={pending}>Admit student</Button></div>}
     </form>

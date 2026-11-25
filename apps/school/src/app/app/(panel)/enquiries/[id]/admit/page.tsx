@@ -39,7 +39,7 @@ export default async function AdmitPage({ params }: { params: Promise<{ id: stri
   const [look, cap, seats] = await Promise.all([students.lookups(), students.capacity(), enq.seatsFor(id)]);
   const sectionOptions = look.sections.map((s) => ({ value: s.id, label: s.label }));
   const j = look.joining;
-  const joinOptions = { classes: j.classes.map((c) => ({ value: c.id, label: c.name })), years: j.years.map((y) => ({ value: y.id, label: y.isCurrent ? `${y.name} (this year)` : y.name })), sections: j.sections.map((x) => ({ value: x.id, label: x.label })) };
+  const joinOptions = { classes: j.classes.map((c) => ({ value: c.id, label: c.name })), years: j.years.map((y) => ({ value: y.id, label: y.isCurrent ? `${y.name} (this year)` : y.name })), sections: j.sections.map((x) => ({ value: x.id, label: x.label, yearId: x.yearId })) };
   const age = { classes: Object.fromEntries(j.classes.map((c) => [c.id, { name: c.name, grade: c.grade }])), sectionClass: Object.fromEntries([...look.sections, ...j.sections].map((x) => [x.id, x.classId])) };
   const wanted = e.classApplying?.toLowerCase();
   const klass = wanted ? look.classes.find((c) => c.name.toLowerCase() === wanted) : undefined;

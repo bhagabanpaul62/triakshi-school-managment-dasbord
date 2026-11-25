@@ -9,6 +9,7 @@ import { Button } from "@smw/ui/ui/button";
 import { FieldGrid, keepValues, type Field, type FormResult } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { MenuIconView } from "@smw/ui/shell/icons";
+import { forYear } from "./fields";
 import { ageHint, Hint, OpenRecord, type AgeInfo } from "./admit-notes";
 
 /**
@@ -32,6 +33,8 @@ export function StudentModal({ title, icon = "users", fields, values, hidden, ac
   const [open, setOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [hint, setHint] = useState<string | null>(null);
+  const startYear = String(values?.joinsYearId ?? "");
+  const [year, setYear] = useState(startYear);
   const [pending, start] = useTransition();
   const router = useRouter();
   const formId = useId();
@@ -43,13 +46,13 @@ export function StudentModal({ title, icon = "users", fields, values, hidden, ac
   });
   return (
     <>
-      <Button onClick={() => { setErrors({}); onOpen?.(); setOpen(true); }} variant={trigger?.variant ?? "default"} className="rounded-full">
+      <Button onClick={() => { setErrors({}); setYear(startYear); onOpen?.(); setOpen(true); }} variant={trigger?.variant ?? "default"} className="rounded-full">
         {(trigger?.plus ?? !trigger) ? <IconPlus className="mr-1.5 h-4 w-4" aria-hidden /> : null}{trigger?.label ?? title}
       </Button>
       <Modal open={open} onOpenChange={setOpen} size={size ?? (fields.length > 6 ? "lg" : "md")} title={title} tone={danger ? "danger" : undefined}
         icon={<IconChip className="h-10 w-10"><MenuIconView name={icon} /></IconChip>} dismissOnOutsideClick={false}
         footer={<ModalFooter danger={danger} secondary={{ onClick: () => setOpen(false) }} primary={{ label: submitLabel, type: "submit", form: formId, loading: pending, disabled: !!blocked }} />}>
-        <form id={formId} onSubmit={keepValues(submit)} onChange={age || onFormChange ? (e) => { const fd = new FormData(e.currentTarget); if (age) setHint(ageHint(fd, age)); onFormChange?.(fd); } : undefined} className="flex flex-col gap-5 pt-2" noValidate>
+        <form id={formId} onSubmit={keepValues(submit)} onChange={(e) => { const fd = new FormData(e.currentTarget); if (fd.has("joinsYearId")) setYear(String(fd.get("joinsYearId"))); if (age) setHint(ageHint(fd, age)); onFormChange?.(fd); }} className="flex flex-col gap-5 pt-2" noValidate>
           {intro ? <p className="text-sm text-[var(--ds-on-surface-variant)]">{intro}</p> : null}
           {effects?.length ? (
             <ul className="list-disc space-y-1 pl-5 text-sm text-[var(--ds-on-surface-variant)]">{effects.map((e) => <li key={e}>{e}</li>)}</ul>
@@ -57,7 +60,7 @@ export function StudentModal({ title, icon = "users", fields, values, hidden, ac
           {blocked ? <p role="alert" className="rounded-2xl bg-[var(--ds-color-warning-500)]/10 px-4 py-3 text-sm text-[var(--ds-color-warning-300)]">{blocked}</p> : null}
           {extra}
           <Hint text={hint} />
-          <FieldGrid fields={fields} values={values} errors={errors} />
+          <FieldGrid fields={forYear(fields, year)} values={values} errors={errors} />
           <OpenRecord href={errors._open} />
         </form>
       </Modal>

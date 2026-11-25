@@ -44,7 +44,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   const admit = (
     <StudentModal title="Admit student" icon="users" fields={studentFields(sectionOptions, "admit", {
       classes: j.classes.map((c) => ({ value: c.id, label: c.name })), years: j.years.map((y) => ({ value: y.id, label: y.isCurrent ? `${y.name} (this year)` : y.name })),
-      sections: j.sections.map((x) => ({ value: x.id, label: x.label })),
+      sections: j.sections.map((x) => ({ value: x.id, label: x.label, yearId: x.yearId })),
     })} action={createStudent} submitLabel="Admit" values={{ guardianRelation: "father", guardian2Relation: "mother" }} age={age}
       intro="Creates the student login and the class enrolment. A child who starts later gets a login that switches on that day." />
   );

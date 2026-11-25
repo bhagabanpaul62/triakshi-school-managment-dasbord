@@ -138,12 +138,12 @@ export const VIEWS: V = {
   "my-approvals": (a) => a.rows.length === 0 ? <Line title="Waiting for approval" href="/app/fees">Nothing you asked for is waiting.</Line> : (
     <Panel title="Waiting for approval">
       <p className="mb-2 text-xs text-[var(--ds-on-surface-muted)]">What you asked for and has not been decided yet.</p>
-      <EntityList maxItems={5} empty={{ title: "", description: "" }} items={a.rows.map((r) => ({ id: r.id, title: r.title, meta: r.amountPaise ? paise(r.amountPaise) : undefined, subtitle: `Asked ${shortDate(r.since)}`, href: r.href ?? undefined }))} />
+      <EntityList maxItems={5} empty={{ title: "", description: "" }} items={a.rows.map((r) => ({ id: r.id, title: r.title, meta: r.amountPaise ? `${paise(r.amountPaise)}${r.perChild ? " a year per child" : ""}` : undefined, subtitle: `Asked ${shortDate(r.since)}`, href: r.href ?? undefined }))} />
     </Panel>
   ),
   "approvals": (a) => a.pending === 0 ? <Line title="Approvals" href="/app/finance/approvals">Nothing waiting for a decision.</Line> : (
     <Panel title="Approvals" action={open("/app/finance/approvals", "Open approvals")}>
-      <EntityList maxItems={4} empty={{ title: "", description: "" }} items={a.rows.map((r) => ({ id: r.id, title: r.title, meta: r.amountPaise ? paise(r.amountPaise) : undefined, href: r.href }))} />
+      <EntityList maxItems={4} empty={{ title: "", description: "" }} items={a.rows.map((r) => ({ id: r.id, title: r.title, meta: r.amountPaise ? `${paise(r.amountPaise)}${r.perChild ? " a year per child" : ""}` : undefined, href: r.href }))} />
       {a.pending > a.rows.length ? <Link href="/app/finance/approvals" className={`mt-3 ${LINK}`}>See all {a.pending}</Link> : null}
     </Panel>
   ),

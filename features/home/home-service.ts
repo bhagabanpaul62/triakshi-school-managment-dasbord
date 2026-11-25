@@ -77,9 +77,9 @@ export interface NumberCard { key: "present" | "collected" | "dues" | "enquiries
 export interface AttendanceWeek { dayOff: DayOff | null; points: { date: string; pct: number }[]; unmarked: SectionToMark[]; sections: number }
 export interface MoneyTrend { trend: TrendPoint[]; thisMonth: number; lastMonthSame: number; change: Change | null }
 export interface Funnel { stages: { key: EnquiryStatus; count: number }[]; open: number; total: number }
-export interface Approvals { pending: number; rows: { id: string; title: string; amountPaise: number; href: string }[] }
+export interface Approvals { pending: number; rows: { id: string; title: string; amountPaise: number; perChild?: boolean; href: string }[] }
 export interface GettingStarted { card: { percent: number; left: number; next: { label: string; href: string; minutes: number } | null } | null }
-export interface MyApprovals { rows: { id: string; title: string; amountPaise: number; href: string | null; since: Date }[] }
+export interface MyApprovals { rows: { id: string; title: string; amountPaise: number; perChild?: boolean; href: string | null; since: Date }[] }
 export interface Leave { away: { id: string; name: string; until: string }[]; pending: number }
 export interface Birthdays { students: { id: string; name: string; label: string | null; age: number | null }[]; staff: { id: string; name: string; age: number | null }[] }
 export interface MyClass { dayOff: DayOff | null; canCall: boolean; sections: { id: string; label: string; marked: boolean; absent: { id: string; name: string; phone: string | null }[]; birthdays: { id: string; name: string }[] }[] }
@@ -461,9 +461,9 @@ export class HomeService extends SchoolService<Perm> {
       const where = eq(finApprovals.status, "pending");
       const [[n], rows] = await Promise.all([
         tx.select({ n: count() }).from(finApprovals).where(where),
-        tx.select({ id: finApprovals.id, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href }).from(finApprovals).where(where).orderBy(asc(finApprovals.createdAt)).limit(4),
+        tx.select({ id: finApprovals.id, kind: finApprovals.kind, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href }).from(finApprovals).where(where).orderBy(asc(finApprovals.createdAt)).limit(4),
       ]);
-      return { pending: Number(n?.n ?? 0), rows: rows.map((r) => ({ id: r.id, title: r.title, amountPaise: Number(r.amountPaise), href: "/app/finance/approvals" })) };
+      return { pending: Number(n?.n ?? 0), rows: rows.map((r) => ({ id: r.id, title: r.title, amountPaise: Number(r.amountPaise), perChild: r.kind === "fees.plan", href: "/app/finance/approvals" })) };
     }));
   }
 
@@ -471,8 +471,8 @@ export class HomeService extends SchoolService<Perm> {
   protected myApprovals(): Promise<Slot<MyApprovals>> {
     return this.slot("finance", async () => {
       if (this.holds("finance:approve")) throw new ForbiddenError();
-      return this.read("view", async (tx) => ({ rows: (await tx.select({ id: finApprovals.id, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href, since: finApprovals.createdAt }).from(finApprovals)
-        .where(and(eq(finApprovals.status, "pending"), eq(finApprovals.requestedBy, this.ctx.userId))).orderBy(asc(finApprovals.createdAt)).limit(5)).map((r) => ({ ...r, amountPaise: Number(r.amountPaise) })) }));
+      return this.read("view", async (tx) => ({ rows: (await tx.select({ id: finApprovals.id, kind: finApprovals.kind, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href, since: finApprovals.createdAt }).from(finApprovals)
+        .where(and(eq(finApprovals.status, "pending"), eq(finApprovals.requestedBy, this.ctx.userId))).orderBy(asc(finApprovals.createdAt)).limit(5)).map(({ kind, ...r }) => ({ ...r, amountPaise: Number(r.amountPaise), perChild: kind === "fees.plan" })) }));
     });
   }
 

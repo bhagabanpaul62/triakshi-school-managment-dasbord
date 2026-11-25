@@ -100,9 +100,9 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
   const has = (k: string) => ctx.features.has(k);
   const related = [
     has("fees") && !slots?.fees ? { label: "Fees", hint: "Dues and receipts", href: `/app/fees/students/${id}` } : null,
-    attendanceRead(ctx) ? { label: "Attendance", hint: "Present and absent days", href: "/app/attendance" } : null,
-    examsRead(ctx) ? { label: "Results", hint: "Marks and report cards", href: "/app/results" } : null,
-    libraryRead(ctx) ? { label: "Library", hint: "Books borrowed and fines", href: `/app/library/members/student/${id}` } : null,
+    joining ? null : attendanceRead(ctx) ? { label: "Attendance", hint: "Present and absent days", href: "/app/attendance" } : null,
+    joining ? null : examsRead(ctx) ? { label: "Results", hint: "Marks and report cards", href: "/app/results" } : null,
+    joining ? null : libraryRead(ctx) ? { label: "Library", hint: "Books borrowed and fines", href: `/app/library/members/student/${id}` } : null,
   ].filter((x): x is { label: string; hint: string; href: string } => !!x);
 
   return (
@@ -153,7 +153,7 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
       <div className="pt-6" id={PANEL_ID} role="tabpanel">
         <KpiRow>
           <StatCard label={joining ? "Class" : gone ? "Last section" : "Class"} value={ov.classSection ?? ov.className ?? "-"} meta={joining ? (ov.joining?.plannedSection ? `Planned section ${ov.joining.plannedSection}` : "No planned section yet") : (ov.className ?? "Not placed in a class")} />
-          <StatCard label="Roll number" value={s.rollNo ? String(s.rollNo) : "-"} meta={s.admissionDate ? `Admitted ${shortDate(s.admissionDate)}` : undefined} />
+          <StatCard label="Roll number" value={s.rollNo ? String(s.rollNo) : "-"} meta={joining ? (ov.joining?.on ? `Joins ${shortDate(ov.joining.on)}` : undefined) : s.admissionDate ? `Admitted ${shortDate(s.admissionDate)}` : undefined} />
           <StatCard label="Guardians" value={String(ov.counts.guardians)} meta={guardians[0] ? `Primary: ${guardians[0].name}` : "None added yet"} />
           <StatCard label="Documents" value={String(ov.counts.documents)} meta={`${ov.counts.consents} consent entries`} />
         </KpiRow>
@@ -204,7 +204,9 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
                   <FactList>
                     <Fact label="Login ID" copy={login.loginId}>{login.loginId}</Fact>
                     <Fact label="Status">
-                      <ToneBadge label={login.status === "disabled" ? "Disabled" : login.lastLoginAt ? "Active" : "Never signed in"} tone={login.status === "disabled" ? "danger" : login.lastLoginAt ? "success" : "warning"} />
+                      {joining && login.status === "disabled"
+                        ? <ToneBadge label={ov.joining?.on ? `Starts ${shortDate(ov.joining.on)}` : "Starts on their joining day"} tone="info" />
+                        : <ToneBadge label={login.status === "disabled" ? "Disabled" : login.lastLoginAt ? "Active" : "Never signed in"} tone={login.status === "disabled" ? "danger" : login.lastLoginAt ? "success" : "warning"} />}
                     </Fact>
                     <Fact label="Last sign-in">{login.lastLoginAt ? dateTime(login.lastLoginAt) : null}</Fact>
                     {login.mustChange ? <Fact label="Password">Must be changed at next sign-in</Fact> : null}
@@ -222,8 +224,7 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
                   <Fact label="PEN" copy={s.pen ?? undefined}>{s.pen}</Fact>
                   <Fact label="RTE quota">{s.rteQuota ? "Yes, under RTE 12(1)(c)" : "No"}</Fact>
                   <Fact label="Address">{s.address}</Fact>
-                  <Fact label="Admitted">{s.admissionDate ? shortDate(s.admissionDate) : null}</Fact>
-                  {joining ? <Fact label="Joins">{ov.joining?.on ? shortDate(ov.joining.on) : null}</Fact> : null}
+                  <Fact label={joining ? "Joins" : "Admitted"}>{joining ? (ov.joining?.on ? shortDate(ov.joining.on) : null) : s.admissionDate ? shortDate(s.admissionDate) : null}</Fact>
                   {joining ? <Fact label="Joining year">{ov.joining?.yearName}</Fact> : null}
                   {s.leftOn ? <Fact label="Last day at school">{shortDate(s.leftOn)}</Fact> : null}
                   {gone || s.leftReason ? <Fact label="Reason for leaving">{ov.leftReason}</Fact> : null}
