@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { IconPlus } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
 import { INPUT } from "../lib/tone";
+import { redrawImage } from "../lib/redraw-image";
 import { Modal, ModalField, ModalFooter, ModalSection } from "../components/dashboard/kit/Modal";
 import { IconChip } from "../components/dashboard/kit/Panel";
 import { Button } from "../components/ui/button";
@@ -45,21 +46,15 @@ export type Field = {
   asJpeg?: boolean;
 };
 
-/** Draw the picked image on a canvas (longest side at most 1200 px) and swap the input's file for the JPEG. Leaves JPEG/PNG and unreadable files as they are. */
+/** Swap the input's file for a JPEG (longest side at most 1200 px) unless it is JPEG or PNG already. Unreadable files stay as they are. */
 async function reencodeAsJpeg(input: HTMLInputElement) {
   const file = input.files?.[0];
   if (!file || !file.type.startsWith("image/") || file.type === "image/jpeg" || file.type === "image/png") return;
-  try {
-    const bmp = await createImageBitmap(file);
-    const k = Math.min(1, 1200 / Math.max(bmp.width, bmp.height));
-    const canvas = Object.assign(document.createElement("canvas"), { width: Math.round(bmp.width * k), height: Math.round(bmp.height * k) });
-    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((ok) => canvas.toBlob(ok, "image/jpeg", 0.9));
-    if (!blob) return;
-    const dt = new DataTransfer();
-    dt.items.add(new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
-    input.files = dt.files;
-  } catch { /* the browser cannot read it: upload the original, the server decides */ }
+  const jpeg = await redrawImage(file, 1200);
+  if (!jpeg) return; // the browser cannot read it: upload the original, the server decides
+  const dt = new DataTransfer();
+  dt.items.add(jpeg);
+  input.files = dt.files;
 }
 
 export { INPUT } from "../lib/tone";

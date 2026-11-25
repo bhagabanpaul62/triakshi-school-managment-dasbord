@@ -48,6 +48,7 @@ export class DayService extends MeetingBase {
       const m = await this.meeting(tx, meetingId);
       const who = this.canManage && teacherId ? teacherId : this.ctx.userId;
       if (who !== this.ctx.userId && !this.canManage) throw new ForbiddenError();
+      await this.seen(tx, m.id);
       if (m.state === "draft") throw new ConflictError("Booking has not opened yet, so there is no list.");
       if (m.state === "cancelled") throw new ConflictError(`This meeting was cancelled${m.cancelReason ? `: ${m.cancelReason}` : "."}`);
       const wins = await rows<{ name: string; day: string; place: string | null; videoUrl: string | null }>(tx, sql`select u.name, w.day::text as day, w.place, w.video_url as "videoUrl"

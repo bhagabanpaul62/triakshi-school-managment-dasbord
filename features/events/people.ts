@@ -4,8 +4,10 @@ import type { Tx } from "@smw/db";
 import { chunks } from "@smw/feature-notifications/constants";
 import { resolveAudience } from "@smw/feature-notifications/audience";
 import { personKey, type Audience, type Reached } from "@smw/feature-notifications/audience-rules";
+import { users } from "@smw/db";
 import type { TopicKey } from "@smw/feature-notifications/topics";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
+import eventsFeature from "./feature";
 import { eventPeople, events } from "./schema";
 
 const row = (schoolId: string, eventId: string, r: Reached) => ({ schoolId, eventId, personKey: personKey(r), userId: r.userId, studentId: r.studentId, name: r.name, label: r.label });
@@ -37,7 +39,7 @@ export async function syncPeople(tx: Tx, schoolId: string, eventIds: string[], a
 }
 
 /** One notification per person, whatever number of events they are in. The person who made the change is not told. */
-export interface Tell { topic: TopicKey; title: string; body?: string; href: string; subject: { type: "event"; id: string }; groupKey?: string }
+export interface Tell { topic: TopicKey; title: string; body?: string; href: string; subject: { type: "event"; id: string }; groupKey?: string; /** Needs an answer: stays in "needs action" until closed. */ action?: boolean }
 export function tell(tx: Tx, schoolId: string, userIds: (string | null)[], skip: string, what: Tell) {
   const ids = [...new Set(userIds.filter((u): u is string => !!u && u !== skip))];
   return NotificationWriter.insert(tx, schoolId, ids.map((userId) => ({ userId, ...what })));
@@ -72,4 +74,11 @@ export async function lateJoiners(tx: Tx, schoolId: string, now = new Date()): P
     sql`((${eventPeople.studentId} is not null and exists (select 1 from students s where s.id = ${eventPeople.studentId} and s.status <> 'active'))
       or (${eventPeople.userId} is not null and exists (select 1 from users u where u.id = ${eventPeople.userId} and u.status <> 'active')))`)).returning({ id: eventPeople.id }) : [];
   return { added, removed: gone.length };
+}
+
+/** Active staff who hold events:write: by their base role, or by a custom role that grants it. These are the people who may own an event. */
+export async function eventWriters(tx: Tx): Promise<{ id: string; name: string }[]> {
+  const base = sql.join(eventsFeature.permissions.write.map((r) => sql`${r}`), sql`, `);
+  return tx.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.status, "active"),
+    sql`(${users.roleId} is null and ${users.role} in (${base}) or exists (select 1 from school_roles r where r.id = ${users.roleId} and 'events:write' = any(r.grants)))`)).orderBy(users.name);
 }

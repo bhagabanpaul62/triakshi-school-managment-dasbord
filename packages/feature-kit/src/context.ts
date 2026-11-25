@@ -1,4 +1,5 @@
 import type { SchoolRole, StaffRole } from "@smw/db";
+import { ForbiddenError } from "./errors";
 
 /** Everything a school service needs to know about the caller. Built per request by @smw/runtime; plain data, so a mobile API reuses it. */
 export interface Ctx {
@@ -35,4 +36,11 @@ export function systemCtx(schoolId: string, features: Iterable<string>, userId =
 export function allows(ctx: Pick<Ctx, "role" | "features" | "grants">, feature: { key: string; permissions: Record<string, readonly SchoolRole[]> }, permission: string): boolean {
   if (!ctx.features.has(feature.key)) return false;
   return ctx.grants ? ctx.grants.has(`${feature.key}:${permission}`) : (feature.permissions[permission] ?? []).includes(ctx.role);
+}
+
+/** Support sessions look, they never act on private things. No-op for a normal session; in support it logs who tried what (no content) and refuses. */
+export function refuseSupport(ctx: Pick<Ctx, "schoolId" | "supportStaffId">, what: string): void {
+  if (!ctx.supportStaffId) return;
+  console.warn(JSON.stringify({ level: "warn", msg: "support session refused", schoolId: ctx.schoolId, supportStaffId: ctx.supportStaffId, what }));
+  throw new ForbiddenError("Not available in a support session.");
 }

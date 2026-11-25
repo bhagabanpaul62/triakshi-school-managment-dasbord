@@ -26,7 +26,7 @@ async function Screen({ ctx, initial, title, back, banner }: { ctx: Ctx; initial
       <BackLink href={back.href}>{back.label}</BackLink>
       <PageHeader eyebrow="Communication" title={title} description={initial.mode === "correct" ? "People see the new version with an Updated stamp. The old one is kept." : "Saved as you type. Nothing is sent until you press the button at the bottom."} />
       {banner}
-      <NoticeForm initial={initial} categories={categories} options={options} labels={labels} languages={settings.languages} attachments={settings.attachments} may={may}
+      <NoticeForm initial={initial} categories={categories} options={options} labels={labels} languages={settings.languages} attachments={settings.attachments} may={{ ...may, websiteApproval: settings.approvalFor.website && !svc.can("manage") && !svc.can("approve") }}
         defaultMode={defaultMode} quiet={{ from: settings.quietFrom, to: settings.quietTo, sundays: settings.quietSundays }} readOnly={ctx.readOnly} />
     </>
   );

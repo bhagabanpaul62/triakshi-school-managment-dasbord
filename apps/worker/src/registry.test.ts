@@ -43,6 +43,14 @@ describe("job registry", () => {
     expect(fn).toHaveBeenLastCalledWith({});
   });
 
+  it("every merged job has a schedule, except the ones that only run when something queues them, and every schedule has a job", async () => {
+    const { FEATURE_JOBS } = await import("./generated/jobs");
+    const jobs = mergeJobs(platformJobs(log), ...(FEATURE_JOBS as Record<string, () => Promise<void>>[]));
+    const QUEUE_ONLY = ["email.send"];
+    expect(Object.keys(jobs).filter((n) => !SCHEDULES[n] && !QUEUE_ONLY.includes(n))).toEqual([]);
+    expect(Object.keys(SCHEDULES).filter((n) => !jobs[n])).toEqual([]);
+  });
+
   it("platform jobs and every feature's jobs merge without a name clash", async () => {
     const { FEATURE_JOBS } = await import("./generated/jobs");
     const jobs = mergeJobs(platformJobs(log), ...(FEATURE_JOBS as Record<string, () => Promise<void>>[]));

@@ -21,7 +21,7 @@ describe("PreferenceService", () => {
   it("shows the topic default, then the school's, then the person's own choice", async () => {
     const p = prefs(a, "student");
     expect((await p.mine()).groups.notices).toMatchObject({ push: true, email: "digest", own: false, locked: false });
-    await withSchool(a.id, (tx) => tx.insert(commSettings).values({ schoolId: a.id, settings: { channelDefaults: { notices: { push: false, email: "off" } } } }));
+    await withSchool(a.id, (tx) => tx.insert(commSettings).values({ schoolId: a.id, settings: { channelDefaults: { families: { notices: { push: false, email: "off" } } } } }));
     expect((await p.mine()).groups.notices).toMatchObject({ push: false, email: "off", own: false });
     await p.saveGroup({ group: "notices", push: true, email: "instant" });
     await p.saveGroup({ group: "fees", push: false, email: "off" });
@@ -33,7 +33,7 @@ describe("PreferenceService", () => {
   it("locked groups cannot be turned off", async () => {
     const p = prefs(a, "student");
     await expect(p.saveGroup({ group: "urgent", push: false, email: "off" })).rejects.toBeInstanceOf(ValidationError);
-    await expect(p.saveGroup({ group: "account", push: false, email: "off" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(p.saveGroup({ group: "urgent", push: false, email: "off" })).rejects.toBeInstanceOf(ValidationError);
     expect((await p.mine()).groups.urgent).toMatchObject({ push: true, email: "instant", locked: true });
     await expect(p.saveGroup({ group: "nope", push: true, email: "off" })).rejects.toBeInstanceOf(ValidationError);
   });
@@ -110,7 +110,7 @@ describe("PreferenceService", () => {
     expect(all!.groups).not.toContain("urgent");
     const m = await prefs(a, "student").mine();
     expect(m.groups.fees.email).toBe("off");
-    expect(m.groups.account.email).toBe("instant");
+    expect(m.groups.urgent.email).toBe("instant");
     expect((await withSchool(a.id, (tx) => tx.select().from(notificationPrefs).where(eq(notificationPrefs.userId, a.users.teacher))))[0]!.groups).toEqual({});
   });
 });

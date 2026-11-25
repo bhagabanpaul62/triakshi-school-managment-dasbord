@@ -66,7 +66,7 @@ const french = (): PeriodRef => ({ blockSlotId: tt.block.blockSlotId, optionId: 
 const entries = (ids: string[], status: "present" | "absent" | "late" | "leave" = "present") => ids.map((studentId) => ({ studentId, status }));
 const dailyOf = async (who: TestSchool["as"]["admin"], section: string, date: string, studentId: string) =>
   (await new StudentAttendanceService(who).sectionSheet(section, date)).rows.find((r) => r.studentId === studentId)?.status ?? null;
-const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
+const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => `${n.title} | ${n.body ?? ""}`));
 
 beforeAll(async () => {
   useServices({ email: mail, storage: new MemoryStorage() });

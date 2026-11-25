@@ -43,7 +43,7 @@ export function SegmentedControl<T extends string>({
             className={cn(
               "relative rounded-full font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]",
               size === "sm" ? "px-2.5 py-1 text-xs" : "px-3.5 py-1.5 text-[13px]",
-              active ? "text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface-variant)]",
+              active ? "text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-variant)] hover:text-[var(--ds-on-surface)]",
             )}
           >
             {active && (

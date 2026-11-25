@@ -5,11 +5,11 @@ import { ForbiddenError } from "@smw/feature-kit";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryEmailSender, MemoryPushSender, useServices, type Mail } from "@smw/integrations";
 import notificationsFeature from "./feature";
-import { deliverDue, DeliveryService, NO_BUDGET, PushTestService } from "./delivery";
+import { deliverDue, DeliveryService, NO_BUDGET, PushTestService, sendAccountMail } from "./delivery";
 import { runDigest } from "./digest";
 import { PreferenceService } from "./prefs";
 import { NotificationWriter } from "./writer";
-import { mailWebhook } from "./email-health";
+import { isSuppressed, mailWebhook } from "./email-health";
 import { commDeliveries, commSettings, emailSuppressions, mailUsage, notificationPrefs, notifications, pushSubscriptions } from "./schema";
 
 process.env.MAIL_DAILY_LIMIT = "10";
@@ -116,10 +116,21 @@ describe("deliverDue: email", () => {
     expect(mail.sent.filter((m) => m.to.includes(`@${b.slug}.`))).toHaveLength(1);
   });
 
-  it("urgent and safety mail may use the whole limit except the tenth kept for codes", async () => {
+  it("urgent and safety mail may use the limit except the fifth kept for codes, which account mail always gets", async () => {
     for (let i = 0; i < 12; i++) await put(i % 2 ? a : b, (i % 2 ? a : b).users.admin, { priority: i % 2 ? 1 : 2, title: `U${i}` });
     await run(a); await run(b);
-    expect(mail.sent).toHaveLength(9);
+    expect(mail.sent).toHaveLength(8);
+    const before = await used(a);
+    await sendAccountMail(a.id, { to: "x@y.test", subject: "Your code", text: "123456" }, DAY);
+    await sendAccountMail(a.id, { to: "x@y.test", subject: "Your code", text: "654321" }, DAY);
+    expect(mail.sent).toHaveLength(10);
+    expect(await used(a)).toBe(before + 2);
+  });
+
+  it("account mail that fails to send is not counted", async () => {
+    mail.fail = () => new Error("smtp down");
+    await expect(sendAccountMail(a.id, { to: "x@y.test", subject: "Your code", text: "1" }, DAY)).rejects.toThrow("smtp down");
+    expect(await used(a)).toBe(0);
   });
 
   it("waits out quiet hours except for urgent and safety, and obeys a person's own hours", async () => {
@@ -442,8 +453,8 @@ describe("after a mail or push went out", () => {
 describe("urgent rows and links", () => {
   it("an urgent row of any topic goes out at once, even in quiet hours; the same row not urgent waits", async () => {
     await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [
-      { userId: a.users.admin, topic: "holiday.declared", title: "School closed tomorrow", urgent: true },
-      { userId: a.users.teacher, topic: "homework.new", title: "Homework" },
+      { userId: a.users.admin, topic: "holiday.declared", subject: { type: "t", id: "1" }, title: "School closed tomorrow", urgent: true },
+      { userId: a.users.teacher, topic: "homework.new", subject: { type: "t", id: "1" }, title: "Homework" },
     ]));
     const rows = await withSchool(a.id, (tx) => tx.select().from(commDeliveries).where(eq(commDeliveries.channel, "email")));
     expect(rows.find((r) => r.userId === a.users.admin)).toMatchObject({ priority: 1, mode: "instant" });
@@ -471,23 +482,27 @@ describe("urgent rows and links", () => {
 });
 
 describe("mail webhook and the delivery screen", () => {
-  const post = (secret: string | null, body: unknown, via: "query" | "header" = "query") =>
+  const post = (secret: string | null, body: unknown, via: "query" | "header" = "header") =>
     mailWebhook(new Request(`http://x.test/api/webhooks/mail${secret && via === "query" ? `?secret=${secret}` : ""}`, { method: "POST", body: JSON.stringify(body), headers: secret && via === "header" ? { "x-webhook-secret": secret } : {} }));
 
   it("refuses a wrong or missing secret", async () => {
     expect((await post("wrong", { event: "hard_bounce", email: `admin@${a.slug}.test` })).status).toBe(401);
     expect((await post(null, { event: "hard_bounce", email: `admin@${a.slug}.test` })).status).toBe(401);
+    expect((await post("s3cret", { event: "hard_bounce", email: `admin@${a.slug}.test` }, "query")).status).toBe(401);
     expect(await withConsole((tx) => tx.select().from(emailSuppressions).where(eq(emailSuppressions.schoolId, a.id)))).toHaveLength(0);
   });
 
   it("marks bounces and spam in every school that holds the address, and ignores soft bounces", async () => {
     expect((await post("s3cret", { event: "soft_bounce", email: `admin@${a.slug}.test` })).status).toBe(200);
     expect(await withConsole((tx) => tx.select().from(emailSuppressions).where(eq(emailSuppressions.schoolId, a.id)))).toHaveLength(0);
-    expect((await post("s3cret", [{ event: "hard_bounce", email: `Admin@${a.slug}.test` }, { event: "spam", email: `teacher@${a.slug}.test` }], "header")).status).toBe(200);
+    expect((await post("s3cret", [{ event: "hard_bounce", email: `Admin@${a.slug}.test` }, { event: "spam", email: `teacher@${a.slug}.test` }])).status).toBe(200);
     expect((await post("s3cret", { event: "hard_bounce", email: `admin@${a.slug}.test` })).status).toBe(200);
     const rows = await withConsole((tx) => tx.select().from(emailSuppressions).where(inArray(emailSuppressions.schoolId, [a.id, b.id])));
     expect(rows.map((r) => `${r.schoolId === a.id ? "a" : "b"}:${r.reason}`).sort()).toEqual(["a:bounced", "a:spam"]);
     expect((await post("s3cret", "not an object")).status).toBe(200);
+    expect(await withSchool(a.id, (tx) => isSuppressed(tx, `ADMIN@${a.slug}.test`))).toBe(true);
+    expect(await withSchool(a.id, (tx) => isSuppressed(tx, `student@${a.slug}.test`))).toBe(false);
+    expect(await withSchool(a.id, (tx) => isSuppressed(tx, null))).toBe(false);
   });
 
   it("shows admins last week's numbers, problems, today's allowance, and retries failures", async () => {

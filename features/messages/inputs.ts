@@ -38,6 +38,9 @@ export const handleReportInput = z.object({
 
 export const reviewInput = z.object({ threadId: f.id(), reason: f.text(5, 500, "Type why you are opening this conversation"), reportId: f.optId() });
 
+/** Find a conversation to review: by a name (student or staff member), by a day, or both. */
+export const findInput = z.object({ q: f.optText(60), day: f.optDate() }).refine((v) => v.q || v.day, { message: "Type a name or pick a day", path: ["q"] });
+
 export const restrictInput = z.object({
   userId: f.id("Choose a person"),
   kind: z.enum(["reply_only", "blocked"], { error: "Choose how far to limit" }),

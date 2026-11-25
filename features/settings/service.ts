@@ -11,6 +11,7 @@ import {
   type ListQuery, type Page,
 } from "@smw/feature-kit";
 import { UploadError, emailHtml, services, uploadKey } from "@smw/integrations";
+import { sendAccountMail } from "@smw/feature-notifications/delivery";
 import settingsFeature from "./feature";
 import { ROLE_TEMPLATES, SYSTEM_ROLES, BASELINE_GRANTS, adminOnlyGrants, allGrants, matrixFor, systemGrants, type Catalogue } from "./catalogue";
 import { STAFF_ROLES, customRoleInput, exportStudentInput, resetInput, roleInput, schoolProfileInput } from "./inputs";
@@ -302,7 +303,7 @@ export class UserAdminService extends SettingsService {
     }, (m) => ({ action: "reset_password", entity: "User", entityId: id, summary: `Issued a password reset link for ${m.name}` }));
     const url = schoolUrl(mail.school.slug, `/reset-password?token=${mail.token}`);
     try {
-      await services().email.send({
+      await sendAccountMail(this.ctx.schoolId, {
         to: mail.to,
         subject: `Reset your password for ${mail.school.name}`,
         text: `Hello ${mail.name},\n\nYour school admin sent you a link to set a new password. It works for 24 hours:\n${url}\n`,

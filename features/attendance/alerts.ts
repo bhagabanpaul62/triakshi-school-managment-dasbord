@@ -60,8 +60,8 @@ export async function sendDueAlerts(tx: Tx, schoolId: string, now: Date): Promis
 
   const line = (x: (typeof send)[number]) => `${x.kid.name} was marked ${STATUS_LABEL[x.status].toLowerCase()} on ${x.date}`;
   await NotificationWriter.insert(tx, schoolId, send.map((x) => ({
-    userId: x.kid.userId!, topic: "attendance.absence" as const, title: line(x),
-    body: "Open attendance for the details. If this is a mistake, speak to the class teacher.",
+    userId: x.kid.userId!, topic: "attendance.absence" as const, title: "Attendance alert", privateBody: true,
+    body: `${line(x)}. If this is a mistake, speak to the class teacher.`,
     href: `/app/attendance?month=${x.date.slice(0, 7)}`, subject: { type: "attendance", id: `${x.studentId}:${x.date}` },
   })));
   return send.length;

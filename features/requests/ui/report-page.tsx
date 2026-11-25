@@ -24,7 +24,7 @@ export default async function ReportPage({ searchParams }: { searchParams: Searc
   return (
     <>
       <PageHeader eyebrow="Communication" title="Request report" description="How fast the school answers, by category and state. Only requests you may see are counted."
-        actions={<Link href="/api/requests/csv?view=all" prefetch={false} className={buttonVariants({ variant: "ghost", className: "rounded-full" })}>Download CSV</Link>} />
+        actions={<Link href={`/api/requests/report?${new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) })}`} prefetch={false} className={buttonVariants({ variant: "ghost", className: "rounded-full" })}>Download CSV</Link>} />
       <SectionNav ctx={ctx} current="/app/requests/report" />
       <form className="mb-6 flex flex-wrap items-end gap-3" role="search">
         <label className="flex flex-col gap-1 text-xs text-[var(--ds-on-surface-muted)]">From<input type="date" name="from" defaultValue={from} className="h-10 rounded-xl bg-white/[0.05] px-3 text-sm text-[var(--ds-on-surface)]" /></label>
@@ -39,6 +39,7 @@ export default async function ReportPage({ searchParams }: { searchParams: Searc
             <StatCard label="Overdue now" value={String(r.overdue)} meta="Past the target days" href="/app/requests?view=overdue" />
             <StatCard label="Time to first answer" value={hoursWords(r.medianFirstAnswerHours)} meta="Median" />
             <StatCard label="Time to resolve" value={hoursWords(r.medianResolveHours)} meta={`Median. ${r.reopened} opened again`} />
+            <StatCard label="Time to close" value={r.medianCloseDays === null ? "Not yet" : `${Math.round(r.medianCloseDays * 10) / 10} days`} meta="Median, raised to closed" />
           </KpiRow>
           <div className="grid gap-3 lg:grid-cols-2">
             <Panel title="By category">

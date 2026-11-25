@@ -11,6 +11,8 @@ import { TOPIC_GROUPS, type TopicGroup } from "./topics";
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 20:00");
 const format = (what: string) => z.string().trim().max(60).refine((s) => s.includes("{n}"), `${what} must contain {n}`);
 
+const sideDefaults = z.partialRecord(z.enum(Object.keys(TOPIC_GROUPS) as [TopicGroup, ...TopicGroup[]]), z.object({ push: z.boolean(), email: z.enum(EMAIL_MODES) })).default({});
+
 export const commSettingsSchema = z.object({
   quietFrom: time.default("20:00"),
   quietTo: time.default("07:00"),
@@ -27,7 +29,8 @@ export const commSettingsSchema = z.object({
   requestFormat: format("The request number").default("REQ/{session}/{n}"),
   /** Second languages a notice may be written in. */
   languages: z.array(z.string().trim().min(1).max(30)).max(10).default([]),
-  channelDefaults: z.partialRecord(z.enum(Object.keys(TOPIC_GROUPS) as [TopicGroup, ...TopicGroup[]]), z.object({ push: z.boolean(), email: z.enum(EMAIL_MODES) })).default({}),
+  /** What each group does for staff and for families until a person chooses. */
+  channelDefaults: z.object({ staff: sideDefaults, families: sideDefaults }).default({ staff: {}, families: {} }),
   retentionYears: z.number().int().min(1).max(7).default(3),
   safetyContacts: z.array(z.object({ name: z.string().trim().min(1).max(80), phone: z.string().trim().min(3).max(20) })).max(10).default([]),
   officeName: z.string().trim().min(1).max(60).default("School office"),

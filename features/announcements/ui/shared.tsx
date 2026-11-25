@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { IconChevronLeft } from "@tabler/icons-react";
 import type { ReactNode } from "react";
+import { dateTime } from "@smw/ui/format";
 import { commState } from "@smw/ui/comm/states";
 import { TONE, type Tone } from "@smw/ui/tone";
 import { NOTICE_STATES, type NoticeState } from "../constants";
@@ -30,3 +31,14 @@ export function Notice({ children, tone = "default" }: { children: ReactNode; to
 export type Query = Record<string, string | string[] | undefined>;
 export const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 export const HOME = "/app/announcements";
+
+/** A thing in another module that points at this notice, as a link line. */
+export interface Related { title: string; href: string; startsAt: Date; cancelled: boolean }
+export function RelatedLinks({ related }: { related: Related[] }) {
+  if (!related.length) return null;
+  return (
+    <ul className="flex flex-col gap-1 text-sm">
+      {related.map((r) => <li key={r.href}>This is the consent for <Link href={r.href} className="underline underline-offset-4">{r.title}</Link>, {dateTime(r.startsAt)}{r.cancelled ? " (cancelled)" : ""}.</li>)}
+    </ul>
+  );
+}

@@ -20,11 +20,11 @@ import { MUTED, PILL, PRIMARY } from "./styles";
 
 export interface FormInitial {
   title: string; type: EventType; description: string; allDay: boolean; startsAt: string; endsAt: string; location: string; mapUrl: string; bring: string;
-  audience: Audience; isPublic: boolean; reminders: number[]; rsvpOn: boolean; capacity: string; guests: string; closesAt: string; consentHref: string;
+  audience: Audience; isPublic: boolean; reminders: number[]; rsvpOn: boolean; capacity: string; guests: string; closesAt: string; consentHref: string; ownerId: string;
 }
 export interface EventFormProps {
   mode: "create" | "edit"; eventId?: string; isDraft?: boolean; options: AudienceOptions; initial: FormInitial; labels?: Record<string, string>;
-  files?: FileItem[]; seriesTotal?: number; canWebsite: boolean; cancelHref: string;
+  files?: FileItem[]; seriesTotal?: number; /** Staff who may run events: the owner can edit and answer for people. */ owners: { id: string; name: string }[]; canWebsite: boolean; cancelHref: string;
 }
 
 const RULES = ["everyone", "families", "staff", "class", "section", "house", "route", "stop", "subject", "role", "group", "student", "person", "teachers_of"] as const;
@@ -32,7 +32,7 @@ const dayOf = (v: string) => v.slice(0, 10);
 const addHour = (v: string) => { const d = new Date(`${v}:00Z`); d.setUTCHours(d.getUTCHours() + 1); return d.toISOString().slice(0, 16); };
 
 /** One form for adding and changing an event. Everything has a default, so the short path is a title, a time and who it is for. */
-export function EventForm({ mode, eventId, isDraft, options, initial, labels, files = [], seriesTotal, canWebsite, cancelHref }: EventFormProps) {
+export function EventForm({ mode, eventId, isDraft, options, initial, labels, files = [], seriesTotal, owners, canWebsite, cancelHref }: EventFormProps) {
   const uid = useId();
   const router = useRouter();
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -150,6 +150,7 @@ export function EventForm({ mode, eventId, isDraft, options, initial, labels, fi
       </ModalSection>
 
       <ModalSection title="More">
+        {owners.length > 1 ? field("ownerId", "Run by", <select id={id("ownerId")} name="ownerId" defaultValue={initial.ownerId} className={INPUT}>{owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</select>, { hint: "This person can change the event, see the answers and mark who came." }) : null}
         {field("bring", "What to bring (optional)", <textarea id={id("bring")} name="bring" defaultValue={initial.bring} rows={2} maxLength={500} className={cn(INPUT, "h-auto py-2")} />)}
         <FilesField existing={files} maxCount={5} />
         {err("files") ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{err("files")}</p> : null}

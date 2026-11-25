@@ -102,7 +102,7 @@ export async function draftTriakshiBills(tx: Tx, schoolId: string) {
 /** Everything the nightly job does for one school. */
 export async function runRecurringJob(tx: Tx, schoolId: string) {
   const [recurring, triakshi] = [await draftRecurringBills(tx, schoolId), await draftTriakshiBills(tx, schoolId)];
-  if (recurring + triakshi) await tell(tx, schoolId, await managers(tx), "work.update", "Draft bills are ready", `${recurring + triakshi} new draft bill(s) from recurring costs and Triakshi invoices need a look.`, "/app/expenses/bills?status=draft", { groupKey: "draft-bills" });
+  if (recurring + triakshi) await tell(tx, schoolId, await managers(tx), "work.update", "Draft bills are ready", `${recurring + triakshi} new draft bill(s) from recurring costs and Triakshi invoices need a look.`, "/app/expenses/bills?status=draft", { groupKey: "draft-bills", subject: { type: "bills", id: "draft" } });
   return { recurring, triakshi };
 }
 

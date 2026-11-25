@@ -67,6 +67,7 @@ export class BookingService extends MeetingBase {
       const m = await this.meeting(tx, meetingId);
       const kid = await kidOfLogin(tx, this.ctx.userId);
       if (!kid || !(await audienceMatches(tx, m.audience, { userId: this.ctx.userId, studentIds: [kid.id] })) || m.state === "draft") throw new NotFoundError("Meeting");
+      await this.seen(tx, m.id);
       const why = this.gate(m, false);
       return this.view(tx, m, [kid], !why, why);
     });

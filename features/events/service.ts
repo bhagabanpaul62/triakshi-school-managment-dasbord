@@ -15,7 +15,7 @@ import { addDays, allDaySpan, istDay, monthRange } from "./dates";
 import eventsFeature from "./feature";
 import { EventFiles, MAX_FILES, type StoredFile, type UploadedFile } from "./files";
 import { cancelInput, createInput, scopeInput, updateInput, type CreateInput, type UpdateInput } from "./inputs";
-import { freezePeople, peopleOf, syncPeople, tell } from "./people";
+import { eventWriters, freezePeople, peopleOf, syncPeople, tell } from "./people";
 import { onDay, repeatDays, type Slot } from "./repeat";
 import { promoteWaiting, rsvpCounts } from "./rsvp";
 import { eventFiles, eventPeople, events } from "./schema";
@@ -73,6 +73,16 @@ export class EventService extends CrudService<typeof events, Perm> {
   /** Everything the caller may see that touches [from, to). Cancelled events are included, struck through by the screens. `drafts: false` leaves unpublished ones out (feeds). */
   async range(from: Date, to: Date, o: { drafts?: boolean } = {}) {
     return this.read("read", (tx) => this.between(tx, and(this.overlapping(from, to), o.drafts === false ? ne(events.state, "draft") : undefined)));
+  }
+
+  /** The calendar was opened on [from, to): the "holiday declared" notices of the closures in view are read. */
+  async seeHolidays(from: Date, to: Date): Promise<number> {
+    return this.read("read", async (tx) => {
+      const spans = [...(await tx.execute(sql`select distinct coalesce(span_id, id)::text as id from attendance_holidays where date >= ${istDay(from)}::date and date < ${istDay(to)}::date limit 200`))] as { id: string }[];
+      let n = 0;
+      for (const s of spans) n += await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "holiday", id: s.id }, this.ctx.userId);
+      return n;
+    });
   }
 
   /** What is coming next (running now or later), soonest first. For dashboards. */
@@ -160,14 +170,21 @@ export class EventService extends CrudService<typeof events, Perm> {
 
   /** The row to write for one date. */
   private values(d: Omit<UpdateInput, "startsAt" | "endsAt" | "allDay">, s: Slot, extra: { state: SchoolEvent["state"]; seriesId: string | null; label: string; allDay: boolean }) {
-    const { audience, rsvp, reminders, ...rest } = d;
-    return { ...rest, ...s, allDay: extra.allDay, schoolId: this.ctx.schoolId, state: extra.state, audience, audienceLabel: extra.label, rsvp, reminders, remindedFor: passed(reminders, s.startsAt, new Date()), seriesId: extra.seriesId, ownerId: this.ctx.userId, createdBy: this.ctx.userId };
+    const { audience, rsvp, reminders, ownerId: _o, ...rest } = d;
+    return { ...rest, ...s, allDay: extra.allDay, schoolId: this.ctx.schoolId, state: extra.state, audience, audienceLabel: extra.label, rsvp, reminders, remindedFor: passed(reminders, s.startsAt, new Date()), seriesId: extra.seriesId, ownerId: d.ownerId ?? this.ctx.userId, createdBy: this.ctx.userId };
+  }
+
+  /** Who may be named owner: staff who can write events. */
+  async owners() { return this.read("write", (tx) => eventWriters(tx)); }
+
+  private async checkOwner(tx: Tx, ownerId: string | undefined) {
+    if (ownerId && !(await eventWriters(tx)).some((w) => w.id === ownerId)) throw new ValidationError({ ownerId: "Pick someone who can add events." });
   }
 
   private invite(rows: SchoolEvent[]) {
     const first = rows[0]!;
     return {
-      topic: "event.invite" as const, title: `New event: ${first.title}`, subject: { type: "event" as const, id: first.id }, href: `/app/events/${first.id}`,
+      topic: "event.invite" as const, action: first.rsvp.on, title: `New event: ${first.title}`, subject: { type: "event" as const, id: first.id }, href: `/app/events/${first.id}`,
       body: `${whenLabel(iso(first))}${first.location ? `, ${first.location}` : ""}${rows.length > 1 ? `. Repeats ${rows.length} times.` : ""}`,
     };
   }
@@ -180,6 +197,7 @@ export class EventService extends CrudService<typeof events, Perm> {
     const d = this.parse(createInput, input);
     return this.write("write", async (tx) => {
       await this.checkAudience(tx, d.audience, d.isPublic);
+      await this.checkOwner(tx, d.ownerId);
       const label = await describeAudience(tx, d.audience);
       const slots = await this.slots(tx, d);
       const seriesId = slots.length > 1 ? randomUUID() : null;
@@ -228,6 +246,7 @@ export class EventService extends CrudService<typeof events, Perm> {
       const row = await this.findOrThrow(tx, id);
       mustRun(this.ctx, row);
       if (row.state === "cancelled") throw new ConflictError("A cancelled event cannot be changed. Add a new one instead.");
+      if (d.ownerId !== row.ownerId) await this.checkOwner(tx, d.ownerId);
       const audience = await expandGroups(tx, d.audience);
       const audienceChanged = canon(audience) !== canon(row.audience);
       if (audienceChanged || (d.isPublic && !row.isPublic)) await this.checkAudience(tx, d.audience, d.isPublic, row);
@@ -251,7 +270,7 @@ export class EventService extends CrudService<typeof events, Perm> {
           type: d.type, title: d.title, description: d.description, bring: d.bring, location: d.location, mapUrl: d.mapUrl, consentHref: d.consentHref,
           ...slot, allDay: d.allDay, audience, audienceLabel: label, isPublic: d.isPublic, rsvp: d.rsvp, reminders: d.reminders,
           remindedFor: timeChanged || JSON.stringify(d.reminders) !== JSON.stringify(t.reminders) ? passed(d.reminders, slot.startsAt, now) : t.remindedFor,
-          sequence: seen ? t.sequence + 1 : t.sequence, updatedAt: now,
+          sequence: seen ? t.sequence + 1 : t.sequence, updatedAt: now, ...(d.ownerId ? { ownerId: d.ownerId } : {}),
         }).where(eq(events.id, t.id)).returning();
         done.push(next!);
       }
@@ -286,6 +305,7 @@ export class EventService extends CrudService<typeof events, Perm> {
       const targets = await this.targets(tx, row, scope);
       const ids = targets.map((t) => t.id);
       const done = await tx.update(events).set({ state: "cancelled", cancelledAt: new Date(), cancelReason: reason, sequence: sql`${events.sequence} + 1`, updatedAt: new Date() }).where(inArray(events.id, ids)).returning();
+      for (const t of ids) await NotificationWriter.done(tx, this.ctx.schoolId, { type: "event", id: t });
       await tell(tx, this.ctx.schoolId, await peopleOf(tx, ids), this.ctx.userId, {
         topic: "event.changed", title: `Cancelled: ${row.title}`, subject: { type: "event", id }, href: `/app/events/${id}`, groupKey: `event-changed:${id}`,
         body: `${reason}${done.length > 1 ? ` (${done.length} dates)` : ""}`,

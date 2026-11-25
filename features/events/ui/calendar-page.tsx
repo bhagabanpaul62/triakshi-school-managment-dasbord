@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { requireCtx } from "@smw/runtime";
 import { IconPlus } from "@tabler/icons-react";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { cn } from "@smw/ui/utils";
 import { EmptyLine } from "@smw/ui/finance/States";
-import { AGENDA_DAYS, addDays, shiftMonth, weekStart, type CalendarView } from "../dates";
+import { AGENDA_DAYS, addDays, shiftMonth, viewRange, weekStart, type CalendarView } from "../dates";
 import { LAYERS, type CalendarItem, type LayerKey } from "../constants";
 import { Agenda, Month, VIEWS, Week, Year, type UrlFor } from "./calendar-grid";
+import { EventService } from "../service";
 import { PhoneCalendar } from "./phone-calendar";
 import { PILL, PRIMARY } from "./styles";
 
@@ -28,7 +30,9 @@ const step = (view: CalendarView, anchor: string, n: 1 | -1) =>
   view === "month" ? `${shiftMonth(anchor.slice(0, 7), n)}-01` : view === "year" ? `${Number(anchor.slice(0, 4)) + n}-01-01` : view === "week" ? addDays(weekStart(anchor), 7 * n) : addDays(anchor, AGENDA_DAYS * n);
 
 /** The calendar: agenda (the default, from today), month, week and year planner. The view, the day and the layers live in the address. */
-export function CalendarPage({ items, view, anchor, today, layers, chosen, defaults, canAdd, holidays, phone }: CalendarPageProps) {
+export async function CalendarPage({ items, view, anchor, today, layers, chosen, defaults, canAdd, holidays, phone }: CalendarPageProps) {
+  // Looking at the holidays layer is reading the holiday notices for those days.
+  if (chosen.includes("holidays")) { const { from, to } = viewRange(view, anchor); await new EventService(await requireCtx()).seeHolidays(from, to); }
   const isDefault = (l: LayerKey[]) => l.length === defaults.length && defaults.every((x) => l.includes(x));
   const url: UrlFor = (o) => {
     const p = new URLSearchParams();

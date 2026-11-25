@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconAlertTriangle, IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 import { Modal, ModalField, ModalFooter } from "@smw/ui/kit/Modal";
 import { FilesField } from "@smw/ui/comm/FilesField";
 import { FileList } from "@smw/ui/comm/FileList";
@@ -18,7 +18,7 @@ import { quietUntil } from "@smw/feature-notifications/quiet";
 import type { Audience } from "@smw/feature-notifications/audience-rules";
 import { MAX_FILES, NEEDS_APPROVAL, NO_URGENT_CATEGORY, type NoticeType, type Reminders, type ResponseSpec } from "../constants";
 import { publicAudience, readyErrors, RESPONSE_WORDS, type NoticeContent } from "../content";
-import { checkNotice, correctNotice, saveCorrectionAsNew, addNoticeFile, publishNotice, removeNoticeFile, saveNotice, scheduleNotice, submitNotice } from "./actions";
+import { checkNotice, correctNotice, saveCorrectionAsNew, addNoticeFile, publishNotice, removeNoticeFile, reorderNoticeFiles, saveNotice, scheduleNotice, submitNotice } from "./actions";
 import { NoticeCard } from "./card";
 import { cleanSpec, ResponseBuilder } from "./response-builder";
 import { TYPE_LABEL } from "./shared";
@@ -40,7 +40,7 @@ export interface NoticeFormProps {
   labels: Record<string, string>;
   languages: string[];
   attachments: boolean;
-  may: { publish: boolean; urgent: boolean; website: boolean };
+  may: { publish: boolean; urgent: boolean; website: boolean; websiteApproval: boolean };
   /** What the person's own sections allow before anyone has picked an audience. */
   defaultMode: "free" | "approval";
   quiet: { from: string; to: string; sundays: boolean };
@@ -132,6 +132,16 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
     return problem;
   };
 
+  /** Move a saved file up or down: shown at once, saved after, put back with a message if it fails. */
+  const moveFile = async (i: number, by: -1 | 1) => {
+    const before = files, next = [...files];
+    [next[i], next[i + by]] = [next[i + by]!, next[i]!];
+    setFiles(next);
+    const fd = new FormData(); fd.set("id", id.current!); fd.set("ids", JSON.stringify(next.map((x) => x.id)));
+    const r = await reorderNoticeFiles(fd).catch(() => null);
+    if (!r || !r.ok) { setFiles(before); toast(r && !r.ok ? r.error : "No connection. The order did not change.", "danger"); }
+  };
+
   /** Save everything now. Resolves true when nothing is left unsaved. */
   const flush = useCallback(async (): Promise<boolean> => {
     if (readOnly) return false;
@@ -204,7 +214,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audienceJson, onlyWebsite, readOnly]);
 
-  const mode: "free" | "approval" = !may.publish ? "approval" : onlyWebsite ? (may.website ? "free" : "approval") : check?.mode ?? defaultMode;
+  const mode: "free" | "approval" = !may.publish || (f.website !== "app" && may.websiteApproval) ? "approval" : onlyWebsite ? "free" : check?.mode ?? defaultMode;
   const content = (): NoticeContent => ({
     type: f.type, categoryId: f.categoryId || null, title: f.title, body: f.body, lang2: f.lang2 || null, title2: f.lang2 ? f.title2 : null, body2: f.lang2 ? f.body2 : null,
     audience: f.audience, response: spec ?? { kind: "none" }, dueAt: f.dueAt ? new Date(fromIstInput(f.dueAt)!) : null, reminders: f.reminders, website: f.website !== "app",
@@ -284,7 +294,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
   const second = f.lang2 && lang === "second";
   const previewFiles = files.map((x) => ({ name: x.name, size: x.size }));
   const cat = categories.find((c) => c.id === f.categoryId) ?? null;
-  const websiteWhy = !may.website ? "Only an admin or an approver can put a notice on the website." : !publicAudience(f.audience) ? "Only a notice for everyone can go on the website. Choose Everyone above." : null;
+  const websiteWhy = !may.website ? "You need the right to publish to put a notice on the website." : !publicAudience(f.audience) ? "Only a notice for everyone can go on the website. Choose Everyone above." : null;
   const statusText = readOnly ? "This school is read only" : correcting ? "A correction is saved when you press Save correction" : status.kind === "saving" ? "Saving" : status.kind === "saved" ? `Saved ${istHm(status.at)}` : status.kind === "failed" ? status.message : dirty ? "Not saved yet" : initial.id ? "All changes saved" : "Nothing written yet";
 
   return (
@@ -353,7 +363,21 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
           <Section title="Files">
             {!attachments ? <p className="text-sm text-[var(--ds-on-surface-muted)]">The school has turned attachments off.</p>
               : correcting ? <><FileList files={files.map((x) => ({ id: x.id, name: x.name, sizeBytes: x.size, type: x.contentType, href: `/api/notices/files/${x.id}` }))} /><p className="text-xs text-[var(--ds-on-surface-muted)]">Files cannot change in a correction. To change them, withdraw this and send a new notice.</p></>
-              : <FilesField key={filesKey} label="Attachments" accept={["application/pdf", "image/*", ".docx", ".xlsx"]} maxCount={MAX_FILES} maxMb={15} existing={files.map((x) => ({ id: x.id, name: x.name, sizeBytes: x.size, type: x.contentType, href: `/api/notices/files/${x.id}` }))} disabled={readOnly} />}
+              : (<><FilesField key={filesKey} label="Attachments" accept={["application/pdf", "image/*", ".docx", ".xlsx"]} maxCount={MAX_FILES} maxMb={15} existing={files.map((x) => ({ id: x.id, name: x.name, sizeBytes: x.size, type: x.contentType, href: `/api/notices/files/${x.id}` }))} disabled={readOnly} />
+                {files.length > 1 && id.current ? (
+                  <div className="flex flex-col gap-2">
+                    <span className="text-sm font-medium text-[var(--ds-on-surface)]">Order people see them in</span>
+                    <ol className="flex flex-col gap-1">
+                      {files.map((x, i) => (
+                        <li key={x.id} className="flex min-h-10 items-center gap-2 rounded-xl bg-white/[0.05] pl-3">
+                          <span className="min-w-0 flex-1 truncate text-sm text-[var(--ds-on-surface)]">{i + 1}. {x.name}</span>
+                          <button type="button" disabled={i === 0 || readOnly} onClick={() => void moveFile(i, -1)} aria-label={`Move ${x.name} up`} className={cn(PILL_BTN, "h-10 w-10 px-0")}><IconArrowUp className="h-4 w-4" aria-hidden /></button>
+                          <button type="button" disabled={i === files.length - 1 || readOnly} onClick={() => void moveFile(i, 1)} aria-label={`Move ${x.name} down`} className={cn(PILL_BTN, "h-10 w-10 px-0")}><IconArrowDown className="h-4 w-4" aria-hidden /></button>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                ) : null}</>)}
           </Section>
 
           <Section title="What people must do">
@@ -386,6 +410,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
                 <option value="only" disabled={!may.website}>On the school website only</option>
               </select>
             </Row>
+            {f.website !== "app" && may.websiteApproval ? <p className="text-sm text-[var(--ds-color-warning-400)]">Putting a notice on the website needs approval, so it goes to an approver first.</p> : null}
             {f.website === "site" && !publicOk ? <p className="text-xs text-[var(--ds-color-danger-400)]">This notice is not for everyone, so it cannot go on the website.</p> : null}
           </Section>
 

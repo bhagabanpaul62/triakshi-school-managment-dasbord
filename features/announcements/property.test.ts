@@ -36,7 +36,7 @@ async function check(id: string) {
   const f = await new ReportService(fx.school.as.admin).funnel(id);
   expect(f.yes + f.no + f.other + f.notAnswered).toBe(f.recipients);
   expect(f.recipients).toBe(have.size);
-  const bells = await sqlRows(sql`select count(*)::int n from notifications where subject_id = ${id} and read_at is null and done_at is null group by user_id having count(*) > 1`);
+  const bells = await sqlRows(sql`select count(*)::int n from notifications where subject_type = 'notice' and subject_id = ${id} and read_at is null and done_at is null group by user_id having count(*) > 1`);
   expect(bells).toHaveLength(0);
 }
 

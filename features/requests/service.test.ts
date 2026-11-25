@@ -10,6 +10,7 @@ import { requestCategories, requests } from "./schema";
 import { REQUEST_STATES } from "./constants";
 import { COMM_STATES } from "@smw/ui/comm/states";
 import { CategoryService, ReportService, RequestService } from "./service";
+import { reportRows } from "./report";
 
 let a: TestSchool, b: TestSchool;
 let classTeacher: Ctx, outsider: Ctx, aboutTeacher: Ctx, admin2: Ctx, family2: Ctx, desk: Ctx;
@@ -441,6 +442,18 @@ describe("report", () => {
     expect(rep.medianResolveHours).not.toBeNull();
     await expect(new ReportService(a.as.teacher).summary()).rejects.toBeInstanceOf(ForbiddenError);
     expect((await new ReportService(a.as.admin).summary({ from: "2999-01-01" })).total).toBe(0);
+  });
+
+  it("gives the median days to close, and the report as rows for a spreadsheet (R10)", async () => {
+    const { id } = await ask("Library");
+    const made = (await row(id)).createdAt;
+    await patch(id, { state: "closed", closedAt: new Date(made.getTime() + 10 * DAY) });
+    const rep = await new ReportService(a.as.admin).summary();
+    expect(rep.medianCloseDays).toBeGreaterThan(0);
+    const rows = reportRows(rep);
+    expect(rows.find((r) => r[0] === "Requests")![1]).toBe(rep.total);
+    expect(rows.find((r) => r[0] === "Median days to close")![1]).not.toBe("");
+    expect(rows.filter((r) => r.length === 5).length).toBe(rep.byCategory.length + 1);
   });
 });
 

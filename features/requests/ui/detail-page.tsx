@@ -12,7 +12,7 @@ import { CategoryService } from "../categories";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { REQUEST_STATE_TONE, type RequestState } from "../constants";
 import { RequestService, type RequestView } from "../service";
-import { BackLink, Notice, dueWords, isFamilyRole } from "./shared";
+import { BackLink, Notice, dueWords, isFamilyRole, mayOpen } from "./shared";
 import { Conversation } from "./conversation";
 import { NextSteps } from "./next-steps";
 import { ReplyBox } from "./reply-box";
@@ -96,6 +96,8 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
               {v.solved !== null ? <Fact label="Family said">{v.solved ? "Solved" : "Not solved"}{v.feedback ? `: ${v.feedback}` : ""}</Fact> : null}
               {v.reopenedCount ? <Fact label="Opened again">{v.reopenedCount} {v.reopenedCount === 1 ? "time" : "times"}</Fact> : null}
               {v.answers.map((a) => <Fact key={a.label} label={a.label}>{a.value}</Fact>)}
+              {family || !v.studentId ? null : <Fact label="Child's record"><Link href={`/app/students/${v.studentId}`} className="underline underline-offset-4">Open the student record</Link></Fact>}
+              {family || !v.studentId || !/certificate/i.test(v.categoryName) || !mayOpen(ctx, "fees", "read", ["admin", "accountant"]) ? null : <Fact label="Fee certificates"><Link href={`/app/fees/students/${v.studentId}/tuition-certificate`} className="underline underline-offset-4">Open the fee certificates</Link></Fact>}
               {v.linked ? <Fact label="About"><Link href={v.linked.href} className="underline underline-offset-4">{v.linked.label}</Link></Fact> : null}
               {v.mergedInto ? <Fact label="Joined with"><Link href={`/app/requests/${v.mergedInto.id}`} className="underline underline-offset-4">{v.mergedInto.number}</Link></Fact> : null}
             </FactList>

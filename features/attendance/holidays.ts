@@ -3,7 +3,7 @@ import { and, eq, gte, lte, ne } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import type { HolidayKind } from "./constants";
 import { attendanceHolidays } from "./schema";
-import { addDays, isSunday } from "./stats";
+import { addDays, isSunday, todayIST } from "./stats";
 
 /** Staff, or the students of a class (null: students in general, so a class-only closure does not apply). */
 export type Who = { staff: true } | { classId: string | null };
@@ -60,6 +60,15 @@ export async function closedClassIds(tx: Tx, date: string): Promise<Set<string>>
   const rows = await tx.select({ ids: attendanceHolidays.classIds }).from(attendanceHolidays)
     .where(and(eq(attendanceHolidays.date, date), eq(attendanceHolidays.appliesTo, "classes"), ne(attendanceHolidays.kind, "working")));
   return new Set(rows.flatMap((r) => r.ids));
+}
+
+/** An emergency closure for today or tomorrow, as a banner line. */
+export type ActiveClosure = { date: string; name: string; when: "today" | "tomorrow"; note: string | null };
+
+/** Emergency closures today and tomorrow that concern `who`: what a panel banner shows until the day is over. */
+export async function activeClosures(tx: Tx, who: Who, today = todayIST()): Promise<ActiveClosure[]> {
+  const rows = await tx.select({ ...cols, note: attendanceHolidays.note }).from(attendanceHolidays).where(and(between(today, addDays(today, 1)), eq(attendanceHolidays.kind, "emergency"))).orderBy(attendanceHolidays.date);
+  return rows.filter((r) => concerns(r, who)).map((r) => ({ date: r.date, name: r.name, when: r.date === today ? "today" : "tomorrow", note: r.note }));
 }
 
 /** What a register or calendar shows for each day: the weekly off and the named holiday are told apart. */

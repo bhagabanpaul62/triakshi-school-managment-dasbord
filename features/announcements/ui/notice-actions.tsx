@@ -15,6 +15,7 @@ import type { ResponseSpec } from "../constants";
 import { funnelNow, nudgeChosen, releaseNotice, undoNotice } from "./actions";
 import { PaperForm } from "./answer-form";
 import { funnelParts } from "./funnel";
+import { LinkButton } from "./shared";
 import { plural } from "@smw/feature-kit/words";
 
 type Action = (fd: FormData) => Promise<ActionResult<unknown>>;
@@ -101,7 +102,7 @@ function PaperButton({ noticeId, recipientId, name, spec }: { noticeId: string; 
 
 export interface PeopleTableProps {
   noticeId: string; spec: ResponseSpec; canNudge: boolean; columns: Column[]; filters: FilterDef[];
-  rows: (Record<string, unknown> & { id: string; name: string; answered: boolean })[];
+  rows: (Record<string, unknown> & { id: string; name: string; answered: boolean; hasSlip: boolean })[];
   total: number; page: number; pageCount: number; emptyText: { title: string; description: string };
 }
 
@@ -116,6 +117,10 @@ export function PeopleTable({ noticeId, spec, canNudge, rows, emptyText, ...tabl
         const r = await nudgeChosen(fd).catch(() => null);
         if (r?.ok) { toast(SAYS.nudge!(r.data)); router.refresh(); } else toast(r && !r.ok ? r.error : "No connection. Nobody was reminded.", "danger");
       } }] : []}
-      rowActions={asks ? Object.fromEntries(rows.map((r) => [r.id, <PaperButton key={r.id} noticeId={noticeId} recipientId={r.id} name={r.name} spec={spec} />])) : undefined} />
+      rowActions={asks ? Object.fromEntries(rows.map((r) => [r.id, (
+        <span key={r.id} className="inline-flex items-center gap-1">
+          {r.hasSlip ? <LinkButton href={`/api/notices/${noticeId}/slip/${r.id}`}>Slip</LinkButton> : null}
+          <PaperButton noticeId={noticeId} recipientId={r.id} name={r.name} spec={spec} />
+        </span>)])) : undefined} />
   );
 }

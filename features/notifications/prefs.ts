@@ -2,9 +2,9 @@ import { createHash, createHmac } from "node:crypto";
 import { sha256 } from "@smw/feature-kit/secret";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { env, isLocal, schoolUrl } from "@smw/config";
-import { withSchool, type Tx } from "@smw/db";
-import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
-import { effectiveGroup, type GroupPref, type GroupPrefs } from "./channels";
+import { users, withSchool, type Tx } from "@smw/db";
+import { NotFoundError, refuseSupport, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { defaultsFor, effectiveGroup, type GroupPref, type GroupPrefs } from "./channels";
 import notificationsFeature from "./feature";
 import { awayInput, digestInput, groupPrefInput, languageInput, quietInput, subscribeInput } from "./inputs";
 import { notificationPrefs, pushSubscriptions } from "./schema";
@@ -38,8 +38,6 @@ export class PreferenceService extends SchoolService<Perm> {
   protected feature = notificationsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
-  /** A support session looks, it never changes a person's settings or devices. */
-  private notSupport() { if (this.ctx.supportStaffId) throw new ForbiddenError("Not available in a support session."); }
   private mineWhere = () => eq(notificationPrefs.userId, this.ctx.userId);
   private upsert(tx: Tx, set: Partial<typeof notificationPrefs.$inferInsert>) {
     return tx.insert(notificationPrefs).values({ schoolId: this.ctx.schoolId, userId: this.ctx.userId, ...set }).onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set });
@@ -48,13 +46,13 @@ export class PreferenceService extends SchoolService<Perm> {
   async mine(): Promise<MyPrefs> {
     return this.read("read", async (tx) => {
       const [[p], school] = await Promise.all([tx.select().from(notificationPrefs).where(this.mineWhere()).limit(1), NotificationWriter.schoolDefaults(tx)]);
-      const groups = Object.fromEntries(GROUPS.map((g) => [g, { ...(lockedGroup(g) ? { push: true, email: "instant" as const } : effectiveGroup(g, p?.groups, school)), locked: lockedGroup(g), own: !!p?.groups?.[g] }])) as MyPrefs["groups"];
+      const groups = Object.fromEntries(GROUPS.map((g) => [g, { ...(lockedGroup(g) ? { push: true, email: "instant" as const } : effectiveGroup(g, p?.groups, defaultsFor(school, this.ctx.role))), locked: lockedGroup(g), own: !!p?.groups?.[g] }])) as MyPrefs["groups"];
       return { groups, digestHour: p?.digestHour ?? 18, quietFrom: p?.quietFrom ?? null, quietTo: p?.quietTo ?? null, awayUntil: p?.awayUntil ?? null, awayText: p?.awayText ?? null, language: p?.language ?? null };
     });
   }
 
   async saveGroup(input: unknown): Promise<GroupPref> {
-    this.notSupport();
+    refuseSupport(this.ctx, "change notification settings");
     const { group, ...pref } = this.parse(groupPrefInput, input);
     if (lockedGroup(group)) throw new ValidationError({ [group]: LOCKED });
     return this.read("read", async (tx) => {
@@ -65,24 +63,24 @@ export class PreferenceService extends SchoolService<Perm> {
   }
 
   async saveQuiet(input: unknown) {
-    this.notSupport();
+    refuseSupport(this.ctx, "change quiet hours");
     const q = this.parse(quietInput, input);
     return this.read("read", (tx) => this.upsert(tx, { quietFrom: q?.from ?? null, quietTo: q?.to ?? null }));
   }
 
   async saveDigest(hour: unknown) {
-    this.notSupport();
+    refuseSupport(this.ctx, "change the digest hour");
     const digestHour = this.parse(digestInput, hour);
     return this.read("read", (tx) => this.upsert(tx, { digestHour }));
   }
 
   async saveLanguage(language: unknown) {
-    this.notSupport();
+    refuseSupport(this.ctx, "change the language");
     return this.read("read", (tx) => this.upsert(tx, { language: this.parse(languageInput, language) }));
   }
 
   async setAway(until: unknown, text?: unknown) {
-    this.notSupport();
+    refuseSupport(this.ctx, "set an away message");
     const a = this.parse(awayInput, { until, text });
     return this.read("read", (tx) => this.upsert(tx, { awayUntil: a.until, awayText: a.until ? (a.text || null) : null }));
   }
@@ -93,13 +91,13 @@ export class PreferenceService extends SchoolService<Perm> {
   }
 
   async removeDevice(id: string) {
-    this.notSupport();
+    refuseSupport(this.ctx, "remove a device");
     const rows = await this.read("read", (tx) => tx.delete(pushSubscriptions).where(and(eq(pushSubscriptions.userId, this.ctx.userId), eq(pushSubscriptions.id, id))).returning({ id: pushSubscriptions.id }));
     if (!rows.length) throw new NotFoundError("Device");
   }
 
   async subscribe(endpoint: string, p256dh: string, auth: string, device?: string) {
-    this.notSupport();
+    refuseSupport(this.ctx, "add a device");
     const s = this.parse(subscribeInput, { endpoint, p256dh, auth, device });
     return this.read("read", async (tx) => {
       await tx.insert(pushSubscriptions).values({ schoolId: this.ctx.schoolId, userId: this.ctx.userId, ...s, device: s.device ?? null })
@@ -117,7 +115,8 @@ export class PreferenceService extends SchoolService<Perm> {
     return withSchool(schoolId, async (tx) => {
       const [p] = await tx.select().from(notificationPrefs).where(and(eq(notificationPrefs.schoolId, schoolId), eq(notificationPrefs.unsubscribeHash, sha256(token)))).limit(1);
       if (!p) return null;
-      const school = await NotificationWriter.schoolDefaults(tx);
+      const [u] = await tx.select({ role: users.role }).from(users).where(eq(users.id, p.userId)).limit(1);
+      const school = defaultsFor(await NotificationWriter.schoolDefaults(tx), u?.role ?? "");
       const hit = group ? [group] : GROUPS.filter((g) => !lockedGroup(g));
       const groups: GroupPrefs = { ...p.groups, ...Object.fromEntries(hit.map((g) => [g, { push: effectiveGroup(g, p.groups, school).push, email: "off" }])) };
       await tx.update(notificationPrefs).set({ groups }).where(eq(notificationPrefs.id, p.id));

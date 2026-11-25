@@ -53,7 +53,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
       </nav>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <TypeFilter value={group ?? ""} options={groups.map((g) => ({ value: g, label: TOPIC_GROUPS[g] }))} base={new URLSearchParams({ tab, ...(unreadOnly ? { unread: "1" } : {}) }).toString()} />
-        <Link href={href({ unread: !unreadOnly, group })} className={pill(unreadOnly)} aria-pressed={unreadOnly}>Unread only</Link>
+        <Link href={href({ unread: !unreadOnly, group })} className={pill(unreadOnly)} aria-current={unreadOnly ? "true" : undefined}>Unread only</Link>
       </div>
       {days.length === 0 ? (
         <Panel>
@@ -63,8 +63,8 @@ export default async function NotificationsPage({ searchParams }: { searchParams
               : "Nothing here yet. Notices, fee dues and results will show up here."}
           </p>
           <p className="pb-4 text-center">
-            {filtered ? <Link href={href({})} className="text-sm text-[var(--ds-color-primary-400)] hover:underline">Clear filters</Link>
-              : tab === "action" ? <Link href={href({ tab: "all" })} className="text-sm text-[var(--ds-color-primary-400)] hover:underline">See everything</Link> : null}
+            {filtered ? <Link href={href({})} className="text-sm text-[var(--ds-primary-text)] hover:underline">Clear filters</Link>
+              : tab === "action" ? <Link href={href({ tab: "all" })} className="text-sm text-[var(--ds-primary-text)] hover:underline">See everything</Link> : null}
           </p>
         </Panel>
       ) : <NotificationDays days={days} unread={pulse.bell} />}
@@ -75,7 +75,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           {page.page < page.pageCount ? <Link href={href({ group, unread: unreadOnly, page: page.page + 1 })} className={pager}>Older</Link> : <span />}
         </nav>
       ) : null}
-      <p className="mt-8 text-sm text-[var(--ds-on-surface-muted)]"><Link href="/app/notifications/preferences" className="text-[var(--ds-color-primary-400)] hover:underline">Choose what reaches your phone and email</Link></p>
+      <p className="mt-8 text-sm text-[var(--ds-on-surface-muted)]"><Link href="/app/notifications/preferences" className="text-[var(--ds-primary-text)] hover:underline">Choose what reaches your phone and email</Link></p>
     </>
   );
 }

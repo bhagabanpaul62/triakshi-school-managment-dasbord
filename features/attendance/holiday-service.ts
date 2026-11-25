@@ -24,6 +24,9 @@ export interface HolidaySpan {
   id: string; from: string; to: string; dates: string[]; name: string; kind: Row["kind"]; appliesTo: Row["appliesTo"]; classIds: string[]; note: string | null;
 }
 
+/** A holiday as saved, with how many people were told about it. */
+export type Declared = HolidaySpan & { told: number };
+
 const spanOf = (rows: Row[]): HolidaySpan[] => {
   const by = new Map<string, Row[]>();
   for (const r of rows) by.set(r.spanId ?? r.id, [...(by.get(r.spanId ?? r.id) ?? []), r]);
@@ -112,7 +115,11 @@ export class HolidayService extends SchoolService<Perm> {
 
   // ---------- writing ----------
 
-  async create(input: unknown) { return this.save(this.parse(holidayInput, input), null); }
+  async create(input: unknown) {
+    const data = this.parse(holidayInput, input);
+    // A closure for today or tomorrow, or an emergency, is never left unannounced because a box was unticked.
+    return this.save({ ...data, notify: data.notify || (data.kind !== "working" && (data.kind === "emergency" || data.from <= addDays(todayIST(), 1))) }, null);
+  }
   async update(id: string, input: unknown) { return this.save(this.parse(holidayInput, input), this.parse(f.id("Pick a holiday"), id)); }
 
   /** Several holidays at once (copy last year, the ready list): all or nothing. */
@@ -132,6 +139,11 @@ export class HolidayService extends SchoolService<Perm> {
     }, (h) => ({ action: "delete", entity: "Holiday", entityId: h.id, summary: `Removed ${h.name} (${h.from}${h.to === h.from ? "" : ` to ${h.to}`})` }));
   }
 
+  /** The notices of these holidays were seen: opening the list reads them. */
+  async seeDeclared(spanIds: string[]): Promise<void> {
+    await this.read("read", async (tx) => { for (const id of spanIds.slice(0, 200)) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "holiday", id }, this.ctx.userId); });
+  }
+
   private async save(data: HolidayData, spanId: string | null) {
     const [out] = await this.saveAll([data], spanId ? "Changed" : "Added", spanId);
     return out!;
@@ -140,7 +152,7 @@ export class HolidayService extends SchoolService<Perm> {
   private async saveAll(items: HolidayData[], verb: string, spanId: string | null = null) {
     try {
       return await this.write("manage", async (tx) => {
-        const out: HolidaySpan[] = [];
+        const out: Declared[] = [];
         for (const data of items) out.push(await this.put(tx, data, spanId));
         return out;
       }, (made) => ({
@@ -175,7 +187,7 @@ export class HolidayService extends SchoolService<Perm> {
   }
 
   /** Replace (or create) one span inside the caller's transaction, after every check. */
-  private async put(tx: Tx, data: HolidayData, spanId: string | null): Promise<HolidaySpan> {
+  private async put(tx: Tx, data: HolidayData, spanId: string | null): Promise<Declared> {
     const old = spanId ? await this.rowsOf(tx, spanId) : [];
     if (spanId && !old.length) throw new NotFoundError("Holiday");
     const dates = await this.guard(tx, data, old);
@@ -184,8 +196,8 @@ export class HolidayService extends SchoolService<Perm> {
     const rows = await tx.insert(attendanceHolidays).values(dates.map((date) => ({
       schoolId: this.ctx.schoolId, date, name: data.name, kind: data.kind, appliesTo: data.appliesTo, classIds: data.classIds, spanId: id, note: data.note ?? null, createdBy: this.ctx.userId,
     }))).returning();
-    if (data.notify && data.from >= todayIST()) await this.tell(tx, id, data);
-    return spanOf(rows)[0]!;
+    const told = data.notify && data.from >= todayIST() ? await this.tell(tx, id, data) : 0;
+    return { ...spanOf(rows)[0]!, told };
   }
 
   /** Days in this list that somebody already marked, for the people this holiday would close. */
@@ -220,7 +232,7 @@ export class HolidayService extends SchoolService<Perm> {
   }
 
   /** Everyone the closure affects hears about it: the whole school, the families, or the families of the chosen classes. */
-  private async tell(tx: Tx, spanId: string, data: HolidayData) {
+  private async tell(tx: Tx, spanId: string, data: HolidayData): Promise<number> {
     const audience: Audience = data.appliesTo === "all" ? EVERYONE
       : data.appliesTo === "students" ? { include: [{ type: "families" }], exclude: [] }
         : { include: data.classIds.map((id) => ({ type: "class" as const, id })), exclude: [] };
@@ -229,7 +241,7 @@ export class HolidayService extends SchoolService<Perm> {
     const working = data.kind === "working";
     // An emergency, or any closure that starts today or tomorrow, cannot wait for a digest or for morning: it goes out at once.
     const urgent = !working && (data.kind === "emergency" || data.from <= addDays(todayIST(), 1));
-    await NotificationWriter.insert(tx, this.ctx.schoolId, userIds.map((userId) => ({
+    return NotificationWriter.insert(tx, this.ctx.schoolId, userIds.map((userId) => ({
       userId, topic: urgent ? "urgent.alert" as const : "holiday.declared" as const, urgent, title: working ? `${data.name}: school is open` : `${data.name}: ${data.appliesTo === "all" ? "school is closed" : data.appliesTo === "students" ? "no school for students" : "no school for some classes"}`,
       body: `${HOLIDAY_KINDS[data.kind]}, ${when}.${data.note ? ` ${data.note}` : ""}`, href: "/app/events", subject: { type: "holiday", id: spanId },
     })));

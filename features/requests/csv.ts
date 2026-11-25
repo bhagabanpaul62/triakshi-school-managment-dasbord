@@ -1,9 +1,10 @@
 // The queue as a spreadsheet: the same list, the same visibility, the same filters as the screen. Families get none.
 import { AppError, ForbiddenError, listQueryFrom } from "@smw/feature-kit";
 import { actionCtx } from "@smw/runtime";
-import { csvLine, csvResponse, fileResponse } from "@smw/integrations";
+import { csvLine, csvResponse, csvText, fileResponse } from "@smw/integrations";
 import { isFamily } from "@smw/feature-messages/core";
 import { REQUEST_STATE_WORDS } from "./constants";
+import { reportRows, ReportService } from "./report";
 import { RequestService, type RequestRow } from "./service";
 
 const COLUMNS: { label: string; value: (r: RequestRow) => unknown }[] = [
@@ -27,6 +28,18 @@ export async function requestsCsv(req: Request): Promise<Response> {
       page = await svc.list({ ...query, page: ++n, pageSize: 100 });
     }
     return csvResponse(out, "requests.csv");
+  } catch (err) {
+    if (err instanceof AppError) return Response.json({ error: err.message }, { status: err.status });
+    throw err;
+  }
+}
+
+/** The report page as a spreadsheet, for the same dates. The queue list has its own file above. */
+export async function reportCsv(req: Request): Promise<Response> {
+  try {
+    const p = new URL(req.url).searchParams;
+    const report = await new ReportService(await actionCtx()).summary({ from: p.get("from") || undefined, to: p.get("to") || undefined });
+    return csvResponse(csvText(reportRows(report)), "request-report.csv");
   } catch (err) {
     if (err instanceof AppError) return Response.json({ error: err.message }, { status: err.status });
     throw err;

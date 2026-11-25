@@ -7,8 +7,26 @@ import { logout } from "@/lib/auth-actions";
 import { NotificationBellServer } from "@smw/feature-notifications/ui/bell-server";
 import { AwaitingApproval } from "@smw/feature-setup/ui/awaiting-approval";
 import { UrgentBanner } from "@smw/feature-announcements/ui/urgent-banner";
+import { activeClosures } from "@smw/feature-attendance/holidays";
+import { sql, withSchool } from "@smw/db";
 import { redirect } from "next/navigation";
 import { Button } from "@smw/ui/ui/button";
+
+/** Emergency closures today and tomorrow for this person: staff by the staff rule, a family by each child's class. A failure here never breaks a page. */
+async function closureLines(ctx: Awaited<ReturnType<typeof requireCtx>>) {
+  if (!ctx.features.has("attendance")) return [];
+  try {
+    return await withSchool(ctx.schoolId, async (tx) => {
+      const who = ctx.role === "student"
+        ? [...new Set([...(await tx.execute(sql`select class_id::text as c from students where user_id = ${ctx.userId}::uuid and status = 'active'`))].map((r) => (r as { c: string | null }).c))].map((classId) => ({ classId }))
+        : [{ staff: true as const }];
+      const found = (await Promise.all(who.map((w) => activeClosures(tx, w)))).flat();
+      return [...new Map(found.map((c) => [`${c.date}:${c.name}`, c])).values()].map((c) => ({
+        key: `${c.date}:${c.name}`, text: `School is closed ${c.when}: ${c.name}.${c.note ? ` ${c.note}` : ""}`,
+      }));
+    });
+  } catch { return []; }
+}
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
   const [school, ctx] = await Promise.all([getSchool(), requireCtx()]);
@@ -36,7 +54,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
       <AppShell brand={{ name: school.name, logoUrl: school.logoUrl, homeHref: "/app" }} groups={buildMenu(ctx, { "/app/messages": counts.messages, "/app/requests": counts.requests, "/app/announcements": counts.notices })}
         user={{ name: ctx.name, meta: ROLE_LABEL[ctx.role] }} logout={logout} banner={banner}
         topbar={ctx.features.has("notifications") ? <NotificationBellServer messages={counts.messages} requests={counts.requests} /> : null}>
-        <UrgentBanner />
+        <UrgentBanner closures={await closureLines(ctx)} />
         {children}
       </AppShell>
     </>

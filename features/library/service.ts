@@ -166,6 +166,7 @@ export class BookService extends CrudService<typeof books, Perm> {
   async detail(id: string) {
     return this.read("read", async (tx) => {
       const book = await this.findOrThrow(tx, id);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "book", id }, this.ctx.userId);
       const rows = await tx.select({
         copy: bookCopies, loanId: loans.id, dueOn: loans.dueOn, waived: loans.fineWaived, borrowerKind: loans.borrowerKind, studentName: students.name, userName: users.name,
       }).from(bookCopies)
@@ -276,6 +277,12 @@ export class LoanService extends SchoolService<Perm> {
     });
   }
 
+  /** Opening a member's loans reads this person's overdue notices for the loans still out (not in a read-only school or a support session). */
+  private async seenLoans(tx: Tx, rows: LoanRow[]) {
+    if (!(!this.ctx.readOnly && !this.ctx.supportStaffId)) return;
+    for (const r of rows) if (!r.returnedOn) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "loan", id: r.id }, this.ctx.userId);
+  }
+
   /** Everything one member has borrowed. Give a studentId or a staff userId. */
   async memberHistory(who: { studentId?: string; userId?: string }): Promise<LoanRow[]> {
     const today = todayIST();
@@ -283,7 +290,9 @@ export class LoanService extends SchoolService<Perm> {
       const key = who.studentId ? eq(loans.studentId, who.studentId) : who.userId ? eq(loans.userId, who.userId) : undefined;
       if (!key || !isUuid(String(who.studentId ?? who.userId))) throw new NotFoundError("Member");
       const rate = (await loadSettings(tx)).finePerDayPaise;
-      return (await this.selectLoans(tx).where(key).orderBy(desc(loans.issuedOn))).map((r) => this.toRow(r, today, rate));
+      const out = (await this.selectLoans(tx).where(key).orderBy(desc(loans.issuedOn))).map((r) => this.toRow(r, today, rate));
+      await this.seenLoans(tx, out);
+      return out;
     });
   }
 
@@ -294,7 +303,9 @@ export class LoanService extends SchoolService<Perm> {
       const ids = (await tx.select({ id: students.id }).from(students).where(eq(students.userId, this.ctx.userId))).map((r) => r.id);
       if (!ids.length) return [];
       const rate = (await loadSettings(tx)).finePerDayPaise;
-      return (await this.selectLoans(tx).where(inArray(loans.studentId, ids)).orderBy(desc(loans.issuedOn))).map((r) => this.toRow(r, today, rate));
+      const out = (await this.selectLoans(tx).where(inArray(loans.studentId, ids)).orderBy(desc(loans.issuedOn))).map((r) => this.toRow(r, today, rate));
+      await this.seenLoans(tx, out);
+      return out;
     });
   }
 

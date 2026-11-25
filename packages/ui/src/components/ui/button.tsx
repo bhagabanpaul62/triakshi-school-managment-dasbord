@@ -6,12 +6,12 @@ import { IconLoader2 } from "@tabler/icons-react"
 import { cn } from "../../lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all duration-[150ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 relative overflow-hidden",
+  "inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all duration-[150ms] ease-[cubic-bezier(0.16,1,0.3,1)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ds-primary-text)] disabled:pointer-events-none disabled:opacity-50 relative overflow-hidden",
   {
     variants: {
       variant: {
         default:
-          "bg-[var(--ds-primary)] text-[var(--ds-on-primary)] rounded-[var(--ds-radius-md)] hover:opacity-90 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ds-primary)]",
+          "bg-[var(--ds-primary)] text-[var(--ds-on-primary)] rounded-[var(--ds-radius-md)] hover:opacity-90 active:scale-[0.98]",
         destructive:
           "bg-[var(--ds-tertiary-container)] text-[var(--ds-tertiary)] rounded-[var(--ds-radius-md)] hover:opacity-90 active:scale-[0.98]",
         outline:
@@ -19,9 +19,9 @@ const buttonVariants = cva(
         secondary:
           "bg-[var(--ds-surface-container-highest)] text-[var(--ds-on-surface)] rounded-[var(--ds-radius-md)] hover:bg-[var(--ds-surface-container)] active:scale-[0.98]",
         ghost:
-          "text-[var(--ds-primary)] bg-transparent rounded-[var(--ds-radius-md)] hover:bg-[var(--ds-surface-container-low)]",
+          "text-[var(--ds-primary-text)] bg-transparent rounded-[var(--ds-radius-md)] hover:bg-[var(--ds-surface-container-low)]",
         link:
-          "text-[var(--ds-primary)] underline-offset-4 hover:underline bg-transparent",
+          "text-[var(--ds-primary-text)] underline-offset-4 hover:underline bg-transparent",
         glow:
           "bg-gradient-to-br from-[var(--ds-primary)] to-[var(--ds-primary-container)] text-[var(--ds-on-primary)] rounded-[var(--ds-radius-md)] relative group shadow-[0_0_20px_rgba(208,188,255,0.3)] hover:shadow-[0_0_30px_rgba(208,188,255,0.5)] active:scale-[0.98]",
       },

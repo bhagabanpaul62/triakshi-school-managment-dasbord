@@ -98,7 +98,7 @@ export function AskForm({ categories, child, office, link, defaultCategory, init
             {errors.details ? <p role="alert" className={err}>{errors.details}</p> : null}
           </div>
 
-          {link ? <><input type="hidden" name="linkLabel" value={link.label} /><input type="hidden" name="linkHref" value={link.href} /><p className="text-sm text-[var(--ds-on-surface-variant)]">About: {link.label}</p></> : null}
+          {link ? <><input type="hidden" name="linkLabel" value={link.label} /><input type="hidden" name="linkHref" value={link.href} /><p className="text-sm text-[var(--ds-on-surface-variant)]">About <a href={link.href} className="ml-1 inline-block max-w-full truncate rounded-full bg-white/[0.08] px-3 py-1 align-bottom text-[var(--ds-on-surface)] underline-offset-4 hover:underline">{link.label}</a></p></> : null}
           <FilesField accept={["application/pdf", "image/*"]} maxCount={5} maxMb={15} label="Photos or PDFs (optional)" />
 
           {cat.nature === "safety" ? <p className="rounded-2xl bg-white/[0.05] p-3 text-sm">This goes straight to the people at school who look after safety. If a child is in danger right now, please also call the helpline or the police.</p> : null}

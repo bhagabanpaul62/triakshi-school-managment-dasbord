@@ -73,6 +73,11 @@ export const listInput = z.object({
   type: z.enum(NOTICE_TYPES).optional(),
   author: z.uuid().optional(),
   needs: z.literal("answer").optional(),
+  /** What its audience includes: everyone, families, staff, or `class:<id>` / `section:<id>`. */
+  audience: z.string().regex(/^(everyone|families|staff|(class|section):[0-9a-f-]{36})$/i).optional(),
+  /** IST days, both included. Compared with when it went out (or is due to, or was last saved). */
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
 });
 export type NoticeListQuery = z.input<typeof listInput>;
 

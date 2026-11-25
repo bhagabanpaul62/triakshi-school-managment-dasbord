@@ -89,11 +89,24 @@ export function themeOf(stored: unknown): Theme {
   return r.success ? r.data : DEFAULT_THEME;
 }
 
+/** First ramp step that reaches 4.5:1 against `bg` (or, with `on`, as a fill under `on` text); `last` is the fallback. */
+const firstReadable = (r: Record<number, string>, steps: number[], ok: (c: string) => boolean) => r[steps.find((s) => ok(r[s]!)) ?? steps.at(-1)!]!;
+
+/** Solid fill for white text (buttons, avatar, badge) and text colour for links on the dark panel, both >= 4.5:1. */
+export function primaryRoles(base: string) {
+  const r = ramp(base);
+  return {
+    fill: firstReadable(r, [500, 600, 700, 800, 900], (c) => contrast("#FFFFFF", c) >= 4.5),
+    text: firstReadable(r, [400, 300, 200, 100], (c) => contrast(c, "#1b1b1b") >= 4.5),
+  };
+}
+
 /** CSS for the dark panel: the kit's primary ramp follows the school colour. */
 export function panelCss(t: Theme): string {
   const r = ramp(t.colors.primary);
+  const { fill, text } = primaryRoles(t.colors.primary);
   const vars = Object.entries(r).map(([k, v]) => `--ds-color-primary-${k}:${v};`).join("");
-  return `:root{${vars}--ds-primary:${r[500]};--ds-primary-container:${r[800]};--school-radius:${RADII[t.radius]};}`;
+  return `:root{${vars}--ds-primary:${fill};--ds-primary-text:${text};--ds-primary-container:${r[800]};--school-radius:${RADII[t.radius]};}`;
 }
 
 /** CSS variables for the light public website and emails. */

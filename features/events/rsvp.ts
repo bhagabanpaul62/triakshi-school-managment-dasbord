@@ -10,6 +10,7 @@ import { whenLabel } from "./ui/when";
 import eventsFeature from "./feature";
 import { answerInput } from "./inputs";
 import { tell } from "./people";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { eventPeople, events } from "./schema";
 
 type Perm = keyof typeof eventsFeature.permissions;
@@ -92,6 +93,8 @@ export class RsvpService extends SchoolService<Perm> {
       }
     }
     await tx.update(eventPeople).set({ answer: input.answer, guests, answeredAt: new Date(), waitingSince }).where(eq(eventPeople.id, p.id));
+    // Any answer settles the invitation's "answer" action for that person.
+    if (p.userId) await NotificationWriter.done(tx, this.ctx.schoolId, { type: "event", id: e.id }, p.userId);
     await promoteWaiting(tx, this.ctx.schoolId, e, this.ctx.userId);
     if (input.answer === "no") return "not_going";
     if (input.answer === "maybe") return "maybe";

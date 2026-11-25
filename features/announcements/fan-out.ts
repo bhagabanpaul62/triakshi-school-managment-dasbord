@@ -29,7 +29,8 @@ export function noticeRow(n: Notice, userId: string, kind: Kind, now = new Date(
     case "late": return { ...base, topic: "notice.published", title: `Last date has passed: ${n.title}`, action: false };
     case "changed": return { ...base, topic: "notice.changed", title: `Updated: ${n.title}` };
     case "remind": return { ...base, topic: "notice.answer", title: `Reminder: ${n.title}`, action: true, urgent: n.type === "urgent" };
-    case "removed": return { userId, topic: "notice.changed", title: NO_LONGER, href: "/app/announcements" };
+    // Its own subject: a later rewrite of the notice (a withdrawal and its reason) must never reach someone who lost it.
+    case "removed": return { userId, topic: "notice.changed", title: NO_LONGER, href: "/app/announcements", subject: { type: "notice-removed", id: n.id } };
   }
 }
 

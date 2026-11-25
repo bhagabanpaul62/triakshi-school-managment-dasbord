@@ -28,6 +28,13 @@ export async function suppressedAmong(tx: Tx, schoolId: string, addresses: strin
   return new Set(rows.map((r) => r.a));
 }
 
+/** Is mail to this address stopped? For the record pages ("Email not working"); `tx` is a school tx, so only this school's list is seen. */
+export async function isSuppressed(tx: Tx, address: string | null | undefined): Promise<boolean> {
+  if (!address) return false;
+  const [r] = [...(await tx.execute(sql`select 1 as x from email_suppressions where lower(address) = ${address.trim().toLowerCase()} limit 1`))];
+  return !!r;
+}
+
 /**
  * A provider told us an address bounced, was reported as spam or is invalid. The provider knows no school, so every
  * school that holds this address (a login or a primary guardian) stops mailing it. Returns how many schools.
@@ -58,10 +65,10 @@ const EVENTS: Record<string, Suppression> = { hard_bounce: "bounced", blocked: "
 export const sameSecret = (given: string, expected: string) =>
   timingSafeEqual(createHash("sha256").update(given).digest(), createHash("sha256").update(expected).digest());
 
-/** POST from the mail provider. The secret comes as ?secret=, x-webhook-secret or a Bearer token. Repeats are harmless. */
+/** POST from the mail provider. The secret comes in the x-webhook-secret header or as a Bearer token, never in the URL (URLs are logged). Repeats are harmless. */
 export async function mailWebhook(req: Request): Promise<Response> {
   const expected = env().MAIL_WEBHOOK_SECRET;
-  const given = new URL(req.url).searchParams.get("secret") ?? req.headers.get("x-webhook-secret") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const given = req.headers.get("x-webhook-secret") ?? req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
   if (!expected || !sameSecret(given, expected)) return Response.json({ error: "Not allowed" }, { status: 401 });
   let body: unknown;
   try { body = await req.json(); } catch { return Response.json({ error: "Not JSON" }, { status: 400 }); }

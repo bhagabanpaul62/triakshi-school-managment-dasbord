@@ -13,6 +13,8 @@ export const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0
 export const can = (ctx: Ctx, perm: keyof typeof requestsFeature.permissions) => allows(ctx, requestsFeature, perm);
 /** The office, or a teacher (for their own students), may write a request down for a family. */
 export const canWriteFor = (ctx: Ctx) => can(ctx, "office") || ctx.role === "teacher";
+/** Another module's screen is offered only when the school has it and this person holds its permission. Same rule as allows(), without importing the module. */
+export const mayOpen = (ctx: Ctx, key: string, perm: string, roles: string[]) => ctx.features.has(key) && (ctx.grants ? ctx.grants.has(`${key}:${perm}`) : roles.includes(ctx.role));
 export const isFamilyRole = (ctx: Ctx) => ctx.role === "student" || ctx.role === "parent";
 
 /** The way between the request screens: only the ones this person may open. The "New request" and "Ask the school" buttons are on the page itself, so they are not tabs. */

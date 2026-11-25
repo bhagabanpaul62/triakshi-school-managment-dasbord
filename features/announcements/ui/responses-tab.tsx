@@ -34,7 +34,7 @@ export async function Responses({ ctx, v, sp }: { ctx: Ctx; v: NoticeView; sp: Q
   const open = n.state === "published" && asks && !(n.dueAt && n.dueAt.getTime() < Date.now());
   const consent = n.response.kind === "consent";
   const rows = people.rows.map((p) => ({
-    id: p.recipientId, name: p.name, label: p.label, answered: !!p.answer,
+    id: p.recipientId, name: p.name, label: p.label, answered: !!p.answer, hasSlip: p.hasSlip,
     how: !p.hasLogin ? "No login yet. Use the sign sheet." : [channel("Push", p.channels.push), channel("Email", p.channels.email)].filter(Boolean).join(", ") || (p.seenAt ? "Opened in the app" : "Nothing sent yet"),
     seen: p.seenAt ? dateTime(p.seenAt) : null,
     answer: p.answer ? p.answerText : asks ? "Not answered" : null, by: p.byName ? `${p.byName}, ${p.byRelation}${p.onPaper ? ", on paper" : ""}` : null,
@@ -49,6 +49,7 @@ export async function Responses({ ctx, v, sp }: { ctx: Ctx; v: NoticeView; sp: Q
           <div className="flex min-w-0 flex-wrap gap-2 [&>*]:max-w-full">
             {open && !ctx.readOnly ? <RunButton action={nudgeAll} values={{ id }} label="Remind those who have not answered" says="nudge" primary /> : null}
             {n.state === "published" && !ctx.readOnly ? <RunButton action={resendNotice} values={{ id, to: "unseen" }} label="Send to those who have not opened it" says="resend" /> : null}
+            {n.state === "published" && !ctx.readOnly ? <RunButton action={resendNotice} values={{ id, to: "unreached" }} label="Send again to those it did not reach" says="resend" /> : null}
             <LinkButton href={`/api/notices/${id}/report.csv`} download>CSV</LinkButton>
             <LinkButton href={`/api/notices/${id}/sign-sheet`}>Sign sheet</LinkButton>
           </div>

@@ -206,7 +206,7 @@ export class ExamService extends CrudService<typeof exams, Perm> {
         if (missing > 0 && !force) throw new ConflictError(`${missing} marks are still missing. Finish marks entry, or publish anyway to show them as pending.`);
       }
       const [row] = await tx.update(exams).set({ status: to }).where(eq(exams.id, id)).returning();
-      if (to === "published") await this.tellSitting(tx, row!, "exam.result", "result", (k) => ({ title: `${row!.name} results are out`, href: `/app/results/${row!.id}/${k.id}` }));
+      if (to === "published") await this.tellSitting(tx, row!, "exam.result", "result", (k) => ({ title: "Results are out", href: `/app/results/${row!.id}/${k.id}` }));
       // Scheduling is when students can see their date sheet and take their admit card.
       if (to === "scheduled") await this.tellSitting(tx, row!, "exam.schedule", "exam-schedule", (k) => ({ title: `${row!.name}: dates and admit card are ready`, href: `/app/exams/${row!.id}/admit-card/${k.id}` }));
       return row!;
@@ -218,7 +218,7 @@ export class ExamService extends CrudService<typeof exams, Perm> {
     const kids = await tx.selectDistinct({ id: students.id, name: students.name, userId: students.userId }).from(students)
       .innerJoin(examPapers, and(eq(examPapers.classId, students.classId), eq(examPapers.examId, exam.id))).where(eq(students.status, "active"));
     const rows = kids.flatMap((k) => (k.userId && k.userId !== this.ctx.userId
-      ? [{ userId: k.userId, topic, subject: { type, id: `${exam.id}:${k.id}` }, body: k.name, ...words(k) }] : []));
+      ? [{ userId: k.userId, topic, subject: { type, id: `${exam.id}:${k.id}` }, body: topic === "exam.result" ? `${exam.name} results are out for ${k.name}.` : k.name, privateBody: topic === "exam.result", ...words(k) }] : []));
     if (rows.length) await NotificationWriter.insert(tx, this.ctx.schoolId, rows);
   }
 

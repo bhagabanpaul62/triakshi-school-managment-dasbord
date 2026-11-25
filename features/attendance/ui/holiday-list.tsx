@@ -6,7 +6,7 @@ import { HOLIDAY_KINDS, type HolidayKind } from "../constants";
 import type { HolidaySpan } from "../holiday-service";
 import { HOLIDAY_SCOPES } from "../holiday-inputs";
 import { dayLabel, groupBy } from "../stats";
-import { deleteHoliday, updateHoliday } from "./actions";
+import { deleteHoliday, updateHoliday } from "./holiday-actions";
 import { holidayFields } from "./fields";
 
 const KIND_TONE: Record<HolidayKind, Tone> = { national: "info", state: "info", vacation: "default", restricted: "default", emergency: "danger", other: "default", working: "success" };

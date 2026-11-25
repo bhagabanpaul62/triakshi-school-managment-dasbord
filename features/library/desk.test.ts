@@ -209,11 +209,16 @@ describe("overdue reminders", () => {
     const first = await run(today);
     expect(first.reminded).toBeGreaterThanOrEqual(1);
     expect(await withSchool(a.id, (tx) => tx.select({ topic: notifications.topic, st: notifications.subjectType }).from(notifications).where(eq(notifications.userId, a.users.student)))).toContainEqual({ topic: "library.due", st: "loan" });
-    expect((await notesOf(a, a.users.student)).filter((m) => m.title.includes(x.book.title))).toHaveLength(1);
+    expect((await notesOf(a, a.users.student)).filter((m) => (m.body ?? "").includes(x.book.title))).toHaveLength(1);
+    // The title is neutral and the words are private; opening the student's loans reads the bell row.
+    const row = (await notesOf(a, a.users.student)).find((m) => m.topic === "library.due" && m.subjectType === "loan")!;
+    expect(row).toMatchObject({ title: "Library overdue notice", privateBody: true, readAt: null });
+    await new LoanService(a.as.student).mine();
+    expect((await notesOf(a, a.users.student)).find((m) => m.id === row.id)!.readAt).not.toBeNull();
     expect((await run(today)).reminded).toBe(0); // same day: nothing again
     expect((await run(addDays(today, 6))).reminded).toBe(0);
     expect((await run(addDays(today, 7))).reminded).toBeGreaterThanOrEqual(1); // a week later
-    expect((await notesOf(a, a.users.student)).filter((m) => m.title.includes(x.book.title))).toHaveLength(2);
+    expect((await notesOf(a, a.users.student)).filter((m) => (m.body ?? "").includes(x.book.title))).toHaveLength(2);
     // a returned loan is never reminded
     await svc.returnLoan(loan.id);
     expect(await withSchool(a.id, (tx) => tx.select().from(loans).where(eq(loans.id, loan.id)))).toHaveLength(1);

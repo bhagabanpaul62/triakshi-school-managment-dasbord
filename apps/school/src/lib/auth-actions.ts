@@ -4,7 +4,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { LoginError, OtpError, PasswordError, SchoolAuth, otpMessage } from "@smw/auth";
 import { schoolUrl } from "@smw/config";
-import { authMails, services, trySend } from "@smw/integrations";
+import { authMails, trySend } from "@smw/integrations";
+import { accountMailer } from "@smw/feature-notifications/delivery";
 import { clearSessionCookie, getSchool, setSessionCookie, SESSION_COOKIE } from "@smw/runtime";
 import { cookies } from "next/headers";
 
@@ -43,7 +44,7 @@ export async function forgotPassword(_prev: ForgotState, fd: FormData): Promise<
   const r = await new SchoolAuth(school.id).requestPasswordReset(id, h.get("x-forwarded-for")?.split(",")[0]?.trim());
   if (r.limited) return { error: "Too many requests. Try again in an hour, or ask your school office for a reset link." };
   // Not awaited: a known account and an unknown one must take the same time to answer.
-  if (r.send) void trySend(services().email, { to: r.send.to, ...authMails.resetPassword(school.name, r.send.name, schoolUrl(school.slug, `/reset-password?token=${r.send.token}`), r.send.code) });
+  if (r.send) void trySend(accountMailer(school.id), { to: r.send.to, ...authMails.resetPassword(school.name, r.send.name, schoolUrl(school.slug, `/reset-password?token=${r.send.token}`), r.send.code) });
   return { done: true, identifier: id };
 }
 
@@ -59,7 +60,7 @@ async function sendCode(fd: FormData, use: "reset" | "login"): Promise<CodeState
   const school = await getSchool();
   const r = await new SchoolAuth(school.id).sendOtp(identifier, use, await ipOf());
   if (r.limited) return { error: TOO_MANY };
-  if (r.send) void trySend(services().email, { to: r.send.to, ...authMails.otp(school.name, r.send.name, r.send.code, use) });
+  if (r.send) void trySend(accountMailer(school.id), { to: r.send.to, ...authMails.otp(school.name, r.send.name, r.send.code, use) });
   return { sent: true, identifier };
 }
 export const resendResetCode = async (_prev: CodeState, fd: FormData) => sendCode(fd, "reset");
@@ -86,7 +87,7 @@ export async function resetWithCode(_prev: ResetCodeState, fd: FormData): Promis
   try {
     const userId = await auth.resetPasswordWithCode(String(fd.get("identifier") ?? ""), code, password, await ipOf());
     const who = await auth.contactOf(userId);
-    if (who?.email) void trySend(services().email, { to: who.email, ...authMails.passwordChanged(school.name, who.name) });
+    if (who?.email) void trySend(accountMailer(school.id), { to: who.email, ...authMails.passwordChanged(school.name, who.name) });
     const { token, expiresAt } = await auth.startSession(userId, { ip: await ipOf(), userAgent: h.get("user-agent") ?? undefined });
     await setSessionCookie(token, expiresAt);
   } catch (e) { return codeError(e); }

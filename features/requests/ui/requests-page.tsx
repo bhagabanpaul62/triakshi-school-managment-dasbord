@@ -12,7 +12,7 @@ import { REQUEST_STATE_TONE, REQUEST_STATE_WORDS, VIEWS, type RequestState, type
 import { CategoryService } from "../categories";
 import { RequestService, type RequestRow } from "../service";
 import { StateChip } from "@smw/ui/comm/StateChip";
-import { SectionNav, canWriteFor, dueWithAge, isFamilyRole, one, type Search } from "./shared";
+import { SectionNav, canWriteFor, dueWithAge, isFamilyRole, mayOpen, one, type Search } from "./shared";
 
 export const metadata = { title: "Requests" };
 
@@ -94,6 +94,7 @@ async function StaffQueue({ sp }: { sp: Awaited<Search> }) {
           {canWriteFor(ctx) ? <Link href="/app/requests/new" className={buttonVariants({ className: "rounded-full" })}>New request</Link> : null}
         </>} />
       <SectionNav ctx={ctx} current="/app/requests" />
+      {mayOpen(ctx, "website", "enquiries", ["admin", "accountant"]) ? <p className="-mt-3 mb-4 text-sm text-[var(--ds-on-surface-muted)]">Looking for a parent who has not enrolled yet? See <Link href="/app/enquiries" className="underline underline-offset-4">website enquiries</Link>.</p> : null}
       <div className="mb-4"><SavedViews views={VIEWS.map(([key, label]) => ({ key, label, count: counts[key] }))} active={view} basePath="/app/requests" params={params} label="Queue views" /></div>
       <DataTable columns={COLUMNS} rows={list.rows.map(plain)} total={list.total} page={list.page} pageCount={list.pageCount} rowHref="/app/requests/{id}" searchPlaceholder="Search number, title or child"
         filters={[

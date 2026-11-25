@@ -19,6 +19,7 @@
   "dependencies": {
     "@smw/db": "workspace:*",
     "@smw/feature-kit": "workspace:*",
+    "@smw/feature-notifications": "workspace:*",
     "@smw/runtime": "workspace:*",
     "@smw/ui": "workspace:*",
     "@smw/integrations": "workspace:*",

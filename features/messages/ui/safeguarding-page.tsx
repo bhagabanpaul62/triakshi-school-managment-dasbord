@@ -3,7 +3,9 @@ import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { SavedViews } from "@smw/ui/comm/SavedViews";
-import { relative } from "@smw/ui/format";
+import { relative, shortDate as dateOnly } from "@smw/ui/format";
+import { INPUT } from "@smw/ui/shell/FormModal";
+import { cn } from "@smw/ui/utils";
 import { REPORT_CATEGORIES } from "../constants";
 import { SafeguardService } from "../safeguard";
 import { UnreadFallback } from "./empty";
@@ -25,7 +27,9 @@ export default async function SafeguardingPage({ searchParams }: { searchParams:
   const svc = new SafeguardService(await requireCtx());
   const sp = await searchParams;
   const view = sp.view === "all" ? "all" : "open";
+  const q = typeof sp.q === "string" ? sp.q.trim() : "", day = typeof sp.day === "string" ? sp.day : "";
   const [{ rows, open }, contacts] = await Promise.all([svc.queue(view), svc.contacts()]);
+  const found = q || day ? await svc.find({ q, day }).catch(() => null) : undefined;
   return (
     <>
       <PageHeader eyebrow="Communication" title="Safeguarding" description="Concerns reported in conversations. A person a concern is about never sees it, and is not counted here." />
@@ -50,6 +54,25 @@ export default async function SafeguardingPage({ searchParams }: { searchParams:
           </table>
         </div>
       ) : <UnreadFallback title={view === "open" ? "No open concerns" : "No concerns yet"} text="When a family or a staff member reports a concern, it shows here and you are told." href={view === "open" ? "/app/safeguarding?view=all" : undefined} label="See all concerns" />}
+      <section aria-labelledby="find-h" className="mt-8">
+        <h2 id="find-h" className="text-base font-medium">Find another conversation</h2>
+        <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">Search by a student, a staff member or a day. You see who is in it, the day and its state. To read it you type a reason, and that is logged.</p>
+        <form role="search" className="mt-3 flex flex-wrap items-end gap-2">
+          <label className="min-w-56 flex-1 text-xs text-[var(--ds-on-surface-muted)]">Student or staff member<input name="q" defaultValue={q} maxLength={60} className={cn(INPUT, "mt-1 block w-full")} /></label>
+          <label className="text-xs text-[var(--ds-on-surface-muted)]">Day<input type="date" name="day" defaultValue={day} className={cn(INPUT, "mt-1 block")} /></label>
+          <button type="submit" className={PILL_BTN}>Search</button>
+        </form>
+        {found === null ? <p role="alert" className="mt-3 text-sm">Type a name or pick a day to search.</p> : found?.length === 0 ? <p className="mt-3 text-sm text-[var(--ds-on-surface-muted)]">No conversation matches. Try fewer letters or another day.</p> : found ? (
+          <ul className="mt-3 flex flex-col gap-2">
+            {found.map((c) => (
+              <li key={c.threadId} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[var(--ds-surface-container-low)] p-3 text-sm">
+                <span className="min-w-0"><span className="block truncate">{c.people.join(", ")}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">{c.studentName ? `About ${c.studentName}. ` : ""}Last active {dateOnly(c.at)}. {c.state === "open" ? "Open" : "Closed"}</span></span>
+                <Link href={`/app/safeguarding/review/${c.threadId}`} className={PILL_BTN}>Open with a reason</Link>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
       <p className="mt-6 text-sm text-[var(--ds-on-surface-muted)]">
         {contacts.length ? <>If nobody at the school can be told, families are shown: {contacts.map((c, i) => <span key={c.phone}>{i ? ", " : ""}{c.name} {c.phone}</span>)}.</> : <>No outside contacts are set. <Link className="underline" href="/app/settings/communication">Add the child helpline and police numbers</Link> so a family always has someone to call.</>}
       </p>

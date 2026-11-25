@@ -1,15 +1,25 @@
 "use server";
 
+import { after } from "next/server";
 import { ValidationError } from "@smw/feature-kit";
 import { AudienceService } from "@smw/feature-notifications/audience";
 import { CommGroupService } from "@smw/feature-notifications/audience-groups";
 import { actionCtx, formToObject, runAction, serviceAction } from "@smw/runtime";
+import { fanOut } from "../fan-out";
 import { AnnouncementCategoryService, NoticeFileService, NoticeService, ReportService, ResponseService, TemplateService, type UploadedFile } from "../service";
 
 const id = (fd: FormData, key = "id") => String(fd.get(key) ?? "");
 const text = (fd: FormData, key: string) => String(fd.get(key) ?? "");
 /** The write page sends everything it knows as one JSON field, so a cleared field really clears. */
 const json = (fd: FormData, key = "payload") => { try { return JSON.parse(text(fd, key) || "{}"); } catch { throw new ValidationError({ [key]: "Could not read what was sent" }); } };
+
+/** Start the sending after the response, so the person is not kept waiting. A failure is logged; the minute job finishes it. */
+const sendAfter = (schoolId: string, noticeId: string) => after(async () => {
+  try { await fanOut(schoolId, noticeId); } catch (e) { console.error("notice fan-out failed; comms.publish-due will retry", noticeId, e); }
+});
+/** The ones that make a notice due at once: send after the answer is given. */
+const dueNow = (run: (s: NoticeService) => Promise<{ id: string }>, message?: string) =>
+  runAction(async () => { const ctx = await actionCtx(); const out = await run(new NoticeService(ctx)); sendAfter(ctx.schoolId, out.id); return out; }, message);
 
 // ---- writing ----
 export async function saveNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.saveDraft(json(fd))); }
@@ -21,7 +31,7 @@ export async function checkNotice(fd: FormData) {
   return runAction(async () => {
     const ctx = await actionCtx();
     const audience = text(fd, "audience");
-    const [reach, people] = await Promise.all([new NoticeService(ctx).reachFor(audience), new AudienceService(ctx).preview(audience)]);
+    const [reach, people] = await Promise.all([new NoticeService(ctx).reachFor(audience, text(fd, "website") === "1"), new AudienceService(ctx).preview(audience)]);
     return { ...reach, people };
   });
 }
@@ -47,14 +57,31 @@ export async function removeNoticeFile(fd: FormData) {
   });
 }
 
+/** `ids` is the new order of the files on the notice. Returns the files as they now stand. */
+export async function reorderNoticeFiles(fd: FormData) {
+  return runAction(async () => {
+    const ctx = await actionCtx();
+    await new NoticeFileService(ctx).reorder(id(fd), json(fd, "ids"));
+    return (await new NoticeService(ctx).get(id(fd))).files;
+  });
+}
+
 // ---- sending ----
 export async function submitNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.submit(id(fd))); }
-export async function publishNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.publish(id(fd), { confirmed: text(fd, "confirmed") === "1" })); }
+/** A 30-second hold for a plain notice (the job sends it); an urgent alert is due at once. */
+export async function publishNotice(fd: FormData) {
+  return runAction(async () => {
+    const ctx = await actionCtx();
+    const out = await new NoticeService(ctx).publish(id(fd), { confirmed: text(fd, "confirmed") === "1" });
+    if (out.sendAt && out.sendAt.getTime() <= Date.now()) sendAfter(ctx.schoolId, out.id);
+    return out;
+  });
+}
 export async function scheduleNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.schedule(id(fd), text(fd, "at"))); }
 export async function unscheduleNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.unschedule(id(fd)), "Taken off the schedule"); }
-export async function sendScheduledNow(fd: FormData) { return serviceAction(NoticeService, (s) => s.sendNow(id(fd)), "Sent"); }
+export async function sendScheduledNow(fd: FormData) { return dueNow((s) => s.sendNow(id(fd)), "Sent"); }
 export async function undoNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.undo(id(fd)), "Not sent. It is a draft again."); }
-export async function releaseNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.release(id(fd)), "Sent"); }
+export async function releaseNotice(fd: FormData) { return dueNow((s) => s.release(id(fd)), "Sent"); }
 
 // ---- approving ----
 export async function recallNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.recall(id(fd)), "Taken back. It is a draft again."); }
@@ -104,6 +131,3 @@ export async function saveGroup(fd: FormData) {
   return serviceAction(CommGroupService, (s) => (body.id ? s.update(String(body.id), body) : s.create(body)), "Group saved");
 }
 export async function deleteGroup(fd: FormData) { return serviceAction(CommGroupService, (s) => s.remove(id(fd)), "Group deleted"); }
-export async function approveWithEdits(fd: FormData) {
-  return serviceAction(NoticeService, (s) => s.approve({ id: id(fd), edits: { title: text(fd, "title"), body: text(fd, "body") } }), "Approved with your changes");
-}

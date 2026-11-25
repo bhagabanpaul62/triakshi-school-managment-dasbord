@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
-import { channelsFor, priorityOf, type GroupPrefs } from "./channels";
+import { channelsFor, defaultsFor, priorityOf, type ChannelDefaults } from "./channels";
 import { chunks } from "./constants";
 import type { NotificationRow } from "./inputs";
 import { commDeliveries, commSettings, notificationPrefs, notifications } from "./schema";
@@ -19,10 +19,10 @@ const safeHref = (h?: string) => (h && /^\/app(\/|$)/.test(h) && !h.includes("//
  *   await NotificationWriter.insert(tx, ctx.schoolId, ids.map((userId) => ({ userId, topic: "fees.due", title: "Fee due", href: "/app/fees" })));
  */
 export class NotificationWriter {
-  /** The school's default channels per group (comm_settings). */
-  static async schoolDefaults(tx: Tx): Promise<GroupPrefs> {
+  /** The school's default channels per side and group (comm_settings). */
+  static async schoolDefaults(tx: Tx): Promise<ChannelDefaults> {
     const [s] = await tx.select({ settings: commSettings.settings }).from(commSettings).limit(1);
-    return (s?.settings?.channelDefaults ?? {}) as GroupPrefs;
+    return { staff: {}, families: {}, ...(s?.settings?.channelDefaults as Partial<ChannelDefaults> | undefined) };
   }
 
   /** Returns how many rows went to active people of this school. */
@@ -34,10 +34,12 @@ export class NotificationWriter {
     return written;
   }
 
-  private static async insertChunk(tx: Tx, schoolId: string, part: NotificationRow[], defaults: GroupPrefs): Promise<number> {
+  private static async insertChunk(tx: Tx, schoolId: string, part: NotificationRow[], defaults: ChannelDefaults): Promise<number> {
     const ids = [...new Set(part.map((r) => r.userId))];
     // Only active people of this school: a user id from another school must never get a row.
-    const ok = new Set((await tx.select({ id: users.id }).from(users).where(and(eq(users.schoolId, schoolId), eq(users.status, "active"), inArray(users.id, ids)))).map((u) => u.id));
+    const found = await tx.select({ id: users.id, role: users.role }).from(users).where(and(eq(users.schoolId, schoolId), eq(users.status, "active"), inArray(users.id, ids)));
+    const ok = new Set(found.map((u) => u.id));
+    const roles = new Map(found.map((u) => [u.id, u.role]));
     const mine = part.filter((r) => ok.has(r.userId));
     if (!mine.length) return 0;
 
@@ -76,7 +78,7 @@ export class NotificationWriter {
     const due: (typeof commDeliveries.$inferInsert)[] = [];
     for (const s of saved) {
       const item = fresh.get(s.id) ?? items.find((x) => x.row.userId === s.userId && x.row.groupKey === s.groupKey)!;
-      const ch = channelsFor(item.topic, prefs.get(s.userId), defaults);
+      const ch = channelsFor(item.topic, prefs.get(s.userId), defaultsFor(defaults, roles.get(s.userId)!));
       const base = { schoolId, userId: s.userId, notificationId: s.id, priority: priorityOf(item.topic, item.row.urgent), nextAt: item.row.deliverAfter ?? now };
       if (fresh.has(s.id)) {
         if (ch.push) due.push({ ...base, sourceKey: `notification:${s.id}`, channel: "push", mode: "instant" });

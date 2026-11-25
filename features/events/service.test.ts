@@ -11,6 +11,7 @@ import eventsFeature from "./feature";
 import { lateJoiners } from "./people";
 import { eventPeople, events } from "./schema";
 import { students } from "@smw/feature-students/schema";
+import { eventsForConsent } from "./consent";
 import { EventService } from "./service";
 import { asUser, FEATURES, fixture, type Fixture } from "./test-fixture";
 
@@ -385,5 +386,40 @@ describe("isolation", () => {
     const d = await new EventService({ ...a.as.admin, supportStaffId: "00000000-0000-4000-8000-000000000009" }).detail(e.id);
     expect(d.me).toBeNull();
     expect(d.counts).toBeNull();
+  });
+});
+
+describe("owner, consent link and holiday notices", () => {
+  it("the owner can be another writer; a family or an unknown person cannot be named; the owner can edit", async () => {
+    expect((await admin().owners()).map((o) => o.id)).toEqual(expect.arrayContaining([a.users.admin, a.users.teacher, fx.teacher2]));
+    expect((await admin().owners()).map((o) => o.id)).not.toContain(fx.annUser);
+    const e = await admin().create(make({ audience: OWN(), ownerId: fx.teacher2 }));
+    expect(e.ownerId).toBe(fx.teacher2);
+    await expect(admin().create(make({ ownerId: fx.annUser }))).rejects.toMatchObject({ fieldErrors: { ownerId: expect.any(String) } });
+    const asOwner = new EventService(asUser(a, fx.teacher2, "teacher"));
+    await expect(asOwner.update(e.id, { title: "Changed by owner", startsAt: at(3), audience: OWN() })).resolves.toMatchObject({ title: "Changed by owner", ownerId: fx.teacher2 });
+    await expect(admin().update(e.id, { title: "Handed back", startsAt: at(3), audience: OWN(), ownerId: a.users.teacher })).resolves.toMatchObject({ ownerId: a.users.teacher });
+  });
+
+  it("eventsForConsent lists the trips that point at a notice, not drafts", async () => {
+    const href = "/app/announcements/consent-1";
+    const live = await admin().create(make({ title: "Zoo trip", type: "trip", consentHref: href }));
+    await admin().create(make({ title: "Hidden trip", type: "trip", consentHref: href, draft: "true" }));
+    const found = await withSchool(a.id, (tx) => eventsForConsent(tx, href));
+    expect(found).toEqual([expect.objectContaining({ id: live.id, title: "Zoo trip", href: `/app/events/${live.id}`, cancelled: false })]);
+  });
+
+  it("looking at the calendar reads the holiday notices of the closures in view", async () => {
+    const day = addDays(istDay(new Date()), 4);
+    const span = "00000000-0000-4000-8000-0000000000a1";
+    await withSchool(a.id, async (tx) => {
+      await tx.insert(attendanceHolidays).values({ schoolId: a.id, date: day, name: "Seen holiday", kind: "other", appliesTo: "all", classIds: [], spanId: span });
+      await tx.insert(notifications).values({ schoolId: a.id, userId: fx.annUser, topic: "holiday.declared", title: "Seen holiday: school is closed", subjectType: "holiday", subjectId: span });
+    });
+    const unread = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.subjectId, span), eq(notifications.userId, fx.annUser))));
+    expect((await unread())[0]!.readAt).toBeNull();
+    const { from, to } = viewRange("month", day);
+    expect(await family().seeHolidays(from, to)).toBe(1);
+    expect((await unread())[0]!.readAt).not.toBeNull();
   });
 });

@@ -345,11 +345,12 @@ describe("result notifications", () => {
   it("publishing tells each student login of the exam once, never the publisher", async () => {
     const { id, svc } = await openExam("Unit Test Notify");
     // Other tests in this file publish exams too, so count only this exam's notices.
-    const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.title, "Unit Test Notify results are out"))));
+    const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.topic, "exam.result")))).then((r) => r.filter((n) => n.subjectId?.startsWith(`${id}:`)));
     expect(await notes(a, a.users.student)).toHaveLength(0);
     await svc.transition({ id, to: "published", force: true });
     const [kid] = await notes(a, a.users.student);
-    expect(kid).toMatchObject({ topic: "exam.result", subjectType: "result", title: "Unit Test Notify results are out", href: `/app/results/${id}/${fa.s1}` });
+    expect(kid).toMatchObject({ topic: "exam.result", subjectType: "result", title: "Results are out", privateBody: true, href: `/app/results/${id}/${fa.s1}` });
+    expect(kid!.body).toContain("Unit Test Notify results are out");
     expect(await notes(a, a.users.parent)).toHaveLength(0);
     expect(await notes(a, a.users.admin)).toHaveLength(0);
     expect(await notes(a, a.users.teacher)).toHaveLength(0);

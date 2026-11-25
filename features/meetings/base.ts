@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Tx } from "@smw/db";
 import { ForbiddenError, NotFoundError, SchoolService } from "@smw/feature-kit";
 import { resolveAudience } from "@smw/feature-notifications/audience";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { rows, type Meeting } from "./access";
 import meetingsFeature from "./feature";
 import { MeetingNotices } from "./notices";
@@ -31,6 +32,11 @@ export abstract class MeetingBase extends SchoolService<Perm> {
     const [m] = z.uuid().safeParse(id).success ? await tx.select().from(meetingDays).where(eq(meetingDays.id, id)).limit(1) : [];
     if (!m) throw new NotFoundError("Meeting");
     return m;
+  }
+
+  /** The meeting page was opened: its bell rows are read. A "book a time" action stays open until the family books. */
+  protected async seen(tx: Tx, meetingId: string) {
+    await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "meeting", id: meetingId }, this.ctx.userId);
   }
 
   /** Every active family login this meeting's audience reaches, once each. */

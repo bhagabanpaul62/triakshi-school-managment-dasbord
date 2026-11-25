@@ -6,6 +6,8 @@ import { NOTICE_TABS, NOTICE_TYPES, type NoticeTab } from "../constants";
 import { listInput } from "../inputs";
 import { AnnouncementCategoryService, NoticeService, TemplateService } from "../service";
 import { MenuLink, MoreMenu } from "@smw/ui/shell/MoreMenu";
+import { AudienceService } from "@smw/feature-notifications/audience";
+import { DateRange } from "./date-range";
 import { NewMenu } from "./new-menu";
 import { LIST_COLUMNS, listRow, rowStep } from "./staff-columns";
 import { HOME, LinkButton, Notice, one, STATE_LABEL, STATE_TONE, TYPE_LABEL, type Query } from "./shared";
@@ -28,9 +30,9 @@ export async function StaffList({ ctx, sp }: { ctx: Ctx; sp: Query }) {
   const tab = NOTICE_TABS.includes(query.tab) ? query.tab : "live";
   const may = svc.mayDo();
   // A reader (the baseline right to read only) has no templates to start from; asking for them is what once broke this page.
-  const [page, counts, categories, authors, templates] = await Promise.all([svc.list(query), svc.counts(), new AnnouncementCategoryService(ctx).options(), svc.authors(), may.draft ? new TemplateService(ctx).list() : Promise.resolve([])]);
+  const [page, counts, categories, authors, aud, templates] = await Promise.all([svc.list(query), svc.counts(), new AnnouncementCategoryService(ctx).options(), svc.authors(), new AudienceService(ctx).options(), may.draft ? new TemplateService(ctx).list() : Promise.resolve([])]);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  const filtered = !!(query.q || query.category || query.type || query.author || query.needs);
+  const filtered = !!(query.q || query.category || query.type || query.author || query.needs || query.audience || query.from || query.to);
   const rows = page.rows.map(listRow);
   const create = ctx.readOnly ? null : <NewMenu urgent={may.urgent} templates={templates.map((t) => ({ id: t.id, name: t.name }))} />;
   const register = svc.can("approve") || svc.can("manage");
@@ -41,13 +43,16 @@ export async function StaffList({ ctx, sp }: { ctx: Ctx; sp: Query }) {
       {ctx.readOnly ? <div className="pb-4"><Notice tone="warning">This school is in read only mode. You can read notices, but nothing can be sent until the school is open again.</Notice></div> : null}
       <div className="flex flex-col gap-3">
         <SavedViews views={VIEWS.map((v) => ({ ...v, count: counts[v.key] }))} active={tab} basePath={HOME} param="tab" label="Notices"
-          params={{ q: query.q, category: query.category, type: query.type, author: query.author, needs: query.needs }} />
+          params={{ q: query.q, category: query.category, type: query.type, author: query.author, needs: query.needs, audience: query.audience, from: query.from, to: query.to }} />
+        <DateRange />
         <DataTable columns={LIST_COLUMNS.map((c) => (c.key === "state" ? { ...c, labels: STATE_LABEL, tones: STATE_TONE } : c))} rows={rows} total={page.total} page={page.page} pageCount={page.pageCount} rowHref={`${HOME}/{id}`}
           searchPlaceholder="Search title, text or number"
           filters={[
             { key: "category", label: "Category", options: categories.map((c) => ({ value: c.id, label: c.name })) },
             { key: "type", label: "Kind", options: NOTICE_TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] })) },
             { key: "author", label: "Author", options: authors.map((a) => ({ value: a.id, label: a.name })) },
+            { key: "audience", label: "For", options: [{ value: "everyone", label: "Everyone" }, { value: "families", label: "All families" }, { value: "staff", label: "All staff" },
+              ...aud.classes.map((c) => ({ value: `class:${c.id}`, label: c.name })), ...aud.sections.map((x) => ({ value: `section:${x.id}`, label: x.name }))] },
             { key: "needs", label: "Needs", options: [{ value: "answer", label: "Asks for an answer" }] },
           ]}
           rowActions={Object.fromEntries(page.rows.flatMap((n) => { const s = rowStep(n.state); return s ? [[n.id, <LinkButton key={n.id} href={`${HOME}/${n.id}${s.to === "edit" ? "/edit" : ""}`} primary={s.primary}>{s.label}</LinkButton>]] : []; }))}

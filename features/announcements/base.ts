@@ -54,6 +54,12 @@ export abstract class NoticeBase extends SchoolService<Perm> {
     return AudiencePolicy.reach(tx, this.ctx, audience, { feature: this.feature, permission });
   }
 
+  /** `reach` plus the website rule: a notice for the website needs approval when the school asks for it, unless the person approves notices. A website-only notice has no audience to check. */
+  protected async publishReach(tx: Tx, c: { audience: Audience; website: boolean }): Promise<Reach> {
+    const base = c.audience.include.length ? await this.reach(tx, c.audience, "publish") : "free";
+    return base === "free" && c.website && !this.isManager && !this.can("approve") && (await this.settings(tx)).approvalFor.website ? "approval" : base;
+  }
+
   /** People who may approve, by name. Built-in roles follow feature.ts; custom roles follow their grants. */
   protected async approvers(tx: Tx): Promise<{ id: string; name: string }[]> {
     const roles = sql.join(this.feature.permissions.approve.map((r) => sql`${r}`), sql`, `);

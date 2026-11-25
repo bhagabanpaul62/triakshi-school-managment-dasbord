@@ -111,6 +111,17 @@ describe("booking", () => {
     await expect(new BookingService(ids.ctx.meera).forFamily(m.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
+  it("opening the meeting reads its bell rows but keeps the 'book a time' action open until booked", async () => {
+    const m = await openMeeting({ title: "Bell" });
+    const row = async () => (await noteCount(a.users.student, "meeting.open")).find((n) => n.subjectId === m.id)!;
+    expect(await row()).toMatchObject({ readAt: null, action: true, doneAt: null });
+    await new BookingService(a.as.student).forFamily(m.id);
+    expect(await row()).toMatchObject({ doneAt: null });
+    expect((await row()).readAt).not.toBeNull();
+    await new BookingService(a.as.student).book(m.id, { slotId: (await freeOf(m.id, ids.t1))[0]!.id });
+    expect((await row()).doneAt).not.toBeNull();
+  });
+
   it("books, refuses a second time with the same teacher, enforces the per-family limit", async () => {
     const m = await openMeeting({ title: "Limit", perFamily: "1" });
     const fam = new BookingService(a.as.student);

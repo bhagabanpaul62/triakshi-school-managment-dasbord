@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { NotFoundError, type Ctx } from "@smw/feature-kit";
 import { CopyValue } from "@smw/ui/finance/CopyValue";
@@ -13,23 +14,27 @@ import { FormModal } from "@smw/ui/shell/FormModal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { dateTime } from "@smw/ui/format";
+import { AudienceService } from "@smw/feature-notifications/audience";
+import { toIstInput } from "@smw/feature-kit/words";
 import type { Tone } from "@smw/ui/tone";
 import { RESPONSE_WORDS } from "../content";
 import { NoticeService, type NoticeView } from "../service";
-import { approveNotice, approveWithEdits, askChanges, deleteDraft, duplicateNotice, recallNotice, rejectNotice, saveAsTemplate, sendScheduledNow, unscheduleNotice, withdrawNotice } from "./actions";
+import { askChanges, deleteDraft, duplicateNotice, recallNotice, rejectNotice, saveAsTemplate, sendScheduledNow, unscheduleNotice, withdrawNotice } from "./actions";
 import { NoticeCard } from "./card";
+import { ApproveDialog } from "./approve-dialog";
 import { diffLines } from "./diff";
+import { DiffView } from "./diff-view";
 import { FamilyRecord } from "./family-record";
 import { MenuLink, MoreMenu } from "@smw/ui/shell/MoreMenu";
 import { RunButton, UndoSending } from "./notice-actions";
 import { Responses } from "./responses-tab";
-import { BackLink, HOME, LinkButton, Notice, one, STATE_KEY, TYPE_LABEL, type Query } from "./shared";
+import { BackLink, HOME, LinkButton, Notice, one, RelatedLinks, STATE_KEY, TYPE_LABEL, type Query, type Related } from "./shared";
 
 const SENT = ["sending", "published", "expired", "withdrawn"];
 const text = (name: string, label: string, extra: object = {}) => ({ name, label, type: "textarea" as const, required: true, wide: true, ...extra });
 
 /** The next steps for this notice in this state, as the buttons the person can really use. Nothing here ends in a refusal. */
-function Steps({ v, canTemplate }: { v: NoticeView; canTemplate: boolean }) {
+function Steps({ v, canTemplate, approve }: { v: NoticeView; canTemplate: boolean; approve: ReactNode }) {
   const n = v.notice, id = n.id, c = v.can, own = `${HOME}/${id}`;
   const quiet = { variant: "secondary" as const, plus: false };
   const menu = { variant: "ghost" as const, plus: false };
@@ -44,10 +49,7 @@ function Steps({ v, canTemplate }: { v: NoticeView; canTemplate: boolean }) {
   return (
     <>
       {c.edit ? <LinkButton href={`${own}/edit`} primary>{v.review ? "Edit and send again" : "Keep writing"}</LinkButton> : null}
-      {c.approve ? (c.approveNeedsReason
-        ? <FormModal title="Approve your own notice" description="No one else can approve notices at this school, so say why you are approving this yourself. It is kept on record." icon="megaphone" fields={[{ name: "reason", label: "Why", type: "textarea", required: true, wide: true }]} hidden={{ id }} action={approveNotice} submitLabel="Approve and send" trigger={{ label: "Approve", plus: false }} />
-        : <RunButton action={approveNotice} values={{ id }} label="Approve" primary />) : null}
-      {c.askChanges ? <FormModal title="Approve with your changes" description="Change the title or the words. The author is told, and the original is kept in History." icon="megaphone" fields={[{ name: "title", label: "Title", required: true, wide: true }, { name: "body", label: "Message", type: "textarea", required: true, wide: true }]} values={{ title: n.title, body: n.body }} hidden={{ id }} action={approveWithEdits} submitLabel="Approve with changes" trigger={{ label: "Approve with changes", ...quiet }} /> : null}
+      {approve}
       {c.askChanges ? <FormModal title="Ask for changes" description="The author gets your note and the notice goes back to their drafts." icon="megaphone" fields={[text("note", "What should change")]} hidden={{ id }} action={askChanges} submitLabel="Send back" trigger={{ label: "Ask for changes", ...quiet }} /> : null}
       {c.reject ? <FormModal title="Reject this notice" description="The author is told why. It goes back to their drafts." icon="megaphone" fields={[text("reason", "Why")]} hidden={{ id }} action={rejectNotice} submitLabel="Reject" trigger={{ label: "Reject", ...quiet }} /> : null}
       {c.recall ? <RunButton action={recallNotice} values={{ id }} label="Take it back" /> : null}
@@ -85,9 +87,7 @@ function Changes({ v }: { v: NoticeView }) {
           <li key={ver.version} className="flex flex-col gap-2 rounded-2xl bg-white/[0.04] p-4">
             <p className="text-sm font-medium text-[var(--ds-on-surface)]">Version {ver.version}{ver.note ? `: ${ver.note}` : ""}</p>
             <p className="text-xs text-[var(--ds-on-surface-muted)]">Replaced {dateTime(ver.at)}{ver.changedByName ? ` by ${ver.changedByName}` : ""}. Red was in this version, green is what came after.</p>
-            <pre className="custom-scrollbar max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 font-sans text-xs leading-5">
-              {lines.map((l, k) => <span key={k} className={`block ${l.kind === "added" ? "bg-[var(--ds-color-success-500)]/15 text-[var(--ds-color-success-400)]" : l.kind === "removed" ? "bg-[var(--ds-color-danger-500)]/15 text-[var(--ds-color-danger-400)] line-through" : "text-[var(--ds-on-surface-variant)]"}`}>{l.text || " "}</span>)}
-            </pre>
+            <DiffView lines={lines} />
           </li>
         );
       })}
@@ -96,12 +96,17 @@ function Changes({ v }: { v: NoticeView }) {
 }
 
 /** /app/announcements/[id] for staff: the state and its next step, the notice as families see it, the report, the history. */
-export async function StaffRecord({ ctx, id, sp }: { ctx: Ctx; id: string; sp: Query }) {
+export async function StaffRecord({ ctx, id, sp, related = [] }: { ctx: Ctx; id: string; sp: Query; related?: Related[] }) {
   const svc = new NoticeService(ctx);
   let v: NoticeView;
   try { v = await svc.get(id); } catch (e) { if (e instanceof NotFoundError) notFound(); throw e; }
   const n = v.notice, c = v.can;
-  if (SENT.includes(n.state) && !c.report) return <FamilyRecord ctx={ctx} id={id} lang={one(sp.lang)} />;
+  if (SENT.includes(n.state) && !c.report) {
+    // A staff reader of a sent notice sees what its recipients see, and the earlier wordings under it (never a family: this page is staff only).
+    return <><FamilyRecord ctx={ctx} id={id} lang={one(sp.lang)} related={related} />{v.versions.length ? <div className="max-w-3xl pt-4"><Panel title="Earlier versions"><Changes v={v} /></Panel></div> : null}</>;
+  }
+  const approve = c.approve ? <ApproveDialog id={id} title={n.title} body={n.body} audience={n.audience} dueAt={toIstInput(n.dueAt)} asks={n.response.kind !== "none"}
+    options={await new AudienceService(ctx).options()} labels={await svc.labelsFor(n.audience)} earlier={v.versions[0] ? { title: String(v.versions[0].snapshot.title ?? ""), body: String(v.versions[0].snapshot.body ?? "") } : null} needsReason={c.approveNeedsReason} /> : null;
   const asks = n.response.kind !== "none";
   const tabs = [{ key: "overview", label: "The notice" }, ...(c.report ? [{ key: "responses", label: asks ? "Responses" : "Who has read it", count: v.stats?.answered ?? undefined }] : []), ...(v.versions.length ? [{ key: "history", label: "History", count: v.versions.length }] : [])];
   const tab = tabs.some((t) => t.key === one(sp.tab)) ? one(sp.tab)! : "overview";
@@ -116,10 +121,11 @@ export async function StaffRecord({ ctx, id, sp }: { ctx: Ctx; id: string; sp: Q
           {n.number ? <CopyValue value={n.number} label="circular number" /> : n.type === "circular" ? <span className="text-xs">Number given when it goes out</span> : null}
           {n.correctedAt ? <span className="text-xs">Updated {dateTime(n.correctedAt)}</span> : null}
         </span>}
-        actions={ctx.readOnly ? null : <Steps v={v} canTemplate={svc.can("manage")} />} />
+        actions={ctx.readOnly ? null : <Steps v={v} canTemplate={svc.can("manage")} approve={approve} />} />
       {ctx.readOnly ? <div className="pb-4"><Notice tone="warning">This school is in read only mode. You can read this, but nothing can be sent or changed until the school is open again.</Notice></div> : null}
       <div className="flex flex-col gap-4">
         <Banner v={v} />
+        <RelatedLinks related={related} />
         <SavedViews views={tabs} active={tab} basePath={`${HOME}/${id}`} param="tab" label="This notice" />
         {tab === "responses" ? <Responses ctx={ctx} v={v} sp={sp} /> : tab === "history" ? <Panel title="Earlier versions"><Changes v={v} /></Panel> : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">

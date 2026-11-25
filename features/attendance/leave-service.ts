@@ -193,9 +193,18 @@ export class LeaveService extends SchoolService<Perm> {
     })));
   }
 
+  /** Opening a request reads its bell row for this person; done() still closes the approver's row when it is decided. */
+  private async seenLeave(tx: Tx, rows: { id: string }[]) {
+    if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "leave", id: r.id }, this.ctx.userId);
+  }
+
   /** Your own requests, newest first. */
   async mine(): Promise<LeaveRow[]> {
-    return this.read("leave", async (tx) => (await this.rows(tx, eq(leaveRequests.requestedBy, this.ctx.userId), () => false)).map((r) => ({ ...r, canEdit: r.status === "pending" })));
+    return this.read("leave", async (tx) => {
+      const rows = await this.rows(tx, eq(leaveRequests.requestedBy, this.ctx.userId), () => false);
+      await this.seenLeave(tx, rows.filter((r) => r.status !== "pending"));
+      return rows.map((r) => ({ ...r, canEdit: r.status === "pending" }));
+    });
   }
 
   /** Sections this teacher is class teacher of. Only they may decide for those students. */
@@ -214,7 +223,9 @@ export class LeaveService extends SchoolService<Perm> {
       if (teacher && own.length === 0) return [];
       const status = tab === "pending" ? eq(leaveRequests.status, "pending") : inArray(leaveRequests.status, ["approved", "rejected"]);
       const scope = teacher ? and(eq(leaveRequests.kind, "student"), inArray(students.sectionId, own)) : undefined;
-      return this.rows(tx, and(status, scope), (r) => !teacher || (r.kind === "student" && !!r.sectionId && own.includes(r.sectionId)));
+      const rows = await this.rows(tx, and(status, scope), (r) => !teacher || (r.kind === "student" && !!r.sectionId && own.includes(r.sectionId)));
+      await this.seenLeave(tx, rows);
+      return rows;
     });
   }
 

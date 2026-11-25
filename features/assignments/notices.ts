@@ -15,7 +15,7 @@ export class AssignmentNotices {
     if (fromStaff) {
       const [kid] = await tx.select({ userId: students.userId }).from(students).where(eq(students.id, studentId)).limit(1);
       if (!kid?.userId || kid.userId === this.ctx.userId) return;
-      await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: kid.userId, topic: "homework.graded" as const, title: `New comment on: ${a.title}`, ...link }]);
+      await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: kid.userId, topic: "homework.graded" as const, title: "New comment on your homework", body: a.title, privateBody: true, ...link }]);
       return;
     }
     const teachers = await tx.select({ id: sectionTeachers.teacherId }).from(sectionTeachers)
@@ -45,7 +45,7 @@ export class AssignmentNotices {
     const [kid] = await tx.select({ userId: students.userId }).from(students).where(eq(students.id, studentId)).limit(1);
     if (!kid?.userId || kid.userId === this.ctx.userId) return;
     await NotificationWriter.insert(tx, this.ctx.schoolId, [{
-      userId: kid.userId, topic: "homework.graded", title: sentBack ? `Sent back to redo: ${a.title}` : `Graded: ${a.title}`, href: `/app/assignments/${a.id}`, subject: { type: "assignment", id: a.id },
+      userId: kid.userId, topic: "homework.graded", title: "Homework marked", body: sentBack ? `Sent back to redo: ${a.title}` : `Graded: ${a.title}`, privateBody: true, href: `/app/assignments/${a.id}`, subject: { type: "assignment", id: a.id },
     }]);
   }
 

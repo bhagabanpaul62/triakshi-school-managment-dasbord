@@ -50,9 +50,9 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
                   active ? "bg-white/[0.07] text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-variant)] hover:bg-white/[0.04] hover:text-[var(--ds-on-surface)]",
                 )}
               >
-                <span className={active ? "text-[var(--ds-color-primary-400)]" : ""}><MenuIconView name={it.icon} /></span>
+                <span className={active ? "text-[var(--ds-primary-text)]" : ""}><MenuIconView name={it.icon} /></span>
                 <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                {it.badge ? <span className="rounded-full bg-[var(--ds-color-primary-500)]/20 px-2 text-[11px] tabular-nums text-[var(--ds-color-primary-300)]">{it.badge}</span> : null}
+                {it.badge ? <span className="rounded-full bg-[var(--ds-color-primary-500)]/20 px-2 text-[11px] tabular-nums text-[var(--ds-primary-text)]">{it.badge}</span> : null}
               </Link>
             );
           })}
@@ -67,7 +67,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
         // eslint-disable-next-line @next/next/no-img-element
         <img src={brand.logoUrl} alt="" className="h-9 w-9 rounded-full object-cover" />
       ) : (
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-color-primary-500)] text-sm font-medium text-white">{initials(brand.name)}</span>
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-primary)] text-sm font-medium text-white">{initials(brand.name)}</span>
       )}
       <span className="min-w-0 truncate text-[15px] font-medium text-[var(--ds-on-surface)]" title={brand.name}>{brand.name}</span>
     </Link>
@@ -90,6 +90,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
 
   return (
     <div className="flex min-h-dvh bg-[var(--ds-color-background)] text-[var(--ds-on-surface)]">
+      <a href="#content" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-full focus:bg-[var(--ds-primary)] focus:px-4 focus:py-2 focus:text-sm focus:text-white">Skip to content</a>
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-[var(--ds-surface-container-lowest)] lg:flex">
         {brandRow}
         {nav}
@@ -117,7 +118,7 @@ export function AppShell({ brand, groups, user, logout, topbar, banner, children
           </button>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">{topbar}</div>
         </header>
-        <main className="min-w-0 flex-1 px-4 pb-12 sm:px-8">{/* A block of auto height: a panel that fills its grid cell must not stretch over the page when it stands alone. */}<div>{children}</div></main>
+        <main id="content" tabIndex={-1} className="min-w-0 flex-1 px-4 pb-12 outline-none sm:px-8">{/* A block of auto height: a panel that fills its grid cell must not stretch over the page when it stands alone. */}<div>{children}</div></main>
       </div>
     </div>
   );

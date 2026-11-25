@@ -7,7 +7,8 @@ import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { templateCsv } from "../holiday-import";
 import { HolidayService } from "../holiday-service";
 import { todayIST } from "../stats";
-import { addHolidays, checkHolidayImport, commitHolidayImport, createHoliday } from "./actions";
+import { checkHolidayImport, commitHolidayImport } from "./actions";
+import { addHolidays, createHoliday } from "./holiday-actions";
 import { holidayFields } from "./fields";
 import { HolidayImportForm } from "./holiday-import-form";
 import { HolidayList } from "./holiday-list";
@@ -43,6 +44,7 @@ export default async function HolidaysPage({ searchParams }: { searchParams: Pro
     svc.spans(year ? { from: year.startsOn, to: year.endsOn } : undefined),
     svc.suggestions(year?.id),
   ]);
+  await svc.seeDeclared(spans.map((s) => s.id));
   const canWrite = svc.can("manage");
   const today = todayIST();
   const create = <FormModal title="Add holiday" icon="calendar" fields={holidayFields(classes, { notify: true })} values={{ kind: "other", appliesTo: "all", notify: true }} action={createHoliday} submitLabel="Add" size="lg" />;

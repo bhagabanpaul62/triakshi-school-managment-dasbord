@@ -8,7 +8,7 @@ import { academicYears, classes, sections } from "@smw/feature-academics/schema"
 import { students } from "@smw/feature-students/schema";
 import { notifications } from "@smw/feature-notifications/schema";
 import { deliverDue } from "@smw/feature-notifications/delivery";
-import { closedDays, closedFrom, closedSet, isClosed, nationalDaysIn, openSundays, workingDayReport, type HolidayRow } from "./holidays";
+import { activeClosures, closedDays, closedFrom, closedSet, isClosed, nationalDaysIn, openSundays, workingDayReport, type HolidayRow } from "./holidays";
 import { HolidayService } from "./holiday-service";
 import { checkSheet, copyProposals } from "./holiday-import";
 import { holidayInput } from "./holiday-inputs";
@@ -310,6 +310,38 @@ describe("notifying", () => {
     await admin().create({ from: addDays(future, 5), name: "Quiet one" });
     await admin().create({ from: "2026-03-20", name: "Past one", notify: true });
     expect((await titles(a.users.student)).some((t) => t.startsWith("Quiet one") || t.startsWith("Past one"))).toBe(false);
+  });
+
+  it("declaring tells people and says how many; today, tomorrow and emergencies are told even with the box unticked; a far one is not", async () => {
+    const today = todayIST();
+    const near = await admin().create({ from: today, name: "Storm day", kind: "other" });
+    expect(near.told).toBeGreaterThan(1);
+    const stormTitles = () => withSchool(a.id, async (tx) => (await tx.select().from(notifications).where(and(eq(notifications.userId, a.users.student), eq(notifications.subjectId, near.id)))).map((n) => n.title));
+    expect(await stormTitles()).toEqual(["Storm day: school is closed"]);
+    const far = await admin().create({ from: addDays(today, 70), name: "Far quiet break", kind: "other" });
+    expect(far.told).toBe(0);
+    const emergency = await admin().create({ from: addDays(today, 71), name: "Far emergency", kind: "emergency" });
+    expect(emergency.told).toBe(near.told);
+    expect((await admin().update(near.id, { from: today, name: "Storm day", kind: "other" })).told).toBe(0);
+  });
+
+  it("activeClosures lists today's and tomorrow's emergency closures for the people they concern", async () => {
+    const today = addDays(todayIST(), 4);
+    await admin().create({ from: addDays(today, 1), name: "Class 5 flood", kind: "emergency", appliesTo: "classes", classIds: [class5Id] });
+    await admin().create({ from: today, name: "Quiet closure", kind: "other" });
+    const seen = (who: Parameters<typeof activeClosures>[1]) => withSchool(a.id, (tx) => activeClosures(tx, who, today)).then((r) => r.map((c) => `${c.name}:${c.when}`));
+    expect(await seen({ classId: class5Id })).toContain("Class 5 flood:tomorrow");
+    expect(await seen({ classId: class6.classId })).not.toContain("Class 5 flood:tomorrow");
+    expect(await seen({ staff: true })).not.toContain("Class 5 flood:tomorrow");
+    expect(await seen({ staff: true })).not.toContain("Quiet closure:today");
+  });
+
+  it("opening the list reads the holiday notices", async () => {
+    const h = await admin().create({ from: addDays(todayIST(), 90), name: "Open to read", kind: "other", notify: true });
+    const unread = () => withSchool(a.id, async (tx) => (await tx.select().from(notifications).where(and(eq(notifications.subjectId, h.id), eq(notifications.userId, a.users.teacher))))[0]!.readAt);
+    expect(await unread()).toBeNull();
+    await new HolidayService(a.as.teacher).seeDeclared([h.id]);
+    expect(await unread()).not.toBeNull();
   });
 
   it("an emergency closure, or one that starts today or tomorrow, is urgent and is mailed at 06:32 in quiet hours; a distant one is not", async () => {

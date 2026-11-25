@@ -7,6 +7,7 @@ import { students } from "@smw/feature-students/schema";
 import { messageFiles } from "@smw/feature-messages/schema";
 import { notifications } from "@smw/feature-notifications/schema";
 import { MemoryStorage, useServices } from "@smw/integrations";
+import { linkFromQuery } from "./inputs";
 import { requests } from "./schema";
 import { CategoryService, RequestService } from "./service";
 
@@ -126,5 +127,27 @@ describe("request files", () => {
       expect([...f.bytes]).toEqual([...PDF]);
     }
     await expect(svc(otherTeacher).file(id, m!.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("a category owned by one person (R1)", () => {
+  it("goes to that person; only active staff can be chosen", async () => {
+    const saved = await new CategoryService(a.as.admin).save({ name: "Named owner", ownerRole: "admin", ownerUserId: admin2.userId, targetDays: 2 });
+    expect(saved.ownerUserId).toBe(admin2.userId);
+    expect((await new CategoryService(a.as.admin).personOptions()).map((p) => p.value)).toContain(admin2.userId);
+    const family = await addUser("student", `f${++seq}`);
+    await withSchool(a.id, (tx) => tx.insert(students).values({ schoolId: a.id, admissionNo: `H${seq}`, name: `Kid ${seq}`, classId, sectionId, userId: family.userId }));
+    const r = await svc(family).raise({ categoryId: saved.id, subject: "Named", details: "Please help us with this." });
+    const row = (await withSchool(a.id, (tx) => tx.select().from(requests).where(eq(requests.id, r.id))))[0]!;
+    expect(row.ownerId).toBe(admin2.userId);
+    await expect(new CategoryService(a.as.admin).save({ name: "Bad owner", ownerRole: "admin", ownerUserId: family.userId, targetDays: 2 })).rejects.toMatchObject({ fieldErrors: { ownerUserId: expect.any(String) } });
+  });
+});
+
+describe("the ask page link (N25, R2)", () => {
+  it("takes an in-app path only", () => {
+    expect(linkFromQuery("Fee notice", "/app/fees/receipts/1")).toEqual({ label: "Fee notice", href: "/app/fees/receipts/1" });
+    for (const bad of ["https://evil.test/app", "//evil.test", "/app//x", "javascript:alert(1)", "/other", ""]) expect(linkFromQuery("x", bad)).toBeNull();
+    expect(linkFromQuery("", "/app/notices")).toBeNull();
   });
 });

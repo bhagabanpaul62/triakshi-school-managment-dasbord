@@ -31,13 +31,13 @@ export function NotificationBell({ bell, items, listHref = "/app/notifications" 
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3H4a4 4 0 0 0 2-3v-3a7 7 0 0 1 4-6" /><path d="M9 17v1a3 3 0 0 0 6 0v-1" />
         </svg>
-        {unread ? <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--ds-color-primary-500)] px-1 text-[10px] font-medium tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
+        {unread ? <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--ds-primary)] px-1 text-[10px] font-medium tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
       </button>
       {open ? (
         <div role="dialog" aria-label="Notifications" className="absolute right-0 z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-3xl bg-[var(--ds-surface-container-low)] p-4 shadow-2xl">
           <div className="mb-2 flex items-center justify-between gap-3">
             <h3 className="text-[15px] font-medium text-[var(--ds-on-surface)]">Notifications{unread ? <span className="ml-2 text-xs font-normal text-[var(--ds-on-surface-muted)]">{unread} unread</span> : null}</h3>
-            {unread ? <button type="button" onClick={marks.readAll} className="inline-flex h-10 items-center rounded-full px-3 text-xs text-[var(--ds-color-primary-400)] hover:bg-white/[0.06] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Mark all read</button> : null}
+            {unread ? <button type="button" onClick={marks.readAll} className="inline-flex h-10 items-center rounded-full px-3 text-xs text-[var(--ds-primary-text)] hover:bg-white/[0.06] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Mark all read</button> : null}
           </div>
           {items.length === 0 ? (
             <p className="py-8 text-center text-sm text-[var(--ds-on-surface-muted)]">You are all caught up. New notices and updates will appear here.</p>

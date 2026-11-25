@@ -7,6 +7,9 @@ const body = f.text(1, BODY_MAX, "Write a few words");
 /** A link inside the app only. */
 const appHref = z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^\/app(\/|$)/).refine((h) => !h.includes("//"), "Not a valid link").max(300).optional());
 
+/** The "about" link of an ask page: label and in-app path from the address bar, or null. */
+export const linkFromQuery = (label: string, href: string) => { const h = appHref.safeParse(href); return label && h.success && h.data ? { label: label.slice(0, 80), href: h.data } : null; };
+
 export const raiseInput = z.object({
   categoryId: f.id("Choose what this is about"),
   /** A family's own child is used when left out; staff must choose the student. */

@@ -14,6 +14,10 @@ import { FormModal } from "@smw/ui/shell/FormModal";
 import { KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { dateTime, initials, relative, shortDate } from "@smw/ui/format";
 import { MenuIconView } from "@smw/ui/shell/icons";
+import { withSchool } from "@smw/db";
+import { isSuppressed } from "@smw/feature-notifications/email-health";
+import { EmailNotWorking } from "@smw/feature-notifications/ui/email-not-working";
+import { OpenWhen } from "@smw/feature-notifications/ui/open-when";
 import { StaffService, type StaffDetail } from "../service";
 import { changeStaffRole, deactivateStaff, reactivateStaff, resendStaffInvite, updateStaff } from "./actions";
 import { editFields, roleFields, staffFormValues } from "./fields";
@@ -113,11 +117,12 @@ function deactivateBody(s: StaffDetail) {
   return `They are signed out everywhere and cannot sign in. Any unused invite link stops working.${stays} Their record and history stay, and you can reactivate them later.`;
 }
 
-export default async function StaffDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
-  const [ctx, { id }, { tab }] = await Promise.all([requireCtx(), params, searchParams]);
+export default async function StaffDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; fix?: string }> }) {
+  const [ctx, { id }, { tab, fix }] = await Promise.all([requireCtx(), params, searchParams]);
   const svc = new StaffService(ctx);
   const s = await svc.get(id).catch((e) => { if (e instanceof NotFoundError) notFound(); throw e; });
   const canWrite = svc.can("write");
+  const emailStopped = canWrite && !!s.email && await withSchool(ctx.schoolId, (tx) => isSuppressed(tx, s.email));
   const roleOptions = canWrite ? await svc.roleOptions() : [];
   const isTeacher = s.role === "teacher";
   const mine = s.id === ctx.userId;
@@ -132,13 +137,13 @@ export default async function StaffDetailPage({ params, searchParams }: { params
         back={{ href: "/app/staff", label: "Staff" }}
         leading={<span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.07] text-base" aria-hidden>{initials(s.name)}</span>}
         title={s.name}
-        chips={<><ToneBadge label={s.roleName ?? ROLE_LABELS[s.role] ?? s.role} tone={ROLE_TONES[s.role]} /><ToneBadge label={STATE_LABELS[s.state]} tone={STATE_TONES[s.state]} /></>}
+        chips={<><ToneBadge label={s.roleName ?? ROLE_LABELS[s.role] ?? s.role} tone={ROLE_TONES[s.role]} /><ToneBadge label={STATE_LABELS[s.state]} tone={STATE_TONES[s.state]} />{emailStopped ? <EmailNotWorking fixHref={`/app/staff/${s.id}?fix=email`} /> : null}</>}
         meta={[s.designation, s.department, s.joiningDate ? `Joined ${shortDate(s.joiningDate)}` : null]}
         actions={canWrite || libraryRead(ctx) ? (
           <>
             {libraryRead(ctx) ? <Link href={`/app/library/members/staff/${s.id}`} className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Library</Link> : null}
             {canWrite ? <>
-            <FormModal title="Edit staff" icon="teacher" fields={editFields} values={staffFormValues(s)} hidden={{ id: s.id }} action={updateStaff} size="lg" trigger={{ label: "Edit", variant: "secondary" }} />
+            <OpenWhen when={fix === "email" && emailStopped}><FormModal title="Edit staff" icon="teacher" fields={editFields} values={staffFormValues(s)} hidden={{ id: s.id }} action={updateStaff} size="lg" trigger={{ label: "Edit", variant: "secondary" }} /></OpenWhen>
             {s.state === "invited" && s.email ? <ActionButton label="Resend invite" variant="default" action={resendStaffInvite} values={{ id: s.id }} successMessage={`Invite sent again to ${s.email}`} /> : null}
             {s.state === "left" ? <ActionButton label="Reactivate" variant="default" action={reactivateStaff} values={{ id: s.id }}
               confirm={{ title: `Reactivate ${s.name}?`, body: "They can sign in again with their old password, or get a fresh invite if they never set one.", confirmLabel: "Reactivate" }} /> : null}

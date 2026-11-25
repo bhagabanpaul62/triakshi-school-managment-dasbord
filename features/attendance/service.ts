@@ -1,4 +1,5 @@
 import { and, asc, count, eq, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { schools, users, type Tx } from "@smw/db";
@@ -284,6 +285,8 @@ export class StudentAttendanceService extends AttendanceBase {
           .where(and(eq(studentAttendance.studentId, studentId), gte(studentAttendance.date, days[0]!), lte(studentAttendance.date, days.at(-1)!))),
         tx.select({ classId: students.classId }).from(students).where(eq(students.id, studentId)).limit(1),
       ]);
+      // Opening the month reads the alerts for its absent and late days, for this viewer only.
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const m of marks) if (m.status === "absent" || m.status === "late") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "attendance", id: `${studentId}:${m.date}` }, this.ctx.userId);
       const closed = await closedDays(tx, days[0]!, days.at(-1)!, { classId: kid?.classId ?? null });
       const looks = days.map((date) => ({ date, ...dayLook(closed, date) }));
       return {

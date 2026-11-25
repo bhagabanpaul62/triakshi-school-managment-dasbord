@@ -71,7 +71,14 @@ describe("write, publish, undo", () => {
     const { id } = await svc.saveDraft({ type: "urgent", title: "Heavy rain", body: "School is closed.", audience: ALL });
     await expect(svc.publish(id)).rejects.toThrow(/people at once/);
     const out = await svc.publish(id, { confirmed: true });
-    expect(out.state).toBe("published");
+    // it returns at once: due now, nobody has it yet. The caller's fan-out (twice is harmless) makes the people.
+    expect(out.state).toBe("sending");
+    expect(await rec(id)).toHaveLength(0);
+    expect(await notes(fx.school.users.student, id)).toHaveLength(0);
+    const first = await fanOut(fx.school.id, id), again = await fanOut(fx.school.id, id);
+    expect(first.recipients).toBeGreaterThan(0);
+    expect(again).toEqual({ recipients: 0, notified: 0 });
+    expect((await row(id)).state).toBe("published");
     const n = await row(id);
     expect(n.response).toEqual({ kind: "ack" });
     const mine = await notes(fx.school.users.student, id);
@@ -104,8 +111,16 @@ describe("who may do what (1, 2, 12)", () => {
     expect(webOnly).toMatchObject({ audienceLabel: "Website only", recipients: 0 });
   });
 
-  it("1: a teacher cannot put anything on the website", async () => {
-    await expect(new NoticeService(A().teacher).saveDraft({ title: "Mine", body: "x", audience: ALL, website: true })).rejects.toMatchObject({ fieldErrors: { website: expect.any(String) } });
+  it("1: a teacher may choose the website for everyone only, and it waits for approval while the school asks for that", async () => {
+    const t = new NoticeService(A().teacher);
+    await expect(t.saveDraft({ title: "Mine", body: "x", audience: section(fx.ids.s5a!), website: true })).rejects.toMatchObject({ fieldErrors: { website: expect.any(String) } });
+    const { id } = await t.saveDraft({ title: "Mine", body: "x", audience: ALL, website: true });
+    expect((await row(id)).website).toBe(true);
+    expect(await t.reachFor(ALL, true)).toMatchObject({ mode: "approval" });
+    await expect(t.publish(id)).rejects.toThrow(/needs approval/);
+    expect((await t.get(id)).can).toMatchObject({ publish: false, website: true });
+    await expect(t.submit(id)).resolves.toMatchObject({ state: "waiting" });
+    expect((await new NoticeService(A().admin).approve({ id })).state).toBe("sending");
   });
 
   it("2: a teacher cannot edit, publish, withdraw or correct another person's notice, and sees only their own and what is sent to them", async () => {
@@ -296,8 +311,8 @@ describe("correct and withdraw (4, 5)", () => {
     // Cy is told; Ann loses it with a note and her "answer me" row is closed
     expect((await notes(fx.ids.cyUser!, id))[0]).toMatchObject({ title: "Reading week (5B)", topic: "notice.answer" });
     const ann = await notes(fx.school.users.student);
-    expect(ann.filter((n) => n.subjectId === id)).toHaveLength(annBell);
-    expect(ann.find((n) => n.subjectId === id)).toMatchObject({ doneAt: expect.anything(), readAt: expect.anything() });
+    expect(ann.filter((n) => n.subjectId === id && n.subjectType === "notice")).toHaveLength(annBell);
+    expect(ann.find((n) => n.subjectId === id && n.subjectType === "notice")).toMatchObject({ doneAt: expect.anything(), readAt: expect.anything() });
     expect(ann.some((n) => n.title === "This notice is no longer for you" && !n.body)).toBe(true);
     // nothing of the new wording reaches the people who lost it
     expect(ann.filter((n) => [n.title, n.body ?? ""].some((t) => t.includes("5B") || t.includes("Bring")))).toHaveLength(0);
@@ -603,6 +618,8 @@ describe("scheduling, lists, copies", () => {
     const { id: later } = await svc.saveDraft({ title: "Send it now", body: "x", audience: section(fx.ids.s5a!) });
     await svc.schedule(later, new Date(Date.now() + 3_600_000));
     await svc.sendNow(later);
+    expect((await row(later)).state).toBe("sending");
+    await fanOut(fx.school.id, later);
     expect((await row(later)).state).toBe("published");
     expect(await rec(later)).toHaveLength(2);
   });
@@ -766,7 +783,7 @@ describe("AnnouncementService for home, the website and the API", () => {
 describe("what the screens need", () => {
   it("the write page knows what a person may do; a teacher in their own section goes free, beyond it needs approval", async () => {
     const teacher = new NoticeService(A().teacher);
-    expect(teacher.mayDo()).toEqual({ draft: true, publish: true, urgent: false, website: false });
+    expect(teacher.mayDo()).toEqual({ draft: true, publish: true, urgent: false, website: true });
     expect(await teacher.reachFor(section(fx.ids.s5a!))).toMatchObject({ mode: "free" });
     expect(await teacher.reachFor(ALL)).toMatchObject({ mode: "approval" });
   });
@@ -776,6 +793,8 @@ describe("what the screens need", () => {
     const { id } = await svc.saveDraft({ title: "Go now", body: "x", audience: section(fx.ids.s5b!), response: { kind: "ack" } });
     await svc.publish(id);
     await svc.release(id);
+    expect(await rec(id)).toHaveLength(0);
+    await fanOut(fx.school.id, id);
     expect((await row(id)).state).toBe("published");
     await expect(svc.release(id)).rejects.toBeInstanceOf(ConflictError);
     expect((await svc.authors()).map((a) => a.id)).toContain(fx.school.users.admin);

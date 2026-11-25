@@ -32,6 +32,16 @@ export async function remindSchool(tx: Tx, schoolId: string, now = new Date()): 
   return sent;
 }
 
+/** Answers are closed (the closing time passed, or the event is over): the invitation's action row closes for everyone. Recent events only, so old ones are not rescanned. */
+export async function closeRsvps(tx: Tx, schoolId: string, now = new Date()): Promise<number> {
+  const due = await tx.select({ id: events.id }).from(events).where(and(eq(events.state, "live"), sql`(${events.rsvp}->>'on')::boolean`,
+    sql`coalesce(${events.endsAt}, ${events.startsAt}) > ${new Date(now.getTime() - 2 * 86_400_000).toISOString()}::timestamptz`,
+    sql`least(coalesce((${events.rsvp}->>'closesAt')::timestamptz, 'infinity'::timestamptz), coalesce(${events.endsAt}, ${events.startsAt})) <= ${now.toISOString()}::timestamptz`));
+  let closed = 0;
+  for (const e of due) closed += await NotificationWriter.done(tx, schoolId, { type: "event", id: e.id });
+  return closed;
+}
+
 /** Runs `work` in every active school; one school failing does not stop the rest, and the run still fails at the end. */
 async function eachSchool(what: string, work: (tx: Tx, schoolId: string) => Promise<unknown>) {
   const ids = (await withConsole((tx) => tx.select({ id: schools.id }).from(schools).where(eq(schools.status, "active")))).map((s) => s.id);
@@ -45,7 +55,7 @@ async function eachSchool(what: string, work: (tx: Tx, schoolId: string) => Prom
 
 export default {
   /** Every 5 minutes (the orchestrator adds the schedule). */
-  "events.reminders": () => eachSchool("Event reminders", (tx, id) => remindSchool(tx, id)),
+  "events.reminders": () => eachSchool("Event reminders", async (tx, id) => { await remindSchool(tx, id); await closeRsvps(tx, id); }),
   /** Daily: new people join the events of their class without a notice; people who left drop out. */
   "events.late-joiners": () => eachSchool("Event late joiners", (tx, id) => lateJoiners(tx, id)),
 } satisfies Record<string, () => Promise<unknown>>;

@@ -2,7 +2,8 @@
 
 import { headers } from "next/headers";
 import { LoginError, PasswordError, SchoolAuth } from "@smw/auth";
-import { authMails, services, trySend } from "@smw/integrations";
+import { authMails, trySend } from "@smw/integrations";
+import { accountMailer } from "@smw/feature-notifications/delivery";
 import { getSchool, setSessionCookie } from "@smw/runtime";
 import { resetPasswordInput } from "../inputs";
 
@@ -23,7 +24,7 @@ export async function setPassword(_prev: SetPasswordState, fd: FormData): Promis
     throw err;
   }
   const who = await auth.contactOf(userId);
-  if (who?.email) void trySend(services().email, { to: who.email, ...authMails.passwordChanged(school.name, who.name) });
+  if (who?.email) void trySend(accountMailer(school.id), { to: who.email, ...authMails.passwordChanged(school.name, who.name) });
   const h = await headers();
   const { token, expiresAt } = await auth.startSession(userId, { ip: h.get("x-forwarded-for")?.split(",")[0]?.trim(), userAgent: h.get("user-agent") ?? undefined });
   await setSessionCookie(token, expiresAt);

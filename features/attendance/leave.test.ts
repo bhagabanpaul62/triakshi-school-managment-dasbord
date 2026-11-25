@@ -28,7 +28,7 @@ const M = d(2).slice(0, 7);
 
 /** Staff must pick a leave type; Casual is one of the defaults. */
 const casual = async () => (await new LeaveTypeService(a.as.admin).all()).find((t) => t.code === "CL")!.id;
-const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
+const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => `${n.title} | ${n.body ?? ""}`));
 
 beforeAll(async () => {
   useServices({ email: mail, storage: new MemoryStorage() });
@@ -58,7 +58,11 @@ describe("absence alert", () => {
     await sendAfter(31); // a second run sends nothing more
     expect((await notes(a, a.users.student)).filter((t) => t.includes(today))).toEqual([expect.stringContaining("marked late")]);
     const [n] = await withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, a.users.student)));
-    expect(n).toMatchObject({ topic: "attendance.absence", subjectType: "attendance", subjectId: `${kid()}:${today}`, href: `/app/attendance?month=${today.slice(0, 7)}` });
+    expect(n).toMatchObject({ topic: "attendance.absence", subjectType: "attendance", subjectId: `${kid()}:${today}`, href: `/app/attendance?month=${today.slice(0, 7)}`, title: "Attendance alert", privateBody: true, readAt: null });
+    expect(n!.body).toContain("marked late");
+    // Opening the month reads the alerts of that month.
+    await new StudentAttendanceService(a.as.student).studentMonth(kid(), today.slice(0, 7));
+    expect((await withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.id, n!.id))))[0]!.readAt).not.toBeNull();
     expect((await rows()).filter((r) => r.date === today)).toMatchObject([{ sentAt: expect.any(Date) }]);
   });
 

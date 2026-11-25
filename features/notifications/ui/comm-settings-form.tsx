@@ -4,15 +4,19 @@ import { useState } from "react";
 import { Panel } from "@smw/ui/kit/Panel";
 import { SegmentedControl } from "@smw/ui/kit/SegmentedControl";
 import { toast } from "@smw/ui/shell/toast";
+import { channelsFor, groupDefault, SIDES, type Side } from "../channels";
 import { EMAIL_MODES, type EmailMode } from "../constants";
 import type { CommSettings } from "../settings";
-import { TOPIC_GROUPS, type TopicGroup } from "../topics";
+import { TOPIC_GROUPS, TOPICS, topicOf, type TopicGroup, type TopicKey } from "../topics";
 import { saveCommSettings } from "./comm-settings-actions";
 import { plural } from "@smw/feature-kit/words";
 
 const field = "h-10 rounded-xl bg-white/[0.06] px-3 text-sm text-[var(--ds-on-surface)] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]";
 const soft = "text-[var(--ds-on-surface-muted)]";
 const EMAIL_LABEL: Record<EmailMode, string> = { off: "Off", instant: "Instant", digest: "Daily summary" };
+const SIDE_LABEL: Record<Side, string> = { families: "Families", staff: "Staff" };
+const TOPIC_LIST = (Object.keys(TOPICS) as TopicKey[]).map((k) => [k, topicOf(k)] as const);
+const channelsText = (c: { push: boolean; email: EmailMode }) => [c.push ? "Phone" : null, c.email === "off" ? null : `Email, ${EMAIL_LABEL[c.email].toLowerCase()}`].filter(Boolean).join(" and ") || "In the app only";
 // Same padding the services use: circulars 3 digits, requests 4.
 export const numberExample = (format: string, pad: number) => format.replace("{session}", "2026-27").replace("{n}", "42".padStart(pad, "0"));
 
@@ -78,6 +82,8 @@ export function CommSettingsForm({ initial }: { initial: CommSettings }) {
     if (r.ok) setS(r.data);
     else { setS(was); toast(r.error ?? "Could not save. Try again.", "danger"); }
   };
+  const [side, setSide] = useState<Side>("families");
+  const defs = s.channelDefaults[side];
   const approval = (k: keyof CommSettings["approvalFor"], v: boolean) => set({ approvalFor: { ...s.approvalFor, [k]: v } });
 
   return (
@@ -121,24 +127,47 @@ export function CommSettingsForm({ initial }: { initial: CommSettings }) {
         </div>
       </Panel>
 
-      <Panel title="Default channels" className="lg:col-span-2">
-        <p className={`mb-2 text-sm ${soft}`}>What reaches people on their phone and email until they choose for themselves. The app always shows everything. Safety and security messages are always sent.</p>
-        <div className="-mx-2 overflow-x-auto"><table className="w-full min-w-[32rem] text-left text-sm">
-          <thead className={`text-xs ${soft}`}><tr><th className="px-2 pb-2 font-normal">Type</th><th className="px-2 pb-2 font-normal">Push</th><th className="px-2 pb-2 font-normal">Email</th></tr></thead>
-          <tbody>
-            {(Object.keys(TOPIC_GROUPS) as TopicGroup[]).filter((g) => g !== "urgent" && g !== "account").map((g) => {
-              const v = s.channelDefaults[g] ?? { push: true, email: "digest" as EmailMode };
-              const put = (next: { push: boolean; email: EmailMode }) => set({ channelDefaults: { ...s.channelDefaults, [g]: next } });
-              return (
-                <tr key={g}>
-                  <td className="px-2 py-1.5 text-[var(--ds-on-surface)]">{TOPIC_GROUPS[g]}</td>
-                  <td className="px-2"><Switch on={v.push} label={`Push for ${TOPIC_GROUPS[g]}`} onChange={(push) => put({ push, email: v.email })} /></td>
-                  <td className="px-2"><SegmentedControl size="sm" label={`Email for ${TOPIC_GROUPS[g]}`} options={EMAIL_MODES.map((m) => ({ value: m, label: EMAIL_LABEL[m] }))} value={v.email} onChange={(email) => put({ push: v.push, email })} /></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table></div>
+      <Panel title="What reaches people" className="lg:col-span-2">
+        <p className={`mb-3 text-sm ${soft}`}>Pick the phone and email default for each kind of message, for families and for staff separately. It applies until a person chooses for themselves. The app always shows everything. Messages marked Always sent cannot be turned off.</p>
+        <SegmentedControl size="sm" label="Who these defaults are for" options={SIDES.map((x) => ({ value: x, label: SIDE_LABEL[x] }))} value={side} onChange={(v) => setSide(v as Side)} />
+        <div className="mt-3 flex flex-col gap-4">
+          {(Object.keys(TOPIC_GROUPS) as TopicGroup[]).map((g) => {
+            const mine = TOPIC_LIST.filter(([, t]) => t.group === g);
+            const open = mine.some(([, t]) => !t.mustTell);
+            const v = defs[g] ?? groupDefault(g);
+            const put = (next: { push: boolean; email: EmailMode }) => set({ channelDefaults: { ...s.channelDefaults, [side]: { ...defs, [g]: next } } });
+            return (
+              <section key={g} aria-label={TOPIC_GROUPS[g]} className="rounded-2xl bg-white/[0.035] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-medium text-[var(--ds-on-surface)]">{TOPIC_GROUPS[g]}</h3>
+                  {open ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`flex items-center text-xs ${soft}`}>Phone<Switch on={v.push} label={`Phone alerts for ${TOPIC_GROUPS[g]} to ${SIDE_LABEL[side]}`} onChange={(push) => put({ push, email: v.email })} /></span>
+                      <SegmentedControl size="sm" label={`Email for ${TOPIC_GROUPS[g]} to ${SIDE_LABEL[side]}`} options={EMAIL_MODES.map((m) => ({ value: m, label: EMAIL_LABEL[m] }))} value={v.email} onChange={(email) => put({ push: v.push, email })} />
+                    </div>
+                  ) : <span className={`text-xs ${soft}`}>Always sent</span>}
+                </div>
+                <ul className="mt-2 flex flex-col divide-y divide-white/[0.06]">
+                  {mine.map(([key, t]) => (
+                    <li key={key} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 text-sm">
+                      <span className="text-[var(--ds-on-surface)]">{t.label}</span>
+                      <span className={`text-xs ${soft}`}>{t.mustTell ? "Always sent" : channelsText(channelsFor(key, {}, defs))}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      </Panel>
+
+      <Panel title="Text messages and WhatsApp" className="lg:col-span-2">
+        <ul className="flex flex-col gap-3">
+          <li className="text-sm text-[var(--ds-on-surface)]">Text messages (SMS) <span className={`ml-2 rounded-full bg-white/[0.08] px-2 py-0.5 text-xs ${soft}`}>Not available yet</span>
+            <span className={`mt-1 block text-xs ${soft}`}>In India a school must register with the telecom rules (called DLT) and get each message wording approved before any text can go out. Until that is done, nothing is sent by text.</span></li>
+          <li className="text-sm text-[var(--ds-on-surface)]">WhatsApp <span className={`ml-2 rounded-full bg-white/[0.08] px-2 py-0.5 text-xs ${soft}`}>Not available yet</span>
+            <span className={`mt-1 block text-xs ${soft}`}>WhatsApp has to approve the school's business number and each message wording first. Until then, families get phone alerts and email.</span></li>
+        </ul>
       </Panel>
 
       <Panel title="Keeping messages">

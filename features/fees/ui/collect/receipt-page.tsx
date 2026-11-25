@@ -29,6 +29,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   const { receipt: r, methods, cheque, allocations, journalId, collectedByName, prints, reversal: ask } = got;
   const live = r.status === "valid" || r.status === "clearing";
   const canDecide = allows(ctx, financeFeature, "approve");
+  const askAbout = ctx.role === "student" && ctx.features.has("requests") && !ctx.supportStaffId ? `/app/requests/new?${new URLSearchParams({ about: `Receipt ${r.number}`, href: `/app/fees/receipts/${r.id}` })}` : null;
   const back = staff ? { href: "/app/fees/receipts", label: "All receipts" } : { href: "/app/fees", label: "My fees" };
 
   const steps: TrackStep[] = cheque
@@ -48,6 +49,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
         description={<>{day(r.date)} · for {staff ? <Ref href={`/app/fees/students/${r.studentId}`}>{r.snapshot.studentName}</Ref> : r.snapshot.studentName} · {r.snapshot.classLabel}{collectedByName ? ` · taken by ${collectedByName}` : ""}</>}
         actions={<>
           <Link href={`/app/fees/receipts/${r.id}/pdf`} target="_blank" className={buttonVariants({ className: "rounded-full" })}>Print receipt</Link>
+          {askAbout ? <Link href={askAbout} className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>Ask about this</Link> : null}
           {nextAction && can(ctx, "collect") ? <Link href={nextAction.href} className={buttonVariants({ variant: "secondary", className: "rounded-full" })}>{nextAction.label}</Link> : null}
         </>} />
       <div className={`${SECTION} mb-4`}><StatusTrack steps={steps} label="Receipt progress" /></div>

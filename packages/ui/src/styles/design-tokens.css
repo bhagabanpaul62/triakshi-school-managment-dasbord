@@ -81,9 +81,11 @@
   /* Foreground roles that pair with the ladder above. */
   --ds-on-surface: var(--ds-color-neutral-100);
   --ds-on-surface-variant: var(--ds-color-neutral-300);
-  --ds-on-surface-muted: var(--ds-color-neutral-400);
+  --ds-on-surface-muted: #808b9d; /* neutral-400 lifted just enough for 4.5:1 on #242424 */
   --ds-on-primary: #ffffff;
-  --ds-primary: var(--ds-color-primary-500);
+  /* White text needs 4.5:1: panelCss recomputes both for the school colour. */
+  --ds-primary: var(--ds-color-primary-600);
+  --ds-primary-text: var(--ds-color-primary-400);
   --ds-primary-container: var(--ds-color-primary-800);
   --ds-secondary: var(--ds-color-accent-cyan-500);
   --ds-tertiary: var(--ds-color-accent-violet-500);

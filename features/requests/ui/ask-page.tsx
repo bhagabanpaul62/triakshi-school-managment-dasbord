@@ -1,6 +1,7 @@
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { CategoryService } from "../categories";
+import { linkFromQuery } from "../inputs";
 import { RequestService } from "../service";
 import { AskForm } from "./ask-form";
 import { BackLink, Notice, NoAccess, canWriteFor, isFamilyRole, one, type Search } from "./shared";
@@ -8,15 +9,14 @@ import { askContext, findStudents, raiseRequest } from "./actions";
 
 export const metadata = { title: "Ask the school" };
 
-/** `about` (what it is about) and `aboutHref` (where it lives) come from an "Ask about this" button on a notice, receipt or result. */
+/** `about` (what it is about) and `href` (where it lives, an in-app path) come from an "Ask about this" button on a notice, receipt or result. */
 export default async function AskPage({ searchParams }: { searchParams: Search }) {
   const ctx = await requireCtx();
   const sp = await searchParams;
   const family = isFamilyRole(ctx);
   if (!family && !canWriteFor(ctx)) return <NoAccess what="Writing a request for a family" who="the school office" />;
   const [categories, context] = await Promise.all([new CategoryService(ctx).options(), new RequestService(ctx).askContext()]);
-  const href = one(sp.aboutHref);
-  const link = one(sp.about) && /^\/app(\/|$)/.test(href) && !href.includes("//") ? { label: one(sp.about).slice(0, 80), href } : null;
+  const link = linkFromQuery(one(sp.about), one(sp.href));
   return (
     <>
       <BackLink href="/app/requests">{family ? "My requests" : "Queue"}</BackLink>

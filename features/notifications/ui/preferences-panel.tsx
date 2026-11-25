@@ -28,7 +28,7 @@ function Switch({ on, onChange, label, disabled }: { on: boolean; onChange: (v: 
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={() => onChange(!on)}
       className="inline-flex h-10 w-14 items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)] disabled:opacity-60">
-      <span className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors ${on ? "bg-[var(--ds-color-primary-500)]" : "bg-white/[0.12]"}`}>
+      <span className={`flex h-6 w-11 items-center rounded-full p-0.5 transition-colors ${on ? "bg-[var(--ds-primary)]" : "bg-white/[0.12]"}`}>
         <span className={`h-5 w-5 rounded-full bg-white transition-transform ${on ? "translate-x-5" : ""}`} />
       </span>
     </button>

@@ -31,6 +31,8 @@ const shared = {
   capacity: f.optInt(1, 100_000),
   guests: f.optInt(0, 10),
   closesAt: optWhen,
+  /** Who runs it. Left out: the person adding it (or the current owner when changing). */
+  ownerId: z.preprocess(blank, z.uuid("Pick a person").optional()),
   /** An app path of the notice that asks families' consent for a trip. */
   consentHref: f.optText(200).refine((v) => !v || /^\/app\/[^\s]*$/.test(v), "Use a link inside the app"),
 };
@@ -40,7 +42,7 @@ const shape = (v: Shared) => ({
   title: v.title, type: v.type, description: v.description ?? null, startsAt: v.startsAt, endsAt: v.endsAt ?? null, allDay: v.allDay,
   location: v.location ?? null, mapUrl: v.mapUrl ?? null, bring: v.bring ?? null, audience: v.audience, isPublic: v.isPublic, reminders: v.reminders,
   rsvp: v.rsvpOn ? { on: true as const, ...(v.capacity ? { capacity: v.capacity } : {}), ...(v.guests ? { guests: v.guests } : {}), ...(v.closesAt ? { closesAt: v.closesAt.toISOString() } : {}) } : { on: false as const },
-  consentHref: v.consentHref ?? null,
+  consentHref: v.consentHref ?? null, ownerId: v.ownerId,
 });
 const ends = (v: Shared) => !v.endsAt || v.endsAt >= v.startsAt;
 

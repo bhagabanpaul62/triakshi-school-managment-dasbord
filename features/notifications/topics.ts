@@ -2,7 +2,7 @@
 import type { EmailMode } from "./constants";
 
 export const TOPIC_GROUPS = {
-  urgent: "Safety and urgent", account: "Account", attendance: "Attendance and leave", notices: "Notices", messages: "Messages and requests",
+  urgent: "Safety and urgent", attendance: "Attendance and leave", notices: "Notices", messages: "Messages and requests",
   homework: "Homework", exams: "Exams and results", fees: "Fees and payments", services: "Library and transport",
   calendar: "Calendar and meetings", work: "Approvals and work",
 } as const;
@@ -14,7 +14,6 @@ const t = (group: TopicGroup, label: string, push: boolean, email: EmailMode, ex
 export const TOPICS = {
   "urgent.alert": t("urgent", "Urgent alert", true, "instant", { mustTell: true, priority: 1 }),
   "safety.report": t("urgent", "A reported concern", true, "instant", { mustTell: true, priority: 1 }),
-  "account.security": t("account", "Password, email and sign-in", true, "instant", { mustTell: true, priority: 1 }),
   "attendance.absence": t("attendance", "Absent or late", true, "instant", { mustTell: true, priority: 2 }),
   "attendance.leave": t("attendance", "Leave requests", true, "digest"),
   "notice.published": t("notices", "New notice", true, "digest"),

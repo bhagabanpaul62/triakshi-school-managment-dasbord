@@ -5,6 +5,7 @@ import { AuthInputError, LoginError, OtpError, SchoolAuth, otpMessage } from "@s
 import { schoolUrl } from "@smw/config";
 import { ForbiddenError, UnauthenticatedError, ValidationError } from "@smw/feature-kit";
 import { UploadError, authMails, services, trySend, uploadKey } from "@smw/integrations";
+import { accountMailer } from "@smw/feature-notifications/delivery";
 import { formToObject, getSchool, getSession, runAction, type ActionResult } from "@smw/runtime";
 import { FilePolicy } from "../service";
 import { profileInput } from "../inputs";
@@ -41,7 +42,7 @@ export async function changeMyPassword(fd: FormData): Promise<ActionResult> {
       throw err;
     }
     // A failed mail must not undo the change.
-    if (user.email) void trySend(services().email, { to: user.email, ...authMails.passwordChanged(school.name, user.name) });
+    if (user.email) void trySend(accountMailer(school.id), { to: user.email, ...authMails.passwordChanged(school.name, user.name) });
     return null;
   }, "Password changed. Your other devices are signed out.");
 }
@@ -68,11 +69,11 @@ export async function updateMyDetails(fd: FormData): Promise<ActionResult> {
     await asField("phone", () => auth.updateProfile(user.id, { phone: d.phone ?? null, ...(user.role !== "student" && d.name ? { name: d.name } : {}) }));
     if (!req) return { sent: null as boolean | null, email: null as string | null };
     const mail = authMails.confirmEmail(school.name, user.name, schoolUrl(school.slug, `/confirm-email?token=${req.token}`), req.code);
-    const sent = await trySend(services().email, { to: d.email!, ...mail });
+    const sent = await trySend(accountMailer(school.id), { to: d.email!, ...mail });
     // Tell the old address, so a hijacked session cannot move the account quietly.
     if (req.oldEmail) {
       const text = `Hello ${user.name},\n\nYour ${school.name} email is being changed to ${d.email}. If this was you, there is nothing to do.\n\nIf it was not you, contact the school office now.`;
-      void trySend(services().email, { to: req.oldEmail, subject: `Your email is being changed · ${school.name}`, text });
+      void trySend(accountMailer(school.id), { to: req.oldEmail, subject: `Your email is being changed · ${school.name}`, text });
     }
     return { sent, email: d.email! };
   });
@@ -102,7 +103,7 @@ export async function sendMyVerifyCode(): Promise<ActionResult> {
   return runAction(async () => {
     const { school, user, auth } = await me();
     const mail = await asField("code", () => auth.sendVerifyEmailCode(user.id));
-    const sent = await trySend(services().email, { to: mail.to, ...authMails.otp(school.name, mail.name, mail.code, "verify_email") });
+    const sent = await trySend(accountMailer(school.id), { to: mail.to, ...authMails.otp(school.name, mail.name, mail.code, "verify_email") });
     if (!sent) throw new ValidationError({ code: "We could not send the email. Try again later." }, "We could not send the email. Try again later.");
     return null;
   }, "We emailed you a 6-digit code");

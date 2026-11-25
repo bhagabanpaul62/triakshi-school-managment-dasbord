@@ -25,7 +25,7 @@ const compactDay = (ymd: string) => ymd.replaceAll("-", "");
 export const icsStamp = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 
 /** Backslash, semicolon, comma and line breaks, as the format requires. */
-export const escapeText = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, ";").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+export const escapeText = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
 
 /** Lines are at most 75 octets: the rest continues on lines that start with one space. A character is never cut in half. */
 export function foldLine(line: string): string {

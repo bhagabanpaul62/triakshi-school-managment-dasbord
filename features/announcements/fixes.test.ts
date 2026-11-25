@@ -150,12 +150,12 @@ describe("8: one notice failing never holds back the rest", () => {
 });
 
 describe("11: what only the people who run a notice may read", () => {
-  it("earlier wordings, approval reasons and review notes are hidden from a plain reader", async () => {
+  it("approval reasons and review notes are hidden from a plain reader; earlier wordings are not", async () => {
     const { id } = await publishNow(A().admin, { title: "Staff news", body: "x", audience: { include: [{ type: "staff" }], exclude: [] } });
     await new NoticeService(A().admin).correct({ id, edits: { body: "y" } });
     await q(sql`update announcements set approval_reason = 'my own reason', review_note = 'asked to shorten' where id = ${id}::uuid`);
     const reader = await new NoticeService(fx.as(fx.ids.teacher2!, "teacher")).get(id);
-    expect(reader.versions).toEqual([]);
+    expect(reader.versions).toHaveLength(1);
     expect(reader.review).toBeNull();
     expect(reader.notice).toMatchObject({ approvalReason: null, reviewNote: null });
     const admin = await new NoticeService(A().admin).get(id);

@@ -8,8 +8,8 @@ interface RowBase {
   title: string;
   body?: string;
   href?: string;
-  /** The thing it is about: opening it marks this read. */
-  subject?: { type: string; id: string };
+  /** The thing it is about: opening it marks this read, and a correction rewrites it. Required, so no row is left that nothing can close. */
+  subject: { type: string; id: string };
   groupKey?: string;
   action?: boolean;
   urgent?: boolean;

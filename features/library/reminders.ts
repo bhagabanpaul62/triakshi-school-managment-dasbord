@@ -28,7 +28,7 @@ export class OverdueReminders extends SchoolService<"read" | "manage" | "self"> 
         return userId ? [{ loanId: c.id, userId, title, days: daysLate(c.dueOn, today), dueOn: c.dueOn }] : [];
       });
       await NotificationWriter.insert(tx, this.ctx.schoolId, targets.map((t) => ({
-        userId: t.userId, topic: "library.due" as const, subject: { type: "loan", id: t.loanId }, title: `Library book overdue: ${t.title}`, body: `It was due on ${t.dueOn} and is ${t.days} ${t.days === 1 ? "day" : "days"} late. Please return it to the library.`, href: "/app/library",
+        userId: t.userId, topic: "library.due" as const, subject: { type: "loan", id: t.loanId }, title: "Library overdue notice", privateBody: true, body: `${t.title} was due on ${t.dueOn} and is ${t.days} ${t.days === 1 ? "day" : "days"} late. Please return it to the library.`, href: "/app/library",
       })));
       return targets.length;
     }, (n) => ({ action: "overdue_reminders", entity: "Loan", summary: `Sent ${n} overdue ${n === 1 ? "reminder" : "reminders"}` }));

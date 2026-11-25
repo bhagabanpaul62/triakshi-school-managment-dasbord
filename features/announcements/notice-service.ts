@@ -8,7 +8,7 @@ import { quietUntil } from "@smw/feature-notifications/quiet";
 import { publicAudience, contentOf, snapshotOf, readyErrors, plain, EMPTY, NO_AUDIENCE, CONTENT_KEYS, isWebsiteOnly, type Notice, type NoticeContent } from "./content";
 import { NoticeBase } from "./base";
 import { NEEDS_APPROVAL, TAB_STATES, type NoticeCan, type NoticeState, type NoticeTab } from "./constants";
-import { fanOut, reconcile, subjectOf, tell } from "./fan-out";
+import { reconcile, subjectOf, tell } from "./fan-out";
 import { approveInput, correctInput, draftInput, editInput, listInput, noteInput, reasonInput, type DraftInput, type NoticeListQuery } from "./inputs";
 import { labelOf, startSending } from "./lifecycle";
 import { announcementCategories, announcementFiles, announcementRecipients, announcementResponses, announcements, announcementVersions } from "./schema";
@@ -40,6 +40,10 @@ export interface NoticeView {
   can: NoticeCan;
 }
 
+/** "class:<id>" is the rule `{type:"class", id}`; "everyone" is `{type:"everyone"}`. */
+const audienceRuleOf = (v: string) => { const [type, id] = v.split(":"); return id ? { type, id } : { type }; };
+/** The day a notice is placed on: when it went out, else when it goes, else when it was last saved. */
+const whenOf = sql`coalesce(${announcements.publishedAt}, ${announcements.scheduledAt}, ${announcements.updatedAt})`;
 const REJECTED = "Rejected: ";
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const idList = (ids: string[]) => sql.join(ids.map((i) => sql`${i}::uuid`), sql`, `);
@@ -56,6 +60,9 @@ export class NoticeService extends NoticeBase {
         inArray(announcements.state, [...TAB_STATES[q.tab]]), this.visible(),
         q.category ? eq(announcements.categoryId, q.category) : undefined, q.type ? eq(announcements.type, q.type) : undefined,
         q.author ? eq(announcements.createdBy, q.author) : undefined, q.needs ? sql`${announcements.response}->>'kind' <> 'none'` : undefined,
+        q.audience ? sql`${announcements.audience}->'include' @> ${JSON.stringify([audienceRuleOf(q.audience)])}::jsonb` : undefined,
+        q.from ? sql`${whenOf} >= ${new Date(`${q.from}T00:00:00+05:30`).toISOString()}::timestamptz` : undefined,
+        q.to ? sql`${whenOf} < ${new Date(new Date(`${q.to}T00:00:00+05:30`).getTime() + 864e5).toISOString()}::timestamptz` : undefined,
         q.q ? or(ilike(announcements.title, `%${q.q}%`), ilike(announcements.body, `%${q.q}%`), ilike(announcements.number, `%${q.q}%`)) : undefined,
       );
       const order = { live: desc(announcements.publishedAt), waiting: asc(announcements.submittedAt), scheduled: asc(announcements.scheduledAt), drafts: desc(announcements.updatedAt), archive: desc(announcements.publishedAt) }[q.tab];
@@ -85,11 +92,11 @@ export class NoticeService extends NoticeBase {
   }
 
   /** Whether this audience goes out at once or needs approval, and who would approve. Same rule as publish. */
-  async reachFor(input: unknown): Promise<{ mode: "free" | "approval"; approvers: string[] }> {
+  async reachFor(input: unknown, website = false): Promise<{ mode: "free" | "approval"; approvers: string[] }> {
     this.staffOnly();
     const audience = this.parse(audienceField, input);
     return this.read("draft", async (tx) => ({
-      mode: this.can("publish") ? await this.reach(tx, audience, "publish") : "approval",
+      mode: this.can("publish") ? await this.publishReach(tx, { audience, website }) : "approval",
       approvers: (await this.approvers(tx)).filter((a) => a.id !== this.ctx.userId).map((a) => a.name),
     }));
   }
@@ -133,10 +140,10 @@ export class NoticeService extends NoticeBase {
         tx.select({ v: announcementVersions, by: users.name }).from(announcementVersions).leftJoin(users, eq(users.id, announcementVersions.changedBy)).where(eq(announcementVersions.announcementId, n.id)).orderBy(desc(announcementVersions.version)),
         tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, [n.createdBy, n.approvedBy].filter((x): x is string => !!x))),
         this.approvers(tx),
-        n.audience.include.length || isWebsiteOnly(n) ? this.reach(tx, n.audience, "publish").catch(() => null) : Promise.resolve(null),
+        n.audience.include.length || isWebsiteOnly(n) ? this.publishReach(tx, n).catch(() => null) : Promise.resolve(null),
       ]);
       const name = new Map(names.map((u) => [u.id, u.name]));
-      // Earlier wordings, approval reasons and what a reviewer asked are for the writer, an admin and approvers only.
+      // Approval reasons and what a reviewer asked are for the writer, an admin and approvers only. Earlier wordings are for any staff who can read the notice.
       const inner = this.isManager || this.can("approve") || n.createdBy === this.ctx.userId;
       if (!inner) { notice.approvalReason = null; notice.reviewNote = null; }
       const unsent = n.state === "draft" || n.state === "waiting" || n.state === "scheduled";
@@ -145,7 +152,7 @@ export class NoticeService extends NoticeBase {
       return {
         notice, category: cat ? { id: cat.id, name: cat.name, tone: cat.tone } : null, authorName: n.createdBy ? name.get(n.createdBy) ?? null : null, approvedByName: n.approvedBy ? name.get(n.approvedBy) ?? null : null,
         files: files.map((f) => ({ id: f.id, name: f.fileName, size: f.size, contentType: f.contentType, sort: f.sort })),
-        versions: !inner ? [] : versions.map(({ v, by }) => ({ version: v.version, note: v.note, changedByName: by, at: v.createdAt, snapshot: v.snapshot })),
+        versions: versions.map(({ v, by }) => ({ version: v.version, note: v.note, changedByName: by, at: v.createdAt, snapshot: v.snapshot })),
         review: !inner ? null : n.reviewNote ? n.reviewNote.startsWith(REJECTED) ? { kind: "rejected", note: n.reviewNote.slice(REJECTED.length) } : { kind: "changes", note: n.reviewNote } : null,
         approvers: approvers.filter((a) => a.id !== n.createdBy).map((a) => a.name),
         audienceText: unsent ? (n.audience.include.length ? await describeAudience(tx, n.audience) : n.audienceLabel) : n.audienceLabel,
@@ -172,7 +179,8 @@ export class NoticeService extends NoticeBase {
     };
   }
 
-  private websiteAllowed() { return this.isManager || this.can("approve"); }
+  /** Anyone who may publish may choose the website; whether it then goes out at once is `publishReach`. */
+  private websiteAllowed() { return this.can("publish"); }
 
   /**
    * Changing who a sent or approved notice is for is publishing to the new people: it needs the right to publish and a reach that goes out at once.
@@ -181,7 +189,7 @@ export class NoticeService extends NoticeBase {
   private async mayChangeAudience(tx: Tx, before: Audience, c: NoticeContent): Promise<void> {
     const after = await expandGroups(tx, c.audience);
     if (sameJson(before, after)) { c.audience = before; return; }
-    if (after.include.length && (!this.can("publish") || (await this.reach(tx, c.audience, "publish")) === "approval")) {
+    if (after.include.length && (!this.can("publish") || (await this.publishReach(tx, c)) === "approval")) {
       throw new ForbiddenError(NEEDS_APPROVAL);
     }
     c.audience = after;
@@ -207,7 +215,7 @@ export class NoticeService extends NoticeBase {
     if (c.website) {
       const asked = d.website === true || d.websiteOnly === true;
       if (!publicAudience(c.audience) || !this.websiteAllowed()) {
-        if (asked) this.fieldError("website", this.websiteAllowed() ? "Only a notice for everyone can go on the website" : "Only an admin or an approver can put a notice on the website");
+        if (asked) this.fieldError("website", this.websiteAllowed() ? "Only a notice for everyone can go on the website" : "You need the right to publish to put a notice on the website");
         c.website = false;
       }
     }
@@ -274,10 +282,12 @@ export class NoticeService extends NoticeBase {
       const n = await this.find(tx, id, true);
       if (action === "recall") this.own(n); else if (n.createdBy === this.ctx.userId) throw new ForbiddenError("You cannot review your own notice. Take it back instead.");
       transition(n.state, action);
-      await tx.update(announcements).set({ state: "draft", reviewNote: note, submittedAt: null, updatedAt: new Date() }).where(eq(announcements.id, n.id));
+      // Keep what the reviewer saw, so the next review can show what the writer changed since.
+      if (action !== "recall") await tx.insert(announcementVersions).values({ schoolId: this.ctx.schoolId, announcementId: n.id, version: n.version, snapshot: snapshotOf(n), note: action === "reject" ? "As it was when rejected" : "As it was when sent back", changedBy: n.createdBy });
+      await tx.update(announcements).set({ state: "draft", reviewNote: note, submittedAt: null, updatedAt: new Date(), ...(action !== "recall" ? { version: n.version + 1 } : {}) }).where(eq(announcements.id, n.id));
       await NotificationWriter.done(tx, this.ctx.schoolId, { type: "notice-approval", id: n.id });
       if (action !== "recall" && n.createdBy) {
-        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: n.createdBy, topic: "work.update", title: `${verb} your notice: ${n.title}`, body: note?.replace(REJECTED, "") ?? undefined, href: `/app/announcements/${n.id}` }]);
+        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: n.createdBy, topic: "work.update", title: `${verb} your notice: ${n.title}`, body: note?.replace(REJECTED, "") ?? undefined, href: `/app/announcements/${n.id}`, subject: { type: "notice-review", id: n.id } }]);
       }
       await this.audit(tx, { action, entity: "Notice", entityId: n.id, summary: `${verb} "${n.title}"` });
       return { id: n.id, state: "draft" as const };
@@ -311,7 +321,7 @@ export class NoticeService extends NoticeBase {
       const row = next === "sending" ? await startSending(tx, approved!, { immediate: false }) : (await tx.update(announcements).set({ state: "scheduled", audience: await expandGroups(tx, approved!.audience) }).where(eq(announcements.id, n.id)).returning())[0]!;
       await NotificationWriter.done(tx, this.ctx.schoolId, { type: "notice-approval", id: n.id });
       if (n.createdBy && n.createdBy !== me) {
-        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: n.createdBy, topic: "work.update", title: `Approved: ${n.title}`, body: d.edits ? "The approver made some changes." : undefined, href: `/app/announcements/${n.id}` }]);
+        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: n.createdBy, topic: "work.update", title: `Approved: ${n.title}`, body: d.edits ? "The approver made some changes." : undefined, href: `/app/announcements/${n.id}`, subject: { type: "notice-review", id: n.id } }]);
       }
       await this.audit(tx, { action: "approve", entity: "Notice", entityId: n.id, summary: `Approved "${n.title}"${n.createdBy === me ? ` (own notice: ${d.reason})` : ""}` });
       return row;
@@ -334,13 +344,12 @@ export class NoticeService extends NoticeBase {
           throw new ValidationError({ confirm: say }, say);
         }
       }
-      if (n.audience.include.length && (await this.reach(tx, n.audience, "publish")) === "approval") throw new ConflictError("This reaches beyond your own classes, so it needs approval. Send it for approval.");
+      if ((await this.publishReach(tx, n)) === "approval") throw new ConflictError("This reaches beyond your own classes, or goes on the website, so it needs approval. Send it for approval.");
       const sending = await startSending(tx, n, { immediate: n.type === "urgent" });
       await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Published "${n.title}"` });
       return sending;
     });
-    if (row.type === "urgent") await fanOut(this.ctx.schoolId, row.id);
-    return { id: row.id, state: row.type === "urgent" ? "published" : row.state, number: row.number, sendAt: row.sendAt };
+    return { id: row.id, state: row.state, number: row.number, sendAt: row.sendAt };
   }
 
   /** Put it on a day and time. Says when that falls in quiet hours (people get the push at the end of them). */
@@ -354,7 +363,7 @@ export class NoticeService extends NoticeBase {
       if (n.type === "urgent") throw new ConflictError("An urgent alert goes at once; it cannot be scheduled.");
       if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() + 60_000) this.fieldError("scheduledAt", "Choose a time that has not passed");
       await this.problems(tx, { ...contentOf(n), scheduledAt: when });
-      if (n.audience.include.length && (await this.reach(tx, n.audience, "publish")) === "approval") throw new ConflictError("This reaches beyond your own classes, so it needs approval. Send it for approval.");
+      if ((await this.publishReach(tx, n)) === "approval") throw new ConflictError("This reaches beyond your own classes, or goes on the website, so it needs approval. Send it for approval.");
       await tx.update(announcements).set({ state: "scheduled", scheduledAt: when, audience: await expandGroups(tx, n.audience), updatedAt: new Date() }).where(eq(announcements.id, n.id));
       const s = await this.settings(tx);
       await this.audit(tx, { action: "schedule", entity: "Notice", entityId: n.id, summary: `Scheduled "${n.title}"` });
@@ -388,7 +397,7 @@ export class NoticeService extends NoticeBase {
     });
   }
 
-  /** "Send now" during the 30 seconds: it goes out at once, the undo is gone. */
+  /** "Send now" during the 30 seconds: it is due at once, the undo is gone. Returns without sending: the caller starts `fanOut` after the response (the minute job is the safety net). */
   async release(id: string): Promise<{ id: string }> {
     this.staffOnly();
     await this.write("publish", async (tx) => {
@@ -399,11 +408,10 @@ export class NoticeService extends NoticeBase {
       await tx.update(announcements).set({ sendAt: new Date(), updatedAt: new Date() }).where(eq(announcements.id, n.id));
       await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent "${n.title}" without waiting` });
     });
-    await fanOut(this.ctx.schoolId, id);
     return { id };
   }
 
-  /** A scheduled notice goes now. */
+  /** A scheduled notice is due now. Returns without sending, like `release`. */
   async sendNow(id: string): Promise<{ id: string; number: string | null }> {
     this.staffOnly();
     const row = await this.write("publish", async (tx) => {
@@ -414,7 +422,6 @@ export class NoticeService extends NoticeBase {
       await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent scheduled notice "${n.title}" now` });
       return sending;
     });
-    await fanOut(this.ctx.schoolId, row.id);
     return { id: row.id, number: row.number };
   }
 

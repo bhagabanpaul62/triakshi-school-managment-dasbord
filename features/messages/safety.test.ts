@@ -263,3 +263,25 @@ describe("seed", () => {
     expect((await new SafeguardService(school.a.as.admin).log()).length).toBe(1);
   });
 });
+
+describe("find a conversation (M11)", () => {
+  it("a lead finds one by student, staff member or day, sees people and state only, and never one that names them", async () => {
+    const t = await svc(w.a.as.admin).start(about(w.st3, { subject: "Secret subject find", body: "Secret words find" }));
+    const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const byStudent = await guard(lead2).find({ q: "Kabir" });
+    const hit = byStudent.find((c) => c.threadId === t.id)!;
+    expect(hit).toMatchObject({ state: "open", studentName: "Kabir" });
+    expect(hit.people).toContain(w.a.as.admin.name);
+    expect(JSON.stringify(hit)).not.toMatch(/Secret/);
+    expect((await guard(lead2).find({ q: w.a.as.admin.name })).some((c) => c.threadId === t.id)).toBe(true);
+    expect((await guard(lead2).find({ day })).some((c) => c.threadId === t.id)).toBe(true);
+    expect((await guard(lead2).find({ q: "Kabir", day: "2000-01-01" })).length).toBe(0);
+    await expect(guard(lead2).find({})).rejects.toBeInstanceOf(ValidationError);
+    await expect(guard(w.own).find({ q: "Kabir" })).rejects.toBeInstanceOf(ForbiddenError);
+    // a report that names a lead hides the conversation from that lead only
+    const view = await svc(w.student3).thread(t.id);
+    await svc(w.student3).report({ threadId: t.id, messageId: view.messages.find((m) => m.sender === w.a.as.admin.name)!.id, category: "pressure", note: "Asked for cash." });
+    expect((await guard(w.a.as.admin).find({ q: "Kabir" })).some((c) => c.threadId === t.id)).toBe(false);
+    expect((await guard(lead2).find({ q: "Kabir" })).some((c) => c.threadId === t.id)).toBe(true);
+  });
+});

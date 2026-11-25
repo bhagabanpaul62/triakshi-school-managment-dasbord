@@ -9,6 +9,7 @@ import { students } from "@smw/feature-students/schema";
 import { classes, sections, academicYears } from "@smw/feature-academics/schema";
 import { addDays, istDay } from "./dates";
 import eventsFeature from "./feature";
+import { closeRsvps } from "./jobs";
 import { RsvpService } from "./rsvp";
 import { eventPeople, events } from "./schema";
 import { EventService } from "./service";
@@ -156,5 +157,40 @@ describe("the owner's side", () => {
     const e = await make({});
     const support = new RsvpService({ ...s.as.admin, supportStaffId: "00000000-0000-4000-8000-000000000009" });
     await expect(support.list(e.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describe("the invitation is an action while answers are open", () => {
+  const rowOf = async (id: string, userId: string) => (await withSchool(s.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.subjectId, id), eq(notifications.userId, userId), eq(notifications.topic, "event.invite")))))[0]!;
+  const ask = (o: Record<string, unknown> = {}) => make({}, { notify: "true", ...o });
+
+  it("is an action row with answers on, a plain row without, and answering closes it", async () => {
+    const e = await ask();
+    expect(await rowOf(e.id, logins[0]!)).toMatchObject({ action: true, doneAt: null });
+    await rsvp(logins[0]!).answer(e.id, { answer: "maybe" });
+    expect((await rowOf(e.id, logins[0]!)).doneAt).not.toBeNull();
+    expect((await rowOf(e.id, logins[1]!)).doneAt).toBeNull();
+    const plain = await admin().create({ title: "Plain", startsAt: when(), audience: JSON.stringify({ include: [{ type: "families" }], exclude: [] }) });
+    expect((await rowOf(plain.id, logins[2]!)).action).toBe(false);
+  });
+
+  it("the office answering for someone closes that person's row only", async () => {
+    const e = await ask();
+    const key = (await rows(e.id)).find((p) => p.userId === logins[3])!.personKey;
+    await rsvp(s.users.admin, "admin").answerFor(e.id, key, { answer: "yes" });
+    expect((await rowOf(e.id, logins[3]!)).doneAt).not.toBeNull();
+    expect((await rowOf(e.id, logins[4]!)).doneAt).toBeNull();
+  });
+
+  it("cancelling closes it for everyone; the job closes it when answers close", async () => {
+    const c = await ask();
+    await admin().cancel(c.id, { reason: "Rain" });
+    expect((await rowOf(c.id, logins[5]!)).doneAt).not.toBeNull();
+    const soon = await ask({ closesAt: `${addDays(istDay(new Date()), 1)}T10:00` });
+    await withSchool(s.id, (tx) => closeRsvps(tx, s.id, new Date()));
+    expect((await rowOf(soon.id, logins[6]!)).doneAt).toBeNull();
+    const closed = await withSchool(s.id, (tx) => closeRsvps(tx, s.id, new Date(Date.now() + 3 * 86_400_000)));
+    expect(closed).toBeGreaterThan(0);
+    expect((await rowOf(soon.id, logins[6]!)).doneAt).not.toBeNull();
   });
 });

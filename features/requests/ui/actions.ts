@@ -57,7 +57,7 @@ export async function saveCategory(fd: FormData) {
     id: o[`f${n}_id`], label: o[`f${n}_label`], kind: o[`f${n}_kind`] ?? "text", required: o[`f${n}_required`] === "true",
     options: typeof o[`f${n}_options`] === "string" ? String(o[`f${n}_options`]).split(",").map((x) => x.trim()).filter(Boolean) : undefined,
   }));
-  return serviceAction(CategoryService, (s) => s.save({ id: o.id, name: o.name, nature: o.nature, ownerRole: o.ownerRole, targetDays: o.targetDays, escalation, fields }), "Category saved");
+  return serviceAction(CategoryService, (s) => s.save({ id: o.id, name: o.name, nature: o.nature, ownerUserId: o.ownerUserId, ownerRole: o.ownerRole, targetDays: o.targetDays, escalation, fields }), "Category saved");
 }
 export async function setCategoryActive(fd: FormData) { return serviceAction(CategoryService, (s) => s.setActive(id(fd), fd.get("active") === "1"), "Updated"); }
 export async function deleteCategory(fd: FormData) { return serviceAction(CategoryService, (s) => s.remove(id(fd)), "Category deleted"); }

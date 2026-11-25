@@ -79,9 +79,9 @@ export abstract class FeesBase extends MoneyService<Perm> {
     return new Map(rows.flatMap((r) => (r.userId ? [[r.id, r.userId] as const] : [])));
   }
 
-  protected async tell(tx: Tx, studentIds: string[], topic: "fees.due" | "fees.payment", title: string, body: string, href = "/app/fees", subject?: { type: string; id: string }) {
+  protected async tell(tx: Tx, studentIds: string[], topic: "fees.due" | "fees.payment", title: string, body: string, href: string, subject: { type: string; id: string }) {
     const logins = await this.studentUsers(tx, studentIds);
-    return NotificationWriter.insert(tx, this.ctx.schoolId, [...logins.values()].map((userId) => ({ userId, topic, title, body, href, subject })));
+    return NotificationWriter.insert(tx, this.ctx.schoolId, [...logins.values()].map((userId) => ({ userId, topic, title, body, href, subject, privateBody: true })));
   }
 
   protected async currentYear(tx: Tx) {

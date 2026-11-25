@@ -19,18 +19,18 @@ describe("comm settings", () => {
     expect(s).toMatchObject({
       quietFrom: "20:00", quietTo: "07:00", quietSundays: true, teacherPublish: "free", approvalFor: { families: false, wholeSchool: false, website: true },
       familiesMayStart: true, familiesMayReply: true, teacherMessages: "taught", attachments: true, showStaffSeen: true,
-      circularFormat: "CIR/{session}/{n}", requestFormat: "REQ/{session}/{n}", languages: [], channelDefaults: {}, retentionYears: 3, safetyContacts: [], officeName: "School office",
+      circularFormat: "CIR/{session}/{n}", requestFormat: "REQ/{session}/{n}", languages: [], channelDefaults: { staff: {}, families: {} }, retentionYears: 3, safetyContacts: [], officeName: "School office",
     });
   });
 
   it("saves only what changed, audits it, and keeps the rest", async () => {
     const svc = new CommSettingsService(a.as.admin);
-    const saved = await svc.save({ quietFrom: "21:00", languages: ["Hindi"], channelDefaults: { fees: { push: true, email: "instant" } }, safetyContacts: [{ name: "Childline", phone: "1098" }] });
+    const saved = await svc.save({ quietFrom: "21:00", languages: ["Hindi"], channelDefaults: { staff: {}, families: { fees: { push: true, email: "instant" } } }, safetyContacts: [{ name: "Childline", phone: "1098" }] });
     expect(saved.quietFrom).toBe("21:00");
     expect(saved.quietTo).toBe("07:00");
     await svc.save({ retentionYears: 5 });
     const again = await new CommSettingsService(a.as.accountant).get();
-    expect(again).toMatchObject({ quietFrom: "21:00", retentionYears: 5, languages: ["Hindi"], channelDefaults: { fees: { push: true, email: "instant" } }, safetyContacts: [{ name: "Childline", phone: "1098" }] });
+    expect(again).toMatchObject({ quietFrom: "21:00", retentionYears: 5, languages: ["Hindi"], channelDefaults: { staff: {}, families: { fees: { push: true, email: "instant" } } }, safetyContacts: [{ name: "Childline", phone: "1098" }] });
     const [log] = [...(await withSchool(a.id, (tx) => tx.execute(sql`select count(*)::int as n from audit_logs where module = 'notifications' and entity = 'Communication settings'`)))] as { n: number }[];
     expect(log!.n).toBe(2);
   });
@@ -42,7 +42,7 @@ describe("comm settings", () => {
     await expect(svc.save({ retentionYears: 8 })).rejects.toBeInstanceOf(ValidationError);
     await expect(svc.save({ circularFormat: "CIR/no-number" })).rejects.toBeInstanceOf(ValidationError);
     await expect(svc.save({ teacherPublish: "never" })).rejects.toBeInstanceOf(ValidationError);
-    await expect(svc.save({ channelDefaults: { nonsense: { push: true, email: "off" } } })).rejects.toBeInstanceOf(ValidationError);
+    await expect(svc.save({ channelDefaults: { staff: { nonsense: { push: true, email: "off" } } } })).rejects.toBeInstanceOf(ValidationError);
     expect((await svc.get()).retentionYears).toBe(5);
   });
 

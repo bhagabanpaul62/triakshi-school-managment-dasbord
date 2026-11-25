@@ -72,6 +72,7 @@ export class MeetingService extends MeetingBase {
         from meeting_windows w join users u on u.id = w.teacher_id where w.meeting_id = ${id}::uuid ${own ? sql`and w.teacher_id = ${this.ctx.userId}::uuid` : sql``}
         order by w.day, u.name, w.starts_at`);
       if (own && !wins.length) throw new NotFoundError("Meeting");
+      await this.seen(tx, id);
       const slots = wins.length ? await rows<SlotView & { windowId: string }>(tx, sql`
         select s.id, s.window_id as "windowId", s.starts_at as "startsAt", s.ends_at as "endsAt", s.state, s.student_id as "studentId", st.name as "studentName",
           coalesce(c.name || coalesce('-' || sec.name, ''), null) as "studentLabel", s.walk_in as "walkIn", s.visit

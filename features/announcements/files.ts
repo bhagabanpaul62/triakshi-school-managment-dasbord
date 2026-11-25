@@ -1,4 +1,5 @@
 // Files on a notice, and one optional slip for a paper answer. Stored privately, served only through checked routes with a 60-second link.
+import { z } from "zod";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { withSchool, type Tx } from "@smw/db";
 import { ConflictError, ValidationError } from "@smw/feature-kit";
@@ -75,6 +76,7 @@ export class NoticeFileService extends NoticeBase {
   /** `ids` in the order they should show. */
   async reorder(noticeId: string, ids: string[]): Promise<{ id: string }> {
     this.staffOnly();
+    if (!z.array(z.uuid()).max(MAX_FILES).safeParse(ids).success) throw new ValidationError({ files: "Could not read the order of the files" });
     return this.write("draft", async (tx) => {
       const n = await this.find(tx, noticeId, true);
       this.own(n);

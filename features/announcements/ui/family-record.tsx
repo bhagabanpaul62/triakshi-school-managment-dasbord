@@ -8,10 +8,10 @@ import { dateTime } from "@smw/ui/format";
 import type { Tone } from "@smw/ui/tone";
 import { FeedService, type FeedNotice } from "../service";
 import { AnswerCard } from "./answer-form";
-import { BackLink, HOME, LinkButton, Notice, TYPE_LABEL } from "./shared";
+import { BackLink, HOME, LinkButton, Notice, RelatedLinks, TYPE_LABEL, type Related } from "./shared";
 
 /** One notice as the person it was sent to reads it: what to answer first, then the words, files and the way to ask. */
-export async function FamilyRecord({ ctx, id, lang }: { ctx: Ctx; id: string; lang?: string }) {
+export async function FamilyRecord({ ctx, id, lang, related = [] }: { ctx: Ctx; id: string; lang?: string; related?: Related[] }) {
   let n: FeedNotice;
   try { n = await new FeedService(ctx).open(id, lang === undefined ? {} : { lang: lang === "main" ? null : lang }); } catch (e) { if (e instanceof NotFoundError) notFound(); throw e; }
   const asks = n.response.kind !== "none" && !n.withdrawn;
@@ -53,6 +53,7 @@ export async function FamilyRecord({ ctx, id, lang }: { ctx: Ctx; id: string; la
             <FileList files={n.files.map((f) => ({ id: f.id, name: f.name, sizeBytes: f.size, type: f.contentType, href: `/api/notices/files/${f.id}` }))} />
           </section>
         ) : null}
+        {n.withdrawn ? null : <RelatedLinks related={related} />}
         {askAbout ? <p className="text-sm"><LinkButton href={askAbout}>Ask about this</LinkButton></p> : null}
       </div>
     </>

@@ -2,7 +2,7 @@ import { and, asc, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { env, schoolUrl } from "@smw/config";
 import { schools, users, withConsole, withSchool, type Tx } from "@smw/db";
 import { SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
-import { emailHtml, escapeHtml, pushConfigured, services, type Mail } from "@smw/integrations";
+import { emailHtml, escapeHtml, pushConfigured, services, type EmailSender, type Mail } from "@smw/integrations";
 import { todayIST, addDays } from "@smw/feature-kit/money";
 import { chunks } from "./constants";
 import notificationsFeature from "./feature";
@@ -31,8 +31,8 @@ export const SETTINGS_LINE = "To change which emails you get, open Settings in t
 /** 06:00 IST on the next IST day. */
 export const tomorrowMorning = (now: Date) => new Date(`${addDays(todayIST(now), 1)}T06:00:00+05:30`);
 
-/** Urgent and safety mail (priority 1 and 2) may use the whole daily limit except the last tenth, which stays for codes and passwords. */
-const URGENT_SHARE = 0.9;
+/** Urgent and safety mail (priority 1 and 2) may use the daily limit except the last fifth, which stays for codes and passwords (`sendAccountMail`). */
+const URGENT_SHARE = 0.8;
 /** Everything else may use this much of the limit, and one school at most half of that, so one busy school cannot starve the others. */
 const NORMAL_SHARE = 0.6;
 const SCHOOL_SHARE = 0.5;
@@ -51,10 +51,25 @@ export async function reserveMail(schoolId: string, priority: number, now: Date)
     const total = rows.reduce((s, r) => s + r.n, 0);
     const mine = rows.find((r) => r.schoolId === schoolId)?.n ?? 0;
     if (total >= cap || (priority > 2 && mine >= Math.floor(cap * SCHOOL_SHARE))) return false;
-    await tx.insert(mailUsage).values({ schoolId, day, count: 1 }).onConflictDoUpdate({ target: [mailUsage.schoolId, mailUsage.day], set: { count: sql`${mailUsage.count} + 1` } });
+    await countMail(tx, schoolId, day);
     return true;
   });
 }
+
+const countMail = (tx: Tx, schoolId: string, day: string) =>
+  tx.insert(mailUsage).values({ schoolId, day, count: 1 }).onConflictDoUpdate({ target: [mailUsage.schoolId, mailUsage.day], set: { count: sql`${mailUsage.count} + 1` } });
+
+/**
+ * Codes, reset links and security notices to one person. Always sent (no limit applies, the reserve exists for them) and
+ * counted for the school, so the usage page tells the truth. A send that fails throws and is not counted.
+ */
+export async function sendAccountMail(schoolId: string, mail: Mail, now = new Date()): Promise<void> {
+  await services().email.send(mail);
+  await withConsole((tx) => countMail(tx, schoolId, todayIST(now))).catch((e) => console.error("account mail sent but not counted", schoolId, e));
+}
+
+/** `sendAccountMail` as a sender, for callers that use `trySend(sender, mail)`. */
+export const accountMailer = (schoolId: string): EmailSender => ({ send: (mail) => sendAccountMail(schoolId, mail) });
 
 export const releaseMail = (schoolId: string, now: Date) =>
   withConsole((tx) => tx.update(mailUsage).set({ count: sql`greatest(${mailUsage.count} - 1, 0)` }).where(and(eq(mailUsage.schoolId, schoolId), eq(mailUsage.day, todayIST(now)))));

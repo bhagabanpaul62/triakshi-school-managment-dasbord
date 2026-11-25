@@ -1,9 +1,10 @@
-import { and, asc, count, eq, sql } from "drizzle-orm";
-import { schoolRoles, type Tx } from "@smw/db";
+import { and, asc, count, eq, inArray, sql } from "drizzle-orm";
+import { schoolRoles, users, type Tx } from "@smw/db";
 import { ConflictError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import type { EscalationLevel, RequestField } from "./constants";
 import requestsFeature from "./feature";
 import { categoryInput, orderInput } from "./inputs";
+import { STAFF_ROLES } from "./routing";
 import { requestCategories, requests } from "./schema";
 
 type Perm = keyof typeof requestsFeature.permissions;
@@ -61,6 +62,11 @@ export class CategoryService extends SchoolService<Perm> {
     });
   }
 
+  /** Active staff a category may be given to by name. */
+  async personOptions(): Promise<{ value: string; label: string }[]> {
+    return this.read("manage", async (tx) => (await tx.select({ id: users.id, name: users.name }).from(users).where(and(eq(users.status, "active"), inArray(users.role, STAFF_ROLES as never[]))).orderBy(asc(users.name))).map((u) => ({ value: u.id, label: u.name })));
+  }
+
   /** Every category, with how many requests each has. A support session may set categories up but never counts requests: `used` is null for it. */
   async list() {
     const support = !!this.ctx.supportStaffId;
@@ -74,6 +80,10 @@ export class CategoryService extends SchoolService<Perm> {
     this.authorize("manage", "write");
     const d = this.parse(categoryInput, input);
     return this.write("manage", async (tx) => {
+      if (d.ownerUserId) {
+        const [u] = await tx.select({ id: users.id }).from(users).where(and(eq(users.id, d.ownerUserId), inArray(users.role, STAFF_ROLES as never[])));
+        if (!u) throw new ValidationError({ ownerUserId: "Choose a staff member" });
+      }
       const values = { name: d.name, nature: d.nature, ownerUserId: d.ownerUserId ?? null, ownerRole: d.ownerRole, targetDays: d.targetDays, escalation: d.escalation, fields: d.fields, updatedAt: new Date() };
       try {
         if (d.id) {

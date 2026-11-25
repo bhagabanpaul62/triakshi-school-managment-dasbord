@@ -11,7 +11,7 @@ import { MenuIconView } from "@smw/ui/shell/icons";
 import { toast } from "@smw/ui/shell/toast";
 import { MAX_LEVELS, MAX_QUESTIONS, NATURE_WORDS, type EscalationLevel, type Nature, type RequestField } from "../constants";
 
-export interface CategoryFormValues { id?: string; name: string; nature: Nature; ownerRole: string; targetDays: number; escalation: EscalationLevel[]; fields: RequestField[] }
+export interface CategoryFormValues { id?: string; name: string; nature: Nature; ownerUserId?: string | null; ownerRole: string; targetDays: number; escalation: EscalationLevel[]; fields: RequestField[] }
 type Role = { value: string; label: string };
 /** A row keeps its own number while rows come and go, so what is typed never slides into another row. */
 type Row<T> = { n: number; value?: T };
@@ -56,8 +56,8 @@ function Rows<T>({ title, noun, rows, max, setRows, make, render }: {
 }
 
 /** Add or edit a category. Any number of late levels (up to 5) and extra questions (up to 8), each added and removed on its own. */
-export function CategoryForm({ title, roles, initial, action, trigger }: {
-  title: string; roles: Role[]; initial?: CategoryFormValues; action: (fd: FormData) => Promise<FormResult>; trigger: { label: string; edit?: boolean };
+export function CategoryForm({ title, roles, people, initial, action, trigger }: {
+  title: string; roles: Role[]; people: Role[]; initial?: CategoryFormValues; action: (fd: FormData) => Promise<FormResult>; trigger: { label: string; edit?: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -80,7 +80,8 @@ export function CategoryForm({ title, roles, initial, action, trigger }: {
   const top: Field[] = [
     { name: "name", label: "Name", required: true, wide: true },
     { name: "nature", label: "Kind", type: "select", required: true, options: Object.entries(NATURE_WORDS).map(([value, label]) => ({ value, label })), hint: "A complaint about a person is hidden from that person. A safety concern goes only to safeguarding." },
-    { name: "ownerRole", label: "Answered by", type: "select", required: true, options: roles },
+    { name: "ownerRole", label: "Answered by (role)", type: "select", required: true, options: roles },
+    { name: "ownerUserId", label: "Or one person", type: "select", options: [{ value: "", label: "Anyone in that role" }, ...people], hint: "A named person gets every request of this category. If they are away or inactive, the role takes it." },
     { name: "targetDays", label: "Days to answer", type: "number", required: true, min: 1, max: 60 },
   ];
   return (
@@ -91,7 +92,7 @@ export function CategoryForm({ title, roles, initial, action, trigger }: {
       <Modal open={open} onOpenChange={setOpen} size="lg" title={title} icon={<IconChip className="h-10 w-10"><MenuIconView name="inbox" /></IconChip>} dismissOnOutsideClick={false}
         footer={<ModalFooter secondary={{ onClick: () => setOpen(false) }} primary={{ label: trigger.edit ? "Save" : "Add", type: "submit", form: formId, loading: pending }} />}>
         <form id={formId} onSubmit={keepValues(submit)} className="flex flex-col gap-6 pt-2" noValidate>
-          <FieldGrid fields={top} values={initial ? { ...initial } : { nature: "general", ownerRole: "admin", targetDays: 3 }} errors={errors} />
+          <FieldGrid fields={top} values={initial ? { ...initial, ownerUserId: initial.ownerUserId ?? "" } : { nature: "general", ownerRole: "admin", targetDays: 3 }} errors={errors} />
           <Rows title="If it is late, it goes up" noun="Level" rows={levels} max={MAX_LEVELS} setRows={setLevels} make={fresh}
             render={(r) => <FieldGrid fields={levelFields(r.n, roles)} values={{ [`l${r.n}_label`]: r.value?.label, [`l${r.n}_role`]: r.value?.role ?? roles[0]?.value, [`l${r.n}_days`]: r.value?.afterDays ?? 2 }} errors={errors} />} />
           <Rows title={SECTION} noun="Question" rows={questions} max={MAX_QUESTIONS} setRows={setQuestions} make={fresh}

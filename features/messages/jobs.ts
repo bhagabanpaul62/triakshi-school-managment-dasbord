@@ -9,32 +9,50 @@ type Row = Record<string, unknown>;
 const rows = async <T extends Row>(tx: Parameters<Parameters<typeof withSchool>[1]>[0], q: ReturnType<typeof sql>) => [...(await tx.execute(q))] as unknown as T[];
 const NOTICE_DAYS = 30;
 
-/** M5: a student conversation closes to read only when the student left, or when every teacher in it stopped teaching the student. */
+const STAFF_ACTIVE = sql`m.thread_id = t.id and m.state = 'active' and u.status = 'active' and u.role not in ('student', 'parent')`;
+
+/**
+ * M5: when no teacher in a student conversation teaches the student any more, those teachers leave it. With no other staff
+ * member left it closes to read only; with an office member left it stays open and says so. A student who left closes it too.
+ */
 export async function lapse(schoolId: string): Promise<{ closed: number }> {
   return withSchool(schoolId, async (tx) => {
-    const found = await rows<{ id: string; student: string; left: boolean; teachers: string[] }>(tx, sql`
-      select t.id::text as id, s.name as student, (s.status <> 'active') as left,
-        coalesce((select array_agg(m.name order by m.name) from thread_members m where m.thread_id = t.id and m.role = 'teacher' and m.state = 'active'), '{}') as teachers
+    const teaching = sql`exists (select 1 from sections sec where sec.id = s.section_id and (sec.class_teacher_id = u.id
+      or exists (select 1 from section_teachers st where st.section_id = sec.id and st.teacher_id = u.id)))`;
+    const lapsed = await rows<{ id: string; student: string; teachers: string[] }>(tx, sql`
+      select t.id::text as id, s.name as student,
+        (select array_agg(m.name order by m.name) from thread_members m where m.thread_id = t.id and m.role = 'teacher' and m.state = 'active') as teachers
       from message_threads t join students s on s.id = t.student_id
-      where t.kind = 'student' and t.state = 'open' and (
-        s.status <> 'active' or not exists (
-          select 1 from thread_members m join users u on u.id = m.user_id
-          where m.thread_id = t.id and m.state = 'active' and u.status = 'active' and u.role not in ('student', 'parent')
-            and (u.role <> 'teacher' or exists (select 1 from sections sec where sec.id = s.section_id and (sec.class_teacher_id = u.id
-              or exists (select 1 from section_teachers st where st.section_id = sec.id and st.teacher_id = u.id))))))`);
-    for (const t of found) {
-      const reason = t.left ? `${t.student} has left the school.` : `${t.teachers.length ? t.teachers.join(" and ") : "The teacher"} no longer teaches ${t.student}.`;
-      await closeThread(tx, t.id, reason);
-      await postSystem(tx, schoolId, t.id, `Closed: ${reason} An admin can move it to the new teacher.`);
+      where t.kind = 'student' and t.state = 'open' and s.status = 'active'
+        and exists (select 1 from thread_members m where m.thread_id = t.id and m.role = 'teacher' and m.state = 'active')
+        and not exists (select 1 from thread_members m join users u on u.id = m.user_id
+          where m.thread_id = t.id and m.role = 'teacher' and m.state = 'active' and u.status = 'active' and ${teaching})`);
+    const found = new Map<string, string>(); // thread id to the reason it closes
+    for (const t of lapsed) {
+      await tx.execute(sql`update thread_members set state = 'left' where thread_id = ${t.id}::uuid and role = 'teacher' and state = 'active'`);
+      const reason = `${t.teachers.join(" and ")} no longer ${t.teachers.length === 1 ? "teaches" : "teach"} ${t.student}.`;
+      const [rest] = await rows<{ n: number }>(tx, sql`select count(*)::int as n from message_threads t join thread_members m on m.thread_id = t.id join users u on u.id = m.user_id where t.id = ${t.id}::uuid and ${STAFF_ACTIVE}`);
+      if (rest?.n) await postSystem(tx, schoolId, t.id, `${reason} They have left this conversation. The office can add the new teacher.`);
+      else found.set(t.id, reason);
     }
-    if (found.length) {
+    const gone = await rows<{ id: string; student: string; left: boolean }>(tx, sql`
+      select t.id::text as id, s.name as student, (s.status <> 'active') as left
+      from message_threads t join students s on s.id = t.student_id
+      where t.kind = 'student' and t.state = 'open' and (s.status <> 'active'
+        or not exists (select 1 from thread_members m join users u on u.id = m.user_id where ${STAFF_ACTIVE}))`);
+    for (const t of gone) if (!found.has(t.id)) found.set(t.id, t.left ? `${t.student} has left the school.` : "No teacher or office member is left in it.");
+    for (const [id, reason] of found) {
+      await closeThread(tx, id, reason);
+      await postSystem(tx, schoolId, id, `Closed: ${reason} An admin can move it to the new teacher.`);
+    }
+    if (found.size) {
       const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")));
       await NotificationWriter.insert(tx, schoolId, admins.map((a) => ({
-        userId: a.id, topic: "work.update" as const, title: `${found.length} conversation${found.length === 1 ? "" : "s"} closed`, body: "A teacher stopped teaching, or a student left. Open Messages to move one to the new teacher.",
-        href: "/app/messages", groupKey: "messages-lapse",
+        userId: a.id, topic: "work.update" as const, title: `${found.size} conversation${found.size === 1 ? "" : "s"} closed`, body: "A teacher stopped teaching, or a student left. Open Messages to move one to the new teacher.",
+        href: "/app/messages", groupKey: "messages-lapse", subject: { type: "lapse", id: schoolId },
       })));
     }
-    return { closed: found.length };
+    return { closed: found.size };
   });
 }
 

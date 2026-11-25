@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import { IconArrowDown, IconArrowUp, IconFile, IconPaperclip, IconX } from "@tabler/icons-react";
 import { cn } from "../../lib/utils";
+import { redrawImage } from "../../lib/redraw-image";
 import { FOCUS, ICON_BTN } from "../finance/ui";
 import { fileKind, fileSize } from "./file-utils";
 import type { FileItem } from "./FileList";
@@ -27,6 +28,8 @@ type Picked = { key: number; file: File; preview: string | null };
 const allowed = (f: File, accept: string[]) =>
   accept.length === 0 || accept.some((a) => (a.startsWith(".") ? f.name.toLowerCase().endsWith(a.toLowerCase()) : a.endsWith("/*") ? f.type.startsWith(a.slice(0, -1)) : f.type === a));
 
+/** Pictures are drawn again in the browser before upload: this removes the place and camera details inside the photo. */
+const MAX_SIDE = 2000;
 const WORDS: Record<string, string> = { "image/*": "pictures", "application/pdf": "PDF", ".pdf": "PDF" };
 
 /** Pick or drop several files. Limits are checked before upload; the files live in a hidden multi-file input so a normal form submits them in order. */
@@ -54,22 +57,28 @@ export function FilesField({ name = "files", label = "Attachments", accept = [],
   const room = maxCount - kept.length - items.length;
   const acceptWords = [...new Set(accept.map((a) => WORDS[a] ?? a.replace(/^\./, "").toUpperCase()))].join(", ");
 
-  const add = (list: FileList | File[]) => {
+  const add = async (list: FileList | File[]) => {
     const issues: string[] = [];
-    const next: Picked[] = [];
+    const picked: File[] = [];
     let slots = room;
     for (const file of Array.from(list)) {
       if (!allowed(file, accept)) issues.push(`"${file.name}" is not an allowed type. You can add: ${acceptWords}.`);
       else if (file.size > maxMb * 1048576) issues.push(`"${file.name}" is ${fileSize(file.size)}. Each file can be up to ${maxMb} MB.`);
       else if (file.size === 0) issues.push(`"${file.name}" is empty.`);
-      else if (items.some((i) => i.file.name === file.name && i.file.size === file.size)) issues.push(`"${file.name}" is already added.`);
       else if (slots <= 0) issues.push(`"${file.name}" was not added. You can attach up to ${maxCount} files; remove one to add another.`);
-      else { slots--; next.push({ key: ++seq.current, file, preview: fileKind(file.name, file.type) === "image" ? URL.createObjectURL(file) : null }); }
+      else { slots--; picked.push(file); }
+    }
+    const next: Picked[] = [];
+    const redrawn = await Promise.all(picked.map(async (src) => ({ src, out: fileKind(src.name, src.type) === "image" ? await redrawImage(src, MAX_SIDE) : src })));
+    for (const { src, out } of redrawn) {
+      if (!out) issues.push(`"${src.name}" could not be read as a picture. Save it as JPEG or PNG and try again.`);
+      else if ([...live.current, ...next].some((x) => x.file.name === out.name && x.file.size === out.size)) issues.push(`"${out.name}" is already added.`);
+      else next.push({ key: ++seq.current, file: out, preview: fileKind(out.name, out.type) === "image" ? URL.createObjectURL(out) : null });
     }
     setProblems(issues);
     if (next.length) setItems((p) => [...p, ...next]);
   };
-  const drop = (e: DragEvent) => { e.preventDefault(); setOver(false); if (!disabled) add(e.dataTransfer.files); };
+  const drop = (e: DragEvent) => { e.preventDefault(); setOver(false); if (!disabled) void add(e.dataTransfer.files); };
   const remove = (key: number) => setItems((p) => { const gone = p.find((i) => i.key === key)?.preview; if (gone) URL.revokeObjectURL(gone); return p.filter((i) => i.key !== key); });
   const move = (idx: number, by: -1 | 1) => setItems((p) => { const q = [...p]; [q[idx], q[idx + by]] = [q[idx + by]!, q[idx]!]; return q; });
 
@@ -81,7 +90,7 @@ export function FilesField({ name = "files", label = "Attachments", accept = [],
       <input ref={input} type="file" name={name} multiple hidden tabIndex={-1} />
       {/* A separate unnamed picker, so a rejected pick never reaches the form. */}
       <input ref={picker} id={id} type="file" multiple hidden tabIndex={-1} accept={accept.join(",") || undefined}
-        onChange={(e) => { add(e.currentTarget.files ?? []); e.currentTarget.value = ""; }} />
+        onChange={(e) => { void add(e.currentTarget.files ?? []); e.currentTarget.value = ""; }} />
       <button type="button" disabled={disabled || room <= 0} aria-describedby={`${id}-h`} aria-labelledby={`${id}-l`}
         onClick={() => picker.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={drop}

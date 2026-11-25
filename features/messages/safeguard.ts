@@ -8,7 +8,7 @@ import { REPORT_STATE_WORDS, RESTRICTION_WORDS, REVIEW_HOURS, type ReportCategor
 import { conversationPdf } from "./conversation-pdf";
 import { hasActiveReview, isFamily, loadThread, noSupport, postSystem, type ThreadData } from "./core";
 import messagesFeature from "./feature";
-import { handleReportInput, restrictInput, reviewInput } from "./inputs";
+import { findInput, handleReportInput, restrictInput, reviewInput } from "./inputs";
 import { hasOpenReport, isNamed, namedIn } from "./leads";
 import { messageRestrictions, messageReports, messageReviews, messageThreads, threadMembers } from "./schema";
 import { istDay } from "@smw/feature-kit/words";
@@ -22,6 +22,8 @@ export interface ReportDetail extends ReportRow {
   reviews: ReviewRow[];
 }
 export interface ReviewRow { id: string; threadId: string; subject: string; reviewer: string; reason: string; action: "opened" | "exported"; at: Date; reportId: string | null }
+/** What a search shows: who is in it, when it last moved and its state. Never the subject or any text. */
+export interface FoundConversation { threadId: string; people: string[]; studentName: string | null; at: Date; state: string }
 export interface RestrictionRow { id: string; userId: string; name: string; role: string; kind: RestrictionKind; reason: string; until: string; createdAt: Date; active: boolean }
 
 export class SafeguardService extends SchoolService<Perm> {
@@ -31,6 +33,23 @@ export class SafeguardService extends SchoolService<Perm> {
   protected authorize(permission: Perm, mode: "read" | "write") {
     noSupport(this.ctx);
     super.authorize(permission, mode);
+  }
+
+  /** Find a conversation by student, staff member or day. Conversations a report names the caller in are left out. */
+  async find(input: unknown): Promise<FoundConversation[]> {
+    const d = this.parse(findInput, input);
+    const like = d.q ? `%${d.q.replace(/[\\%_]/g, "\\$&")}%` : null;
+    return this.read("safeguard", async (tx) => {
+      const rows = [...(await tx.execute(sql`
+        select t.id::text as id, t.state, t.last_message_at as at, s.name as student,
+          (select array_agg(m.name order by m.name) from thread_members m where m.thread_id = t.id) as people
+        from message_threads t left join students s on s.id = t.student_id
+        where ${like ? sql`(s.name ilike ${like} or exists (select 1 from thread_members m where m.thread_id = t.id and m.name ilike ${like}))` : sql`true`}
+          and ${d.day ? sql`exists (select 1 from messages x where x.thread_id = t.id and (x.created_at at time zone 'Asia/Kolkata')::date = ${d.day}::date)` : sql`true`}
+          and not exists (select 1 from message_reports rp where rp.thread_id = t.id and ${this.ctx.userId}::uuid = any(rp.about_user_ids))
+        order by t.last_message_at desc limit 25`))] as { id: string; state: string; at: Date; student: string | null; people: string[] | null }[];
+      return rows.map((r) => ({ threadId: r.id, people: r.people ?? [], studentName: r.student, at: new Date(r.at), state: r.state }));
+    });
   }
 
   /** A report that names me is not mine to see, count or open. */
@@ -200,7 +219,7 @@ export class SafeguardService extends SchoolService<Perm> {
       await tx.insert(messageRestrictions).values({ schoolId: this.ctx.schoolId, userId: p.id, kind: data.kind, reason: data.reason, until: data.until, createdBy: this.ctx.userId });
       await NotificationWriter.insert(tx, this.ctx.schoolId, [{
         userId: p.id, topic: "work.update" as const, title: "Your messages are limited", body: `${RESTRICTION_WORDS[data.kind]}, until ${data.until}. ${isFamily(p.role) ? "Contact the school office if you have a question." : ""}`.trim(),
-        href: "/app/messages", privateBody: true,
+        href: "/app/messages", privateBody: true, subject: { type: "limit", id: p.id },
       }]);
     }, () => ({ action: "restrict", entity: "Person", entityId: data.userId, summary: `Limited messages until ${data.until}` }));
   }
@@ -209,7 +228,7 @@ export class SafeguardService extends SchoolService<Perm> {
     await this.write("safeguard", async (tx) => {
       const rows = await tx.update(messageRestrictions).set({ liftedAt: new Date() }).where(and(eq(messageRestrictions.id, id), isNull(messageRestrictions.liftedAt))).returning({ userId: messageRestrictions.userId });
       if (!rows.length) throw new NotFoundError("Limit");
-      await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: rows[0]!.userId, topic: "work.update" as const, title: "Your messages are back to normal", href: "/app/messages" }]);
+      await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: rows[0]!.userId, topic: "work.update" as const, title: "Your messages are back to normal", href: "/app/messages", subject: { type: "limit", id: rows[0]!.userId } }]);
     }, () => ({ action: "lift", entity: "Limit", entityId: id, summary: "Lifted a message limit" }));
   }
 }

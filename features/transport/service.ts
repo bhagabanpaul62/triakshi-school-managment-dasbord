@@ -10,6 +10,7 @@ import { syncTransportCharges } from "./billing";
 import { monthlyFeeFor, nextMonthStart, occupancyPct, stopTimeProblem } from "./rules";
 import { routeStops, routes, studentTransport, vehicles } from "./schema";
 import { VehicleCareService, todayIST } from "./vehicle-care";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 
 type Perm = keyof typeof transportFeature.permissions;
 export type Vehicle = typeof vehicles.$inferSelect;
@@ -350,7 +351,7 @@ export class StudentTransportService extends TransportBase {
       const ids = await this.ownStudentIds(tx);
       if (!ids.length) return [];
       const rows = await tx.select({
-        studentId: students.id, studentName: students.name, routeName: routes.name, stopName: routeStops.name,
+        studentId: students.id, studentName: students.name, routeId: routes.id, routeName: routes.name, stopName: routeStops.name,
         morningTime: routeStops.morningTime, eveningTime: routeStops.eveningTime, pickup: studentTransport.pickup, drop: studentTransport.drop,
         monthlyFeePaise: routeStops.monthlyFeePaise, vehicle: vehicles.registrationNo, trackingUrl: vehicles.trackingUrl, driverName: vehicles.driverName, driverPhone: vehicles.driverPhone,
       }).from(studentTransport)
@@ -359,7 +360,8 @@ export class StudentTransportService extends TransportBase {
         .innerJoin(routeStops, eq(routeStops.id, studentTransport.stopId))
         .leftJoin(vehicles, eq(vehicles.id, routes.vehicleId))
         .where(inArray(studentTransport.studentId, ids)).orderBy(asc(students.name));
-      return rows.map((r) => ({ ...r, trip: tripLabel(r.pickup, r.drop), feePaise: monthlyFeeFor(r.monthlyFeePaise, r.pickup, r.drop) }));
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const id of new Set(rows.map((r) => r.routeId))) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "route", id }, this.ctx.userId);
+      return rows.map(({ routeId: _r, ...r }) => ({ ...r, trip: tripLabel(r.pickup, r.drop), feePaise: monthlyFeeFor(r.monthlyFeePaise, r.pickup, r.drop) }));
     });
   }
 }

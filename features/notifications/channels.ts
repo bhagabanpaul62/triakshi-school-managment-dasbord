@@ -5,15 +5,24 @@ import { TOPICS, topicOf, type TopicGroup, type TopicKey } from "./topics";
 
 export type GroupPrefs = Partial<Record<TopicGroup, GroupPref>>;
 export type { GroupPref };
+/** Families are the student logins; every other login is staff. */
+export type Side = "staff" | "families";
+export const SIDES: readonly Side[] = ["staff", "families"];
+export const sideOf = (role: string): Side => (role === "student" ? "families" : "staff");
+/** The school's default channels, per side and group. */
+export type ChannelDefaults = Record<Side, GroupPrefs>;
+/** The only reader of the school's defaults: the part that applies to this role. */
+export const defaultsFor = (d: ChannelDefaults | undefined, role: string): GroupPrefs => d?.[sideOf(role)] ?? {};
 export const MUST_TELL: GroupPref = { push: true, email: "instant" };
 
 const ALL = Object.values(TOPICS) as ReturnType<typeof topicOf>[];
 const firstOpenTopic = (group: TopicGroup) => ALL.find((x) => x.group === group && !x.mustTell) ?? ALL.find((x) => x.group === group)!;
+/** What a group does when nobody has chosen: the default of its first optional topic. */
+export const groupDefault = (group: TopicGroup): GroupPref => { const t = firstOpenTopic(group); return { push: t.push, email: t.email }; };
 
 /** What a group does for a person: their own choice, else the school's, else the default of the group's first optional topic. */
 export function effectiveGroup(group: TopicGroup, personGroups: GroupPrefs = {}, schoolDefaults: GroupPrefs = {}): GroupPref {
-  const t = firstOpenTopic(group);
-  return personGroups[group] ?? schoolDefaults[group] ?? { push: t.push, email: t.email };
+  return personGroups[group] ?? schoolDefaults[group] ?? groupDefault(group);
 }
 
 /** Order: the topic's default, then the school's default for its group, then the person's own choice. Must-tell topics ignore all of it. */

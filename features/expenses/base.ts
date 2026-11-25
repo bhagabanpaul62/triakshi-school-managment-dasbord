@@ -53,7 +53,7 @@ export const journalIdSql = (prefix: string, idCol: unknown) => sql<string | nul
 export async function managers(tx: Tx): Promise<string[]> {
   return (await tx.select({ id: users.id }).from(users).where(and(inArray(users.role, ["admin", "accountant"]), eq(users.status, "active")))).map((u) => u.id);
 }
-export async function tell(tx: Tx, schoolId: string, userIds: string[], topic: TopicKey, title: string, body: string, href: string, extra: { subject?: { type: string; id: string }; action?: boolean; groupKey?: string } = {}) {
+export async function tell(tx: Tx, schoolId: string, userIds: string[], topic: TopicKey, title: string, body: string, href: string, extra: { subject: { type: string; id: string }; action?: boolean; groupKey?: string }) {
   await NotificationWriter.insert(tx, schoolId, userIds.map((userId) => ({ userId, topic, title, body, href, ...extra })));
 }
 /** Withdraw the open approval requests of a document and close the approvers' action rows. */

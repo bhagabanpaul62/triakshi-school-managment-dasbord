@@ -8,6 +8,7 @@ import { PreferenceService } from "@smw/feature-notifications/prefs";
 import { commDeliveries, notifications } from "@smw/feature-notifications/schema";
 import { BatchService } from "./batch";
 import { addMember, createThread, loadThread, postMessage, unreadByThread } from "./core";
+import { sectionTeachers, subjects } from "@smw/feature-academics/schema";
 import { lapse } from "./jobs";
 import { messageBatches, messageFiles, messages, messageThreads, threadMembers } from "./schema";
 import { MessageService } from "./service";
@@ -486,6 +487,24 @@ describe("lapse (M5, acceptance 21)", () => {
     expect(open.members.filter((m) => m.state === "active").map((m) => m.userId).sort()).toEqual([w.student3.userId, w.other.userId].sort());
     await expect(svc(w.student3).send(t.id, "Hello new teacher")).resolves.toBeDefined();
     await expect(svc(w.own).reassign(t.id, w.other.userId)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("takes the teacher out when none teaches the student, and keeps it open while an office member is in it", async () => {
+    const tmp = await addUser(w.a, "teacher", "lapsetmp");
+    await sql_(async (tx) => {
+      const [subject] = await tx.select({ id: subjects.id }).from(subjects).limit(1);
+      await tx.insert(sectionTeachers).values({ schoolId: w.a.id, sectionId: w.s2, subjectId: subject!.id, teacherId: tmp.userId });
+    });
+    const t = await svc(tmp).start({ studentId: w.st3.id, recipientIds: [], subject: "Lapse with office", body: "Hello" });
+    await sql_((tx) => tx.insert(threadMembers).values({ schoolId: w.a.id, threadId: t.id, userId: w.a.as.admin.userId, name: w.a.as.admin.name, role: "admin" }));
+    await sql_((tx) => tx.execute(sql`delete from section_teachers where teacher_id = ${tmp.userId}::uuid`));
+    await lapse(w.a.id);
+    const view = await svc(w.student3).thread(t.id);
+    expect(view.thread.state).toBe("open");
+    expect(view.members.find((m) => m.userId === tmp.userId)?.state).toBe("left");
+    expect(view.members.find((m) => m.userId === w.a.as.admin.userId)?.state).toBe("active");
+    expect(view.messages.at(-1)).toMatchObject({ kind: "system", body: expect.stringContaining("no longer teaches Kabir") });
+    await expect(svc(w.student3).send(t.id, "Still here")).resolves.toBeDefined();
   });
 
   it("closes a conversation when the student leaves", async () => {
