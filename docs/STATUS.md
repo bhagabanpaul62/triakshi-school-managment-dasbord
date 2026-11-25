@@ -1,9 +1,9 @@
 # Build status (2026-11-25)
 
-Finance was built on 2026-11-24 and 25 and tested locally. Git, CI and the demo server were last checked on 2026-11-24.
+Finance was built on 2026-11-24 and 25 and tested locally; Communication followed. Git, CI and the demo server were last checked on 2026-11-24.
 
 ## Finance module (2026-11-25)
-Built on branch `feat/finance` (pushed to the fork; **PR open to `main`, not merged, not deployed**). Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
+Built on branch `feat/finance`; **merged to `main` as PR #5 (`69f1898`), not deployed**. Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
 
 | Part | State |
 |---|---|
@@ -26,26 +26,68 @@ Logged 2026-11-25. All three are open.
 | 2 | Set `DATA_KEY` on the server before payroll is used, and keep a copy somewhere safe | It encrypts bank and ID numbers. Losing it loses the stored values; without it payroll refuses to save them | It is in the server's env and a copy is stored outside the server |
 | 3 | Rehearse the move of old fee data on a copy of the live data, after a backup (`move-fees --dry-run`, then bootstrap) | It worked on local data: 287 receipts, every difference explained. It has not been run on live data | The report on the copy explains every difference, and Finance shows no red "books do not match" panel |
 
+## Communication module (2026-11-25)
+Built on local branch `feat/communication`: **not merged, not deployed**. Guide: [COMMUNICATION](COMMUNICATION.md). Rules for changing it: [COMMUNICATION-BUILD](COMMUNICATION-BUILD.md). Plan: [COMMUNICATION-PRD](COMMUNICATION-PRD.md).
+
+| Part | State |
+|---|---|
+| Notices, circulars, urgent alerts, answers, reports | built |
+| Messages, reports of a concern, safeguarding review | built |
+| Requests (Growth plan and up), Calendar, Meetings (Growth plan and up), Holidays | built |
+| Bell, push, email, digest, audiences, settings (the kernel) | built |
+| Migration `0012_communication.sql` | built; holds hand-written data steps, never regenerate it; not run on a copy of live data |
+| Worker jobs (`comms.*`, `messages.*`, `requests.clock`, `events.*`, `meetings.reminders`) | built; restart the worker to schedule them |
+
+**Tested 2026-11-25, local, production build, fresh database:** every desktop browser test passes; the 15 journeys (42 checks) passed in three full runs, the last on the final build. The older specs ran in parts, not in one run; failed ones were fixed and rerun. Links followed for six roles: 0 problems. Accessibility (axe): 6 of 6. Unit: 2,048 passed in 39 packages on the first full run; packages changed after it were rerun. Typecheck 42/42, lint 0 errors.
+
+**Speed (one person at a time, about 30,000 notifications and 56,000 notice recipients in a 214-student school):** feed, inbox, requests, calendar and notifications answer in under 30 ms (median). Bell check about 2 ms at 3,000 students (service level). Not measured: many people at once on the pages.
+
+### New environment values
+| Name | What |
+|---|---|
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web push. Make the pair with `npx web-push generate-vapid-keys`. Without them push is hidden. |
+| `MAIL_DAILY_LIMIT` | Emails per day across all schools (default 300). 20% is kept for codes and passwords. |
+| `MAIL_WEBHOOK_SECRET` | Header `x-webhook-secret` for the bounce and spam webhook at `/api/webhooks/mail`. Without it the webhook refuses everything. |
+| `DATA_KEY` (not new) | Now also signs unsubscribe links and the circular QR. Same key as payroll; never change it. |
+| `MAIL_FROM` (not new) | Must be an address on our own sending domain before real use. |
+
+### Before real schools use it
+1. Back up the database.
+2. Run the migrations (0012), then `pnpm --filter @smw/db post-sql`.
+3. Run `pnpm --filter @smw/school bootstrap` (adds Requests and Meetings to the plans except Starter).
+4. Set the new environment values above and restart the worker.
+5. Name a safeguarding lead in every school. With none, every admin hears reports.
+6. Send from our own domain, with SPF and DKIM set at the mail provider.
+7. Each school's admins read the "Check these holidays" notices under Attendance, Holidays.
+
+### Not verified
+- Push on a real phone, over HTTPS.
+- Email from a real domain into real inboxes (spam placement, bounce webhook).
+- The demo server: nothing here has run there.
+- Legal rules for keeping and reviewing private messages, and the school's own policy for them.
+- Migration 0012 on a copy of live data.
+
 ## Where things stand
 | What | State |
 |---|---|
-| Code | All 21 features, sign-in and roles, People, the Academics group and onboarding are built and committed. The working tree was clean before this file was edited. |
-| `origin/main` (bhagabanpaul62) | Has everything through PR #3 (`cf3ae29`), merged 2026-11-20. |
-| `fork/feat/school-platform` | One commit ahead: `63f18d5` (forms keep what was typed after a refusal; e2e fixes). **PR open to `main`; not on the demo.** |
+| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is on `feat/communication`. |
+| `origin/main` | Has everything through Finance (PR #5, `69f1898`). |
+| `63f18d5` (forms keep what was typed after a refusal; e2e fixes) | In `origin/main`; **not on the demo**. |
 | CI | Passes for PR #2, PR #3 and `63f18d5`. |
 | Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
 | Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
-| Migrations on main | 0000–0008 in `packages/db/migrations`. 0005, 0006 and 0008 hold hand-written data steps: never regenerate them. |
+| Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) only on `feat/communication`. 0005, 0006, 0008 and 0012 hold hand-written data steps: never regenerate them. |
 
 PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
 
 ## Next
-0. Review and merge the finance PR, then do the three items in "Before real schools use it" before deploying it.
-1. Merge the PR for `63f18d5`, then deploy it to the demo. Both need the owner's go-ahead.
+0. Do the three items in "Before real schools use it" (Finance) before deploying Finance.
+1. Deploy `main` to the demo. It needs the owner's go-ahead.
+1a. Review and merge `feat/communication`, then do its "Before real schools use it" list.
 2. Get the approved demo schools signed in; resend their sign-in email from the console school page where needed.
-3. Prove email delivery to outside inboxes. A sender on a domain of our own, verified in Brevo, is the likely fix (not confirmed).
+3. Prove email delivery to outside inboxes. A sender on a domain of our own, verified in Brevo, is the likely fix (not confirmed). Communication needs this too.
 4. Add browser tests for `/app/staff/import` and for the school-record panels on My profile (student and teacher). They have unit tests only. Student import has a browser test.
-5. Finish the UX review of the fees, students and communication screens (wave B stopped early).
+5. Finish the UX review of the fees and students screens (wave B stopped early).
 6. Make the Deploy workflow pass or stop running on push: it needs the EC2 host and its secrets. Add required reviewers to `production` **before** the secrets, or the next push to `main` deploys by itself.
 7. Do the owner-only launch items (last section).
 

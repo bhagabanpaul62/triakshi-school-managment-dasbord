@@ -145,7 +145,7 @@ test("student: messages, notices and calendar on phone", async ({ page }) => {
   await go(page, "/app/announcements");
   await shot(page, "p1-announcements");
   await phone(page, "p1-announcements");
-  await go(page, "/app/calendar");
+  await go(page, "/app/events");
   await shot(page, "p2-calendar");
   await phone(page, "p2-calendar");
   await go(page, "/app/assignments");
