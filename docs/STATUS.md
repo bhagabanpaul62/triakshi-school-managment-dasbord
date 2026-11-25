@@ -38,7 +38,7 @@ Built on local branch `feat/communication`: **not merged, not deployed**. Guide:
 | Migration `0012_communication.sql` | built; holds hand-written data steps, never regenerate it; not run on a copy of live data |
 | Worker jobs (`comms.*`, `messages.*`, `requests.clock`, `events.*`, `meetings.reminders`) | built; restart the worker to schedule them |
 
-**Tested 2026-11-25, local, production build, fresh database:** every desktop browser test passes; the 15 journeys (42 checks) passed in three full runs, the last on the final build. The older specs ran in parts, not in one run; failed ones were fixed and rerun. Links followed for six roles: 0 problems. Accessibility (axe): 6 of 6. Unit: 2,048 passed in 39 packages on the first full run; packages changed after it were rerun. Typecheck 42/42, lint 0 errors.
+**Tested 2026-11-25, local, production build, fresh database:** every desktop browser test passes, 1 skipped; the 15 journeys (42 checks) passed in three full runs, the last on the final build. The older specs ran in parts, not in one run; failed ones were fixed and rerun. Links followed for six roles: 0 problems. Accessibility (axe): 6 of 6. Unit: 2,049 passed in 39 packages on the final code. Typecheck 42/42, lint 0 errors.
 
 **Speed (one person at a time, about 30,000 notifications and 56,000 notice recipients in a 214-student school):** feed, inbox, requests, calendar and notifications answer in under 30 ms (median). Bell check about 2 ms at 3,000 students (service level). Not measured: many people at once on the pages.
 
