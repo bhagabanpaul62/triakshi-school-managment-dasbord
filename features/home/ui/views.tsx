@@ -39,6 +39,21 @@ function Listed({ title, href, label, quiet, children, empty }: { title: string;
 }
 
 export const VIEWS: V = {
+  "left": (l) => (
+    <Panel title="Your login">
+      <p className="text-sm text-[var(--ds-on-surface-variant)]">The student has left the school. This login stays open until {shortDate(l.until)} for what is below.</p>
+      {l.links.length ? (
+        <ul className="mt-4 flex flex-col gap-1">
+          {l.links.map((k) => (
+            <li key={k.href}><Link href={k.href} className="block min-h-11 rounded-xl px-3 py-2 transition-colors hover:bg-white/[0.05] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]"><span className="block text-sm text-[var(--ds-on-surface)]">{k.label}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">{k.hint}</span></Link></li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="mt-4 text-sm text-[var(--ds-on-surface-variant)]">
+        For anything else, ask {l.office.name}{l.office.phone ? <>: <a href={`tel:${l.office.phone}`} className={LINK}>{l.office.phone}</a></> : l.office.email ? <>: <a href={`mailto:${l.office.email}`} className={LINK}>{l.office.email}</a></> : "."}
+      </p>
+    </Panel>
+  ),
   // ---------- everyone ----------
   "today": (t) => (
     <Panel>

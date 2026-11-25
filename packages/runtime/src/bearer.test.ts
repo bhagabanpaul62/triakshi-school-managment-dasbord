@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { SchoolAuth } from "@smw/auth";
-import { closeDb, eq, schoolRoles, users, withSchool } from "@smw/db";
+import { closeDb, eq, schoolRoles, sql, users, withSchool } from "@smw/db";
 import { allows, defineFeature, ForbiddenError, ValidationError } from "@smw/feature-kit";
-import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
+import { createSchoolPair, createTestSchool, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import { apiHandler, bearerCtx, bearerToken, notReady, readJson } from "./bearer";
 
 let a: TestSchool, b: TestSchool;
@@ -141,5 +141,67 @@ describe("readJson and notReady", () => {
     const res = await handler(req(`${a.slug}.localhost`, tokenA));
     expect(res.status).toBe(501);
     expect((await res.json()).error.code).toBe("not_ready");
+  });
+});
+
+describe("a student who left: the Ctx keeps only fees, exams, home, notifications, settings", () => {
+  const KEYS = ["fees", "exams", "home", "notifications", "settings", "messages", "announcements"];
+  let c: TestSchool;
+  const ist = (daysAgo: number) => new Date(Date.now() + 330 * 60_000 - daysAgo * 86_400_000).toISOString().slice(0, 10);
+  const host = () => `${c.slug}.localhost`;
+  const setStudent = (status: string, leftOn: string | null) => withSchool(c.id, async (tx) => {
+    await tx.execute(sql`delete from students where user_id = ${c.users.student}`);
+    if (status) await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on) values (gen_random_uuid(), ${c.id}, 'ADM-1', 'Kid', ${c.users.student}, ${status}, ${leftOn}::date)`);
+  });
+  const sign = (role: string) => new SchoolAuth(c.id).login(`${role}-${c.slug}`, "password123", { ip: `phase-${role}` }).then((r) => r.token);
+
+  beforeAll(async () => {
+    await registerFeatures(KEYS.map((key) => defineFeature({ key, name: key, description: "t", stage: "ga", permissions: { read: ["admin", "teacher", "student"] } })));
+    c = await createTestSchool("lvphase", KEYS);
+    await withSchool(c.id, (tx) => tx.update(users).set({ mustChangePassword: false }).where(eq(users.schoolId, c.id)));
+  });
+
+  it("is cut for a left student and an alumni, with the last day and read-only untouched", async () => {
+    for (const status of ["left", "alumni"]) {
+      await setStudent(status, ist(20));
+      const ctx = await bearerCtx(req(host(), await sign("student")));
+      expect([...ctx.features].sort()).toEqual(["exams", "fees", "home", "notifications", "settings"]);
+      expect(ctx.leftUntil).toBeTruthy();
+      expect(ctx.readOnly).toBe(false);
+    }
+  });
+
+  it("the session ends after the 90th day, and a student with no student row or an active one is untouched", async () => {
+    await setStudent("left", ist(40));
+    const token = await sign("student");
+    await bearerCtx(req(host(), token));
+    await setStudent("left", ist(91));
+    await expect(bearerCtx(req(host(), token))).rejects.toMatchObject({ code: "unauthenticated" });
+    await setStudent("", null);
+    const plain = await bearerCtx(req(host(), await sign("student")));
+    expect(plain.features.has("messages")).toBe(true);
+    expect(plain.leftUntil).toBeUndefined();
+    await setStudent("active", null);
+    expect((await bearerCtx(req(host(), await sign("student")))).features.has("announcements")).toBe(true);
+  });
+
+  it("staff, with or without a custom role, keep every module, and a parent still cannot sign in", async () => {
+    await setStudent("left", ist(5));
+    expect((await bearerCtx(req(host(), await sign("teacher")))).features.has("messages")).toBe(true);
+    const [r] = await withSchool(c.id, (tx) => tx.insert(schoolRoles).values({ schoolId: c.id, name: "Desk", base: "teacher", grants: ["home:view"] }).returning());
+    await withSchool(c.id, (tx) => tx.update(users).set({ roleId: r!.id }).where(eq(users.id, c.users.teacher)));
+    const ctx = await bearerCtx(req(host(), await sign("teacher")));
+    expect(ctx.features.has("messages")).toBe(true);
+    expect(ctx.leftUntil).toBeUndefined();
+    await expect(sign("parent")).rejects.toBeTruthy();
+  });
+
+  it("school isolation: school A's left student does not cut school B's active one", async () => {
+    await setStudent("left", ist(5));
+    const other = await createTestSchool("lvphase-b", KEYS);
+    await withSchool(other.id, (tx) => tx.update(users).set({ mustChangePassword: false }).where(eq(users.schoolId, other.id)));
+    const token = (await new SchoolAuth(other.id).login(`student-${other.slug}`, "password123", { ip: "phase-iso" })).token;
+    const ctx = await bearerCtx(req(`${other.slug}.localhost`, token));
+    expect(ctx.features.has("messages")).toBe(true);
   });
 });

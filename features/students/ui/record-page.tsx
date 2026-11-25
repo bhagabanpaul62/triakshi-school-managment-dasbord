@@ -20,10 +20,11 @@ import { EmailNotWorking } from "@smw/feature-notifications/ui/email-not-working
 import { ConsentService, CredentialService, DocumentService, GuardianService, PhotoService, StudentService } from "../service";
 import { DOCUMENT_KINDS } from "../inputs";
 import {
-  addGuardian, deleteDocument, deleteStudent, recordConsent, removeGuardian, resetStudentLogin, setPrimaryGuardian, updateStudent, uploadDocument, uploadPhoto,
+  addGuardian, bringStudentBack, changeJoiningDay, deleteDocument, deleteStudent, markStudentLeft, startStudentNow, withdrawStudent, recordConsent, removeGuardian, resetStudentLogin, setPrimaryGuardian, updateStudent, uploadDocument, uploadPhoto,
 } from "./actions";
 import { cameFromEnquiry } from "../came-from";
-import { consentFields, documentFields, guardianFields, GENDER_OPTIONS, photoFields, studentFields } from "./fields";
+import { bringBackFields, consentFields, documentFields, guardianFields, GENDER_OPTIONS, joiningDayFields, leaveFields, photoFields, studentFields, withdrawFields } from "./fields";
+import { StudentModal } from "./student-modal";
 import { Avatar, RowList, type RowItem } from "./parts";
 import { RecordTabs } from "./record-tabs";
 
@@ -38,7 +39,7 @@ const PANEL_ID = "student-tab-panel";
 const label = (list: readonly { value: string; label: string }[], v: string) => list.find((o) => o.value === v)?.label ?? v;
 const cap = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
 const kb = (bytes: number) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
-const STATUS_TONE = { active: "success", alumni: "info", left: "warning" } as const;
+const STATUS_TONE = { active: "success", joining: "info", alumni: "info", left: "warning" } as const;
 
 export default async function StudentRecordPage({ params, searchParams, slots }: {
   params: Promise<{ id: string }>;
@@ -65,6 +66,9 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
   const familyEmail = (guardians.find((g) => g.isPrimary) ?? guardians[0])?.email;
   const emailStopped = canWrite && !!familyEmail && await withSchool(ctx.schoolId, (tx) => isSuppressed(tx, familyEmail));
   const sectionOptions = (look?.sections ?? []).map((x) => ({ value: x.id, label: x.label }));
+  // A child who has not started edits the planned section of the year they join.
+  const plannedOptions = (look?.joining.sections ?? []).filter((x) => x.yearId === s.joinsYearId).map((x) => ({ value: x.id, label: x.label }));
+  const joining = s.status === "joining", gone = s.status === "left" || s.status === "alumni";
   // What is still missing on this record, as a link to the tab that fixes it; plus where else this student's data lives.
   const todo = canWrite ? [
     ov.counts.guardians === 0 ? { label: "Add a guardian contact for the family", href: `?tab=guardians` } : null,
@@ -86,10 +90,29 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
         leading={<Avatar name={s.name} src={photoUrl} size={56} />}
         title={s.name}
         chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}{s.rteQuota ? <ToneBadge label="RTE quota" tone="info" /> : null}{emailStopped ? <EmailNotWorking fixHref="?tab=guardians" /> : null}</>}
-        meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null, enquiry ? <Link key="enquiry" href={`/app/enquiries/${enquiry.id}`} className="underline underline-offset-4">Came from enquiry {enquiry.ref ?? ""}</Link> : null]}
+        meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null, ov.joining ? `Joins ${ov.joining.on ? shortDate(ov.joining.on) : "on a day to be set"}${ov.joining.yearName ? ` in ${ov.joining.yearName}` : ""}` : null, enquiry ? <Link key="enquiry" href={`/app/enquiries/${enquiry.id}`} className="underline underline-offset-4">Came from enquiry {enquiry.ref ?? ""}</Link> : null]}
         actions={canWrite ? (<>
-          <FormModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit")} values={{ ...s }} hidden={{ id: s.id }}
+          <StudentModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit", undefined, joining ? plannedOptions : undefined)} values={{ ...s }} hidden={{ id: s.id }}
             action={updateStudent} trigger={{ label: "Edit", variant: "secondary" }} />
+          {joining ? (<>
+            <ActionButton variant="secondary" label="Start now" action={startStudentNow} values={{ id: s.id }}
+              confirm={{ title: `Start ${s.name} now?`, body: "They become an active student today: they get the planned section and a roll number, count against the plan, and their login switches on.", confirmLabel: "Start now" }} />
+            <FormModal title="Change the joining day" icon="calendar" fields={joiningDayFields(plannedOptions)} values={{ joinsOn: s.joinsOn, joinsSectionId: s.joinsSectionId }} hidden={{ id: s.id }}
+              action={changeJoiningDay} trigger={{ label: "Change the joining day", variant: "secondary", plus: false }} />
+            <StudentModal title="Withdraw before joining" icon="users" danger fields={withdrawFields} hidden={{ id: s.id }} action={withdrawStudent} submitLabel="Withdraw"
+              trigger={{ label: "Withdraw before joining", variant: "secondary", plus: false }}
+              effects={["They become a student who left, with the reason: withdrew before joining.", "Their enrolment for the year is closed.", "Their login stays off.", "Their admission number is kept and never used again.", "Bills and receipts stay."]} />
+          </>) : null}
+          {s.status === "active" ? (
+            <StudentModal title="Mark as left" icon="users" danger fields={leaveFields()} hidden={{ id: s.id }} action={markStudentLeft} submitLabel="Mark as left"
+              trigger={{ label: "Mark as left", variant: "secondary", plus: false }}
+              effects={["This year's enrolment closes as left.", "Their last section stays on the record, for papers.", "They stop counting in registers, audiences and the plan limit, and the seat is free.", "Their login can still open fees, exams and results for 90 days after the last day, then it closes.", "Bills, receipts and marks stay."]} />
+          ) : null}
+          {gone ? (
+            <StudentModal title="Bring back" icon="users" fields={bringBackFields(sectionOptions)} hidden={{ id: s.id }} action={bringStudentBack} submitLabel="Bring back"
+              trigger={{ label: "Bring back", variant: "secondary", plus: false }}
+              effects={["They become an active student in the section you choose, with the next roll number.", "The plan must have room: they count against it again.", "This year's enrolment is opened, and their login is switched on."]} />
+          ) : null}
           <FormModal title="Change photo" icon="user" fields={photoFields} hidden={{ studentId: s.id }} action={uploadPhoto}
             trigger={{ label: "Photo", variant: "secondary" }} submitLabel="Upload" />
           <ActionButton variant="secondary" label="Reset login" action={resetStudentLogin} values={{ id: s.id }}
@@ -108,7 +131,7 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
 
       <div className="pt-6" id={PANEL_ID} role="tabpanel">
         <KpiRow>
-          <StatCard label="Class" value={ov.classSection ?? "-"} meta={ov.className ?? "Not placed in a class"} />
+          <StatCard label={joining ? "Class" : gone ? "Last section" : "Class"} value={ov.classSection ?? ov.className ?? "-"} meta={joining ? (ov.joining?.plannedSection ? `Planned section ${ov.joining.plannedSection}` : "No planned section yet") : (ov.className ?? "Not placed in a class")} />
           <StatCard label="Roll number" value={s.rollNo ? String(s.rollNo) : "-"} meta={s.admissionDate ? `Admitted ${shortDate(s.admissionDate)}` : undefined} />
           <StatCard label="Guardians" value={String(ov.counts.guardians)} meta={guardians[0] ? `Primary: ${guardians[0].name}` : "None added yet"} />
           <StatCard label="Documents" value={String(ov.counts.documents)} meta={`${ov.counts.consents} consent entries`} />
@@ -175,10 +198,14 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
                   <Fact label="Blood group">{s.bloodGroup}</Fact>
                   <Fact label="Category">{s.category}</Fact>
                   <Fact label="APAAR ID" copy={s.apaarId ?? undefined}>{s.apaarId}</Fact>
+                  <Fact label="PEN" copy={s.pen ?? undefined}>{s.pen}</Fact>
                   <Fact label="RTE quota">{s.rteQuota ? "Yes, under RTE 12(1)(c)" : "No"}</Fact>
                   <Fact label="Address">{s.address}</Fact>
                   <Fact label="Admitted">{s.admissionDate ? shortDate(s.admissionDate) : null}</Fact>
-                  {s.leftOn ? <Fact label="Left on">{shortDate(s.leftOn)}</Fact> : null}
+                  {joining ? <Fact label="Joins">{ov.joining?.on ? shortDate(ov.joining.on) : null}</Fact> : null}
+                  {joining ? <Fact label="Joining year">{ov.joining?.yearName}</Fact> : null}
+                  {s.leftOn ? <Fact label="Last day at school">{shortDate(s.leftOn)}</Fact> : null}
+                  {gone || s.leftReason ? <Fact label="Reason for leaving">{ov.leftReason}</Fact> : null}
                   <Fact label="Mother tongue">{s.motherTongue}</Fact>
                   <Fact label="Religion">{s.religion}</Fact>
                   <Fact label="Nationality">{s.nationality}</Fact>

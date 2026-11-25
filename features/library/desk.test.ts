@@ -244,3 +244,34 @@ describe("loans due today (home links its count here)", () => {
     expect((await new LoanService(b.as.admin).list({ filters: { status: "due-today" } })).rows).toEqual([]);
   });
 });
+
+describe("joining and left students", () => {
+  it("a joining child cannot borrow or reserve, with a clear message; a left student's loan can still be returned", async () => {
+    const x = await makeBook(a, 2);
+    const kid = await makeStudent(a);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "joining" }).where(eq(students.id, kid.id)));
+    await expect(new LoanService(a.as.admin).issue({ copyId: x.copies[0]!.id, studentId: kid.id })).rejects.toMatchObject({ fieldErrors: { admissionNo: expect.stringMatching(/has not joined yet/) } });
+    await expect(new HoldService(a.as.admin).place(x.book.id, kid.id)).rejects.toMatchObject({ fieldErrors: { studentId: expect.stringMatching(/has not joined yet/) } });
+    expect(await new LoanService(a.as.admin).findBorrowers(kid.name)).toEqual([]);
+    // Someone who left cannot borrow either, but a book already out is still theirs to bring back.
+    const out = await makeStudent(a);
+    const loan = await new LoanService(a.as.admin).issue({ copyId: x.copies[1]!.id, studentId: out.id });
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "left", leftOn: today }).where(eq(students.id, out.id)));
+    await expect(new LoanService(a.as.admin).issue({ copyId: x.copies[0]!.id, studentId: out.id })).rejects.toMatchObject({ fieldErrors: { admissionNo: expect.stringMatching(/has left the school/) } });
+    await expect(new LoanService(a.as.admin).returnLoan(loan.id)).resolves.toBeTruthy();
+  });
+
+  it("a hold of a student who left keeps no copy aside, is not in the queue, and does not block a renewal", async () => {
+    const x = await makeBook(a);
+    const [holder, leaver] = [await makeStudent(a), await makeStudent(a)];
+    const loan = await new LoanService(a.as.admin).issue({ copyId: x.copies[0]!.id, studentId: holder.id });
+    const hold = await new HoldService(a.as.admin).place(x.book.id, leaver.id);
+    await expect(new LoanService(a.as.admin).renew(loan.id)).rejects.toBeInstanceOf(ConflictError);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "left", leftOn: today }).where(eq(students.id, leaver.id)));
+    expect((await new HoldService(a.as.admin).queue()).some((h) => h.id === hold.id)).toBe(false);
+    await expect(new LoanService(a.as.admin).renew(loan.id)).resolves.toBeTruthy();
+    await new LoanService(a.as.admin).returnLoan(loan.id);
+    const [row] = await withSchool(a.id, (tx) => tx.select().from(bookHolds).where(eq(bookHolds.id, hold.id)));
+    expect(row!.status).toBe("cancelled");
+  });
+});

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, CrudService, NotFoundError, listQuerySchema, toPage, type Ctx, type ListQuery } from "@smw/feature-kit";
 import { percentOf, rupees } from "@smw/feature-kit/money";
@@ -54,7 +54,7 @@ export class ConcessionService extends FeesBase {
 
   /** What a concession is worth over the year, for the approval limit: the plan's dues (or the bills so far) for the head. */
   private async estimateIn(tx: Tx, c: { studentId: string; yearId: string; headId: string | null; mode: "percent" | "amount"; value: number; per: "bill" | "year" }) {
-    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate }).from(students).where(eq(students.id, c.studentId));
+    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status }).from(students).where(eq(students.id, c.studentId));
     const plan = s ? await new PlanService(this.ctx).resolve(tx, s, c.yearId) : null;
     const dues = plan ? await tx.select({ key: feePlanDues.dueKey, amount: feePlanDues.amountPaise }).from(feePlanDues).innerJoin(feePlanLines, eq(feePlanLines.id, feePlanDues.lineId)).where(and(eq(feePlanLines.planId, plan.id), eq(feePlanLines.optional, false), c.headId ? eq(feePlanLines.headId, c.headId) : undefined)) : [];
     // No plan covers the student: the bills already issued for the year say what the discount is worth.
@@ -185,17 +185,17 @@ export class ConcessionService extends FeesBase {
       };
       // Brothers and sisters: everyone after the eldest admitted.
       const sib = await tx.execute<{ id: string; name: string; rank: number }>(sql`
-        select s.id, s.name, row_number() over (partition by fam.root order by s.admission_date nulls last, s.created_at, s.id) as rank
+        select s.id, s.name, row_number() over (partition by fam.root order by (s.status = 'joining'), s.admission_date nulls last, s.created_at, s.id) as rank
         from students s join (select sg.student_id, min(sg2.student_id::text) as root from student_guardians sg join student_guardians sg2 on sg2.guardian_id = sg.guardian_id group by sg.student_id) fam on fam.student_id = s.id
-        where s.status = 'active'`);
+        where s.status = 'active' or (s.status = 'joining' and s.joins_year_id = ${year.id})`);
       for (const r of sib) if (Number(r.rank) > 1) make("sibling", r, "Brother or sister at the school", { mode: "percent", value: 1000, headId: null });
-      const rte = await tx.select({ id: students.id, name: students.name }).from(students).where(and(eq(students.rteQuota, true), eq(students.status, "active")));
+      const rte = await tx.select({ id: students.id, name: students.name }).from(students).where(and(eq(students.rteQuota, true), or(eq(students.status, "active"), and(eq(students.status, "joining"), eq(students.joinsYearId, year.id)))));
       for (const s of rte) make("rte", s, "RTE seat: tuition is free and claimed from the government", { mode: "percent", value: 10_000, headId: heads.length === 1 ? heads[0]!.id : null });
       // The staff module may be off, and a query on a missing table would abort the transaction, so look first.
       const [has_] = [...(await tx.execute<{ t: string | null }>(sql`select to_regclass('staff_profiles') as t`))];
       const staff = has_?.t ? await tx.execute<{ id: string; name: string }>(sql`
         select distinct s.id, s.name from students s join student_guardians sg on sg.student_id = s.id join guardians g on g.id = sg.guardian_id
-        where s.status = 'active' and exists (select 1 from staff_profiles p where (p.phone is not null and p.phone = g.phone) or (p.email is not null and lower(p.email) = lower(g.email)))`) : [];
+        where (s.status = 'active' or (s.status = 'joining' and s.joins_year_id = ${year.id})) and exists (select 1 from staff_profiles p where (p.phone is not null and p.phone = g.phone) or (p.email is not null and lower(p.email) = lower(g.email)))`) : [];
       for (const s of staff) make("staff_child", s, "Child of a staff member", { mode: "percent", value: 5000, headId: null });
       return out;
     });

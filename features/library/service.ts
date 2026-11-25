@@ -29,15 +29,23 @@ export async function loadSettings(tx: Tx): Promise<LibrarySettings> {
  * Keep returned copies for the people waiting: drop ready holds whose 3 days ran out, then make the longest-waiting holds
  * ready while there are more free copies than ready holds. Each new ready hold tells its holder. Returns their names.
  */
+/** Why a student cannot borrow or reserve yet or any more, in plain words, or null when they are at school. */
+const notAtSchool = (s: { name: string; status: string }) =>
+  s.status === "active" ? null : s.status === "joining" ? `${s.name} has not joined yet. Books can be issued once they join the school.` : `${s.name} has left the school, so books cannot be issued.`;
+
+/** A hold whose holder is at school (staff holds have no student). A student who left keeps the row, but it keeps no copy aside and holds no place in the line. */
+const HOLDER_HERE = sql`(${bookHolds.studentId} is null or exists (select 1 from students st where st.id = ${bookHolds.studentId} and st.status = 'active'))`;
+
 export async function settleHolds(tx: Tx, schoolId: string, bookId: string, title: string, today: string): Promise<string[]> {
   await tx.update(bookHolds).set({ status: "cancelled" }).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "ready"), lt(bookHolds.readyUntil, today)));
+  await tx.update(bookHolds).set({ status: "cancelled" }).where(and(eq(bookHolds.bookId, bookId), inArray(bookHolds.status, ["waiting", "ready"]), sql`not ${HOLDER_HERE}`));
   const [[free], [ready]] = await Promise.all([
     tx.select({ n: count() }).from(bookCopies).where(and(eq(bookCopies.bookId, bookId), eq(bookCopies.status, "available"))),
-    tx.select({ n: count() }).from(bookHolds).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "ready"))),
+    tx.select({ n: count() }).from(bookHolds).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "ready"), HOLDER_HERE)),
   ]);
   const room = Number(free?.n ?? 0) - Number(ready?.n ?? 0);
   if (room <= 0) return [];
-  const next = await tx.select().from(bookHolds).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "waiting"))).orderBy(asc(bookHolds.createdAt), asc(bookHolds.id)).limit(room);
+  const next = await tx.select().from(bookHolds).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "waiting"), HOLDER_HERE)).orderBy(asc(bookHolds.createdAt), asc(bookHolds.id)).limit(room);
   if (!next.length) return [];
   const readyUntil = addDays(today, HOLD_DAYS);
   await tx.update(bookHolds).set({ status: "ready", readyUntil }).where(inArray(bookHolds.id, next.map((h) => h.id)));
@@ -395,9 +403,11 @@ export class LoanService extends SchoolService<Perm> {
           if (!u) throw new ValidationError({ userId: "Choose a staff member" });
           borrower = { kind: "staff", id: u.id, name: u.name };
         } else {
-          const [s] = await tx.select({ id: students.id, name: students.name }).from(students)
-            .where(and(data.studentId ? eq(students.id, data.studentId) : eq(students.admissionNo, data.admissionNo!), eq(students.status, "active"))).for("update");
-          if (!s) throw new ValidationError({ admissionNo: "No active student has this admission number" });
+          const [s] = await tx.select({ id: students.id, name: students.name, status: students.status }).from(students)
+            .where(data.studentId ? eq(students.id, data.studentId) : eq(students.admissionNo, data.admissionNo!)).for("update");
+          if (!s) throw new ValidationError({ admissionNo: "No student has this admission number" });
+          const why = notAtSchool(s);
+          if (why) throw new ValidationError({ admissionNo: why });
           borrower = { kind: "student", id: s.id, name: s.name };
         }
 
@@ -407,7 +417,7 @@ export class LoanService extends SchoolService<Perm> {
         if (Number(held?.n) >= limit) throw new LimitError(`${borrower.name} already has ${limit} books. Ask for one back first.`);
 
         // A copy kept aside for someone else is not for sale: refuse unless a copy is free beyond the ready holds.
-        const ready = await tx.select().from(bookHolds).where(and(eq(bookHolds.bookId, copy.bookId), eq(bookHolds.status, "ready"), gte(bookHolds.readyUntil, today)));
+        const ready = await tx.select().from(bookHolds).where(and(eq(bookHolds.bookId, copy.bookId), eq(bookHolds.status, "ready"), gte(bookHolds.readyUntil, today), HOLDER_HERE));
         const own = ready.find((h) => (borrower.kind === "student" ? h.studentId === borrower.id : h.userId === borrower.id));
         if (!own) {
           const [free] = await tx.select({ n: count() }).from(bookCopies).where(and(eq(bookCopies.bookId, copy.bookId), eq(bookCopies.status, "available")));
@@ -465,7 +475,7 @@ export class LoanService extends SchoolService<Perm> {
       const rules = await loadSettings(tx);
       if (loan.renewals >= rules.renewalsAllowed) throw new LimitError(rules.renewalsAllowed === 0 ? "This school does not allow renewals." : `This loan was already renewed ${loan.renewals} ${loan.renewals === 1 ? "time" : "times"}. Take the book back instead.`);
       const [copy] = await tx.select({ bookId: bookCopies.bookId, title: books.title }).from(bookCopies).innerJoin(books, eq(books.id, bookCopies.bookId)).where(eq(bookCopies.id, loan.copyId));
-      const [waiting] = await tx.select({ n: count() }).from(bookHolds).where(and(eq(bookHolds.bookId, copy!.bookId), inArray(bookHolds.status, ["waiting", "ready"])));
+      const [waiting] = await tx.select({ n: count() }).from(bookHolds).where(and(eq(bookHolds.bookId, copy!.bookId), inArray(bookHolds.status, ["waiting", "ready"]), HOLDER_HERE));
       if (Number(waiting?.n) > 0) throw new ConflictError(`Someone is waiting for ${copy!.title}, so it cannot be renewed.`);
       const dueOn = addDays(todayIST(), rules.loanDays);
       await tx.update(loans).set({ dueOn, renewals: loan.renewals + 1 }).where(eq(loans.id, loanId));
@@ -583,8 +593,10 @@ export class HoldService extends SchoolService<Perm> {
       if (!book) throw new NotFoundError("Book");
       let who: { studentId: string | null; userId: string | null };
       if (studentId) {
-        const [s] = await tx.select({ id: students.id }).from(students).where(and(eq(students.id, isUuid(studentId) ? studentId : NIL), eq(students.status, "active")));
-        if (!s) throw new ValidationError({ studentId: "Choose an active student" });
+        const [s] = await tx.select({ id: students.id, name: students.name, status: students.status }).from(students).where(eq(students.id, isUuid(studentId) ? studentId : NIL));
+        if (!s) throw new ValidationError({ studentId: "Choose a student" });
+        const why = notAtSchool(s);
+        if (why) throw new ValidationError({ studentId: why });
         who = { studentId: s.id, userId: null };
       } else if (perm === "self") {
         const [own] = await this.ownStudentIds(tx);
@@ -592,7 +604,7 @@ export class HoldService extends SchoolService<Perm> {
         who = { studentId: own, userId: null };
       } else who = { studentId: null, userId: this.ctx.userId };
       const [free] = await tx.select({ n: count() }).from(bookCopies).where(and(eq(bookCopies.bookId, bookId), eq(bookCopies.status, "available")));
-      const [ready] = await tx.select({ n: count() }).from(bookHolds).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "ready")));
+      const [ready] = await tx.select({ n: count() }).from(bookHolds).where(and(eq(bookHolds.bookId, bookId), eq(bookHolds.status, "ready"), HOLDER_HERE));
       if (Number(free?.n) > Number(ready?.n)) throw new ConflictError(`${book.title} has a copy on the shelf. Ask for it at the library desk.`);
       const [h] = await tx.insert(bookHolds).values({ schoolId: this.ctx.schoolId, bookId, ...who }).returning({ id: bookHolds.id });
       return { id: h!.id, title: book.title };
@@ -633,7 +645,7 @@ export class HoldService extends SchoolService<Perm> {
 
   /** The desk's list: every live hold, oldest first. */
   async queue(): Promise<HoldRow[]> {
-    return this.read("read", async (tx) => (await this.select(tx).where(inArray(bookHolds.status, ["waiting", "ready"])).orderBy(asc(bookHolds.createdAt))).map((r) => this.row(r)));
+    return this.read("read", async (tx) => (await this.select(tx).where(and(inArray(bookHolds.status, ["waiting", "ready"]), HOLDER_HERE)).orderBy(asc(bookHolds.createdAt))).map((r) => this.row(r)));
   }
 }
 

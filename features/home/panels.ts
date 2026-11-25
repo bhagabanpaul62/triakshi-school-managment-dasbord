@@ -2,12 +2,12 @@
 import { allows, type Ctx } from "@smw/feature-kit";
 import { FEATURES } from "./staff-links";
 
-type Who = Pick<Ctx, "role" | "features" | "grants" | "supportStaffId">;
+type Who = Pick<Ctx, "role" | "features" | "grants" | "supportStaffId" | "leftUntil">;
 
 export type PanelKey =
   // shared
   | "today" | "needs-action" | "attention" | "numbers" | "attendance-week" | "money-trend" | "funnel" | "requests" | "approvals" | "my-approvals"
-  | "getting-started" | "my-setup" | "plan" | "leave" | "birthdays" | "notices" | "events"
+  | "left" | "getting-started" | "my-setup" | "plan" | "leave" | "birthdays" | "notices" | "events"
   // teacher
   | "now-next" | "to-mark" | "to-grade" | "marks" | "homework" | "my-class" | "meetings" | "messages"
   // family
@@ -42,6 +42,8 @@ const def = (key: PanelKey, title: string, size: PanelDef["size"], height: numbe
 const LINE = 48;
 
 export const PANELS: Record<PanelKey, PanelDef> = {
+  /** For a student who left: what the login still does, until when, and who to ask. Nothing else is on their Home. */
+  "left": def("left", "Your login", 12, 160, [], []),
   "today": def("today", "Today", 12, 76, [], []),
   "needs-action": def("needs-action", "Needs action", 7, 240, ["notifications:read"], ["/app/notifications"], { private: true }),
   "attention": def("attention", "Needs attention", 5, 240, [], []),
@@ -102,6 +104,7 @@ export const PANELS: Record<PanelKey, PanelDef> = {
 const ADMIN: PanelKey[] = ["today", "getting-started", "numbers", "needs-action", "attention", "requests", "approvals", "attendance-week", "money-trend", "funnel", "plan", "leave", "birthdays", "notices", "events"];
 const ACCOUNTANT: PanelKey[] = ["fin-numbers", "needs-action", "approvals", "my-approvals", "requests", "dues-by-class", "overdue", "receipts", "cheques", "payroll", "notices", "my-setup"];
 const TEACHER: PanelKey[] = ["now-next", "to-mark", "to-grade", "marks", "homework", "my-class", "meetings", "needs-action", "messages", "notices", "my-setup"];
+const LEFT: PanelKey[] = ["left"];
 const FAMILY: PanelKey[] = ["family-answer", "family-classes", "family-homework", "family-dues", "family-attendance", "family-exam", "family-result", "family-meeting", "family-bus", "family-library", "notices"];
 /** What a custom role is built from: each panel appears when the role holds what it needs. */
 const CUSTOM: PanelKey[] = ["needs-action", "front-office", "requests", "library", "transport", "fin-numbers", "approvals", "my-approvals", "dues-by-class", "overdue", "receipts", "cheques", "payroll", "exam-coordinator", "cover", "website", "safeguarding", "notices", "links", "my-setup"];
@@ -141,6 +144,7 @@ export function panelAllowed(ctx: Who, key: PanelKey): boolean {
 
 /** Home for a base role with its default grants; for a custom role (grants set), the work panels (periods, registers, marks) and everything it holds, each shown when its grants allow. */
 export function layoutOf(ctx: Who): PanelKey[] {
+  if (ctx.leftUntil) return LEFT;
   if (ctx.role === "student") return FAMILY;
   const base = ctx.role === "admin" ? ADMIN : ctx.role === "accountant" ? ACCOUNTANT : ctx.role === "teacher" ? TEACHER : [];
   if (ctx.grants === undefined && base.length) return base;

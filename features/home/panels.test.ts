@@ -29,6 +29,14 @@ describe("panels per login, in their fixed order", () => {
   ];
   it.each(cases)("%s", (_name, ctx, want) => { expect(keys(ctx)).toEqual(want); });
 
+  it("a student who left sees one panel about their login, never a module they lost; staff and parents never do", () => {
+    const left = who("student", undefined, { features: new Set(["home", "fees", "exams", "notifications", "settings"]), leftUntil: "2027-02-01" });
+    expect(keys(left)).toEqual(["left"]);
+    expect(keys(who("student"))).not.toContain("left");
+    for (const r of ["admin", "teacher", "accountant"] as const) expect(keys(who(r))).not.toContain("left");
+    expect(keys(who("staff", ["home:view"]))).not.toContain("left");
+  });
+
   it("every panel shown is one the login holds the needs of, for every case above", () => {
     for (const [, ctx] of cases) for (const p of panelsFor(ctx)) for (const need of p.needs) expect(holds(ctx, need), `${p.key} needs ${need}`).toBe(true);
   });

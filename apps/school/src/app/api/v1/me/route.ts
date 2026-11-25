@@ -9,6 +9,7 @@ export const GET = apiHandler(async (req) => {
     school: { id: school.id, slug: school.slug, name: school.name },
     features: [...ctx.features].sort(),
     readOnly: ctx.readOnly,
+    ...(ctx.leftUntil ? { leftUntil: ctx.leftUntil } : {}),
     expiresAt: session.expiresAt.toISOString(),
   };
 });

@@ -10,7 +10,7 @@ import { KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
-import { AcademicYearService, ClassService, SectionService, SectionTeacherService, SubjectGroupService, SubjectService } from "../service";
+import { AcademicYearService, ClassService, SectionService, SectionTeacherService, SubjectGroupService, SubjectService, withJoining } from "../service";
 import { assignGroup, assignSubjects, setElectiveChoices, assignTeacher, createGroup, createSection, deleteClass, deleteGroup, deleteSection, removeClassSubject, setClassTeacher, setElective, updateClass, updateGroup, updateSection } from "./actions";
 import { KIND_LABELS, SHIFT_LABELS, STAGE_LABELS, assignSubjectFields, choiceFields, classFields, groupFields, sectionFields } from "./fields";
 import { stageOf } from "../presets";
@@ -45,6 +45,7 @@ export default async function ClassPage({ params }: { params: Promise<{ id: stri
   const showFill = ctx.features.has("students");
   const hasTimetable = ctx.features.has("timetable");
   const students = sections.reduce((n, s) => n + s.students, 0);
+  const joining = sections.reduce((n, s) => n + s.joining, 0);
   const seats = sections.reduce((n, s) => n + s.capacity, 0);
   const noClassTeacher = sections.filter((s) => !s.classTeacherId).length;
   const electives = subjects.filter((s) => s.isElective);
@@ -68,7 +69,7 @@ export default async function ClassPage({ params }: { params: Promise<{ id: stri
       <KpiRow>
         <StatCard label="Sections" value={String(sections.length)} icon={<MenuIconView name="class" />}
           meta={noClassTeacher ? `${noClassTeacher} without a class teacher` : sections.length ? "All have a class teacher" : undefined} />
-        <StatCard label={showFill ? "Students" : "Seats"} value={showFill ? `${students} of ${seats}` : String(seats)} icon={<MenuIconView name="users" />} meta={showFill ? "seats filled" : undefined} />
+        <StatCard label={showFill ? "Students" : "Seats"} value={showFill ? `${withJoining(students, joining)} of ${seats}` : String(seats)} icon={<MenuIconView name="users" />} meta={showFill ? "seats filled" : undefined} />
         <StatCard label="Subjects" value={String(subjects.length)} icon={<MenuIconView name="subject" />} />
         <StatCard label="Subject teachers set" value={slots ? `${assigned} of ${slots}` : "0"} icon={<MenuIconView name="teacher" />}
           meta={slots && assigned < slots ? `${slots - assigned} still to set` : slots ? "All set" : "subject by section"} />
@@ -83,7 +84,7 @@ export default async function ClassPage({ params }: { params: Promise<{ id: stri
                 items={sections.map((s) => ({
                   id: s.id,
                   title: `Section ${s.name}`,
-                  meta: [s.room ? `Room ${s.room}` : "No room", s.medium, s.shift ? SHIFT_LABELS[s.shift] : null, s.streamLabel, showFill ? `${s.students} of ${s.capacity} seats` : `${s.capacity} seats`].filter(Boolean).join(" · "),
+                  meta: [s.room ? `Room ${s.room}` : "No room", s.medium, s.shift ? SHIFT_LABELS[s.shift] : null, s.streamLabel, showFill ? `${withJoining(s.students, s.joining)} of ${s.capacity} seats` : `${s.capacity} seats`].filter(Boolean).join(" · "),
                   actions: <>
                     {canWrite ? <TeacherSelect label={`Class teacher of section ${s.name}`} value={s.classTeacherId ?? ""} teachers={teachers} action={setClassTeacher}
                       fields={{ sectionId: s.id }} empty="Pick class teacher" className="w-44" />

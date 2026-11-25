@@ -1,18 +1,16 @@
 // School houses: members, a captain, and a points log.
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { AcademicsCrud } from "./base";
-import { sectionStudents, studentRow } from "./electives";
+import { activeStudent, sectionStudents } from "./electives";
 import { assignHouseInput, awardPointsInput, houseInput, pointsUpdate } from "./inputs";
 import { housePoints, houses, sections, studentHouses } from "./schema";
 
 export type House = typeof houses.$inferSelect;
 
 async function activeStudentName(tx: Tx, ctx: Ctx, studentId: string) {
-  const st = await studentRow(tx, ctx, studentId);
-  if (st.status !== "active") throw new ValidationError({ studentId: "That student is not active" });
-  return st.name;
+  return (await activeStudent(tx, ctx, studentId)).name;
 }
 
 export class HouseService extends AcademicsCrud<typeof houses> {
@@ -33,9 +31,14 @@ export class HouseService extends AcademicsCrud<typeof houses> {
   }
   protected beforeUpdate(tx: Tx, _existing: House, data: Record<string, unknown>) { return this.beforeCreate(tx, data); }
 
+  /** A house counts its active students; a child who left (kept section, kept link) or has not started is no member. Off with the students module. */
+  private activeMember() {
+    return this.ctx.features.has("students") ? sql`exists (select 1 from students s where s.id = ${studentHouses.studentId} and s.status = 'active')` : undefined;
+  }
+
   /** A house that still has students or a points history is in use: move the students out and delete the entries first. */
   protected async usage(tx: Tx, h: House): Promise<[string, number][]> {
-    const [m] = await tx.select({ n: sql<number>`count(*)::int` }).from(studentHouses).where(eq(studentHouses.houseId, h.id));
+    const [m] = await tx.select({ n: sql<number>`count(*)::int` }).from(studentHouses).where(and(eq(studentHouses.houseId, h.id), this.activeMember()));
     const [p] = await tx.select({ n: sql<number>`count(*)::int` }).from(housePoints).where(eq(housePoints.houseId, h.id));
     return [["students", Number(m?.n ?? 0)], ["points entries", Number(p?.n ?? 0)]];
   }
@@ -48,7 +51,7 @@ export class HouseService extends AcademicsCrud<typeof houses> {
       const ids = rows.map((h) => h.id);
       const [pts, members] = await Promise.all([
         tx.select({ houseId: housePoints.houseId, total: sql<number>`coalesce(sum(${housePoints.points}), 0)::int` }).from(housePoints).where(inArray(housePoints.houseId, ids)).groupBy(housePoints.houseId),
-        tx.select({ houseId: studentHouses.houseId, n: sql<number>`count(*)::int` }).from(studentHouses).where(inArray(studentHouses.houseId, ids)).groupBy(studentHouses.houseId),
+        tx.select({ houseId: studentHouses.houseId, n: sql<number>`count(*)::int` }).from(studentHouses).where(and(inArray(studentHouses.houseId, ids), this.activeMember())).groupBy(studentHouses.houseId),
       ]);
       const total = new Map(pts.map((p) => [p.houseId, Number(p.total)]));
       const count = new Map(members.map((m) => [m.houseId, Number(m.n)]));
@@ -56,7 +59,7 @@ export class HouseService extends AcademicsCrud<typeof houses> {
       const capIds = rows.map((h) => h.captainStudentId).filter((x): x is string => !!x);
       if (capIds.length && this.ctx.features.has("students")) {
         const list = sql.join(capIds.map((i) => sql`${i}`), sql`, `);
-        for (const r of await tx.execute(sql`select id, name from students where id in (${list})`)) captains.set(String(r.id), String(r.name));
+        for (const r of await tx.execute(sql`select id, name from students where id in (${list}) and status = 'active'`)) captains.set(String(r.id), String(r.name));
       }
       return rows.map((h) => ({ ...h, points: total.get(h.id) ?? 0, members: count.get(h.id) ?? 0, captainName: h.captainStudentId ? captains.get(h.captainStudentId) ?? null : null }))
         .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name));
@@ -133,7 +136,7 @@ export class HouseService extends AcademicsCrud<typeof houses> {
   async mine() {
     return this.read("read", async (tx) => {
       if (!this.ctx.features.has("students")) return null;
-      const own = [...(await tx.execute(sql`select id from students where user_id = ${this.ctx.userId} limit 1`))][0] as { id: string } | undefined;
+      const own = [...(await tx.execute(sql`select id from students where user_id = ${this.ctx.userId} and status = 'active' limit 1`))][0] as { id: string } | undefined;
       if (!own) return null;
       const [link] = await tx.select().from(studentHouses).where(eq(studentHouses.studentId, own.id)).limit(1);
       if (!link) return null;

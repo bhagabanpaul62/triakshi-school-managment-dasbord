@@ -3,7 +3,7 @@ import { schoolUrl } from "@smw/config";
 import { todayIST } from "@smw/feature-kit/money";
 import { withConsole } from "@smw/db";
 import { emailHtml, escapeHtml, services } from "@smw/integrations";
-import { apply, emailTarget, failedTry, load, LEASE_MS, NO_BUDGET, releaseMail, reserveMail, SETTINGS_LINE, tomorrowMorning, unsubscribeHeaders, type EmailTarget } from "./delivery";
+import { apply, emailTarget, heardByPerson, LEFT_SKIP, failedTry, load, LEASE_MS, NO_BUDGET, releaseMail, reserveMail, SETTINGS_LINE, tomorrowMorning, unsubscribeHeaders, type EmailTarget } from "./delivery";
 import { chunks } from "./constants";
 import { isAddressRefusal, suppress } from "./email-health";
 import { PreferenceService } from "./prefs";
@@ -65,7 +65,7 @@ async function sendRound(rows: Delivery[], now: Date, out: DigestResult) {
   for (const row of rows) {
     try {
       const note = row.notificationId ? b.notes.get(row.notificationId) : undefined, person = b.people.get(row.userId);
-      const skip = !note ? "The notification no longer exists." : note.readAt || note.doneAt ? "Already read in the app" : !person || person.status !== "active" ? "The account is not active." : null;
+      const skip = !note ? "The notification no longer exists." : note.readAt || note.doneAt ? "Already read in the app" : !person || person.status !== "active" ? "The account is not active." : !heardByPerson(b, person.id, note.topic, now) ? LEFT_SKIP : null;
       if (skip) { await apply([row.id], { state: "skipped", reason: skip }); out.skipped++; continue; }
       const t = await emailTarget(person!, note!, row);
       if ("patch" in t) { await apply([row.id], t.patch); out.skipped++; continue; }

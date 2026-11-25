@@ -31,13 +31,13 @@ export default async function DuesPage({ searchParams }: { searchParams: Search 
     { key: "headId", label: "Fee", options: heads.map((h) => ({ value: h.id, label: h.name })) },
     ...(routes.length ? [{ key: "routeId", label: "Route", options: routes.map((r) => ({ value: r.id, label: r.name })) }] : []),
     { key: "age", label: "How late", options: AGE_BANDS.map((b) => ({ value: b.key, label: b.label })) },
-    { key: "status", label: "Student", options: [{ value: "active", label: "At school" }, { value: "left", label: "Left" }, { value: "alumni", label: "Alumni" }] },
+    { key: "status", label: "Student", options: [{ value: "active", label: "At school" }, { value: "joining", label: "Joining" }, { value: "left", label: "Left" }, { value: "alumni", label: "Alumni" }] },
   ];
   const age = AGE_BANDS.find((b) => b.key === one(sp.age));
   const cols = age ? [...columns.slice(0, 3), { key: "inBand", label: age.label, type: "money" as const }, ...columns.slice(3)] : columns;
   const qs = queryOf(sp);
   const tabHref = (v: string) => { const n = new URLSearchParams(qs); n.delete("overdue"); n.delete("age"); if (v) n.set("overdue", v); return `/app/fees/dues${n.size ? `?${n}` : ""}`; };
-  const rows = data.rows.map((r) => ({ ...r, meta: `${r.admissionNo}${r.studentStatus !== "active" ? ` · ${r.studentStatus === "left" ? "Left" : "Alumni"}${r.leftOn ? ` ${r.leftOn}` : ""}` : ""}` }));
+  const rows = data.rows.map((r) => ({ ...r, meta: `${r.admissionNo}${r.tag ? ` · ${r.tag}` : ""}` }));
 
   return (
     <>

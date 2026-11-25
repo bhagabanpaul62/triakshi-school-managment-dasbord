@@ -18,7 +18,7 @@ import { StateBadge } from "@smw/ui/finance/StateBadge";
 import { collectReceipt, findStudents } from "../collect-actions";
 import { changeDue, cashLimitWarning, dueNow, earliestDate, outcomeOf, pickedTotal, previewAllocation, selectIds, shareText, splitProblem, type DeskBill, type SelectMode } from "./logic";
 
-export interface DeskMember { id: string; name: string; admissionNo: string; classLabel: string; advancePaise: number; waitingAdvancePaise: number; duePaise: number; overduePaise: number }
+export interface DeskMember { id: string; name: string; admissionNo: string; classLabel: string; tag?: string | null; advancePaise: number; waitingAdvancePaise: number; duePaise: number; overduePaise: number }
 export interface DeskConfig { today: string; lateFeeFirst: boolean; cashLimitPaise: number; backdateDays: number; usesCounters: boolean; school: { name: string }; banks: { id: string; name: string }[] }
 export interface DeskProps {
   config: DeskConfig;
@@ -138,7 +138,7 @@ export function CollectDesk({ config, picked, members, bills, cashReady, openCou
                   {members.length > 1 ? <input type="radio" name="payer" checked={m.id === payer?.id} onChange={() => { setPayerId(m.id); setParts(null); }} className="accent-[var(--ds-primary)]" /> : null}
                   <Link href={`/app/fees/students/${m.id}`} className="font-medium underline-offset-4 hover:underline">{m.name}</Link>
                 </span>
-                <span className="text-xs text-[var(--ds-on-surface-muted)]">{m.admissionNo} · {m.classLabel}</span>
+                <span className="text-xs text-[var(--ds-on-surface-muted)]">{m.admissionNo} · {m.classLabel}{m.tag ? ` · ${m.tag}` : ""}</span>
                 <span className="mt-1 grid grid-cols-3 gap-1 text-xs">
                   <span><span className="block text-[var(--ds-on-surface-muted)]">Due</span><Money paise={m.duePaise} size="sm" /></span>
                   <span><span className="block text-[var(--ds-on-surface-muted)]">Overdue</span><Money paise={m.overduePaise} size="sm" tone={m.overduePaise ? "danger" : "default"} /></span>

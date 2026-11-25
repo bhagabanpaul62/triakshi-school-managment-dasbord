@@ -97,7 +97,6 @@ export class InvoiceService extends FeesBase {
     this.authorize("setup", "write");
     const d = this.parse(draftInput, input);
     return this.write("setup", async (tx) => {
-      const year = await this.currentYear(tx);
       if (d.id) {
         const [cur] = await tx.select().from(feeInvoices).where(eq(feeInvoices.id, d.id)).for("update");
         if (!cur) throw new NotFoundError("Invoice");
@@ -107,6 +106,7 @@ export class InvoiceService extends FeesBase {
         await this.writeLines(tx, d.id, d.lines);
         return d.id;
       }
+      const year = await this.billYearOf(tx, d.studentId);
       return this.createDraft(tx, { studentId: d.studentId, yearId: year.id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines, lateRule: d.lateRule === undefined ? await this.planRule(tx, d.studentId, year.id) : d.lateRule });
     }, (id) => ({ action: "draft", entity: "Invoice", entityId: id, summary: `Saved draft bill ${d.label}` }));
   }
@@ -126,9 +126,8 @@ export class InvoiceService extends FeesBase {
     this.authorize("setup", "write");
     const d = this.parse(chargeManyInput, input);
     return this.write("setup", async (tx) => {
-      const year = await this.currentYear(tx);
       const made: string[] = [];
-      for (const studentId of d.studentIds) made.push(await this.createDraft(tx, { studentId, yearId: year.id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines, lateRule: d.lateRule === undefined ? await this.planRule(tx, studentId, year.id) : d.lateRule }));
+      for (const studentId of d.studentIds) made.push(await this.createDraft(tx, { studentId, yearId: (await this.billYearOf(tx, studentId)).id, kind: "custom", label: d.label, dueDate: d.dueDate, note: d.note, lines: d.lines, lateRule: d.lateRule === undefined ? await this.planRule(tx, studentId, (await this.billYearOf(tx, studentId)).id) : d.lateRule }));
       await this.issueIn(tx, made);
       return made;
     }, (ids) => ({ action: "charge_many", entity: "Invoice", summary: `Billed ${ids.length} students for ${d.label}` }));
@@ -136,7 +135,7 @@ export class InvoiceService extends FeesBase {
 
   /** The late fee rule of the plan a student is billed on (the school's usual), or null when they have no plan or the plan has none. */
   private async planRule(tx: Tx, studentId: string, yearId: string): Promise<InvoiceFull["lateRule"]> {
-    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate }).from(students).where(eq(students.id, studentId));
+    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status }).from(students).where(eq(students.id, studentId));
     if (!s) throw new NotFoundError("Student");
     const pick = await new PlanService(this.ctx).resolve(tx, s, yearId);
     return pick ? (await tx.select({ r: feePlans.lateRule }).from(feePlans).where(eq(feePlans.id, pick.id)))[0]?.r ?? null : null;
@@ -146,8 +145,8 @@ export class InvoiceService extends FeesBase {
   async lateRuleFor(studentId: string) {
     this.authorize("setup", "write");
     return this.read("setup", async (tx) => {
-      const year = await this.currentYear(tx);
-      return { rule: await this.planRule(tx, asId(studentId, "Student"), year.id) };
+      const id = asId(studentId, "Student");
+      return { rule: await this.planRule(tx, id, (await this.billYearOf(tx, id)).id) };
     });
   }
 

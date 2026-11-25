@@ -2,7 +2,7 @@ import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { schools } from "@smw/db";
 import { rupees, todayIST } from "@smw/feature-kit/money";
 import { finCashAccounts } from "@smw/feature-finance/schema";
-import { FeesBase, type Perm } from "./base";
+import { FeesBase, studentTag, type Perm } from "./base";
 import { dueNow, type DeskBill } from "./calc";
 import { DuesService } from "./dues";
 import { feeCounters, feeInvoices } from "./schema";
@@ -41,15 +41,15 @@ export class DeskService extends FeesBase {
     if (t.length < 2) return [];
     return this.read(this.can("collect") ? "collect" : "read", async (tx) => {
       const like = `%${t.replace(/[%_]/g, "")}%`;
-      const rows = [...(await tx.execute<{ id: string; name: string; admission_no: string; cls: string; due: string }>(sql`
-        select s.id, s.name, s.admission_no, coalesce(c.name || coalesce('-' || sec.name, ''), '-') cls,
+      const rows = [...(await tx.execute<{ id: string; name: string; admission_no: string; status: string; joins_on: string | null; left_on: string | null; left_reason: string | null; cls: string; due: string }>(sql`
+        select s.id, s.name, s.admission_no, s.status, s.joins_on::text joins_on, s.left_on::text left_on, s.left_reason, coalesce(c.name || coalesce('-' || sec.name, ''), '-') cls,
           (select coalesce(sum(i.gross_paise - i.concession_paise - i.credited_paise + i.late_paise - i.paid_paise), 0) from fee_invoices i where i.student_id = s.id and i.status = 'issued') due
         from students s left join classes c on c.id = s.class_id left join sections sec on sec.id = s.section_id
         where s.name ilike ${like} or s.admission_no ilike ${like}
           or exists (select 1 from student_guardians sg join guardians g on g.id = sg.guardian_id where sg.student_id = s.id and g.phone ilike ${like})
           or exists (select 1 from fee_invoices i where i.student_id = s.id and i.number ilike ${like})
         order by s.name limit 8`))];
-      return rows.map((r) => ({ id: r.id, label: r.name, meta: `${r.admission_no} · ${r.cls}${Number(r.due) > 0 ? ` · ${rupees(Number(r.due))} due` : ""}` }));
+      return rows.map((r) => ({ id: r.id, label: r.name, meta: `${r.admission_no} · ${r.cls}${studentTag({ status: r.status, joinsOn: r.joins_on, leftOn: r.left_on, leftReason: r.left_reason }) ? ` · ${studentTag({ status: r.status, joinsOn: r.joins_on, leftOn: r.left_on, leftReason: r.left_reason })}` : ""}${Number(r.due) > 0 ? ` · ${rupees(Number(r.due))} due` : ""}` }));
     });
   }
 
@@ -64,7 +64,7 @@ export class DeskService extends FeesBase {
         parts: full?.parts ?? [], lines: (full?.lines ?? []).map((l) => ({ id: l.id, label: l.label, kind: l.kind, amountPaise: l.amountPaise, concessionPaise: l.concessionPaise, creditedPaise: l.creditedPaise, paidPaise: l.paidPaise, sort: l.sort })) };
     }));
     const members = fam.members.map((m) => ({
-      id: m.student.id, name: m.student.name, admissionNo: m.student.admissionNo, classLabel: m.student.classLabel, advancePaise: m.advancePaise, waitingAdvancePaise: m.waitingAdvancePaise, duePaise: m.openPaise,
+      id: m.student.id, name: m.student.name, admissionNo: m.student.admissionNo, classLabel: m.student.classLabel, tag: studentTag(m.student), advancePaise: m.advancePaise, waitingAdvancePaise: m.waitingAdvancePaise, duePaise: m.openPaise,
       overduePaise: bills.filter((b) => b.studentId === m.student.id && b.state === "overdue").reduce((s, b) => s + dueNow(b), 0),
     }));
     return { members, bills, totalPaise: fam.totalPaise };

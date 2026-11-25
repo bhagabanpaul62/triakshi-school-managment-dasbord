@@ -1,7 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
-import { LoginError, PasswordError, SchoolAuth } from "@smw/auth";
+import { LoginError, PasswordError, SchoolAuth, loginRefusal } from "@smw/auth";
 import { authMails, trySend } from "@smw/integrations";
 import { accountMailer } from "@smw/feature-notifications/delivery";
 import { getSchool, setSessionCookie } from "@smw/runtime";
@@ -20,7 +20,7 @@ export async function setPassword(_prev: SetPasswordState, fd: FormData): Promis
     userId = await auth.resetPassword(input.data.token, input.data.password);
   } catch (err) {
     if (err instanceof PasswordError) return { error: err.message }; // the link is not used up
-    if (err instanceof LoginError) return { error: "This link has expired or was already used. Use Forgot password on the sign-in page, or ask your school office for a new link." };
+    if (err instanceof LoginError) return { error: loginRefusal(err) ?? "This link has expired or was already used. Use Forgot password on the sign-in page, or ask your school office for a new link." };
     throw err;
   }
   const who = await auth.contactOf(userId);

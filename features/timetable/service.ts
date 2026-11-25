@@ -137,7 +137,7 @@ export class TimetableService extends SchoolService<Perm> {
   private async learnerSectionIds(tx: Tx): Promise<string[] | null> {
     if (!this.isLearner) return null;
     if (!this.ctx.features.has("students")) return [];
-    const rows = await tx.execute(sql`select distinct section_id from students where user_id = ${this.ctx.userId} and section_id is not null`);
+    const rows = await tx.execute(sql`select distinct section_id from students where user_id = ${this.ctx.userId} and status = 'active' and section_id is not null`);
     return [...rows].map((r) => String((r as { section_id: string }).section_id));
   }
 
@@ -198,7 +198,7 @@ export class TimetableService extends SchoolService<Perm> {
     if (!this.ctx.features.has("students")) return new Set();
     const rows = await tx.execute(sql`select distinct ss.subject_id from student_subjects ss
       join students st on st.id = ss.student_id join academic_years y on y.id = ss.year_id and y.is_current
-      where st.user_id = ${this.ctx.userId}`);
+      where st.user_id = ${this.ctx.userId} and st.status = 'active'`);
     return new Set([...rows].map((r) => String((r as { subject_id: string }).subject_id)));
   }
 

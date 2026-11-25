@@ -17,6 +17,8 @@ const ADMIN_PAGE = new Set<PanelKey>(["today", "getting-started", "numbers", "at
 
 /** A login that holds exactly the panel's `needs` and nothing else. */
 const holding = (key: PanelKey): Ctx => {
+  // The left panel needs nothing but being a student who left (no custom grants).
+  if (key === "left") return { ...a.as.student, features: new Set(["home", "fees", "exams", "notifications", "settings"]), leftUntil: "2027-02-01" };
   const grants = new Set(["home:view", ...PANELS[key].needs]);
   const base = FAMILY.has(key) ? a.as.student : ADMIN_PAGE.has(key) ? a.as.admin : a.as.accountant;
   return { ...base, role: FAMILY.has(key) ? "student" : ADMIN_PAGE.has(key) ? "admin" : "staff", grants };

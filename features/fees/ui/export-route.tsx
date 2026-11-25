@@ -79,7 +79,7 @@ async function build(kind: string, sp: URLSearchParams, ctx: Ctx): Promise<Repor
       title: "Students' dues", subtitle: `${note(q)} As on ${todayIST()}.`,
       columns: [{ key: "student", label: "Student" }, { key: "adm", label: "Admission no" }, { key: "class", label: "Class" }, { key: "state", label: "Student" }, { key: "billed", label: "Billed", kind: "money" }, { key: "paid", label: "Paid", kind: "money" },
         { key: "due", label: "Open", kind: "money" }, { key: "overdue", label: "Overdue", kind: "money" }, { key: "late", label: "Late fee building up", kind: "money" }, { key: "next", label: "Next due", kind: "date" }, ...(q.filters.age ? [{ key: "band", label: `Open, ${AGE_BANDS.find((b) => b.key === q.filters.age)?.label ?? "this age"}`, kind: "money" as const }] : [])],
-      rows: rows.map((r) => ({ cells: { student: r.name, adm: r.admissionNo, class: r.classLabel, state: r.studentStatus === "active" ? "At school" : `Left${r.leftOn ? ` ${r.leftOn}` : ""}`, billed: r.gross - r.concession, paid: r.paid, due: r.due, overdue: r.overdue, late: r.accrued, next: r.nextDueDate, band: r.inBand } })),
+      rows: rows.map((r) => ({ cells: { student: r.name, adm: r.admissionNo, class: r.classLabel, state: r.tag ?? "At school", billed: r.gross - r.concession, paid: r.paid, due: r.due, overdue: r.overdue, late: r.accrued, next: r.nextDueDate, band: r.inBand } })),
     };
   }
   if (kind === "rte") {

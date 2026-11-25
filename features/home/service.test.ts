@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, supportMessages, supportTickets, users, withSchool } from "@smw/db";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
@@ -178,6 +178,7 @@ describe("admin panels", () => {
     expect(b1.staff).toEqual([{ id: a.users.teacher, name: expect.any(String), age: 36 }]);
     await withSchool(a.id, (tx) => tx.update(staffProfiles).set({ status: "left" }).where(eq(staffProfiles.userId, a.users.teacher)));
     expect((await get(new HomeService(a.as.admin, wed), "birthdays")).staff).toEqual([]);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "active" }).where(eq(students.id, fx.kids[1]!)));
   });
 
   it("approvals, leave and the rest answer for a quiet school without erroring", async () => {
@@ -551,5 +552,33 @@ describe("review fixes", () => {
     const dues = cards.find((c) => c.key === "dues");
     expect(dues).toMatchObject({ failed: true, href: "/app/academics/years" });
     expect(dues!.meta).toMatch(/academic year/i);
+  });
+});
+
+describe("a student who left", () => {
+  const left = (s: TestSchool): Ctx => ({ ...s.as.student, features: new Set(["home", "fees", "exams", "notifications", "settings"]), leftUntil: "2027-02-01" });
+
+  it("sees what still works, until when, and the office phone, and no panel of a lost module", async () => {
+    await withSchool(a.id, (tx) => tx.execute(sql`update schools set phone = '011 5550 0000' where id = ${a.id}`));
+    const svc = new HomeService(left(a), wed);
+    expect(svc.layout().map((p) => p.key)).toEqual(["left"]);
+    const d = await get(svc, "left");
+    expect(d.until).toBe("2027-02-01");
+    expect(d.links.map((l) => l.href)).toEqual(["/app/fees", "/app/results"]);
+    expect(d.office.phone).toBe("011 5550 0000");
+    for (const k of ["family-homework", "family-classes", "notices", "family-attendance", "numbers"] as const) expect((await svc.panel(k)).state).toBe("off");
+  });
+
+  it("a link appears only when its module is on for the login (no dead links), and another login gets no such panel", async () => {
+    const noExams = new HomeService({ ...left(a), features: new Set(["home", "fees", "notifications", "settings"]) }, wed);
+    expect((await get(noExams, "left")).links.map((l) => l.href)).toEqual(["/app/fees"]);
+    expect((await new HomeService(a.as.student, wed).panel("left")).state).toBe("off");
+    expect((await new HomeService(a.as.teacher, wed).panel("left")).state).toBe("off");
+  });
+
+  it("school isolation: the office phone is this school's own", async () => {
+    await withSchool(b.id, (tx) => tx.execute(sql`update schools set phone = '022 5550 1111' where id = ${b.id}`));
+    expect((await get(new HomeService(left(b), wed), "left")).office.phone).toBe("022 5550 1111");
+    expect((await get(new HomeService(left(a), wed), "left")).office.phone).toBe("011 5550 0000");
   });
 });

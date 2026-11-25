@@ -230,7 +230,7 @@ export async function teachersOfStudent(tx: Tx, studentId: string): Promise<Stud
     join users u on u.status = 'active' and (u.id = sec.class_teacher_id or exists (select 1 from section_teachers t where t.section_id = sec.id and t.teacher_id = u.id))
     left join section_teachers st on st.section_id = sec.id and st.teacher_id = u.id
     left join subjects subj on subj.id = st.subject_id
-    where s.id = ${studentId}::uuid group by u.id, u.name, u.role order by u.name`);
+    where s.id = ${studentId}::uuid and s.status = 'active' group by u.id, u.name, u.role order by u.name`);
 }
 
 export interface AudienceOptions {

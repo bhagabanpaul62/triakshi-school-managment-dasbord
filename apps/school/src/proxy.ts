@@ -2,12 +2,13 @@
 // The school itself is resolved on the server from the Host header (getSchool), never from a header a client can send.
 import { NextResponse, type NextRequest } from "next/server";
 
-const INTERNAL = ["x-smw-school-id", "x-smw-school-status", "x-smw-request-id"];
+const INTERNAL = ["x-smw-school-id", "x-smw-school-status", "x-smw-request-id", "x-smw-path"];
 
 export function proxy(req: NextRequest) {
   const headers = new Headers(req.headers);
   for (const h of INTERNAL) headers.delete(h);
   headers.set("x-smw-request-id", crypto.randomUUID());
+  headers.set("x-smw-path", req.nextUrl.pathname);
   return NextResponse.next({ request: { headers } });
 }
 

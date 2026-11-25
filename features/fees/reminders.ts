@@ -1,7 +1,7 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { rupees, addDays, daysBetween, todayIST } from "@smw/feature-kit/money";
 import { z } from "zod";
-import { FeesBase, invalid } from "./base";
+import { FeesBase, WITHDREW, invalid } from "./base";
 import { openOf } from "./calc";
 import { feeInvoices, feePromises, feeReminderStops, feeReminders } from "./schema";
 
@@ -43,6 +43,7 @@ export class ReminderService extends FeesBase {
         join fee_invoices i on i.id = s.invoice_id
         where s.open_paise > 0 and s.due_on between ${earliestDue}::date and ${latestDue}::date
           and not exists (select 1 from fee_reminder_stops x where x.student_id = s.student_id)
+          and not exists (select 1 from students st where st.id = s.student_id and st.status = 'left' and st.left_reason = ${WITHDREW})
           and not exists (select 1 from fee_promises p where p.student_id = s.student_id and p.promised_on >= ${today}::date)`))];
       const picks = slices.flatMap((s) => {
         const reached = offsets.filter((o) => addDays(s.due_on, o) <= today);
@@ -91,6 +92,7 @@ export class ReminderService extends FeesBase {
       const sent: { studentId: string; name: string; bills: number; totalPaise: number }[] = [], skipped: { studentId: string; name: string; reason: SkipReason; detail: string }[] = [];
       for (const s of people) {
         const skip = (reason: SkipReason, detail: string) => skipped.push({ studentId: s.id, name: s.name, reason, detail });
+        if (s.status === "left" && s.leftReason === WITHDREW) { skip("nothing_open", "Withdrew before joining, so there is nothing to chase."); continue; }
         if (stopped.has(s.id)) { skip("stopped", "Reminders are stopped for this student."); continue; }
         if (promised.has(s.id)) { skip("promise", `They promised to pay by ${promised.get(s.id)}.`); continue; }
         const open = bills.filter((b) => b.studentId === s.id && b.status === "issued" && openOf(b) > 0);

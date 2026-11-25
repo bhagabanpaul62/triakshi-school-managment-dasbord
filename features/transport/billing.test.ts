@@ -137,6 +137,20 @@ describe("monthly fee sync", () => {
   });
 });
 
+describe("a student who left", () => {
+  it("is billed no more months: the unpaid ones from the month after they left are cancelled, and the monthly run does not bring them back", async () => {
+    const { r, s1 } = await route(a);
+    const st = await makeStudent(a);
+    await new StudentTransportService(a.as.admin).assign({ studentId: st.id, routeId: r.id, stopId: s1.id, ...both });
+    expect((await active(st.id)).length).toBeGreaterThan(0);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "left", leftOn: today }).where(eq(students.id, st.id)));
+    await resyncSchoolTransport(a.id, today);
+    expect((await active(st.id)).filter((c) => c.dueDate >= nextMonth)).toHaveLength(0);
+    await resyncSchoolTransport(a.id, today);
+    expect((await active(st.id)).filter((c) => c.dueDate >= nextMonth)).toHaveLength(0);
+  });
+});
+
 describe("tracking link", () => {
   const base = { registrationNo: "KA 01 TR 1", capacity: 10, driverName: "Dri Ver", driverPhone: "9845012345" };
   it("only https is accepted", async () => {

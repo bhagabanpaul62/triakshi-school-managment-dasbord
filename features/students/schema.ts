@@ -6,6 +6,7 @@ import { academicYears, classes, sections } from "@smw/feature-academics/schema"
 
 /** "joining": accepted, not started. May be billed and may pay; in no register, audience or plan count; login off until `joinsOn`. */
 export const STUDENT_STATUSES = ["joining", "active", "alumni", "left"] as const;
+export { WITHDREW_BEFORE_JOINING } from "./constants";
 export const GENDERS = ["male", "female", "other"] as const;
 
 export const students = pgTable("students", {
@@ -53,6 +54,7 @@ export const students = pgTable("students", {
   ...tenant(t, "students"),
   index("students_joins").on(t.schoolId, t.joinsOn).where(sql`${t.status} = 'joining'`),
   uniqueIndex("students_admission_no").on(t.schoolId, t.admissionNo),
+  index("students_user").on(t.schoolId, t.userId),
   index("students_section").on(t.schoolId, t.sectionId),
   index("students_status").on(t.schoolId, t.status),
 ]);

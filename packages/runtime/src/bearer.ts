@@ -9,6 +9,7 @@ import { eq, modules, planModules, schoolModuleOverrides, schools, withSchool } 
 import { AppError, NotFoundError, resolveEntitlements, UnauthenticatedError, ValidationError, type Ctx } from "@smw/feature-kit";
 import type { z } from "zod";
 import { REQUEST_ID_HEADER, resolveSchoolByHost } from "./host";
+import { featuresFor, leftUntilOf } from "./phase";
 
 export interface ApiSchool { id: string; slug: string; name: string; features: Set<string>; readOnly: boolean }
 export interface ApiSession { ctx: Ctx; school: ApiSchool; session: ValidSession }
@@ -57,7 +58,7 @@ export async function bearerSession(req: Request, opts: { allowMustChange?: bool
   }
   const ctx: Ctx = {
     schoolId: school.id, userId: session.user.id, role: session.user.role, name: session.user.name, grants: session.user.grants,
-    features: school.features, readOnly: school.readOnly || session.readOnly,
+    features: featuresFor(school.features, session.phase), leftUntil: leftUntilOf(session.phase), readOnly: school.readOnly || session.readOnly,
     requestId: req.headers.get(REQUEST_ID_HEADER) ?? undefined, ip: clientIp(req), supportStaffId: session.supportStaffId,
   };
   return { ctx, school, session };

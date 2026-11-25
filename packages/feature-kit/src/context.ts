@@ -17,6 +17,8 @@ export interface Ctx {
   grants?: ReadonlySet<string>;
   /** Set when platform staff act through support login. */
   supportStaffId?: string | null;
+  /** Set only for a student who has left: the last day (IST, `YYYY-MM-DD`) this login still works. `features` is already cut to what such a login keeps. */
+  leftUntil?: string;
 }
 
 /** Caller in the platform console. */

@@ -50,6 +50,7 @@ export const SCHEDULES: Record<string, { cron: string; tz: string }> = {
   "fees.control-checks": { cron: "15 3 * * *", tz: "Asia/Kolkata" }, // 03:15 IST daily
   "expenses.recurring": { cron: "0 2 * * *", tz: "Asia/Kolkata" }, // 02:00 IST daily; one draft bill per period
   "attendance.leave-credit": { cron: "30 0 * * *", tz: "Asia/Kolkata" }, // 00:30 IST daily; each person, type and leave year is credited once
+  "students.join-due": { cron: "10 0 * * *", tz: "Asia/Kolkata" }, // 00:10 IST daily; children whose joining day has come become active, once each
   "transport.document-expiry": { cron: "0 9 * * *", tz: "Asia/Kolkata" }, // 09:00 IST daily; 30/7/0-day alerts, once each
 };
 

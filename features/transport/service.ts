@@ -47,7 +47,7 @@ export class VehicleService extends CrudService<typeof vehicles, Perm> {
   protected async beforeUpdate(tx: Tx, existing: Vehicle, data: Record<string, unknown>) {
     const capacity = Number(data.capacity);
     const [worst] = await tx.select({ n: count() }).from(studentTransport).innerJoin(routes, eq(routes.id, studentTransport.routeId))
-      .where(eq(routes.vehicleId, existing.id)).groupBy(routes.id).orderBy(sql`count(*) desc`).limit(1);
+      .where(and(eq(routes.vehicleId, existing.id), ACTIVE_RIDER)).groupBy(routes.id).orderBy(sql`count(*) desc`).limit(1);
     if (worst && Number(worst.n) > capacity) throw new ValidationError({ capacity: `${worst.n} students already ride this vehicle.` });
     return { ...data, trackingUrl: data.trackingUrl ?? null };
   }
@@ -102,7 +102,7 @@ export class RouteService extends CrudService<typeof routes, Perm> {
     const [v] = await tx.select().from(vehicles).where(eq(vehicles.id, String(data.vehicleId))).limit(1);
     if (!v) throw new ValidationError({ vehicleId: "Choose a vehicle" });
     if (routeId) {
-      const [riders] = await tx.select({ n: count() }).from(studentTransport).where(eq(studentTransport.routeId, routeId));
+      const [riders] = await tx.select({ n: count() }).from(studentTransport).where(and(eq(studentTransport.routeId, routeId), ACTIVE_RIDER));
       if (Number(riders?.n ?? 0) > v.capacity) throw new LimitError(`${v.registrationNo} seats ${v.capacity}, but ${riders!.n} students ride this route.`);
     }
   }
@@ -112,7 +112,7 @@ export class RouteService extends CrudService<typeof routes, Perm> {
     return { ...data, vehicleId: data.vehicleId ?? null };
   }
   protected async beforeRemove(tx: Tx, existing: Route) {
-    const [riders] = await tx.select({ n: count() }).from(studentTransport).where(eq(studentTransport.routeId, existing.id));
+    const [riders] = await tx.select({ n: count() }).from(studentTransport).where(and(eq(studentTransport.routeId, existing.id), ACTIVE_RIDER));
     if (Number(riders?.n) > 0) throw new ConflictError(`${riders!.n} students ride ${existing.name}. Move them to another route first.`);
   }
 
@@ -122,7 +122,7 @@ export class RouteService extends CrudService<typeof routes, Perm> {
       const [rs, vs, riders, stops] = await Promise.all([
         tx.select().from(routes).orderBy(asc(routes.name)),
         tx.select().from(vehicles),
-        tx.select({ routeId: studentTransport.routeId, n: count() }).from(studentTransport).groupBy(studentTransport.routeId),
+        tx.select({ routeId: studentTransport.routeId, n: count() }).from(studentTransport).where(ACTIVE_RIDER).groupBy(studentTransport.routeId),
         tx.select({ routeId: routeStops.routeId, n: count() }).from(routeStops).groupBy(routeStops.routeId),
       ]);
       return rs.map((r) => {
@@ -142,7 +142,7 @@ export class RouteService extends CrudService<typeof routes, Perm> {
       const [vehicle, stops, riders] = await Promise.all([
         route.vehicleId ? tx.select().from(vehicles).where(eq(vehicles.id, route.vehicleId)).then((r) => r[0] ?? null) : Promise.resolve(null),
         tx.select().from(routeStops).where(eq(routeStops.routeId, id)).orderBy(asc(routeStops.sequence)),
-        tx.select({ stopId: studentTransport.stopId, n: count() }).from(studentTransport).where(eq(studentTransport.routeId, id)).groupBy(studentTransport.stopId),
+        tx.select({ stopId: studentTransport.stopId, n: count() }).from(studentTransport).where(and(eq(studentTransport.routeId, id), ACTIVE_RIDER)).groupBy(studentTransport.stopId),
       ]);
       const total = riders.reduce((a, r) => a + Number(r.n), 0);
       return {
@@ -203,7 +203,7 @@ export class RouteService extends CrudService<typeof routes, Perm> {
     return this.write("manage", async (tx) => {
       const stop = await this.stopOrThrow(tx, stopId);
       await this.routeOrThrow(tx, stop.routeId);
-      const [riders] = await tx.select({ n: count() }).from(studentTransport).where(eq(studentTransport.stopId, stopId));
+      const [riders] = await tx.select({ n: count() }).from(studentTransport).where(and(eq(studentTransport.stopId, stopId), ACTIVE_RIDER));
       if (Number(riders?.n) > 0) throw new ConflictError(`${riders!.n} students board at ${stop.name}. Move them to another stop first.`);
       await tx.delete(routeStops).where(eq(routeStops.id, stopId));
       const rest = await this.orderedStops(tx, stop.routeId);
@@ -225,6 +225,8 @@ export interface RosterRow {
   stopId: string; stopName: string; stopSequence: number; pickup: boolean; drop: boolean; trip: string; startsOn: string; parentPhone: string | null;
 }
 
+/** A rider who is at school now. A left student keeps their stop row, but they take no seat and are in no count or list. */
+const ACTIVE_RIDER = sql`exists (select 1 from students st where st.id = ${studentTransport.studentId} and st.status = 'active')`;
 const tripLabel = (pickup: boolean, drop: boolean) => (pickup && drop ? "Both ways" : pickup ? "Pickup only" : "Drop only");
 
 /** Shared by the services that serve student logins: who is "mine". */
@@ -252,13 +254,14 @@ export class StudentTransportService extends TransportBase {
       if (!stop) throw new ValidationError({ stopId: "Choose a stop on this route" });
       const [student] = await tx.select({ id: students.id, name: students.name, status: students.status }).from(students).where(eq(students.id, data.studentId)).limit(1);
       if (!student) throw new ValidationError({ studentId: "Choose the student" });
-      if (student.status !== "active") throw new ValidationError({ studentId: `${student.name} is not an active student` });
+      if (student.status === "joining") throw new ValidationError({ studentId: `${student.name} has not joined yet. Give a route once they join the school.` });
+      if (student.status !== "active") throw new ValidationError({ studentId: `${student.name} has left the school, so a route cannot be given.` });
 
       if (route.vehicleId) {
         // Lock the vehicle so two admins assigning at once cannot both take the last seat.
         const [vehicle] = await tx.select().from(vehicles).where(eq(vehicles.id, route.vehicleId)).for("update");
         if (vehicle) {
-          const [taken] = await tx.select({ n: count() }).from(studentTransport).where(and(eq(studentTransport.routeId, route.id), ne(studentTransport.studentId, data.studentId)));
+          const [taken] = await tx.select({ n: count() }).from(studentTransport).where(and(eq(studentTransport.routeId, route.id), ne(studentTransport.studentId, data.studentId), ACTIVE_RIDER));
           if (Number(taken?.n) >= vehicle.capacity) throw new LimitError(`${vehicle.registrationNo} is full (${vehicle.capacity} seats). Pick another route.`);
         }
       }
@@ -298,7 +301,7 @@ export class StudentTransportService extends TransportBase {
         .innerJoin(routeStops, eq(routeStops.id, studentTransport.stopId))
         .leftJoin(classes, eq(classes.id, students.classId))
         .leftJoin(sections, eq(sections.id, students.sectionId))
-        .where(eq(studentTransport.routeId, routeId))
+        .where(and(eq(studentTransport.routeId, routeId), eq(students.status, "active")))
         .orderBy(asc(routeStops.sequence), asc(students.name));
       const phones = rows.length
         ? await tx.select({ studentId: studentGuardians.studentId, phone: guardians.phone, primary: studentGuardians.isPrimary }).from(studentGuardians)
@@ -359,7 +362,7 @@ export class StudentTransportService extends TransportBase {
         .innerJoin(routes, eq(routes.id, studentTransport.routeId))
         .innerJoin(routeStops, eq(routeStops.id, studentTransport.stopId))
         .leftJoin(vehicles, eq(vehicles.id, routes.vehicleId))
-        .where(inArray(studentTransport.studentId, ids)).orderBy(asc(students.name));
+        .where(and(inArray(studentTransport.studentId, ids), eq(students.status, "active"))).orderBy(asc(students.name));
       if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const id of new Set(rows.map((r) => r.routeId))) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "route", id }, this.ctx);
       return rows.map(({ routeId: _r, ...r }) => ({ ...r, trip: tripLabel(r.pickup, r.drop), feePaise: monthlyFeeFor(r.monthlyFeePaise, r.pickup, r.drop) }));
     });
@@ -378,7 +381,7 @@ export class TransportFeeHelper extends TransportBase {
         if (!own.includes(studentId)) return 0;
       }
       const [row] = await tx.select({ fee: routeStops.monthlyFeePaise, pickup: studentTransport.pickup, drop: studentTransport.drop }).from(studentTransport)
-        .innerJoin(routeStops, eq(routeStops.id, studentTransport.stopId)).where(eq(studentTransport.studentId, studentId)).limit(1);
+        .innerJoin(routeStops, eq(routeStops.id, studentTransport.stopId)).where(and(eq(studentTransport.studentId, studentId), ACTIVE_RIDER)).limit(1);
       return row ? monthlyFeeFor(row.fee, row.pickup, row.drop) : 0;
     });
   }

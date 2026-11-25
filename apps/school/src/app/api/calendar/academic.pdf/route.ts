@@ -1,6 +1,6 @@
 import { sql, withSchool } from "@smw/db";
 import { actionCtx } from "@smw/runtime";
-import { NotFoundError } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError } from "@smw/feature-kit";
 import { academicCalendarPdf } from "@smw/feature-events/academic-pdf";
 import { schoolFromRequest } from "@smw/runtime/bearer";
 import { parseIst } from "@smw/feature-events/dates";
@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     const ctx = await actionCtx();
+    if (ctx.leftUntil) throw new ForbiddenError("This is not available to a student who has left the school.");
     const asked = new URL(req.url).searchParams.get("year");
     const year = await withSchool(ctx.schoolId, async (tx) => {
       const rows = [...(await tx.execute(asked && /^[0-9a-f-]{36}$/i.test(asked)

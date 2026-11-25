@@ -6,6 +6,7 @@ ALTER TABLE "students" ADD COLUMN "joins_section_id" uuid;--> statement-breakpoi
 ALTER TABLE "students" ADD CONSTRAINT "students_joins_year_id_academic_years_id_fk" FOREIGN KEY ("joins_year_id") REFERENCES "public"."academic_years"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "students" ADD CONSTRAINT "students_joins_section_id_sections_id_fk" FOREIGN KEY ("joins_section_id") REFERENCES "public"."sections"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "students_joins" ON "students" USING btree ("school_id","joins_on") WHERE "students"."status" = 'joining';--> statement-breakpoint
+CREATE INDEX "students_user" ON "students" USING btree ("school_id","user_id");--> statement-breakpoint
 -- A student who left or graduated is no longer "studying" in the year they left. Nothing about an active student changes.
 UPDATE "student_enrollments" e SET "outcome" = CASE s."status" WHEN 'alumni' THEN 'graduated' ELSE 'left' END
 FROM "students" s, "academic_years" y

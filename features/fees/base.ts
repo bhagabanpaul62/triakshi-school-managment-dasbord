@@ -1,3 +1,4 @@
+import { WITHDREW_BEFORE_JOINING } from "@smw/feature-students/constants";
 import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, ne, sql, sum, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
@@ -23,7 +24,16 @@ export type Invoice = typeof feeInvoices.$inferSelect;
 export type InvoiceLine = typeof feeInvoiceLines.$inferSelect;
 export type Head = typeof feeHeads.$inferSelect;
 export interface Snapshot { studentName: string; admissionNo: string; classLabel: string; guardian: string | null }
-export interface StudentLine { id: string; name: string; admissionNo: string; classId: string | null; sectionId: string | null; status: string; leftOn: string | null; classLabel: string }
+export interface StudentLine { id: string; name: string; admissionNo: string; classId: string | null; sectionId: string | null; status: string; leftOn: string | null; classLabel: string; joinsOn?: string | null; leftReason?: string | null }
+/** `students.left_reason` of a child who never started. Nothing ran for them, so nothing is chased. */
+export const WITHDREW = WITHDREW_BEFORE_JOINING;
+export const dayLabel = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+/** The plain words for a student who is not simply at school ("Joining 3 Jun 2027", "Left 4 Mar 2027"), or null. */
+export function studentTag(s: { status: string; joinsOn?: string | null; leftOn?: string | null; leftReason?: string | null }): string | null {
+  if (s.status === "joining") return s.joinsOn ? `Joining ${dayLabel(s.joinsOn)}` : "Joining";
+  if (s.status === "left") return s.leftReason === WITHDREW ? "Withdrew before joining" : `Left${s.leftOn ? ` ${dayLabel(s.leftOn)}` : ""}`;
+  return s.status === "alumni" ? "Alumni" : null;
+}
 /** An invoice with its lines and settlement parts, ready for the arithmetic in calc.ts. */
 export interface InvoiceFull extends Invoice { lines: InvoiceLine[]; parts: { dueOn: string; amountPaise: number }[] }
 /** The note of an advance put on open bills by itself (the setting "use the advance automatically"). Only these uses are given back on a reversal. */
@@ -84,6 +94,12 @@ export abstract class FeesBase extends MoneyService<Perm> {
     return NotificationWriter.insert(tx, this.ctx.schoolId, [...logins.values()].map((userId) => ({ userId, topic, title, body, href, subject, privateBody: true })));
   }
 
+  /** The year a new bill for this student belongs to: the joining year while they are joining, else the current year. */
+  protected async billYearOf(tx: Tx, studentId: string) {
+    const [s] = await tx.select({ status: students.status, joinsYearId: students.joinsYearId }).from(students).where(eq(students.id, studentId));
+    return s?.status === "joining" && s.joinsYearId ? this.yearOr(tx, s.joinsYearId) : this.currentYear(tx);
+  }
+
   protected async currentYear(tx: Tx) {
     const [year] = await tx.select().from(academicYears).orderBy(desc(academicYears.isCurrent), desc(academicYears.startsOn)).limit(1);
     if (!year) throw new ConflictError("Set up the academic year first.");
@@ -100,7 +116,7 @@ export abstract class FeesBase extends MoneyService<Perm> {
 
   protected studentLines(tx: Tx, where?: SQL): Promise<StudentLine[]> {
     return tx.select({
-      id: students.id, name: students.name, admissionNo: students.admissionNo, classId: students.classId, sectionId: students.sectionId, status: students.status, leftOn: students.leftOn,
+      id: students.id, name: students.name, admissionNo: students.admissionNo, classId: students.classId, sectionId: students.sectionId, status: students.status, leftOn: students.leftOn, joinsOn: students.joinsOn, leftReason: students.leftReason,
       classLabel: sql<string>`coalesce(${classes.name} || coalesce('-' || ${sections.name}, ''), '-')`,
     }).from(students).leftJoin(classes, eq(classes.id, students.classId)).leftJoin(sections, eq(sections.id, students.sectionId))
       .where(where).orderBy(asc(classes.grade), asc(sections.name), asc(students.name));

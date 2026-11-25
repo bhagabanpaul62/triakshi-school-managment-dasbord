@@ -54,7 +54,7 @@ export class MeetingSchedule extends MeetingBase {
         and exists (select 1 from meeting_windows w where w.meeting_id = md.id) and not exists (select 1 from meeting_windows w where w.meeting_id = md.id and w.ends_at > ${ts(now)}) returning id`);
       // A child who left no longer needs their time: give it back so another family can take it.
       const freed = await tx.execute(sql`update meeting_slots set state = 'open', student_id = null, booked_by = null, booked_at = null, visit = null, reminded_day = false, reminded_hour = false
-        where state = 'booked' and not walk_in and starts_at > ${ts(now)} and student_id in (select id from students where status <> 'active') returning id`);
+        where state = 'booked' and not walk_in and starts_at > ${ts(now)} and student_id in (select id from students where status in ('left', 'alumni')) returning id`);
       for (const r of [...closed, ...done]) await this.notices.over(tx, String(r.id));
       return [...closed].length + [...done].length + [...freed].length;
     });

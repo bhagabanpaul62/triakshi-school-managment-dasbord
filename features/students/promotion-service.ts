@@ -1,11 +1,11 @@
-import { and, asc, count, eq, gt, max } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, max } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ValidationError } from "@smw/feature-kit";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { StudentRecordService } from "./access";
 import { promoteInput } from "./inputs";
 import { studentEnrollments, students } from "./schema";
-import { sectionLabel, today } from "./util";
+import { leftReasonCode, sectionLabel, today } from "./util";
 
 interface SectionInfo { id: string; classId: string; yearId: string; name: string; className: string; grade: number; yearName: string; yearStart: string }
 
@@ -37,6 +37,15 @@ export class PromotionService extends StudentRecordService {
     });
   }
 
+  /** Students in each of these sections: active now, and joining children planned into them (they count toward its strength, not its roll). */
+  private async strength(tx: Tx, ids: string[]) {
+    const out = new Map<string, { now: number; joining: number }>(ids.map((id) => [id, { now: 0, joining: 0 }]));
+    if (!ids.length) return out;
+    for (const r of await tx.select({ id: students.sectionId, n: count() }).from(students).where(and(inArray(students.sectionId, ids), eq(students.status, "active"))).groupBy(students.sectionId)) out.get(r.id!)!.now = Number(r.n);
+    for (const r of await tx.select({ id: students.joinsSectionId, n: count() }).from(students).where(and(inArray(students.joinsSectionId, ids), eq(students.status, "joining"))).groupBy(students.joinsSectionId)) out.get(r.id!)!.joining = Number(r.n);
+    return out;
+  }
+
   /** What promoting this section would involve: its students and where they can go. */
   async preview(fromSectionId: string) {
     return this.read("write", async (tx) => {
@@ -48,7 +57,8 @@ export class PromotionService extends StudentRecordService {
         id: sections.id, name: sections.name, classId: sections.classId, className: classes.name, grade: classes.grade, yearName: academicYears.name,
       }).from(sections).innerJoin(classes, eq(classes.id, sections.classId)).innerJoin(academicYears, eq(academicYears.id, sections.yearId))
         .where(gt(academicYears.startsOn, from.yearStart)).orderBy(asc(classes.grade), asc(sections.name));
-      const option = (s: (typeof later)[number]) => ({ id: s.id, label: `${sectionLabel(s.className, s.name)} (${s.yearName})` });
+      const seats = await this.strength(tx, later.map((l) => l.id));
+      const option = (s: (typeof later)[number]) => ({ id: s.id, label: `${sectionLabel(s.className, s.name)} (${s.yearName})`, ...seats.get(s.id)! });
       return {
         from: { id: from.id, label: sectionLabel(from.className, from.name), yearName: from.yearName },
         students: people,
@@ -84,6 +94,7 @@ export class PromotionService extends StudentRecordService {
       if (d.retainedIds.length && !retainTo) throw new ValidationError({ retainSectionId: "Choose where students who repeat the year go" });
 
       const tally = { promoted: 0, retained: 0, left: 0, graduated: 0 };
+      const leftReason = leftReasonCode(d.leftReason);
       const nextRoll = new Map<string, number>();
       const rollIn = async (sectionId: string) => {
         if (!nextRoll.has(sectionId)) {
@@ -101,11 +112,11 @@ export class PromotionService extends StudentRecordService {
       for (const { id } of people) {
         if (d.leftIds.includes(id)) {
           await closeOld(id, "left");
-          await tx.update(students).set({ status: "left", leftOn: today() }).where(eq(students.id, id));
+          await tx.update(students).set({ status: "left", leftOn: today(), leftReason }).where(eq(students.id, id));
           tally.left++;
         } else if (graduating && !d.retainedIds.includes(id)) {
           await closeOld(id, "graduated");
-          await tx.update(students).set({ status: "alumni", leftOn: today() }).where(eq(students.id, id));
+          await tx.update(students).set({ status: "alumni", leftOn: today(), leftReason: leftReasonCode("completed") }).where(eq(students.id, id));
           tally.graduated++;
         } else {
           const retained = d.retainedIds.includes(id);
@@ -118,7 +129,10 @@ export class PromotionService extends StudentRecordService {
           tally[retained ? "retained" : "promoted"]++;
         }
       }
-      return { ...tally, from: sectionLabel(from.className, from.name) };
+      // Strength after the run: who is there now, and who is still to join (counted in the seat sum, not in the register).
+      const after = await this.strength(tx, [...new Set([target?.id, retainTo?.id].filter((x): x is string => !!x))]);
+      const into = (t: SectionInfo | null) => t ? { label: `${sectionLabel(t.className, t.name)} (${t.yearName})`, ...after.get(t.id)! } : null;
+      return { ...tally, from: sectionLabel(from.className, from.name), target: into(target), retainTarget: into(retainTo) };
     }, (r) => ({
       action: "promote", entity: "Student",
       summary: `Promoted ${r.from}: ${r.promoted} moved up, ${r.retained} repeat, ${r.left} left, ${r.graduated} graduated`, meta: { ...r },

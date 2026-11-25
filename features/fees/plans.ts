@@ -86,6 +86,10 @@ export function pickPlan(plans: PublishedPlan[], s: { classId: string | null; ad
 export const admissionKind = (admissionDate: string | null, year: { startsOn: string; endsOn: string }): "new" | "existing" =>
   admissionDate && admissionDate >= year.startsOn && admissionDate <= year.endsOn ? "new" : "existing";
 
+/** A joining child is always a new admission of the year they join. */
+export const kindFor = (s: { status?: string; admissionDate: string | null }, year: { startsOn: string; endsOn: string }): "new" | "existing" =>
+  s.status === "joining" ? "new" : admissionKind(s.admissionDate, year);
+
 // ---------- plans ----------
 
 export class PlanService extends FeesBase {
@@ -97,10 +101,10 @@ export class PlanService extends FeesBase {
   }
 
   /** The published plan one student is billed on in a year, or null. */
-  async resolve(tx: Tx, student: { id: string; classId: string | null; admissionDate: string | null }, yearId: string): Promise<PublishedPlan | null> {
+  async resolve(tx: Tx, student: { id: string; classId: string | null; admissionDate: string | null; status?: string }, yearId: string): Promise<PublishedPlan | null> {
     const year = await this.yearOr(tx, yearId);
     const [over] = await tx.select({ rootId: feeStudentPlans.rootId }).from(feeStudentPlans).where(and(eq(feeStudentPlans.studentId, student.id), eq(feeStudentPlans.yearId, yearId)));
-    return pickPlan(await this.publishedIn(tx, yearId), { classId: student.classId, admission: admissionKind(student.admissionDate, year), overrideRoot: over?.rootId });
+    return pickPlan(await this.publishedIn(tx, yearId), { classId: student.classId, admission: kindFor(student, year), overrideRoot: over?.rootId });
   }
 
   async list(query: ListQuery = {}) {
@@ -334,7 +338,7 @@ export class PlanService extends FeesBase {
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
       const [[s], target] = await Promise.all([
-        tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId)),
+        tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status, name: students.name }).from(students).where(eq(students.id, data.studentId)),
         this.publishedIn(tx, year.id).then((all) => all.find((p) => p.rootId === data.rootId)),
       ]);
       if (!s) throw new NotFoundError("Student");
@@ -361,7 +365,7 @@ export class PlanService extends FeesBase {
     const data = this.parse(optInInput, input);
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
-      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId));
+      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status, name: students.name }).from(students).where(eq(students.id, data.studentId));
       if (!s) throw new NotFoundError("Student");
       const heads = [...new Set(data.headIds)];
       if (heads.length && (await tx.select({ id: feeHeads.id }).from(feeHeads).where(inArray(feeHeads.id, heads))).length !== heads.length) throw new NotFoundError("Fee head");
@@ -426,12 +430,12 @@ export class PlanService extends FeesBase {
     const data = this.parse(removeOverrideInput, input);
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
-      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId));
+      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status, name: students.name }).from(students).where(eq(students.id, data.studentId));
       if (!s) throw new NotFoundError("Student");
       const [over] = await tx.select({ rootId: feeStudentPlans.rootId }).from(feeStudentPlans).where(and(eq(feeStudentPlans.studentId, s.id), eq(feeStudentPlans.yearId, year.id)));
       if (!over) throw new ConflictError("This student is not on a plan of their own, so there is nothing to remove.");
       const taken = new Set((await tx.select({ h: feeOptIns.headId }).from(feeOptIns).where(and(eq(feeOptIns.studentId, s.id), eq(feeOptIns.yearId, year.id)))).map((r) => r.h));
-      const [now, back] = [await this.resolve(tx, s, year.id), pickPlan(await this.publishedIn(tx, year.id), { classId: s.classId, admission: admissionKind(s.admissionDate, year) })];
+      const [now, back] = [await this.resolve(tx, s, year.id), pickPlan(await this.publishedIn(tx, year.id), { classId: s.classId, admission: kindFor(s, year) })];
       const lowers = (now ? await this.unbilledIn(tx, s.id, now.id, taken) : 0) - (back ? await this.unbilledIn(tx, s.id, back.id, taken) : 0);
       const d = { studentId: s.id, yearId: year.id, rootId: null, reason: "Back on the class plan" };
       const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "student_plan", studentId: s.id, payload: d, reason: d.reason, lowersPaise: lowers, title: `Put ${s.name} back on the class fee plan`, href: `/app/fees/students/${s.id}` }, () => this.applyStudentPlanIn(tx, d));

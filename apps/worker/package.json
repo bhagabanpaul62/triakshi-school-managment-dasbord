@@ -47,6 +47,7 @@
     "@smw/feature-support": "workspace:*",
     "@smw/feature-setup": "workspace:*",
     "@smw/feature-website": "workspace:*",
-    "@smw/feature-settings": "workspace:*"
+    "@smw/feature-settings": "workspace:*",
+    "@smw/feature-students": "workspace:*"
   }
 }

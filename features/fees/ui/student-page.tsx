@@ -17,7 +17,7 @@ import { ConcessionTypeService, DuesService, HeadService, PromiseService } from 
 import { addPromise, resumeReminders, settleUpLeaving, stopReminders, withdrawConcession, resendSettlement, withdrawNote, withdrawSettlement } from "./actions";
 import { ConcessionForm } from "./concession-form";
 import { FeesLookup } from "./lookups";
-import type { ApprovalInfo } from "../base";
+import { WITHDREW, studentTag, type ApprovalInfo } from "../base";
 import { SettlementBuilder, type SettlementPlan } from "./settlement-builder";
 import { StudentDocs } from "./student-docs";
 import { Notice, PillLink, Tabs, can, one, type Search } from "./shared";
@@ -51,7 +51,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
   ]);
   const openBills = a.invoices.filter((i) => i.status === "issued" && i.openPaise > 0).sort((x, y) => x.dueDate.localeCompare(y.dueDate));
   const overdue = openBills.filter((i) => i.state === "overdue");
-  const left = student.status !== "active";
+  const tag = studentTag(student), left = student.status === "left" || student.status === "alumni";
   const waitingSettlement = a.settlements.find((s) => s.status === "pending");
   const billsForDeal = openBills.map((i) => ({ id: i.id, number: i.number, label: i.label, openPaise: i.openPaise, accruedLatePaise: i.accruedLatePaise, dueDate: i.dueDate }));
   const owed = balance.openPaise + balance.accruedPaise;
@@ -62,7 +62,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
   return (
     <>
       <EntityHeader back={{ href: staff ? "/app/fees/dues" : "/app/fees", label: staff ? "Students' dues" : "My fees" }} title={student.name}
-        chips={<><ToneBadge label={student.classLabel} />{left ? <ToneBadge label={student.status === "left" ? `Left${student.leftOn ? ` ${shortDate(student.leftOn)}` : ""}` : "Alumni"} tone="warning" /> : null}{stopped ? <ToneBadge label="Reminders stopped" tone="info" /> : null}</>}
+        chips={<><ToneBadge label={student.classLabel} />{tag ? <ToneBadge label={tag} tone={student.status === "joining" ? "info" : "warning"} /> : null}{stopped ? <ToneBadge label="Reminders stopped" tone="info" /> : null}</>}
         meta={[student.admissionNo, <Link key="p" href={`/app/students/${studentId}`} className={LINK}>Student record</Link>]}
         actions={staff ? <>
           {collect ? <PillLink href={`/app/fees/collect?student=${studentId}`} primary>Collect</PillLink> : null}
@@ -87,7 +87,7 @@ export default async function StudentFeesPage({ params, searchParams }: { params
 
       {waitingSettlement ? <div className="mt-4"><Notice tone="info" action={canApprove(ctx) ? { href: "/app/finance/approvals", label: "Open approvals" } : undefined}>A settlement for this student is waiting. {waiting(waitingSettlement.approval)}. Reminders and late fees follow the new dates once it is approved.</Notice></div> : null}
       {broken ? <div className="mt-4"><Notice tone="danger" action={concede && openBills.length ? undefined : undefined}>Promised to pay by {shortDate(broken.promisedOn)} and still owes. {collect ? "Collect the fee, or note a new promise." : ""}</Notice></div> : null}
-      {left && owed > 0 ? <div className="mt-4"><Notice>This student has left and still owes {paise(owed)}. A transfer certificate warns until it is paid or settled.</Notice></div> : null}
+      {left && owed > 0 ? <div className="mt-4"><Notice>{student.leftReason === WITHDREW ? "This child withdrew before joining" : "This student has left"} and still owes {paise(owed)}.{student.leftReason === WITHDREW ? " Settle up or refund it." : " A transfer certificate warns until it is paid or settled."}</Notice></div> : null}
 
       <div className="mt-6"><Tabs label="Student fee sections" tabs={TABS.map(([t, l]) => [t, l] as const)} current={tab} href={(t) => `${base}${t === "overview" ? "" : `?tab=${t}`}`} /></div>
 

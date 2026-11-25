@@ -177,7 +177,7 @@ export class StudentAttendanceService extends AttendanceBase {
       if (this.ctx.role === "teacher" && this.ctx.features.has("timetable") && (await loadSettings(tx)).mode === "period") throw new ForbiddenError("This school takes attendance period by period. Mark from My classes.");
       await this.assertOpenDay(tx, data.date, await this.studentWho(tx, [data.sectionId]));
       const ids = entries.map((e) => e.studentId);
-      const inSection = await tx.select({ id: students.id }).from(students).where(and(eq(students.sectionId, data.sectionId), inArray(students.id, ids)));
+      const inSection = await tx.select({ id: students.id }).from(students).where(and(eq(students.sectionId, data.sectionId), eq(students.status, "active"), inArray(students.id, ids)));
       if (inSection.length !== ids.length) throw new ValidationError({ entries: "Some students are not in this section" });
       await this.upsert(tx, studentAttendance, [studentAttendance.studentId, studentAttendance.date],
         entries.map((e) => ({ schoolId: this.ctx.schoolId, studentId: e.studentId, sectionId: data.sectionId, date: data.date, status: e.status, note: e.note ?? null, markedBy: this.ctx.userId })),

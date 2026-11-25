@@ -113,7 +113,7 @@ export class ChequeService extends FeesBase {
       const { bounceChargePaise } = await this.settings(tx);
       if (bounceChargePaise > 0) {
         const bills = new InvoiceService(this.ctx);
-        const year = await this.currentYear(tx);
+        const year = await this.billYearOf(tx, r!.studentId);
         const id = await bills.createDraft(tx, { studentId: r!.studentId, yearId: year.id, kind: "bounce", label: `Bounced cheque ${c.chequeNo}`, dueDate: date, sourceKey: `bounce:${c.id}`, lines: [{ kind: "bounce", label: "Bounced cheque charge", amountPaise: bounceChargePaise }] });
         await bills.issueIn(tx, [id], date);
       }

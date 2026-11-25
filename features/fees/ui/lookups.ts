@@ -2,7 +2,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { finApprovals, finJournals } from "@smw/feature-finance/schema";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
-import { FeesBase } from "../base";
+import { FeesBase, studentTag } from "../base";
 import { feeReminderStops } from "../schema";
 
 /**
@@ -15,10 +15,10 @@ export class FeesLookup extends FeesBase {
     if (q.trim().length < 2) return [];
     return this.read("read", async (tx) => {
       const like = `%${q.trim()}%`;
-      const rows = await tx.select({ id: students.id, name: students.name, admissionNo: students.admissionNo, status: students.status, classLabel: sql<string>`coalesce(${classes.name} || coalesce('-' || ${sections.name}, ''), '-')` })
+      const rows = await tx.select({ id: students.id, name: students.name, admissionNo: students.admissionNo, status: students.status, joinsOn: students.joinsOn, leftOn: students.leftOn, leftReason: students.leftReason, classLabel: sql<string>`coalesce(${classes.name} || coalesce('-' || ${sections.name}, ''), '-')` })
         .from(students).leftJoin(classes, eq(classes.id, students.classId)).leftJoin(sections, eq(sections.id, students.sectionId))
         .where(or(ilike(students.name, like), ilike(students.admissionNo, like))).orderBy(asc(students.name)).limit(8);
-      return rows.map((r) => ({ id: r.id, label: r.name, meta: `${r.admissionNo} · ${r.classLabel}${r.status === "active" ? "" : ` · ${r.status}`}` }));
+      return rows.map((r) => ({ id: r.id, label: r.name, meta: `${r.admissionNo} · ${r.classLabel}${studentTag(r) ? ` · ${studentTag(r)}` : ""}` }));
     });
   }
 
@@ -43,7 +43,7 @@ export class FeesLookup extends FeesBase {
   /** One student as a picker option, or null when the id is not a student of this school. */
   async studentOption(studentId: string) {
     if (!/^[0-9a-f-]{36}$/i.test(studentId)) return null;
-    return this.read("read", async (tx) => { const [s] = await this.studentLines(tx, eq(students.id, studentId)); return s ? { id: s.id, label: s.name, meta: `${s.admissionNo} · ${s.classLabel}` } : null; });
+    return this.read("read", async (tx) => { const [s] = await this.studentLines(tx, eq(students.id, studentId)); return s ? { id: s.id, label: s.name, meta: `${s.admissionNo} · ${s.classLabel}${studentTag(s) ? ` · ${studentTag(s)}` : ""}` } : null; });
   }
 
   /** Classes with their sections, for the filters and for billing a whole class. */

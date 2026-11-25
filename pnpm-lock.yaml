@@ -643,6 +643,9 @@ importers:
       '@smw/feature-setup':
         specifier: workspace:*
         version: link:../../features/setup
+      '@smw/feature-students':
+        specifier: workspace:*
+        version: link:../../features/students
       '@smw/feature-support':
         specifier: workspace:*
         version: link:../../features/support

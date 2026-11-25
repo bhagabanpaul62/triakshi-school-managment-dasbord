@@ -2,6 +2,7 @@ import { and, count, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-
 import { listQuerySchema, SchoolService, toPage, type Ctx, type ListQuery, type Page } from "@smw/feature-kit";
 import notificationsFeature from "./feature";
 import { listFilters } from "./inputs";
+import { hiddenForLeft } from "./left";
 import { notifications, type Notification } from "./schema";
 import { hiddenTopics, TOPICS, type TopicGroup, type TopicKey } from "./topics";
 import { NotificationWriter } from "./writer";
@@ -26,7 +27,8 @@ export class NotificationService extends SchoolService<Perm> {
     return this.ctx.supportStaffId && (n.privateBody || PRIVATE_TOPICS.has(n.topic)) ? { ...n, title: "Private", body: null } : n;
   }
   private mine = () => {
-    const off = hiddenTopics(this.ctx.features);
+    // A student who left sees only what still opens for them: fees, results, the account. Older rows of lost modules would lead to a refusal.
+    const off = [...new Set([...hiddenTopics(this.ctx.features), ...(this.ctx.leftUntil ? hiddenForLeft() : [])])];
     return and(eq(notifications.userId, this.ctx.userId), off.length ? notInArray(notifications.topic, off) : undefined);
   };
   private needsAction = () => and(eq(notifications.action, true), isNull(notifications.doneAt));

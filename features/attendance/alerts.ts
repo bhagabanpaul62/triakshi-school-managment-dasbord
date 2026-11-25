@@ -47,7 +47,7 @@ export async function sendDueAlerts(tx: Tx, schoolId: string, now: Date): Promis
     .where(inArray(studentAttendance.studentId, due.map((d) => d.studentId)));
   const statusOf = new Map(marks.map((m) => [`${m.studentId}:${m.date}`, m.status]));
   const kids = new Map((await tx.select({ id: students.id, name: students.name, userId: students.userId }).from(students)
-    .innerJoin(users, eq(users.id, students.userId)).where(inArray(students.id, due.map((d) => d.studentId)))).map((k) => [k.id, k]));
+    .innerJoin(users, eq(users.id, students.userId)).where(and(eq(students.status, "active"), inArray(students.id, due.map((d) => d.studentId))))).map((k) => [k.id, k]));
 
   const send = due.flatMap((d) => {
     const status = statusOf.get(`${d.studentId}:${d.date}`), kid = kids.get(d.studentId);
