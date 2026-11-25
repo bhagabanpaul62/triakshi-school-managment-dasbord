@@ -75,7 +75,8 @@ describe("absence alert", () => {
     const svc = new StudentAttendanceService(a.as.admin);
     const day = addDays(today, -1), n = (await notes(a, a.users.student)).length;
     await svc.mark({ sectionId: fx.own, date: day, entries: [{ studentId: kid(), status: "present" }, { studentId: fx.kids[1], status: "absent" }] });
-    await svc.mark({ sectionId: fx.own, date: addDays(today, -10), entries: [{ studentId: kid(), status: "absent" }] });
+    // Before `base`, so it never lands on a day the leave tests below expect to be unmarked.
+    await svc.mark({ sectionId: fx.own, date: addDays(today, -25), entries: [{ studentId: kid(), status: "absent" }] });
     await withSchool(a.id, (tx) => tx.insert(attendanceSettings).values({ schoolId: a.id, alertsEnabled: false, thresholdPercent: 75 }));
     await svc.mark({ sectionId: fx.own, date: day, entries: [{ studentId: kid(), status: "absent" }] });
     await sendAfter(31);
