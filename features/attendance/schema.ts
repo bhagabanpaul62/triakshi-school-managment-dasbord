@@ -4,7 +4,7 @@ import { schoolColumns, tenant, users } from "@smw/db";
 import { academicYears, sections, subjects } from "@smw/feature-academics/schema";
 import { periods, timetableSlots, ttBlockOptions, ttBlockSlots } from "@smw/feature-timetable/schema";
 import { students } from "@smw/feature-students/schema";
-import { ATTENDANCE_MODES, ATTENDANCE_STATUSES, CONDONATION_REASONS, HALF_DAY_SLOTS, LEAVE_KINDS, LEAVE_STATUSES, LEDGER_KINDS, STAFF_STATUSES } from "./constants";
+import { ATTENDANCE_MODES, ATTENDANCE_STATUSES, CONDONATION_REASONS, HALF_DAY_SLOTS, type HolidayKind, type HolidayScope, LEAVE_KINDS, LEAVE_STATUSES, LEDGER_KINDS, STAFF_STATUSES } from "./constants";
 
 export { ATTENDANCE_STATUSES, STAFF_STATUSES };
 
@@ -64,6 +64,14 @@ export const attendanceHolidays = pgTable("attendance_holidays", {
   ...schoolColumns(),
   date: date("date").notNull(),
   name: text("name").notNull(),
+  kind: text("kind").$type<HolidayKind>().notNull().default("other"),
+  /** Who is off. Class holidays close only those classes; staff work unless it says staff too. */
+  appliesTo: text("applies_to").$type<HolidayScope>().notNull().default("all"),
+  classIds: uuid("class_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  /** The days of one break share this. */
+  spanId: uuid("span_id"),
+  note: text("note"),
+  createdBy: uuid("created_by"),
 }, (t) => [...tenant(t, "attendance_holidays"), uniqueIndex("attendance_holidays_date").on(t.schoolId, t.date)]);
 
 /** One row per school: alerts on/off and the eligibility threshold. No row = the defaults. */

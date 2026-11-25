@@ -1,10 +1,10 @@
 // Pure leave arithmetic: working days, leave years, pro-rata. No database, safe for client components.
-import { addDays, isSunday } from "./stats";
+import { addDays } from "./stats";
 
-/** Days between `from` and `to` (both included) that are neither a Sunday nor a holiday. */
-export function workingDays(from: string, to: string, holidays: ReadonlySet<string>): string[] {
+/** Days between `from` and `to` (both included) that are not in `closed` (Sundays and holidays, from closedSet). */
+export function workingDays(from: string, to: string, closed: ReadonlySet<string>): string[] {
   const days: string[] = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) if (!isSunday(d) && !holidays.has(d)) days.push(d);
+  for (let d = from; d <= to; d = addDays(d, 1)) if (!closed.has(d)) days.push(d);
   return days;
 }
 

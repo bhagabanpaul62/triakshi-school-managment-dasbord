@@ -39,7 +39,7 @@ function MonthCalendar({ data, today, basePath }: { data: Month; today: string; 
         {days.map((d) => {
           const s = data.marks[d] as AttendanceStatus | undefined;
           const holiday = data.holidays[d];
-          const sunday = new Date(`${d}T00:00:00Z`).getUTCDay() === 0;
+          const sunday = data.sundays.includes(d);
           const label = s ? STATUS_LABEL[s] : holiday ?? (sunday ? "Sunday" : d > today ? "" : "Not marked");
           return (
             <span key={d} role="img" title={label || undefined} aria-label={`${shortDate(d)}${label ? `: ${label}` : ""}`}

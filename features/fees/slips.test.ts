@@ -83,7 +83,7 @@ describe("UPI slips", () => {
 describe("reminders", () => {
   let f: Fixture;
   const remind = () => new ReminderService(f.school.as.admin);
-  const sent = async () => (await withSchool(f.school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, f.school.users.student)))).filter((n) => n.kind === "fee_due" && /^Fee (reminder|overdue)/.test(n.title));
+  const sent = async () => (await withSchool(f.school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, f.school.users.student)))).filter((n) => n.topic === "fees.due" && /^Fee (reminder|overdue)/.test(n.title));
   beforeAll(async () => {
     f = await makeSchool("remind", { plan: false });
     await publish(f, { name: "Class 5", classIds: [f.classId], lines: [{ headId: f.heads.tuition, dues: [due("A", 5, 100_000), due("B", -3, 50_000)] }] });
@@ -98,8 +98,9 @@ describe("reminders", () => {
     await config(f, { remindersOn: true, reminderDays: [-7, 0, 3, 10, 30] });
     expect(await remind().run()).toBe(2); // A: 7 days before is reached (due in 5); B: its due date has passed (offset 0). Only Riya has a login.
     const titles = (await sent()).map((n) => n.title).sort();
-    expect(titles).toEqual(["Fee overdue: Month B", "Fee reminder: Month A"]);
-    expect((await sent()).find((n) => n.title.includes("Month A"))!.body).toContain("due in 5 days");
+    expect(titles).toEqual(["Fee overdue", "Fee reminder"]);
+    expect((await sent()).every((n) => n.privateBody && !/\d/.test(n.title))).toBe(true);
+    expect((await sent()).find((n) => n.body!.includes("Month A"))!.body).toContain("due in 5 days");
     expect(await remind().run()).toBe(0);
   });
 

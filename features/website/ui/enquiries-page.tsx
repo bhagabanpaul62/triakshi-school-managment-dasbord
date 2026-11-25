@@ -39,6 +39,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <PageHeader eyebrow="Website" title="Admission enquiries" description="Everyone who asked about a seat, from the website or by phone." actions={add} />
+      {ctx.features.has("requests") ? <p className="pb-3 text-xs text-[var(--ds-on-surface-muted)]">Questions from current families are in <Link href="/app/requests" className="underline underline-offset-4">Requests</Link>.</p> : null}
       <KpiRow>
         <StatCard label="New" value={String(counts.new)} meta={counts.new ? "Waiting for a call" : "All caught up"} />
         <StatCard label="In progress" value={String(counts.contacted + counts.visited)} meta="Contacted or visited" />

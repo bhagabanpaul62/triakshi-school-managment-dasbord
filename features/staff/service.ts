@@ -9,7 +9,8 @@ import {
   type ListQuery, type Page,
 } from "@smw/feature-kit";
 import { academicYears, classes, sections, sectionTeachers, subjects } from "@smw/feature-academics/schema";
-import { SheetError, emailHtml, parseSheet, services, type SheetRows } from "@smw/integrations";
+import { SheetError, emailHtml, parseSheet, type SheetRows } from "@smw/integrations";
+import { sendAccountMail } from "@smw/feature-notifications/delivery";
 import staffFeature from "./feature";
 import { IMPORT_MAX_ROWS, FIELD_COLUMN, bumpId, rowInput, type ImportReport, type ImportRow, type ImportedPerson, type ImportResult } from "./import";
 import { myContactInput, roleInput, staffInput, staffUpdateInput } from "./inputs";
@@ -523,7 +524,7 @@ export class StaffService extends SchoolService<Perm> {
     if (!i.to) return false;
     const url = this.inviteUrl(i);
     try {
-      await services().email.send({
+      await sendAccountMail(this.ctx.schoolId, {
         to: i.to,
         subject: `Set your password for ${i.schoolName}`,
         text: `Hello ${i.name},\n\n${i.schoolName} has added you to its school dashboard. Set your password here (the link works for 7 days):\n${url}\n`,

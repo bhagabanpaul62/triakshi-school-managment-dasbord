@@ -17,7 +17,7 @@ async function tell(tx: Tx, schoolId: string, notes: Note[]) {
   const managers = await tx.select({ id: users.id }).from(users).where(and(inArray(users.role, ["admin", "accountant"]), eq(users.status, "active")));
   for (const m of managers) {
     const have = new Set((await tx.select({ t: notifications.title }).from(notifications).where(and(eq(notifications.userId, m.id), inArray(notifications.title, notes.map((n) => n.title))))).map((r) => r.t));
-    await NotificationWriter.insert(tx, schoolId, notes.filter((n) => !have.has(n.title)).map((n) => ({ userId: m.id, kind: "system" as const, ...n })));
+    await NotificationWriter.insert(tx, schoolId, notes.filter((n) => !have.has(n.title)).map((n) => ({ userId: m.id, topic: "work.update" as const, subject: { type: "payroll-note", id: n.href }, ...n })));
   }
 }
 

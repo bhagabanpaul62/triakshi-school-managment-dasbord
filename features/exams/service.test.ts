@@ -327,15 +327,30 @@ describe("GradeScaleService", () => {
   });
 });
 
+describe("schedule notifications", () => {
+  it("scheduling tells each student login once, with a link to the admit card", async () => {
+    const svc = new ExamService(a.as.admin);
+    const { exam: e } = await svc.createWithPapers(exam("Unit Test Dates"));
+    const notes = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, a.users.student), eq(notifications.topic, "exam.schedule"), eq(notifications.title, "Unit Test Dates: dates and admit card are ready"))));
+    expect(await notes()).toHaveLength(0); // a draft tells nobody
+    await svc.transition({ id: e.id, to: "scheduled" });
+    const [kid] = await notes();
+    expect(kid).toMatchObject({ subjectType: "exam-schedule", href: `/app/exams/${e.id}/admit-card/${fa.s1}` });
+    await svc.transition({ id: e.id, to: "scheduled" }); // a repeat is a no-op
+    expect(await notes()).toHaveLength(1);
+  });
+});
+
 describe("result notifications", () => {
   it("publishing tells each student login of the exam once, never the publisher", async () => {
     const { id, svc } = await openExam("Unit Test Notify");
     // Other tests in this file publish exams too, so count only this exam's notices.
-    const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.title, "Unit Test Notify results are out"))));
+    const notes = (school: TestSchool, userId: string) => withSchool(school.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, userId), eq(notifications.topic, "exam.result")))).then((r) => r.filter((n) => n.subjectId?.startsWith(`${id}:`)));
     expect(await notes(a, a.users.student)).toHaveLength(0);
     await svc.transition({ id, to: "published", force: true });
     const [kid] = await notes(a, a.users.student);
-    expect(kid).toMatchObject({ kind: "result", title: "Unit Test Notify results are out", href: `/app/results/${id}/${fa.s1}` });
+    expect(kid).toMatchObject({ topic: "exam.result", subjectType: "result", title: "Results are out", privateBody: true, href: `/app/results/${id}/${fa.s1}` });
+    expect(kid!.body).toContain("Unit Test Notify results are out");
     expect(await notes(a, a.users.parent)).toHaveLength(0);
     expect(await notes(a, a.users.admin)).toHaveLength(0);
     expect(await notes(a, a.users.teacher)).toHaveLength(0);

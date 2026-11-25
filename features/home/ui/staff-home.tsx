@@ -5,12 +5,13 @@ import { WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { ROW_HOVER } from "@smw/ui/tone";
 import type { StaffHome } from "../home-service";
 import { Rows, SlotPanel } from "./layout";
-import { AnnouncementsBody, open } from "./parts";
+import { AnnouncementsBody, NeedsActionBody, open } from "./parts";
 
 /** A role without a dashboard of its own: links to what it may open, and the school's announcements. */
 export function StaffHomeView({ d }: { d: StaffHome }) {
   return (
     <Rows>
+      <SlotPanel slot={d.needsAction} title="Needs action" action={open("/app/notifications?tab=action", "All that needs action")}>{(rows) => <NeedsActionBody rows={rows} />}</SlotPanel>
       <Panel title="Your pages">
         {d.links.length === 0 ? (
           <WidgetEmptyState title="Nothing is open to your role yet." description="Ask the school office to give your role access to a module." />

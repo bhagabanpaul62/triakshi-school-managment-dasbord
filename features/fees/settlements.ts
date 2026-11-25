@@ -112,7 +112,7 @@ export class SettlementService extends FeesBase {
     const result = await this.runIn(tx, plan);
     if (requested && figures(result) !== figures(requested)) throw new ConflictError("The dues changed since this was asked. Send it again.");
     const [row] = await tx.update(feeSettlements).set({ status: "approved" }).where(eq(feeSettlements.id, id)).returning();
-    await this.tell(tx, [s.studentId], "Fee settlement agreed", "The school has agreed new terms for your dues. Open your fees to see the dates.");
+    await this.tell(tx, [s.studentId], "fees.payment", "Fee settlement agreed", "The school has agreed new terms for your dues. Open your fees to see the dates.", "/app/fees", { type: "settlement", id: s.id });
     return row!;
   }
 

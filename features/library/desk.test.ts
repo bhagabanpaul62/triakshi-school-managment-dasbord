@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { closeDb, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError, systemCtx, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
-import { MemoryEmailSender, useServices } from "@smw/integrations";
 import { notifications } from "@smw/feature-notifications/schema";
 import { students } from "@smw/feature-students/schema";
 import { BookService, CatalogueService, HoldService, LibrarySettingsService, LoanService } from "./service";
@@ -12,8 +11,7 @@ import { addDays, todayIST } from "./rules";
 import { bookHolds, loans } from "./schema";
 
 let a: TestSchool, b: TestSchool;
-const mail = new MemoryEmailSender();
-beforeAll(async () => { ({ a, b } = await createSchoolPair(["students", "academics", "library"], "s5")); useServices({ email: mail }); });
+beforeAll(async () => { ({ a, b } = await createSchoolPair(["students", "academics", "library"], "s5")); });
 afterAll(closeDb);
 
 let n = 0;
@@ -202,21 +200,25 @@ describe("a Librarian custom role", () => {
 });
 
 describe("overdue reminders", () => {
-  it("sends one notice and email per overdue loan per week, only to the login of its own school", async () => {
+  it("sends one notice (topic library.due) per overdue loan per week, only to the login of its own school", async () => {
     const svc = new LoanService(a.as.admin);
     const s = await makeStudent(a, a.users.student);
     const x = await makeBook(a);
     const loan = await svc.issue({ copyId: x.copies[0]!.id, studentId: s.id, issuedOn: addDays(today, -20) });
     const run = (day: string) => new OverdueReminders(systemCtx(a.id, ["library"])).run(day);
-    mail.sent.length = 0;
     const first = await run(today);
     expect(first.reminded).toBeGreaterThanOrEqual(1);
-    expect(mail.sent.filter((m) => m.subject.includes(x.book.title))).toHaveLength(1);
-    expect((await notesOf(a, a.users.student)).filter((m) => m.title.includes(x.book.title))).toHaveLength(1);
+    expect(await withSchool(a.id, (tx) => tx.select({ topic: notifications.topic, st: notifications.subjectType }).from(notifications).where(eq(notifications.userId, a.users.student)))).toContainEqual({ topic: "library.due", st: "loan" });
+    expect((await notesOf(a, a.users.student)).filter((m) => (m.body ?? "").includes(x.book.title))).toHaveLength(1);
+    // The title is neutral and the words are private; opening the student's loans reads the bell row.
+    const row = (await notesOf(a, a.users.student)).find((m) => m.topic === "library.due" && m.subjectType === "loan")!;
+    expect(row).toMatchObject({ title: "Library overdue notice", privateBody: true, readAt: null });
+    await new LoanService(a.as.student).mine();
+    expect((await notesOf(a, a.users.student)).find((m) => m.id === row.id)!.readAt).not.toBeNull();
     expect((await run(today)).reminded).toBe(0); // same day: nothing again
     expect((await run(addDays(today, 6))).reminded).toBe(0);
     expect((await run(addDays(today, 7))).reminded).toBeGreaterThanOrEqual(1); // a week later
-    expect((await notesOf(a, a.users.student)).filter((m) => m.title.includes(x.book.title))).toHaveLength(2);
+    expect((await notesOf(a, a.users.student)).filter((m) => (m.body ?? "").includes(x.book.title))).toHaveLength(2);
     // a returned loan is never reminded
     await svc.returnLoan(loan.id);
     expect(await withSchool(a.id, (tx) => tx.select().from(loans).where(eq(loans.id, loan.id)))).toHaveLength(1);

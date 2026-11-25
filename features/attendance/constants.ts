@@ -44,3 +44,9 @@ export const DEFAULT_LEAVE_TYPES = [
   { code: "EL", name: "Earned", paid: true, yearlyHalfDays: 30, carryForwardHalfDays: 60, encashable: true, halfDayAllowed: true, needsFileAfterDays: null, sort: 3 },
   { code: "LOP", name: "Unpaid", paid: false, yearlyHalfDays: 0, carryForwardHalfDays: 0, encashable: false, halfDayAllowed: true, needsFileAfterDays: null, sort: 4 },
 ] as const;
+
+/** "working" opens a Sunday; every other kind closes its day. */
+export const HOLIDAY_KINDS = { national: "National holiday", state: "State holiday", vacation: "Vacation", restricted: "Restricted holiday", emergency: "Emergency closure", other: "School holiday", working: "Working Sunday" } as const;
+export type HolidayKind = keyof typeof HOLIDAY_KINDS;
+/** all: nobody works. students: staff work. classes: only those classes are off. */
+export type HolidayScope = "all" | "students" | "classes";

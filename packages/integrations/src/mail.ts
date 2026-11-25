@@ -1,7 +1,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "@smw/config";
 
-export interface Mail { to: string; subject: string; text: string; html?: string; replyTo?: string; attachments?: { filename: string; content: Uint8Array; contentType: string }[] }
+export interface Mail { to: string; subject: string; text: string; html?: string; replyTo?: string; /** Extra headers, e.g. List-Unsubscribe. */ headers?: Record<string, string>; attachments?: { filename: string; content: Uint8Array; contentType: string }[] }
 
 export interface EmailSender { send(mail: Mail): Promise<void> }
 
@@ -16,7 +16,7 @@ export class SmtpEmailSender implements EmailSender {
     });
   }
   async send(m: Mail) {
-    await this.transport.sendMail({ from: env().MAIL_FROM, to: m.to, subject: m.subject, text: m.text, html: m.html, replyTo: m.replyTo,
+    await this.transport.sendMail({ from: env().MAIL_FROM, to: m.to, subject: m.subject, text: m.text, html: m.html, replyTo: m.replyTo, headers: m.headers,
       attachments: m.attachments?.map((a) => ({ filename: a.filename, content: Buffer.from(a.content), contentType: a.contentType })) });
   }
 }
@@ -40,7 +40,8 @@ export async function trySend(sender: EmailSender, mail: Mail): Promise<boolean>
   }
 }
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+export const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+const esc = escapeHtml;
 const first = (name: string) => name.trim().split(/\s+/)[0] || "there";
 
 const codeText = (code?: string) => (code ? `\n\nOr type this code on the page, it works for 10 minutes: ${code}` : "");

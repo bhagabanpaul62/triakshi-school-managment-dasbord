@@ -2,6 +2,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { env, isLocal } from "@smw/config";
 
+/** SHA-256 as hex: the one way tokens are stored and compared. */
+export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+
 function key() {
   const k = env().DATA_KEY;
   if (!k && !isLocal()) throw new Error("Set DATA_KEY before storing payroll details.");

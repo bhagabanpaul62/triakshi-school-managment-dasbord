@@ -24,8 +24,6 @@ export const markStaffInput = z.object({
   entries: rows(z.object({ userId: f.id(), status: z.enum(STAFF_STATUSES), note: f.optText(200) })),
 });
 
-export const holidayInput = z.object({ date: f.date(), name: f.text(2, 80, "Name the holiday") });
-
 export const monthInput = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Pick a month");
 
 export const leaveApplyInput = z.object({

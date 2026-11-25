@@ -201,6 +201,22 @@ describe("term report card", () => {
     expect((await new ReportCardService(off).termCard(fa.t1, fa.s1)).blocks[0]!.attendance).toBeNull();
   });
 
+  it("a closure of other classes or a working day does not touch the count; a closure of this class or of students does", async () => {
+    const card = () => new ReportCardService(a.as.admin).termCard(fa.t1, fa.s1).then((c) => c.blocks[0]!.attendance);
+    const run = (q: ReturnType<typeof sql>) => withSchool(a.id, (tx) => tx.execute(q));
+    const [sec] = [...(await withSchool(a.id, (tx) => tx.execute(sql`select class_id from sections where id = ${fa.secA}`)))] as { class_id: string }[];
+    const row = (d: string, kind: string, scope: string, classIds: ReturnType<typeof sql>) => run(sql`insert into attendance_holidays (id, school_id, date, name, kind, applies_to, class_ids) values (gen_random_uuid(), ${a.id}, ${d}, 'Closure', ${kind}, ${scope}, ${classIds})`);
+    await row("2026-06-04", "other", "classes", sql`array[gen_random_uuid()]`);
+    await row("2026-06-05", "working", "all", sql`'{}'::uuid[]`);
+    expect(await card()).toEqual({ working: 5, present: 4 });
+    await run(sql`update attendance_holidays set class_ids = array[${sec!.class_id}::uuid] where date = '2026-06-04'`);
+    expect(await card()).toEqual({ working: 4, present: 4 });
+    await run(sql`update attendance_holidays set applies_to = 'students', class_ids = '{}' where date = '2026-06-04'`);
+    expect(await card()).toEqual({ working: 4, present: 4 });
+    await run(sql`delete from attendance_holidays where date in ('2026-06-04', '2026-06-05')`);
+    expect(await card()).toEqual({ working: 5, present: 4 });
+  });
+
   it("class teacher remarks print on the card; another section's teacher is refused", async () => {
     const r = new RemarkService(a.as.teacher);
     expect((await r.sections()).map((s) => s.id)).toEqual([fa.secA]);

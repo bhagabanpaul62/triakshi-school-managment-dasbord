@@ -123,3 +123,13 @@ describe("SetupService.markComplete", () => {
     expect((await new SetupService(b.as.admin).progress()).completedAt).toBeNull();
   });
 });
+
+describe("SetupService.communication", () => {
+  it("an empty school has four steps to do, and a school without notices has three", async () => {
+    const all = new Set([...FEATURES, "notifications", "settings"]);
+    const steps = await new SetupService({ ...b.as.admin, features: all }).communication();
+    expect(steps.map((s) => [s.key, s.done])).toEqual([["email", false], ["quiet", false], ["lead", false], ["notice", false]]);
+    const few = await new SetupService({ ...b.as.admin, features: new Set(["setup", "settings", "notifications"]) }).communication();
+    expect(few.map((s) => s.key)).toEqual(["email", "quiet", "lead"]);
+  });
+});

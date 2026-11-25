@@ -1,127 +1,114 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, withSchool } from "@smw/db";
-import { ForbiddenError, ValidationError } from "@smw/feature-kit";
+
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
-import { MemoryEmailSender, useServices } from "@smw/integrations";
 import notificationsFeature from "./feature";
+import { commDeliveries, notifications } from "./schema";
 import { NotificationService, NotificationWriter } from "./service";
-import { notifications } from "./schema";
-import { runEmailDigest } from "./jobs";
 
 let a: TestSchool, b: TestSchool;
-const mail = new MemoryEmailSender();
-
 beforeAll(async () => {
   await registerFeatures([notificationsFeature]);
-  ({ a, b } = await createSchoolPair(["notifications"]));
-  useServices({ email: mail });
+  ({ a, b } = await createSchoolPair(["notifications"], "nv"));
 });
 afterAll(closeDb);
+beforeEach(async () => { for (const s of [a, b]) await withSchool(s.id, async (tx) => { await tx.delete(commDeliveries); await tx.delete(notifications); }); });
 
-const send = (s: TestSchool, userId: string, title: string) =>
-  withSchool(s.id, (tx) => NotificationWriter.insert(tx, s.id, [{ userId, kind: "announcement", title, body: "Details", href: "/app/announcements" }]));
+const send = (s: TestSchool, userId: string, title: string, extra: Partial<Parameters<typeof NotificationWriter.insert>[2][number]> = {}) =>
+  withSchool(s.id, (tx) => NotificationWriter.insert(tx, s.id, [{ userId, topic: "notice.published", title, href: "/app/announcements", ...extra } as never]));
+const svc = (s: TestSchool, role: keyof TestSchool["as"], readOnly = false) => new NotificationService({ ...s.as[role], readOnly, features: new Set(["notifications", "requests"]) });
 
 describe("NotificationService", () => {
-  it("lists only the caller's own notifications, with an unread count", async () => {
+  it("lists only the caller's own rows and counts unread", async () => {
     await send(a, a.users.accountant, "For the accountant");
     await send(a, a.users.teacher, "For the teacher");
-    const mine = await new NotificationService(a.as.accountant).forUser();
+    const mine = await svc(a, "accountant").forUser();
     expect(mine.items.map((n) => n.title)).toEqual(["For the accountant"]);
     expect(mine.unread).toBe(1);
   });
 
-  it("marks one and then all as read", async () => {
+  it("rows of a module the plan does not have are not shown or counted", async () => {
+    await send(a, a.users.teacher, "Notice");
+    await send(a, a.users.teacher, "Request", { topic: "request.work", href: "/app/requests" });
+    const off = new NotificationService({ ...a.as.teacher, features: new Set(["notifications"]) });
+    expect((await off.forUser()).items.map((n) => n.title)).toEqual(["Notice"]);
+    expect((await off.pulse()).bell).toBe(1);
+    expect((await off.list()).total).toBe(1);
+    expect((await svc(a, "teacher").pulse()).bell).toBe(2);
+  });
+
+  it("pulse gives the bell and Needs action in one call", async () => {
+    await send(a, a.users.student, "Plain");
+    await send(a, a.users.student, "Approve me", { action: true, subject: { type: "x", id: "1" } });
+    const s = svc(a, "student");
+    expect(await s.pulse()).toEqual({ bell: 2, needsAction: 1 });
+    await s.markRead("all");
+    // read, but the action stays until its module closes it
+    expect(await s.pulse()).toEqual({ bell: 0, needsAction: 1 });
+    await withSchool(a.id, (tx) => NotificationWriter.done(tx, a.id, { type: "x", id: "1" }));
+    expect(await s.pulse()).toEqual({ bell: 0, needsAction: 0 });
+  });
+
+  it("filters by tab, unread and group, and pages", async () => {
+    await send(a, a.users.student, "Notice");
+    await send(a, a.users.student, "Fee", { topic: "fees.due" });
+    await send(a, a.users.student, "Act", { action: true, topic: "notice.answer" });
+    const s = svc(a, "student");
+    expect((await s.list()).total).toBe(3);
+    expect((await s.list({ filters: { tab: "action" } })).rows.map((r) => r.title)).toEqual(["Act"]);
+    expect((await s.list({ filters: { group: "fees" } })).rows.map((r) => r.title)).toEqual(["Fee"]);
+    expect((await s.list({ pageSize: 2 })).pageCount).toBe(2);
+    await s.markRead("all");
+    expect((await s.list({ filters: { unread: "1" } })).total).toBe(0);
+  });
+
+  it("marks one and all read, ignores bad ids, and drops pending sends of what was read", async () => {
     await send(a, a.users.student, "One");
     await send(a, a.users.student, "Two");
-    const svc = new NotificationService(a.as.student);
-    const { items } = await svc.forUser();
-    expect((await svc.markRead(items[0]!.id)).updated).toBe(1);
-    expect((await svc.forUser()).unread).toBe(1);
-    expect((await svc.markRead("all")).updated).toBe(1);
-    expect((await svc.forUser()).unread).toBe(0);
-    expect((await svc.markRead("not-an-id")).updated).toBe(0);
+    const s = svc(a, "student");
+    const { items } = await s.forUser();
+    expect((await s.markRead(items[0]!.id)).updated).toBe(1);
+    expect((await s.pulse()).bell).toBe(1);
+    const pending = async () => (await withSchool(a.id, (tx) => tx.select().from(commDeliveries))).filter((d) => d.state === "pending").length;
+    expect(await pending()).toBe(2);
+    expect((await s.markRead("all")).updated).toBe(1);
+    expect(await pending()).toBe(0);
+    expect((await s.markRead("nope")).updated).toBe(0);
   });
 
-  it("cannot read or mark another user's notification in the same school", async () => {
-    await send(a, a.users.accountant, "Private to accountant");
-    const target = (await new NotificationService(a.as.accountant).forUser()).items[0]!;
-    expect((await new NotificationService(a.as.teacher).markRead(target.id)).updated).toBe(0);
-    expect((await new NotificationService(a.as.teacher).list()).rows.some((n) => n.id === target.id)).toBe(false);
+  it("cannot read or mark another person's row, and school B sees nothing of A", async () => {
+    await send(a, a.users.accountant, "Private");
+    const id = (await svc(a, "accountant").forUser()).items[0]!.id;
+    expect((await svc(a, "teacher").markRead(id)).updated).toBe(0);
+    expect((await svc(a, "teacher").list()).rows).toHaveLength(0);
+    expect((await svc(b, "admin").markRead(id)).updated).toBe(0);
+    expect((await svc(b, "admin").list()).total).toBe(0);
+    expect((await svc(a, "accountant").pulse()).bell).toBe(1);
   });
 
-  it("school B cannot see or mark school A's notifications", async () => {
-    await send(a, a.users.admin, "A only");
-    const idA = (await new NotificationService(a.as.admin).forUser()).items[0]!.id;
-    expect((await new NotificationService(b.as.admin).forUser()).items).toHaveLength(0);
-    expect((await new NotificationService(b.as.admin).markRead(idA)).updated).toBe(0);
-    const [row] = await withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.id, idA)));
-    expect(row!.readAt).toBeNull();
-    // no school set -> zero rows
-    expect(await withSchool(b.id, (tx) => tx.select().from(notifications).where(eq(notifications.id, idA)))).toHaveLength(0);
+  it("reading and read marks work in a read-only school; the module must be on", async () => {
+    await send(a, a.users.student, "Still readable");
+    const ro = svc(a, "student", true);
+    expect((await ro.pulse()).bell).toBe(1);
+    expect((await ro.markRead("all")).updated).toBe(1);
+    await expect(new NotificationService({ ...a.as.student, features: new Set() }).pulse()).rejects.toThrow();
   });
 
-  it("notify checks permission and input", async () => {
-    await expect(new NotificationService(a.as.student).notify([a.users.teacher], { title: "Hi" })).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(new NotificationService(a.as.admin).notify([a.users.student], { title: "" })).rejects.toBeInstanceOf(ValidationError);
-    await expect(new NotificationService(a.as.admin).notify([a.users.student], { title: "Hi", href: "https://evil.example" })).rejects.toBeInstanceOf(ValidationError);
-    expect(await new NotificationService(a.as.admin).notify([a.users.student, a.users.student], { title: "Fee due", kind: "fee_due", href: "/app/fees" })).toBe(1);
-  });
-
-  it("the writer skips users of another school and drops off-app links", async () => {
-    expect(await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [{ userId: b.users.student, title: "Leak" }]))).toBe(0);
-    await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [{ userId: a.users.student, title: "Link", href: "//evil.example/app" }]));
-    const [n] = (await new NotificationService(a.as.student).forUser()).items.filter((x) => x.title === "Link");
-    expect(n?.href).toBeNull();
-  });
-
-  it("stores the email digest preference per user", async () => {
-    const svc = new NotificationService(a.as.teacher);
-    expect(await svc.emailDigestEnabled()).toBe(true);
-    await svc.setEmailDigest(false);
-    await svc.setEmailDigest(false);
-    expect(await svc.emailDigestEnabled()).toBe(false);
-    await svc.setEmailDigest(true);
-    expect(await svc.emailDigestEnabled()).toBe(true);
-  });
-});
-
-describe("email digest job", () => {
-  it("sends one email per user and never emails the same notification twice", async () => {
-    await withSchool(b.id, (tx) => tx.delete(notifications).where(and(eq(notifications.schoolId, b.id))));
-    mail.sent.length = 0;
-    await send(b, b.users.student, "Fee <b>due</b>");
-    await send(b, b.users.student, "Result published");
-    await send(b, b.users.teacher, "Staff meeting");
-    const first = await runEmailDigest({ schoolId: b.id });
-    expect(first).toMatchObject({ emails: 2, notifications: 3, failed: 0 });
-    const toStudent = mail.sent.find((m) => m.to === `student@${b.slug}.test`)!;
-    expect(toStudent.subject).toContain("2 new notifications");
-    expect(toStudent.html).toContain("Fee &lt;b&gt;due&lt;/b&gt;");
-    const second = await runEmailDigest({ schoolId: b.id });
-    expect(second).toMatchObject({ emails: 0, notifications: 0 });
-    expect(mail.sent).toHaveLength(2);
-  });
-
-  it("skips opted-out users and already-read notifications", async () => {
-    mail.sent.length = 0;
-    await withSchool(b.id, (tx) => tx.delete(notifications));
-    await new NotificationService(b.as.admin).setEmailDigest(false);
-    await send(b, b.users.admin, "Opted out");
-    await send(b, b.users.student, "Already seen");
-    await new NotificationService(b.as.student).markRead("all");
-    expect(await runEmailDigest({ schoolId: b.id })).toMatchObject({ emails: 0 });
-    expect(mail.sent).toHaveLength(0);
-  });
-
-  it("releases the claim when sending fails so the next run retries", async () => {
-    await withSchool(b.id, (tx) => tx.delete(notifications));
-    await new NotificationService(b.as.teacher).setEmailDigest(true);
-    await send(b, b.users.teacher, "Retry me");
-    useServices({ email: { send: async () => { throw new Error("smtp down"); } } });
-    expect(await runEmailDigest({ schoolId: b.id })).toMatchObject({ emails: 0, failed: 1 });
-    useServices({ email: mail });
-    mail.sent.length = 0;
-    expect(await runEmailDigest({ schoolId: b.id })).toMatchObject({ emails: 1, notifications: 1 });
+  it("a support session sees no private words, changes nothing, and still reads the rest", async () => {
+    await send(a, a.users.student, "Plain notice", { body: "open text" });
+    await send(a, a.users.student, "Marks inside", { topic: "work.update", body: "secret", privateBody: true });
+    await send(a, a.users.student, "Teacher wrote to you", { topic: "message.new", body: "private talk" });
+    await send(a, a.users.student, "Your request moved", { topic: "request.update", body: "private request" });
+    for (const readOnly of [false, true]) {
+      const support = new NotificationService({ ...a.as.student, features: new Set(["notifications", "requests"]), supportStaffId: crypto.randomUUID(), readOnly });
+      const rows = [...(await support.list()).rows, ...(await support.forUser()).items];
+      const byOld = (t: string) => rows.filter((r) => r.title === t);
+      expect(byOld("Plain notice").length).toBeGreaterThan(0);
+      expect(byOld("Plain notice")[0]!.body).toBe("open text");
+      expect(rows.filter((r) => r.title === "Private" && r.body === null)).toHaveLength(6);
+      expect(JSON.stringify(rows)).not.toMatch(/secret|private talk|private request|Marks inside|Teacher wrote|Your request moved/);
+      expect((await support.markRead("all")).updated).toBe(0);
+    }
+    expect((await svc(a, "student").pulse()).bell).toBe(4);
   });
 });

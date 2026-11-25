@@ -17,11 +17,14 @@ export function Fact({
   label,
   children,
   copy,
+  wrap,
   className,
 }: {
   label: string;
   children?: ReactNode;
   copy?: string;
+  /** Let the value wrap onto more lines instead of truncating (dates, sentences). */
+  wrap?: boolean;
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -50,7 +53,7 @@ export function Fact({
         {empty ? (
           <span className="text-[var(--ds-on-surface-muted)]">—</span>
         ) : (
-          <span className="min-w-0 truncate" title={typeof children === "string" ? children : undefined}>
+          <span className={cn("min-w-0", wrap ? "break-words" : "truncate")} title={typeof children === "string" ? children : undefined}>
             {children}
           </span>
         )}

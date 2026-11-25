@@ -6,6 +6,7 @@ import { TemplateService } from "@smw/feature-finance/templates/service";
 import { monthLabel } from "../csv";
 import { PayrollService } from "../base";
 import { payItems, payLines, payProfiles, payRuns } from "../schema";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 
 export interface PayslipRow { itemId: string; payslipNo: string; month: string; label: string; runLabel: string; netPaise: number; grossPaise: number; payout: string }
 
@@ -17,6 +18,7 @@ export class PayslipService extends PayrollService {
     return this.read("self", async (tx) => {
       const rows = await tx.select({ i: payItems, r: payRuns }).from(payItems).innerJoin(payRuns, eq(payRuns.id, payItems.runId))
         .where(and(eq(payItems.userId, id), inArray(payRuns.status, ["approved", "paid"]), sql`${payItems.skippedReason} is null`, sql`${payItems.payslipNo} is not null`)).orderBy(desc(payRuns.month), desc(payRuns.createdAt));
+      if (id === this.ctx.userId && !this.ctx.readOnly && !this.ctx.supportStaffId) for (const { i } of rows) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "payslip", id: i.id }, { userId: id });
       return rows.map(({ i, r }) => ({ itemId: i.id, payslipNo: i.payslipNo!, month: r.month, label: monthLabel(r.month), runLabel: r.label, netPaise: Number(i.netPaise), grossPaise: Number(i.grossPaise), payout: i.payout }));
     });
   }

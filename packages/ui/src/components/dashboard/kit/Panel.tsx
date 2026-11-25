@@ -64,7 +64,7 @@ export function Panel({
       {title || action ? (
         <header className="mb-4 flex min-h-8 shrink-0 items-center justify-between gap-3">
           {title ? (
-            <h3 className="min-w-0 truncate text-[15px] font-medium text-[var(--ds-on-surface)]">{title}</h3>
+            <h3 className="min-w-0 line-clamp-2 break-words text-[15px] font-medium text-[var(--ds-on-surface)]">{title}</h3>
           ) : (
             <span />
           )}

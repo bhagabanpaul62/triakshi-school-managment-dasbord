@@ -3,8 +3,9 @@ import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { MoneyService } from "@smw/feature-finance/base";
 import { cashAccount } from "@smw/feature-finance/posting";
-import { finAccounts, finCostCentres, finJournals } from "@smw/feature-finance/schema";
+import { finAccounts, finApprovals, finCostCentres, finJournals } from "@smw/feature-finance/schema";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
+import type { TopicKey } from "@smw/feature-notifications/topics";
 import expensesFeature from "./feature";
 
 export type ExpensePermission = keyof typeof expensesFeature.permissions;
@@ -52,8 +53,13 @@ export const journalIdSql = (prefix: string, idCol: unknown) => sql<string | nul
 export async function managers(tx: Tx): Promise<string[]> {
   return (await tx.select({ id: users.id }).from(users).where(and(inArray(users.role, ["admin", "accountant"]), eq(users.status, "active")))).map((u) => u.id);
 }
-export async function tell(tx: Tx, schoolId: string, userIds: string[], title: string, body: string, href: string) {
-  await NotificationWriter.insert(tx, schoolId, userIds.map((userId) => ({ userId, kind: "system" as const, title, body, href })));
+export async function tell(tx: Tx, schoolId: string, userIds: string[], topic: TopicKey, title: string, body: string, href: string, extra: { subject: { type: string; id: string }; action?: boolean; groupKey?: string }) {
+  await NotificationWriter.insert(tx, schoolId, userIds.map((userId) => ({ userId, topic, title, body, href, ...extra })));
+}
+/** Withdraw the open approval requests of a document and close the approvers' action rows. */
+export async function closeApprovals(tx: Tx, ctx: { schoolId: string; userId: string }, kind: string, refId: string) {
+  const rows = await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: ctx.userId, decidedAt: new Date() }).where(and(eq(finApprovals.kind, kind), eq(finApprovals.refId, refId), eq(finApprovals.status, "pending"))).returning({ id: finApprovals.id });
+  for (const r of rows) await NotificationWriter.done(tx, ctx.schoolId, { type: "approval", id: r.id });
 }
 export async function userName(tx: Tx, id: string) {
   const [u] = await tx.select({ name: users.name }).from(users).where(eq(users.id, id)).limit(1);

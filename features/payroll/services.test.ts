@@ -152,11 +152,20 @@ describe("run lifecycle", () => {
     await runs.review(run.id);
     await expect(runs.addAdjustment(view.items[0]!.id, { code: "bonus", amountPaise: 100 })).rejects.toBeInstanceOf(ConflictError);
     const ap = await runs.submit(run.id);
+    const askRows = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.subjectId, ap.id)));
+    const asked = (await askRows()).filter((n) => n.topic === "work.approval");
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((n) => n.action && !n.doneAt)).toBe(true);
     await expect(decider(a, a.as.accountant).approve({ id: ap.id })).rejects.toBeInstanceOf(ForbiddenError);
     await decider().approve({ id: ap.id });
+    expect((await askRows()).filter((n) => n.topic === "work.approval").every((n) => n.doneAt)).toBe(true); // the approvers' action row closes
     const done = await runs.get(run.id);
     expect(done.run.status).toBe("approved");
     expect(done.items.every((i) => i.payslipNo)).toBe(true);
+    // Each person is told once their payslip has a number, privately,.
+    const slips = await withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.topic, "payroll.payslip")));
+    expect(slips.length).toBe(done.items.filter((i) => !i.skippedReason).length);
+    expect(slips.every((n) => n.privateBody && n.href === "/app/payroll/me" && !/\d{3}/.test(n.body ?? ""))).toBe(true);
     const items = await nets(run.id), net = items.reduce((s, i) => s + i.net, 0);
     expect(await bal("salary_payable")).toBe(-net);
     expect(await bal("pf_payable")).toBe(-(await lineSum(items.map((i) => i.id), "pf_employee") + await lineSum(items.map((i) => i.id), "pf_employer") + await lineSum(items.map((i) => i.id), "eps_employer") + await lineSum(items.map((i) => i.id), "edli") + await lineSum(items.map((i) => i.id), "pf_admin") + (done.totals.pfAdminTopUp ?? 0)));

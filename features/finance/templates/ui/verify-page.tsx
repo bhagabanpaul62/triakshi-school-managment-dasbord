@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { getSchool } from "@smw/runtime";
+import { Markdown } from "@smw/ui/comm/Markdown";
 import { formatPaise } from "@smw/ui/finance/logic";
 import { checkDocument, type VerifyLookups } from "../verify";
 
 export const verifyMetadata: Metadata = { title: "Check a document", robots: { index: false, follow: false } };
 
 const day = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-const KIND_WORD: Record<string, string> = { receipt: "receipt", invoice: "invoice" };
+const KIND_WORD: Record<string, string> = { receipt: "receipt", invoice: "invoice", circular: "circular" };
 
 function Shell({ school, children }: { school: string; children: React.ReactNode }) {
   return (
@@ -43,10 +44,11 @@ export default async function VerifyPage({ params, lookups, limited }: { params:
     <Shell school={school.name}>
       <h1 className="mt-2 text-2xl font-medium tracking-tight">{doc.ok ? `This ${KIND_WORD[kind] ?? "document"} is genuine` : `This ${KIND_WORD[kind] ?? "document"} is ${doc.status.toLowerCase()}`}</h1>
       <dl className="mt-5 grid gap-3 text-sm">
-        {([["Status", doc.status], ["Number", doc.number], ["Date", day(doc.date)], ["Amount", formatPaise(doc.amountPaise, { fixed: true })], ...(doc.maskedName ? [["Name", doc.maskedName]] : [])] as [string, string][]).map(([k, v]) => (
+        {([["Status", doc.status], ["Number", doc.number], ["Date", day(doc.date)], ...(doc.title ? [["Title", doc.title]] : []), ...(doc.amountPaise === undefined ? [] : [["Amount", formatPaise(doc.amountPaise, { fixed: true })]]), ...(doc.maskedName ? [["Name", doc.maskedName]] : [])] as [string, string][]).map(([k, v]) => (
           <div key={k} className="flex justify-between gap-4"><dt className="text-[var(--ds-on-surface-muted)]">{k}</dt><dd className="text-right font-medium tabular-nums">{v}</dd></div>
         ))}
       </dl>
+      {doc.text ? <Markdown source={doc.text} className="mt-5" /> : null}
     </Shell>
   );
 }

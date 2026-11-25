@@ -79,9 +79,9 @@ export abstract class FeesBase extends MoneyService<Perm> {
     return new Map(rows.flatMap((r) => (r.userId ? [[r.id, r.userId] as const] : [])));
   }
 
-  protected async tell(tx: Tx, studentIds: string[], title: string, body: string, href = "/app/fees") {
+  protected async tell(tx: Tx, studentIds: string[], topic: "fees.due" | "fees.payment", title: string, body: string, href: string, subject: { type: string; id: string }) {
     const logins = await this.studentUsers(tx, studentIds);
-    return NotificationWriter.insert(tx, this.ctx.schoolId, [...logins.values()].map((userId) => ({ userId, kind: "fee_due" as const, title, body, href })));
+    return NotificationWriter.insert(tx, this.ctx.schoolId, [...logins.values()].map((userId) => ({ userId, topic, title, body, href, subject, privateBody: true })));
   }
 
   protected async currentYear(tx: Tx) {
@@ -272,6 +272,7 @@ export abstract class FeesBase extends MoneyService<Perm> {
     if (!a) throw new ConflictError("This is not waiting for approval any more, so there is nothing to withdraw. Open the request to see what happened.");
     if (a.requestedBy !== this.ctx.userId && this.ctx.role !== "admin") throw new ForbiddenError("Only the person who asked can withdraw this.");
     await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(eq(finApprovals.id, a.id));
+    await NotificationWriter.done(tx, this.ctx.schoolId, { type: "approval", id: a.id });
   }
 
   // ---------- posting ----------

@@ -45,17 +45,17 @@ test.describe("attendance journeys", () => {
       const want = i < 2 ? "Absent" : "Present";
       for (let t = 0; t < 4 && !(await firstRows.nth(i).getAttribute("aria-label"))?.includes(`: ${want}.`); t++) await firstRows.nth(i).click();
     }
-    await expect(page.locator("[role=status][aria-live=polite]")).toContainText("2 absent");
+    await expect(page.locator("[role=status][aria-live=polite]:not(.sr-only)")).toContainText("2 absent");
     await shot(page, "teacher-marked");
 
     // A rerun on the same day finds these marks already saved: the button then reads "Saved".
     const save = page.getByRole("button", { name: /^(Save attendance|Saved)$/ });
     if ((await save.textContent())?.trim() === "Save attendance") await save.click();
     await expect(page.getByRole("button", { name: "Saved" })).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator("[role=status][aria-live=polite]")).toContainText("Saved");
+    await expect(page.locator("[role=status][aria-live=polite]:not(.sr-only)")).toContainText("Saved");
 
     await page.reload();
-    await expect(page.locator("[role=status][aria-live=polite]")).toContainText("2 absent");
+    await expect(page.locator("[role=status][aria-live=polite]:not(.sr-only)")).toContainText("2 absent");
     await expect(page.getByRole("button", { name: "Saved" })).toBeVisible();
     await shot(page, "teacher-reopened");
     await noHorizontalScroll(page);

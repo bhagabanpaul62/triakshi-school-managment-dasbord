@@ -31,7 +31,7 @@ export async function approversOf(tx: Tx, exceptUserId: string): Promise<{ id: s
 export async function requestApproval(tx: Tx, ctx: Ctx, r: ApprovalRequest): Promise<Approval> {
   const [row] = await tx.insert(finApprovals).values({ schoolId: ctx.schoolId, requestedBy: ctx.userId, ...r }).onConflictDoNothing().returning();
   if (!row) throw new ConflictError("This is already waiting for approval.");
-  await NotificationWriter.insert(tx, ctx.schoolId, (await approversOf(tx, ctx.userId)).map((a) => ({ userId: a.id, kind: "fee_due" as const, title: "Approval needed", body: r.title, href: "/app/finance/approvals" })));
+  await NotificationWriter.insert(tx, ctx.schoolId, (await approversOf(tx, ctx.userId)).map((a) => ({ userId: a.id, topic: "work.approval" as const, title: "Approval needed", body: r.title, href: "/app/finance/approvals", subject: { type: "approval", id: row.id }, action: true })));
   return row;
 }
 
@@ -50,6 +50,7 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
         tx.select().from(finApprovals).where(where).orderBy(desc(finApprovals.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(finApprovals).where(where),
       ]);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) if (r.status === "pending") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: r.id }, this.ctx);
       const ids = [...new Set(rows.flatMap((r) => [r.requestedBy, r.decidedBy]).filter((x): x is string => !!x))];
       const names = new Map(ids.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))).map((u) => [u.id, u.name]) : []);
       return toPage(rows.map((r) => ({ ...r, requestedByName: names.get(r.requestedBy) ?? null, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null })), Number(n?.n ?? 0), q);
@@ -60,6 +61,7 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
   async mine(): Promise<(Approval & { decidedByName: string | null })[]> {
     return withSchool(this.ctx.schoolId, async (tx) => {
       const rows = await tx.select().from(finApprovals).where(eq(finApprovals.requestedBy, this.ctx.userId)).orderBy(desc(finApprovals.createdAt)).limit(100);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) if (r.status !== "pending") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: r.id }, this.ctx);
       const ids = [...new Set(rows.flatMap((r) => r.decidedBy ?? []))];
       const names = new Map(ids.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))).map((u) => [u.id, u.name]) : []);
       return rows.map((r) => ({ ...r, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null }));
@@ -93,8 +95,9 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
       }
       if (status === "approved") await handler.approve(tx, a, this.ctx); else await handler.reject?.(tx, a, this.ctx);
       const [row] = await tx.update(finApprovals).set({ status, decidedBy: this.ctx.userId, decidedAt: new Date(), note: note ?? null, selfApproved }).where(eq(finApprovals.id, id)).returning();
+      await NotificationWriter.done(tx, this.ctx.schoolId, { type: "approval", id });
       if (a.requestedBy !== this.ctx.userId) {
-        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: a.requestedBy, kind: "fee_due" as const, title: status === "approved" ? "Approved" : "Not approved", body: `${a.title}${note ? `: ${note}` : ""}`, href: a.href ?? "/app" }]);
+        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: a.requestedBy, topic: "work.decision" as const, subject: { type: "approval", id }, title: status === "approved" ? "Approved" : "Not approved", body: `${a.title}${note ? `: ${note}` : ""}`, href: a.href ?? "/app" }]);
       }
       return row!;
     }, (r) => ({ action: r.status, entity: "Approval", entityId: r.id, summary: `${r.status === "approved" ? "Approved" : "Rejected"}: ${r.title}${r.selfApproved ? " (own request, only admin)" : ""}`, meta: { kind: r.kind, refId: r.refId, amountPaise: r.amountPaise } }));

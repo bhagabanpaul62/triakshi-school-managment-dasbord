@@ -12,7 +12,8 @@ import { StateBadge } from "../components/finance/StateBadge";
 
 /**
  * How a value renders, chosen by its type (kit rule 12). Columns are plain data, so server pages can pass them.
- * - person: value is the name; `metaKey` adds a second line; avatar initials on the left
+ * - person: value is the name; avatar initials on the left
+ * - person and text: `metaKey` adds a quiet second line
  * - badge: value is a status; `tones` maps each value to a tone; `labels` renames it
  * - state: a finance state (paid, overdue, pending...), one badge map for every screen
  * - money: integer paise, right-aligned · date: short absolute · number: right-aligned tabular
@@ -56,10 +57,10 @@ const right = (t?: Column["type"]) => t === "money" || t === "number";
 function Cell({ col, row }: { col: Column; row: Record<string, unknown> }) {
   const v = row[col.key];
   if (v == null || v === "") return <span className="text-[var(--ds-on-surface-muted)]">-</span>;
+  const meta = col.metaKey ? row[col.metaKey] : null;
   switch (col.type) {
     case "state": return <StateBadge state={String(v)} />;
-    case "person": {
-      const meta = col.metaKey ? row[col.metaKey] : null;
+    case "person":
       return (
         <span className="flex min-w-0 items-center gap-3">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/[0.07] text-[11px]">{initials(String(v))}</span>
@@ -69,13 +70,17 @@ function Cell({ col, row }: { col: Column; row: Record<string, unknown> }) {
           </span>
         </span>
       );
-    }
     case "badge": return <ToneBadge label={col.labels?.[String(v)] ?? String(v).replace(/_/g, " ")} tone={col.tones?.[String(v)] ?? "default"} />;
     case "money": return <span className="tabular-nums">{paise(Number(v))}</span>;
     case "date": return <span className="whitespace-nowrap">{shortDate(v as string)}</span>;
     case "number": return <span className="tabular-nums">{Number(v).toLocaleString("en-IN")}</span>;
     case "mono": return <span className="font-mono text-xs">{String(v)}</span>;
-    default: return <span className="block max-w-[28ch] truncate" title={String(v)}>{String(v)}</span>;
+    default: return (
+      <span className="block max-w-[32ch]">
+        <span className="block truncate" title={String(v)}>{String(v)}</span>
+        {meta ? <span className="block truncate text-xs text-[var(--ds-on-surface-muted)]">{String(meta)}</span> : null}
+      </span>
+    );
   }
 }
 

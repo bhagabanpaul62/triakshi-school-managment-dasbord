@@ -11,8 +11,10 @@ import expenses from "@smw/feature-expenses/seed";
 import fees from "@smw/feature-fees/seed";
 import finance from "@smw/feature-finance/seed";
 import library from "@smw/feature-library/seed";
+import meetings from "@smw/feature-meetings/seed";
 import messages from "@smw/feature-messages/seed";
 import payroll from "@smw/feature-payroll/seed";
+import requests from "@smw/feature-requests/seed";
 import settings from "@smw/feature-settings/seed";
 import staff from "@smw/feature-staff/seed";
 import students from "@smw/feature-students/seed";
@@ -20,4 +22,4 @@ import timetable from "@smw/feature-timetable/seed";
 import transport from "@smw/feature-transport/seed";
 import website from "@smw/feature-website/seed";
 
-export const SEEDS: Record<string, FeatureSeed> = { "academics": academics, "announcements": announcements, "assignments": assignments, "attendance": attendance, "billing": billing, "events": events, "exams": exams, "expenses": expenses, "fees": fees, "finance": finance, "library": library, "messages": messages, "payroll": payroll, "settings": settings, "staff": staff, "students": students, "timetable": timetable, "transport": transport, "website": website };
+export const SEEDS: Record<string, FeatureSeed> = { "academics": academics, "announcements": announcements, "assignments": assignments, "attendance": attendance, "billing": billing, "events": events, "exams": exams, "expenses": expenses, "fees": fees, "finance": finance, "library": library, "meetings": meetings, "messages": messages, "payroll": payroll, "requests": requests, "settings": settings, "staff": staff, "students": students, "timetable": timetable, "transport": transport, "website": website };

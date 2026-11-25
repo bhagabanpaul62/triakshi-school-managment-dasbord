@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "job": "tsx src/run-job.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },
@@ -37,6 +38,11 @@
     "@smw/feature-attendance": "workspace:*",
     "@smw/feature-finance": "workspace:*",
     "@smw/feature-expenses": "workspace:*",
-    "@smw/feature-payroll": "workspace:*"
+    "@smw/feature-payroll": "workspace:*",
+    "@smw/feature-announcements": "workspace:*",
+    "@smw/feature-events": "workspace:*",
+    "@smw/feature-meetings": "workspace:*",
+    "@smw/feature-messages": "workspace:*",
+    "@smw/feature-requests": "workspace:*"
   }
 }

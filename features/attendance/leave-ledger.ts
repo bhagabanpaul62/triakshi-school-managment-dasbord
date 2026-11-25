@@ -4,7 +4,8 @@ import { schools, users, type Tx } from "@smw/db";
 import { ValidationError } from "@smw/feature-kit";
 import { DEFAULT_LEAVE_TYPES } from "./constants";
 import { fmtDays, halfDaysOfDay, leaveYearEnd, leaveYearStart, monthKey, proRataHalfDays, workingDays } from "./leave-days";
-import { attendanceHolidays, leaveLedger, leaveRequests, leaveTypes } from "./schema";
+import { closedSet } from "./holidays";
+import { leaveLedger, leaveRequests, leaveTypes } from "./schema";
 import { addDays } from "./stats";
 
 export type LeaveType = typeof leaveTypes.$inferSelect;
@@ -19,11 +20,6 @@ export async function startMonth(tx: Tx): Promise<number> {
 export async function yearOf(tx: Tx, day: string) {
   const start = leaveYearStart(day, await startMonth(tx));
   return { start, end: leaveYearEnd(start) };
-}
-
-export async function holidaySet(tx: Tx, from: string, to: string): Promise<Set<string>> {
-  const rows = await tx.select({ date: attendanceHolidays.date }).from(attendanceHolidays).where(and(gte(attendanceHolidays.date, from), lte(attendanceHolidays.date, to)));
-  return new Set(rows.map((h) => h.date));
 }
 
 /** Types are made the first time anyone looks; a school that deleted them all gets the defaults back. */
@@ -46,7 +42,7 @@ export async function balanceHalfDays(tx: Tx, userId: string, typeId: string, st
 
 /** The working days of a request, as half-days per calendar month (a month never crosses a leave year). */
 export async function requestMonths(tx: Tx, r: { fromDate: string; toDate: string; halfDay: string | null }): Promise<Month[]> {
-  const days = workingDays(r.fromDate, r.toDate, await holidaySet(tx, r.fromDate, r.toDate));
+  const days = workingDays(r.fromDate, r.toDate, await closedSet(tx, r.fromDate, r.toDate, { staff: true }));
   const by = new Map<string, Month>();
   for (const d of days) {
     const m = by.get(monthKey(d)) ?? { month: monthKey(d), first: d, halfDays: 0 };

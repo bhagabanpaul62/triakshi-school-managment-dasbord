@@ -11,7 +11,7 @@ import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { shortDate } from "@smw/ui/format";
 import { ATTENDANCE_STATUSES } from "../constants";
 import { PeriodAttendanceService } from "../period-service";
-import { addDays, isDate, isSunday, todayIST } from "../stats";
+import { addDays, isDate, todayIST } from "../stats";
 import { markStudentAttendance } from "./actions";
 import { AttendanceGrid } from "./AttendanceGrid";
 import { AttendanceNav } from "./nav";
@@ -76,7 +76,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
 
   const dayNote = sheet?.holiday ? undefined
     : date < today ? `You are editing ${shortDate(date)}, a past day. Changes replace what was saved.`
-    : isSunday(date) ? `${shortDate(date)} is a Sunday. Mark only if the school is open.` : undefined;
+    : sheet?.sunday ? `${shortDate(date)} is a Sunday. Mark only if the school is open.` : undefined;
 
   return (
     <>

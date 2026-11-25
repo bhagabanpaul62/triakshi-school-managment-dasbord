@@ -1,0 +1,35 @@
+// The public "this circular is genuine" check. Follows features/fees/verify.ts: the app merges every module's lookups.
+import { createHmac } from "node:crypto";
+import { sha256 } from "@smw/feature-kit/secret";
+import { eq } from "drizzle-orm";
+import type { Tx } from "@smw/db";
+import { tokenKey } from "@smw/feature-notifications/prefs";
+import { publicAudience } from "./content";
+import { announcements } from "./schema";
+import { istDay } from "@smw/feature-kit/words";
+
+/** Same shape as the finance check page expects (no import: features stay independent). */
+interface VerifyFound { status: string; ok: boolean; number: string; date: string; studentName: string | null; title: string; text: string | null }
+type VerifyLookup = (tx: Tx, token: string) => Promise<VerifyFound | null>;
+
+/** Derived, not stored: a reprint of the PDF carries the same QR. Only its hash is kept in the database. */
+/** Null when the server has no key: a circular then goes out without a QR, never with one made from a key everyone knows. */
+export const verifyToken = (schoolId: string, noticeId: string): string | null => {
+  const key = tokenKey();
+  return key ? createHmac("sha256", key).update(`circular:${schoolId}:${noticeId}`).digest("hex").slice(0, 32) : null;
+};
+export const verifyHash = sha256;
+
+const STATUS: Record<string, { status: string; ok: boolean }> = {
+  published: { status: "Genuine", ok: true }, expired: { status: "Genuine, no longer current", ok: true }, withdrawn: { status: "Withdrawn by the school", ok: false },
+};
+
+/** What the public page may know about a circular: number, date, title and standing. Its text only while it is on the website; never its audience. */
+const circularLookup: VerifyLookup = async (tx, token): Promise<VerifyFound | null> => {
+  const [n] = await tx.select().from(announcements).where(eq(announcements.verifyHash, verifyHash(token)));
+  const s = n && STATUS[n.state];
+  const open = !!n && n.state === "published" && n.website && publicAudience(n.audience) && (!n.expiresAt || n.expiresAt > new Date());
+  return n?.number && n.publishedAt && s ? { ...s, number: n.number, date: istDay(n.publishedAt), studentName: null, title: n.title, text: open ? n.body : null } : null;
+};
+
+export const announcementsVerifyLookups: Record<string, VerifyLookup> = { circular: circularLookup };

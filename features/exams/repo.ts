@@ -120,9 +120,10 @@ export class ExamRepo {
   /** Working days and days present between two dates, read by raw SQL so the exams feature works without the attendance module. Null when there is no data. */
   static async attendance(tx: Tx, ctx: { schoolId: string; features: ReadonlySet<string> }, studentId: string, sectionId: string, from: string, to: string): Promise<{ working: number; present: number } | null> {
     if (!ctx.features.has("attendance") || !isUuid(studentId) || !isUuid(sectionId)) return null;
-    const [have] = [...(await tx.execute(sql`select to_regclass('student_attendance') as a, to_regclass('attendance_holidays') as h`))] as { a: string | null; h: string | null }[];
+    const [have] = [...(await tx.execute(sql`select to_regclass('student_attendance') as a, to_regclass('attendance_holidays') as h, to_regproc('school_day_closed') as f`))] as { a: string | null; h: string | null; f: string | null }[];
     if (!have?.a) return null;
-    const open = have.h ? sql`and not exists (select 1 from attendance_holidays h where h.school_id = ${ctx.schoolId} and h.date = a.date)` : sql``;
+    // The rule lives in attendance/sql/20-closed.sql (this feature reads attendance by name only); the function reads holidays under row-level security.
+    const open = have.h && have.f ? sql`and not school_day_closed(a.date, (select s.class_id from sections s where s.id = ${sectionId}::uuid))` : sql``;
     const [r] = [...(await tx.execute(sql`
       select
         (select count(distinct a.date) from student_attendance a where a.school_id = ${ctx.schoolId} and a.section_id = ${sectionId} and a.date between ${from} and ${to} ${open}) as working,

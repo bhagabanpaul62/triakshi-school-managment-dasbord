@@ -8,6 +8,7 @@
     "start": "next start -p 4100",
     "typecheck": "tsgo --noEmit",
     "lint": "eslint src",
+    "test": "vitest run",
     "seed": "tsx scripts/seed.mts",
     "bootstrap": "tsx scripts/bootstrap.mts",
     "move-fees": "tsx scripts/move-fees.mts"
@@ -51,7 +52,9 @@
     "@smw/feature-setup": "workspace:*",
     "@smw/feature-expenses": "workspace:*",
     "@smw/feature-finance": "workspace:*",
-    "@smw/feature-payroll": "workspace:*"
+    "@smw/feature-payroll": "workspace:*",
+    "@smw/feature-meetings": "workspace:*",
+    "@smw/feature-requests": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

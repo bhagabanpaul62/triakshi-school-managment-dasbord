@@ -14,6 +14,9 @@ import { KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { dateTime, shortDate } from "@smw/ui/format";
+import { withSchool } from "@smw/db";
+import { isSuppressed } from "@smw/feature-notifications/email-health";
+import { EmailNotWorking } from "@smw/feature-notifications/ui/email-not-working";
 import { ConsentService, CredentialService, DocumentService, GuardianService, PhotoService, StudentService } from "../service";
 import { DOCUMENT_KINDS } from "../inputs";
 import {
@@ -57,6 +60,9 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
     new PhotoService(ctx).url(id), guardianSvc.forStudent(id), canWrite ? students.lookups() : null,
     canWrite ? new CredentialService(ctx).loginStatus(id) : null,
   ]);
+  // Mail to a family goes to the primary guardian.
+  const familyEmail = (guardians.find((g) => g.isPrimary) ?? guardians[0])?.email;
+  const emailStopped = canWrite && !!familyEmail && await withSchool(ctx.schoolId, (tx) => isSuppressed(tx, familyEmail));
   const sectionOptions = (look?.sections ?? []).map((x) => ({ value: x.id, label: x.label }));
   // What is still missing on this record, as a link to the tab that fixes it; plus where else this student's data lives.
   const todo = canWrite ? [
@@ -78,7 +84,7 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
         back={{ href: "/app/students", label: "Students" }}
         leading={<Avatar name={s.name} src={photoUrl} size={56} />}
         title={s.name}
-        chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}{s.rteQuota ? <ToneBadge label="RTE quota" tone="info" /> : null}</>}
+        chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}{s.rteQuota ? <ToneBadge label="RTE quota" tone="info" /> : null}{emailStopped ? <EmailNotWorking fixHref="?tab=guardians" /> : null}</>}
         meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null]}
         actions={canWrite ? (<>
           <FormModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit")} values={{ ...s }} hidden={{ id: s.id }}

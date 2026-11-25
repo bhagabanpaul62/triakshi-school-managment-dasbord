@@ -117,7 +117,7 @@ test.describe("exams and results journeys", () => {
     const inputs = page.locator("input[type=number]");
     await inputs.first().focus();
     await page.keyboard.type("9999");
-    await expect(page.getByRole("alert").first()).toContainText(/0 to/); // inline, before saving
+    await expect(page.getByRole("alert").filter({ hasText: /0 to/ }).first()).toBeVisible(); // inline, before saving
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.type("41");
     await page.keyboard.press("Enter");

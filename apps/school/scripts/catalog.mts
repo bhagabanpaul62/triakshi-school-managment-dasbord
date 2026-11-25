@@ -6,7 +6,7 @@ import { FEATURES } from "../src/generated/features";
 type PlanDef = { key: string; name: string; studentCap: number; annual: number; monthly: number; exclude: string[]; isPublic?: boolean };
 
 export const PLAN_DEFS: PlanDef[] = [
-  { key: "starter", name: "Starter", studentCap: 300, annual: 30_000_00, monthly: 3_000_00, exclude: ["domains", "transport", "library", "expenses", "payroll", "api"] },
+  { key: "starter", name: "Starter", studentCap: 300, annual: 30_000_00, monthly: 3_000_00, exclude: ["domains", "transport", "library", "expenses", "payroll", "api", "requests", "meetings"] },
   { key: "growth", name: "Growth", studentCap: 1000, annual: 75_000_00, monthly: 7_500_00, exclude: ["payroll", "api"] },
   { key: "pro", name: "Pro", studentCap: 3000, annual: 1_80_000_00, monthly: 18_000_00, exclude: [] },
   { key: "enterprise", name: "Enterprise", studentCap: 100000, annual: 0, monthly: 0, exclude: [], isPublic: false },

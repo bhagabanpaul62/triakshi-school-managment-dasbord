@@ -1,6 +1,7 @@
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { ConflictError, NotFoundError, SchoolService, ValidationError, f, type Ctx } from "@smw/feature-kit";
 import { users, type Tx } from "@smw/db";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { z } from "zod";
 import { classes, sectionTeachers, sections, subjects } from "@smw/feature-academics/schema";
 import { dayName } from "./bell";
@@ -158,7 +159,7 @@ export class SubstitutionService extends SchoolService<Perm> {
       const base = { schoolId: this.ctx.schoolId, date: d.date, ...set };
       if (d.optionId) await tx.insert(substitutions).values({ ...base, blockSlotId: slot.id, optionId: d.optionId }).onConflictDoUpdate({ target: [substitutions.blockSlotId, substitutions.optionId, substitutions.date], set });
       else await tx.insert(substitutions).values({ ...base, slotId: slot.id }).onConflictDoUpdate({ target: [substitutions.slotId, substitutions.date], set });
-      await this.notify(tx, cover.id, `Cover duty: ${slot.label}, ${slot.period}`, `${slot.subject} on ${dayName(slot.day)} ${d.date}${d.note ? `. ${d.note}` : ""}`);
+      await this.notify(tx, cover.id, d.date, `Cover duty: ${slot.label}, ${slot.period}`, `${slot.subject} on ${dayName(slot.day)} ${d.date}${d.note ? `. ${d.note}` : ""}`);
       return { slotId: slot.id, cover: cover.name, label: slot.label, date: d.date, period: slot.period };
     }, (r) => ({ action: "assign_cover", entity: "Substitution", entityId: r.slotId, summary: `${r.cover} covers ${(r as { label: string }).label}, ${(r as { period: string }).period} on ${(r as { date: string }).date}` }));
   }
@@ -170,15 +171,15 @@ export class SubstitutionService extends SchoolService<Perm> {
     return this.write("manage", async (tx) => {
       const which = d.optionId ? and(eq(substitutions.blockSlotId, d.slotId), eq(substitutions.optionId, d.optionId)) : eq(substitutions.slotId, d.slotId);
       const gone = await tx.delete(substitutions).where(and(which, eq(substitutions.date, d.date))).returning({ coverId: substitutions.coverTeacherId });
-      for (const g of gone) await this.notify(tx, g.coverId, "Cover duty cancelled", `You no longer cover a period on ${d.date}.`);
+      for (const g of gone) await this.notify(tx, g.coverId, d.date, "Cover duty cancelled", `You no longer cover a period on ${d.date}.`);
       return { cleared: gone.length, slotId: d.slotId, date: d.date };
     }, (r) => ({ action: "clear_cover", entity: "Substitution", entityId: r.slotId, summary: `Cleared ${r.cleared} cover on ${r.date}` }));
   }
 
-  /** In-app notice to the cover teacher. Raw SQL so this feature does not depend on notifications; skipped when that module is off. */
-  private async notify(tx: Tx, userId: string, title: string, body: string) {
-    if (!this.ctx.features.has("notifications") || !(await this.hasTable(tx, "notifications"))) return;
-    await tx.execute(sql`insert into notifications (id, school_id, user_id, kind, title, body, href) values (gen_random_uuid(), ${this.ctx.schoolId}, ${userId}, 'system', ${title.slice(0, 160)}, ${body.slice(0, 1000)}, '/app/timetable')`);
+  /** Tells the cover teacher. */
+  private async notify(tx: Tx, userId: string, date: string, title: string, body: string) {
+    if (!this.ctx.features.has("notifications")) return;
+    await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId, topic: "work.cover", subject: { type: "cover", id: `${userId}:${date}` }, title, body, href: "/app/timetable" }]);
   }
 
   /** Covers a teacher takes on a date (for the teacher's own page and tests). `optionId` is set for a block period. */

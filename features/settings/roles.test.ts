@@ -4,7 +4,7 @@ import { closeDb, eq, oneTimeTokens, schoolRoles, users, withConsole, withSchool
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, allows, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryEmailSender, useServices } from "@smw/integrations";
-import { matrixFor, type Catalogue } from "./catalogue";
+import { BASELINE_GRANTS, ROLE_TEMPLATES, matrixFor, permissionLabel, type Catalogue } from "./catalogue";
 import { RoleService, UserAdminService, resolveRole } from "./service";
 
 // Small stand-ins for the real features: this package cannot import them, and the rules under test do not care.
@@ -204,5 +204,46 @@ describe("settings:manage is not a way to become admin", () => {
     const holder = new RoleService({ ...a.as.admin, userId: a.users.accountant });
     await expect(holder.update(role.key, { name: "Self edit", base: "staff", grants: ["library:read", "library:manage"] }, CAT)).rejects.toBeInstanceOf(ForbiddenError);
     await asAdmin(a).changeRole(a.users.accountant, { role: "accountant" });
+  });
+});
+
+describe("communication grants", () => {
+  const COMM: Catalogue = [
+    { key: "announcements", name: "Notices", permissions: { read: ["admin", "teacher", "student"], draft: ["admin", "teacher"], publish: ["admin", "teacher"], approve: ["admin"], urgent: ["admin"], whole: ["admin"], manage: ["admin"] } },
+    { key: "messages", name: "Messages", permissions: { use: ["admin", "teacher", "student"], all: ["admin", "accountant"], safeguard: ["admin"], manage: ["admin"] } },
+    { key: "notifications", name: "Notifications", permissions: { read: ["admin", "teacher", "student"], manage: ["admin"], delivery: ["admin"] } },
+    { key: "requests", name: "Requests", permissions: { use: ["admin", "student"], office: ["admin", "accountant"], manage: ["admin"] } },
+    { key: "events", name: "Calendar", permissions: { read: ["admin", "student"], write: ["admin", "teacher"], manage: ["admin"] } },
+  ];
+  const all = new Set(COMM.map((f) => f.key));
+
+  it("the matrix shows messages and notifications, but not the baseline grants", () => {
+    const grants = matrixFor(COMM, all).flatMap((m) => m.permissions.map((p) => p.grant));
+    expect(grants).toEqual(expect.arrayContaining(["messages:all", "messages:safeguard", "messages:manage", "notifications:manage", "notifications:delivery", "announcements:draft", "announcements:approve", "requests:office"]));
+    for (const g of ["messages:use", "notifications:read", "announcements:read", "events:read", "requests:use"]) expect(grants).not.toContain(g);
+  });
+
+  it("the baseline holds the new read grants and labels say what they do", () => {
+    expect(BASELINE_GRANTS).toEqual(expect.arrayContaining(["announcements:read", "events:read", "requests:use"]));
+    const label = (f: string, p: string) => matrixFor(COMM, all).find((m) => m.key === f)!.permissions.find((x) => x.key === p)!.label;
+    expect(label("announcements", "approve")).toBe("Approve notices");
+    expect(label("announcements", "whole")).toBe("Publish to the whole school without approval");
+    expect(permissionLabel("approve")).toBe("Approve requests");
+    expect(label("announcements", "draft")).toBe("Write drafts");
+    expect(label("messages", "safeguard")).toBe("Review reported conversations");
+    expect(label("requests", "office")).toBe("Work the requests inbox".replace("requests inbox", "office inbox"));
+    expect(label("notifications", "delivery")).toBe("See delivery and failures");
+  });
+
+  it("templates: front office drafts but does not publish; two new roles; every grant is real", () => {
+    const t = (n: string) => ROLE_TEMPLATES.find((r) => r.name === n)!;
+    expect(t("Front office").grants).toEqual(expect.arrayContaining(["announcements:draft", "requests:office", "meetings:use"]));
+    expect(t("Front office").grants).not.toContain("announcements:publish");
+    expect(t("Safeguarding lead").grants).toEqual(["messages:safeguard", "students:read"]);
+    expect(t("Coordinator").grants).toEqual(expect.arrayContaining(["announcements:draft", "announcements:publish", "announcements:approve", "events:write", "requests:office", "students:read", "academics:read"]));
+  });
+
+  it("another school's roles never show up", async () => {
+    expect((await new RoleService(b.as.admin).list(COMM)).map((r) => r.name)).not.toContain("Old notices");
   });
 });

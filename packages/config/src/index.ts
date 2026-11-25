@@ -36,6 +36,15 @@ const schema = z.object({
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().default("Triakshi <no-reply@yourbrand.com>"),
 
+  /** Web push keys (npx web-push generate-vapid-keys). Without them push is hidden and nothing else breaks. */
+  VAPID_PUBLIC_KEY: z.preprocess((v) => v || undefined, z.string().optional()),
+  VAPID_PRIVATE_KEY: z.preprocess((v) => v || undefined, z.string().optional()),
+  VAPID_SUBJECT: z.preprocess((v) => v || undefined, z.string().optional()),
+  /** Emails per IST day across all schools (Brevo free is 300). */
+  MAIL_DAILY_LIMIT: z.preprocess((v) => v || undefined, z.coerce.number().int().positive().default(300)),
+  /** Shared secret for the mail provider's bounce webhook. Without it the webhook refuses everything. */
+  MAIL_WEBHOOK_SECRET: z.preprocess((v) => v || undefined, z.string().optional()),
+
   CASHFREE_ENV: z.enum(["sandbox", "production"]).default("sandbox"),
   /** "true" turns on the test checkout off localhost (a temporary demo server). Anyone can "pay" with it: never on a real launch. */
   FAKE_PAYMENTS: z.enum(["true", "false"]).default("false"),

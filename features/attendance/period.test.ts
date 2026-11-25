@@ -15,7 +15,7 @@ import { periodAttendance } from "./schema";
 import { StudentAttendanceService } from "./service";
 import { subjectCsv } from "./register-export";
 import { addDays, isSunday, rollupStatus, todayIST } from "./stats";
-import { sendDueAlerts, sendMails } from "./alerts";
+import { sendDueAlerts } from "./alerts";
 
 let a: TestSchool, b: TestSchool;
 let fx: Fixture;
@@ -66,7 +66,7 @@ const french = (): PeriodRef => ({ blockSlotId: tt.block.blockSlotId, optionId: 
 const entries = (ids: string[], status: "present" | "absent" | "late" | "leave" = "present") => ids.map((studentId) => ({ studentId, status }));
 const dailyOf = async (who: TestSchool["as"]["admin"], section: string, date: string, studentId: string) =>
   (await new StudentAttendanceService(who).sectionSheet(section, date)).rows.find((r) => r.studentId === studentId)?.status ?? null;
-const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
+const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => `${n.title} | ${n.body ?? ""}`));
 
 beforeAll(async () => {
   useServices({ email: mail, storage: new MemoryStorage() });
@@ -227,7 +227,7 @@ describe("roll-up to daily", () => {
     const title = (n: string[]) => n.filter((t) => t.includes(when));
     const before = title(await notes(a, a.users.student)).length;
     await withSchool(a.id, (tx) => tx.delete(periodAttendance).where(eq(periodAttendance.date, when)));
-    const sendAfterWindow = async () => sendMails(await withSchool(a.id, (tx) => sendDueAlerts(tx, a.id, new Date(Date.now() + 31 * 60_000))));
+    const sendAfterWindow = async () => withSchool(a.id, (tx) => sendDueAlerts(tx, a.id, new Date(Date.now() + 31 * 60_000)));
     await svc.markPeriod({ date: when, ...ref(0), entries: entries([kid], "absent") });
     expect(await dailyOf(a.as.admin, fx.own, when, kid)).toBe("absent");
     await sendAfterWindow();

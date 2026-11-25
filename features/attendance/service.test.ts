@@ -3,7 +3,8 @@ import { closeDb } from "@smw/db";
 import { ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { buildSchoolData, type Fixture } from "./test-fixture";
-import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "./service";
+import { HolidayService } from "./holiday-service";
+import { StaffAttendanceService, StudentAttendanceService } from "./service";
 import { addDays, attendancePercent, todayIST } from "./stats";
 
 let a: TestSchool, b: TestSchool;
@@ -48,7 +49,7 @@ describe("StudentAttendanceService", () => {
   it("refuses future dates, holidays and students from another section", async () => {
     const svc = new StudentAttendanceService(a.as.admin);
     await expect(svc.mark({ sectionId: fx.own, date: addDays(todayIST(), 1), entries: entries(fx.kids) })).rejects.toMatchObject({ fieldErrors: { date: "You cannot mark a future date" } });
-    await new HolidayService(a.as.admin).create({ date: "2026-10-02", name: "Gandhi Jayanti" });
+    await new HolidayService(a.as.admin).create({ from: "2026-10-02", name: "Gandhi Jayanti" });
     await expect(svc.mark({ sectionId: fx.own, date: "2026-10-02", entries: entries(fx.kids) })).rejects.toMatchObject({ fieldErrors: { date: "Gandhi Jayanti is a holiday" } });
     expect((await svc.sectionSheet(fx.own, "2026-10-02")).holiday).toBe("Gandhi Jayanti");
     await expect(svc.mark({ sectionId: fx.other, date: "2026-10-07", entries: entries(fx.kids) })).rejects.toBeInstanceOf(ValidationError);
@@ -183,13 +184,13 @@ describe("StaffAttendanceService", () => {
 describe("HolidayService", () => {
   it("admin manages holidays; one per date; others cannot write; B cannot touch A's", async () => {
     const svc = new HolidayService(a.as.admin);
-    const h = await svc.create({ date: "2026-11-01", name: "Diwali break" });
-    await expect(svc.create({ date: "2026-11-01", name: "Again" })).rejects.toMatchObject({ code: "conflict" });
-    await expect(new HolidayService(a.as.teacher).create({ date: "2026-11-02", name: "Nope" })).rejects.toBeInstanceOf(ForbiddenError);
+    const h = await svc.create({ from: "2026-11-01", name: "Diwali break" });
+    await expect(svc.create({ from: "2026-11-01", name: "Again" })).rejects.toMatchObject({ code: "conflict" });
+    await expect(new HolidayService(a.as.teacher).create({ from: "2026-11-02", name: "Nope" })).rejects.toBeInstanceOf(ForbiddenError);
     const bSvc = new HolidayService(b.as.admin);
-    expect((await bSvc.list()).rows.some((r) => r.id === h.id)).toBe(false);
+    expect((await bSvc.spans()).some((r) => r.id === h.id)).toBe(false);
     await expect(bSvc.get(h.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(bSvc.update(h.id, { date: "2026-11-01", name: "Hacked" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(bSvc.update(h.id, { from: "2026-11-01", name: "Hacked" })).rejects.toBeInstanceOf(NotFoundError);
     await expect(bSvc.remove(h.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 });

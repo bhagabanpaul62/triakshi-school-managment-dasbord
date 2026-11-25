@@ -10,7 +10,7 @@ import { METHOD_LABEL } from "@smw/feature-fees/service";
 import type { AccountantHome } from "../home-service";
 import { plural } from "../rules";
 import { PanelRow, Rows, SlotPanel } from "./layout";
-import { AnnouncementsBody, NextStep, open } from "./parts";
+import { AnnouncementsBody, NeedsActionBody, NextStep, RequestsBody, open } from "./parts";
 
 const avatar = (name: string) => <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/[0.07] text-xs" aria-hidden>{initials(name)}</span>;
 
@@ -25,6 +25,10 @@ export function AccountantHomeView({ d }: { d: AccountantHome }) {
         {m ? <StatCard label="Overdue students" value={String(m.summary.overdueCount)} icon={<MenuIconView name="clock" />} meta={m.summary.overdueCount ? `${paise(m.summary.overdueAmount)} overdue` : "Nobody is behind"} href="/app/fees/dues?overdue=1" /> : null}
       </KpiRow>
       <Rows>
+        <PanelRow cells={[
+          { slot: d.needsAction, size: 7, node: <SlotPanel slot={d.needsAction} title="Needs action" action={open("/app/notifications?tab=action", "All that needs action")}>{(rows) => <NeedsActionBody rows={rows} />}</SlotPanel> },
+          { slot: d.requests, size: 5, node: <SlotPanel slot={d.requests} title="Requests" action={open("/app/requests", "Open requests")}>{(r) => <RequestsBody r={r} />}</SlotPanel> },
+        ]} />
         <PanelRow cells={[
           { slot: d.recent, size: 7, node: (
             <SlotPanel slot={d.recent} title="Recent payments" action={open("/app/fees", "Open fees")}>

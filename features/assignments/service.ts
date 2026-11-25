@@ -5,6 +5,7 @@ import { students } from "@smw/feature-students/schema";
 import assignmentsFeature from "./feature";
 import { assignmentInput, bulkGradeInput, commentInput, extensionInput, gradeInput, submitInput } from "./inputs";
 import { assignmentExtensions, assignmentFiles, assignments, submissionComments, submissionFiles, submissions, type AssignmentStatus, type SubmissionStatus } from "./schema";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { AssignmentNotices } from "./notices";
 import { AssignmentAccess, isUuid, type Assignment, type Kid } from "./access";
 import { FileStore, type FileLink, type UploadedFile } from "./files";
@@ -632,6 +633,7 @@ export class SelfService extends SchoolService<Perm> {
       const a = await this.access.assignment(tx, assignmentId);
       const mine = kids.filter((k) => k.sectionId === a.sectionId);
       if (a.status === "draft" || mine.length === 0) throw new NotFoundError("Assignment");
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "assignment", id: a.id }, this.ctx);
       const [labels, attachments, subs, exts] = await Promise.all([
         this.access.labels(tx, [a.sectionId], [a.subjectId]),
         tx.select().from(assignmentFiles).where(eq(assignmentFiles.assignmentId, a.id)).orderBy(asc(assignmentFiles.createdAt)),

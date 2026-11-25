@@ -29,7 +29,7 @@ export default {
     if (!mismatches.length) return;
     await withSchool(id, async (tx) => {
       const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")));
-      await NotificationWriter.insert(tx, id, admins.map((a) => ({ userId: a.id, kind: "system" as const, title: "The fee books do not match", body: `${mismatches.length} check${mismatches.length === 1 ? "" : "s"} failed. Open Finance to see which.`, href: "/app/fees" })));
+      await NotificationWriter.insert(tx, id, admins.map((a) => ({ userId: a.id, topic: "work.update" as const, subject: { type: "fee-checks", id: "books" }, groupKey: "fee-books-mismatch", title: "The fee books do not match", body: `${mismatches.length} check${mismatches.length === 1 ? "" : "s"} failed. Open Finance to see which.`, href: "/app/fees" })));
     });
   }),
 } satisfies Record<string, () => Promise<unknown>>;

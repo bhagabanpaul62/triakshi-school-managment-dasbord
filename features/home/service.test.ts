@@ -2,19 +2,22 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, supportMessages, supportTickets, withSchool } from "@smw/db";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
-import { AnnouncementService } from "@smw/feature-announcements/service";
+import { publishNow } from "@smw/feature-announcements/quick";
+import { FeedService } from "@smw/feature-announcements/service";
 import { StudentAttendanceService } from "@smw/feature-attendance/service";
+import { attendanceHolidays } from "@smw/feature-attendance/schema";
 import { todayIST } from "@smw/feature-attendance/stats";
 import { buildSchoolData, type Fixture } from "@smw/feature-attendance/test-fixture";
-import { academicYears, terms } from "@smw/feature-academics/schema";
+import { academicYears, sections, terms } from "@smw/feature-academics/schema";
 import { feeReceiptMethods, feeReceipts } from "@smw/feature-fees/schema";
 import { students } from "@smw/feature-students/schema";
 import { HomeService, type Slot } from "./home-service";
 
-const FEATURES = ["home", "students", "academics", "attendance", "fees", "exams", "timetable", "assignments", "announcements", "events", "website", "support"];
+const FEATURES = ["home", "students", "academics", "attendance", "fees", "exams", "timetable", "assignments", "announcements", "events", "website", "support", "notifications", "setup"];
 // A Wednesday in the past: deterministic, and attendance may be marked on it.
 const WED = "2026-11-11";
 const wed = () => new Date(`${WED}T10:00:00+05:30`);
+const EVERYONE = { include: [{ type: "everyone" }], exclude: [] };
 const SUN = () => new Date("2026-11-15T10:00:00+05:30");
 
 let a: TestSchool, b: TestSchool;
@@ -58,9 +61,8 @@ describe("admin home", () => {
       const [t] = await tx.insert(supportTickets).values({ schoolId: a.id, subject: "Invoice question", status: "open" }).returning();
       await tx.insert(supportMessages).values({ schoolId: a.id, ticketId: t!.id, authorStaffId: "00000000-0000-0000-0000-0000000000aa", body: "We have fixed it." });
     });
-    const pinned = new AnnouncementService(a.as.admin);
-    await pinned.create({ title: "Regular notice", body: "x" });
-    await pinned.create({ title: "Pinned notice", body: "x", pinned: "true" });
+    await publishNow(a.as.admin, { title: "Regular notice", body: "x", audience: EVERYONE });
+    await publishNow(a.as.admin, { title: "Pinned notice", body: "x", audience: EVERYONE, pinnedUntil: new Date(Date.now() + 86_400_000).toISOString() });
 
     const home = await new HomeService(a.as.admin, wed).admin();
     const { items, unchecked } = ok(home.attention);
@@ -68,10 +70,22 @@ describe("admin home", () => {
     expect(items.find((i) => i.key === "attendance")).toMatchObject({ count: 1, href: "/app/attendance" });
     expect(items.find((i) => i.key === "support")).toMatchObject({ count: 1, href: "/app/support" });
     expect(items.find((i) => i.key === "fees")).toBeUndefined(); // nobody owes anything yet
-    expect(ok(home.announcements).map((r) => r.title)).toEqual(["Pinned notice", "Regular notice"]);
+    const notices = ok(home.announcements);
+    expect(notices.map((r) => r.title)).toEqual(["Pinned notice", "Regular notice"]);
+    expect(notices[0]).toMatchObject({ href: `/app/announcements/${notices[0]!.id}`, excerpt: "x" });
+    expect(ok(home.needsAction)).toEqual([]);
+    expect(home.requests.state).toBe("off"); // this package's test database has no requests tables
     expect(ok(home.capacity)).toMatchObject({ active: 5, cap: 300, percent: 2, warning: false });
     expect(ok(home.fees).summary).toMatchObject({ collectedThisMonth: 0, outstanding: 0 });
     expect(ok(home.fees).trend).toHaveLength(6);
+  });
+
+  it("carries the first-day checklist, each step ticked from the data, and none for a school without setup", async () => {
+    const steps = ok((await new HomeService(a.as.admin, wed).admin()).firstDay);
+    expect(steps.map((x) => x.key)).toEqual(["email", "quiet", "notice"]);
+    expect(steps.find((x) => x.key === "notice")!.done).toBe(true); // the notices published above
+    const off = { ...a.as.admin, features: new Set(FEATURES.filter((f) => f !== "setup")) };
+    expect((await new HomeService(off, wed).admin()).firstDay).toEqual({ state: "off" });
   });
 
   it("shows today's school-wide attendance from the attendance module", async () => {
@@ -137,6 +151,27 @@ describe("teacher home", () => {
 
   it("no register on a Sunday", async () => {
     expect(ok((await new HomeService(a.as.teacher, SUN).teacher()).toMark)).toEqual({ dayOff: "Sunday", rows: [] });
+  });
+});
+
+describe("teacher home on closed and open days", () => {
+  const on = (date: string) => new HomeService(a.as.teacher, () => new Date(`${date}T10:00:00+05:30`));
+  const hol = (date: string, name: string, over: Partial<typeof attendanceHolidays.$inferInsert> = {}) =>
+    withSchool(a.id, (tx) => tx.insert(attendanceHolidays).values({ schoolId: a.id, date, name, ...over }));
+
+  it("a closure of chosen classes takes only those sections off the register; one for everyone names the day; a working Sunday opens it", async () => {
+    const [sec] = await withSchool(a.id, (tx) => tx.select({ classId: sections.classId }).from(sections).where(eq(sections.id, fx.own)));
+    await hol("2026-11-12", "Class 5 trip", { appliesTo: "classes", classIds: [sec!.classId] });
+    expect(ok((await on("2026-11-12").teacher()).toMark)).toEqual({ dayOff: null, rows: [] });
+    await hol("2026-11-13", "Founders day");
+    expect(ok((await on("2026-11-13").teacher()).toMark)).toEqual({ dayOff: "Founders day", rows: [] });
+    await hol("2026-11-15", "Make-up Sunday", { kind: "working" });
+    expect(ok((await on("2026-11-15").teacher()).toMark).rows).toHaveLength(1);
+    // The admin's tile and the timetable say "Sunday" only when it is a day off.
+    const day = (date: string) => new HomeService(a.as.admin, () => new Date(`${date}T10:00:00+05:30`));
+    expect(ok((await day("2026-11-15").admin()).attendance).dayOff).toBeNull();
+    expect(ok((await day("2026-11-13").admin()).attendance).dayOff).toBe("Founders day");
+    expect(ok((await day("2026-11-22").admin()).attendance).dayOff).toBe("Sunday");
   });
 });
 
@@ -210,5 +245,17 @@ describe("student home", () => {
     const home = await new HomeService(b.as.student).student();
     expect(home.child).toBeNull();
     expect(home.attendance.state).toBe("off");
+  });
+});
+
+describe("family home", () => {
+  it("lists the notice that needs an answer first, with a link to it", async () => {
+    await publishNow(a.as.admin, { title: "Plain news", body: "Just so you know", audience: EVERYONE });
+    await publishNow(a.as.admin, { title: "Trip consent", body: "Please answer", audience: EVERYONE, response: { kind: "consent", reasonForNo: false } });
+    const home = await new HomeService(a.as.student).student();
+    const rows = ok(home.announcements);
+    expect(rows[0]).toMatchObject({ title: "Trip consent", needsAnswer: true, href: expect.stringMatching(/^\/app\/announcements\/[0-9a-f-]{36}$/) });
+    expect(rows.find((r) => r.title === "Plain news")?.needsAnswer).toBe(false);
+    expect((await new FeedService(a.as.student).feed()).rows.length).toBe(rows.length);
   });
 });

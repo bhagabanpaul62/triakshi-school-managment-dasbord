@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import type { Catalogue } from "../catalogue";
@@ -10,6 +11,8 @@ import { UrlTabs } from "./tabs";
 import { UsersTab } from "./users-tab";
 
 export const metadata = { title: "Settings" };
+
+const LINK = "inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm text-[var(--ds-on-surface)] transition-colors hover:bg-white/[0.14] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]";
 
 const TABS = [
   { id: "school", label: "School profile" },
@@ -28,7 +31,11 @@ export default async function SettingsPage({ searchParams, catalogue, roleAction
   const tab = TABS.find((t) => t.id === params.tab)?.id ?? "school";
   return (
     <>
-      <PageHeader eyebrow="Admin" title="Settings" description="Your school's details, who can sign in and what they can do, and your data." />
+      <PageHeader eyebrow="Admin" title="Settings" description="Your school's details, who can sign in and what they can do, and your data."
+        actions={<>
+          <Link href="/app/settings/communication" className={LINK}>Communication settings</Link>
+          <Link href="/app/notifications/delivery" className={LINK}>Delivery report</Link>
+        </>} />
       <UrlTabs tabs={TABS} value={tab} label="Settings sections" panelId="settings-panel" />
       <div id="settings-panel" role="tabpanel" className="pt-6">
         {tab === "school" ? <SchoolTab ctx={ctx} /> : tab === "users" ? <UsersTab ctx={ctx} searchParams={params} /> : tab === "roles" ? <RolesTab ctx={ctx} catalogue={catalogue} actions={roleActions} /> : <ExportTab ctx={ctx} />}

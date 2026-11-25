@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, eq, plans, schools, withConsole } from "@smw/db";
+import { closeDb, eq, plans, schools, withConsole, withSchool } from "@smw/db";
+import { announcements } from "@smw/feature-announcements/schema";
 import { AppError, ForbiddenError, LimitError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryStorage, useServices } from "@smw/integrations";
-import { AnnouncementService } from "@smw/feature-announcements/service";
+import { NoticeService } from "@smw/feature-announcements/service";
 import { PRESETS } from "@smw/themes";
 import seed from "./seed";
 import { EnquiryService, PublicSiteService, SiteService, ThemeService, studentLink } from "./service";
@@ -153,13 +154,20 @@ describe("SiteService", () => {
 
 describe("PublicSiteService", () => {
   it("shows public news only, teachers by name, and nothing when the module is off", async () => {
-    const ann = new AnnouncementService(a.as.admin);
-    await ann.create({ title: "Open day", body: "Come see us", isPublic: "true" });
-    await ann.create({ title: "Staff only", body: "x", audience: "staff" });
+    const everyone = { include: [{ type: "everyone" }], exclude: [] };
+    // Without the fan-out job (this package has no academics tables for it to read): send, then mark as published by hand.
+    const publish = async (input: Record<string, unknown>) => {
+      const n = new NoticeService(a.as.admin);
+      await n.publish((await n.saveDraft({ type: "notice", ...input })).id, { confirmed: true });
+      await withSchool(a.id, (tx) => tx.update(announcements).set({ state: "published" }).where(eq(announcements.state, "sending")));
+    };
+    await publish({ title: "Open day", body: "Come see us", audience: everyone, website: true });
+    await publish({ title: "Not on the website", body: "x", audience: everyone });
+    await expect(publish({ title: "Staff only", body: "x", audience: { include: [{ type: "staff" }], exclude: [] }, website: true })).rejects.toBeInstanceOf(ValidationError);
+    await publish({ title: "Staff only", body: "x", audience: { include: [{ type: "staff" }], exclude: [] } });
     const pub = PublicSiteService.forSchool(a.id, FEATURES);
     const titles = (await pub.news()).map((n) => n.title);
-    expect(titles).toContain("Open day");
-    expect(titles).not.toContain("Staff only");
+    expect(titles).toEqual(["Open day"]);
     expect((await pub.staff()).map((s) => s.name)).toContain("teacher a");
     expect(await pub.events()).toEqual([]);
     expect(await PublicSiteService.forSchool(a.id, ["announcements"]).published()).toBeNull();

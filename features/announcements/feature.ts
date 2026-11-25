@@ -2,12 +2,18 @@ import { defineFeature } from "@smw/feature-kit";
 
 export default defineFeature({
   key: "announcements",
-  name: "Announcements",
-  description: "Notices to the whole school, staff, students, families (student logins) or one class. Public ones appear on the website.",
+  name: "Notices",
+  description: "Notices, circulars and urgent alerts to the school, one class or one family, with approval, answers and a report of who has seen them.",
   stage: "ga",
+  requires: ["academics", "students"],
   permissions: {
     read: ["admin", "accountant", "teacher", "student"],
-    write: ["admin", "teacher"],
+    draft: ["admin", "accountant", "teacher"],
+    publish: ["admin", "accountant", "teacher"],
+    approve: ["admin"],
+    urgent: ["admin"],
+    whole: ["admin"],
+    manage: ["admin"],
   },
-  menu: [{ label: "Announcements", href: "/app/announcements", icon: "megaphone", permission: "read", group: "communication", order: 10 }],
+  menu: [{ label: "Notices", href: "/app/announcements", icon: "megaphone", permission: "read", group: "communication", order: 10 }],
 });

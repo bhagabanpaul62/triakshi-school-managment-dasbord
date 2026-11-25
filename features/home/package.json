@@ -42,7 +42,10 @@
     "@smw/feature-website": "workspace:*",
     "@smw/feature-support": "workspace:*",
     "@smw/feature-transport": "workspace:*",
-    "@smw/feature-library": "workspace:*"
+    "@smw/feature-library": "workspace:*",
+    "@smw/feature-requests": "workspace:*",
+    "@smw/feature-setup": "workspace:*",
+    "@smw/feature-meetings": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

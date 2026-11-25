@@ -118,7 +118,7 @@ export class CounterService extends FeesBase {
     await tx.update(feeCounters).set({ differenceState: state }).where(eq(feeCounters.id, id));
     const body = approved ? `The difference of ${rupees(Math.abs((c.countedPaise ?? 0) - (c.expectedPaise ?? 0)))} on ${c.day} was approved and written to Cash differences.`
       : short ? `The shortage on ${c.day} was not approved. It now shows as owed by you (Cashier dues) until it is settled.` : `The extra cash on ${c.day} was not approved. Count again: ask your admin to reopen it, or send it for approval again.`;
-    await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: c.userId, kind: "fee_due" as const, title: approved ? "Counter difference approved" : "Counter difference not approved", body, href: "/app/fees/counter" }]);
+    await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: c.userId, topic: "work.decision" as const, subject: { type: "counter", id }, title: approved ? "Counter difference approved" : "Counter difference not approved", body, href: "/app/fees/counter" }]);
   }
 
   /** Take the request back. The difference stays unbooked; ask again or count again. */

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { auditLogs, closeDb, eq, sql, users, withSchool } from "@smw/db";
+import { auditLogs, and, closeDb, eq, sql, users, withSchool } from "@smw/db";
 import { notifications } from "@smw/feature-notifications/schema";
 import { students } from "@smw/feature-students/schema";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
@@ -297,7 +297,7 @@ describe("remove", () => {
 });
 
 describe("assignment notifications", () => {
-  const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
+  const notes = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.body ?? n.title));
 
   it("publishing tells the section's students; a draft says nothing until it is published", async () => {
     const t = new AssignmentService(a.as.teacher);
@@ -322,13 +322,15 @@ describe("assignment notifications", () => {
     const mine = await notes(a, a.users.student);
     expect(mine).toContain("Sent back to redo: Graded notice");
     expect(mine).toContain("Graded: Graded notice");
+    const [row] = await withSchool(a.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, a.users.student), eq(notifications.topic, "homework.graded"))).limit(1));
+    expect(row).toMatchObject({ title: "Homework marked", privateBody: true });
   });
 });
 
 // ---- PRD 4.4 additions: extensions, reminders, bulk grade, CSV, comments, scheduled publish, file cleanup ----
 
 const hoursFromNow = (h: number) => new Date(Date.now() + h * 3_600_000);
-const titlesOf = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => n.title));
+const titlesOf = (school: TestSchool, userId: string) => withSchool(school.id, async (tx) => (await tx.select().from(notifications).where(eq(notifications.userId, userId))).map((n) => (n.privateBody ? `${n.title}: ${n.body}` : n.title)));
 
 describe("per-student extension", () => {
   it("an extension makes a late hand-in on time, and moves a late one to submitted", async () => {
@@ -434,7 +436,7 @@ describe("comment thread", () => {
     expect(aarav.comments.map((c) => [c.body, c.mine])).toEqual([["Is part 2 needed?", true], ["Yes, part 2 too.", false]]);
     expect((await new SelfService(diya).detail(x.id)).entries[0]!.comments).toEqual([]);
     expect(await titlesOf(a, a.users.teacher)).toContain("New comment from a student on: Thread");
-    expect(await titlesOf(a, a.users.student)).toContain("New comment on: Thread");
+    expect(await titlesOf(a, a.users.student)).toContain("New comment on your homework: Thread");
   });
 });
 

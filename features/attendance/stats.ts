@@ -9,6 +9,8 @@ export const todayIST = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia
 const utc = (d: string) => new Date(`${d}T00:00:00Z`);
 export const addDays = (d: string, n: number) => { const x = utc(d); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 export const isSunday = (d: string) => utc(d).getUTCDay() === 0;
+/** "3 Nov 2026" from "2026-11-03". */
+export const dayLabel = (d: string) => utc(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 export const isDate = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && utc(d).toISOString().slice(0, 10) === d;
 
 /** Every date of a "YYYY-MM" month. */

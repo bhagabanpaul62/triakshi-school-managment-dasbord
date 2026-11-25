@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { auditLogs, closeDb, eq, withConsole, withSchool } from "@smw/db";
+import { and, auditLogs, closeDb, eq, withConsole, withSchool } from "@smw/db";
+import { notifications } from "@smw/feature-notifications/schema";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { addMonths, monthStart, todayIST } from "@smw/feature-kit/money";
 import { createTestSchool, createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
@@ -118,6 +119,18 @@ describe("manual journals and reversal", () => {
     expect(posted.rows[0]).toMatchObject({ memo: "Bought chairs", totalPaise: 25_000 });
     expect((await journals.list({ filters: { account: acc.general_expense } })).rows.map((r) => r.memo)).toContain("Bought chairs");
     expect((await journals.list({ filters: { account: acc.fixed_assets } })).total).toBe(0);
+  });
+
+  it("the approvers' action row closes when the request is decided, and the asker is told", async () => {
+    const acc = await chart(a), { approvalId } = await new JournalService(a.as.accountant).propose(manual(acc, { memo: "Row closes" }));
+    const rows = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.subjectType, "approval"), eq(notifications.subjectId, approvalId))));
+    const asked = (await rows()).filter((n) => n.topic === "work.approval");
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((n) => n.action && !n.doneAt)).toBe(true);
+    await decide(a).approve({ id: approvalId });
+    const after = await rows();
+    expect(after.filter((n) => n.topic === "work.approval").every((n) => n.doneAt)).toBe(true);
+    expect(after.some((n) => n.topic === "work.decision" && n.userId === a.users.accountant)).toBe(true);
   });
 
   it("the only admin cannot approve their own entry without a reason", async () => {

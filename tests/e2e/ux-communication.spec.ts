@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { expectHealthy, login, loginStudent, SCHOOL } from "./helpers";
 
-// Communication journeys: assignments, announcements, events, messages. Screenshots land in test-results/ux-communication/.
+// Assignments, and the family screens of Communication on a phone. Screenshots land in test-results/ux-communication/.
 /** One value from the local seed database, or null when it is not reachable. */
 function sql(q: string): string | null {
   try { return execFileSync("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", "smw", "-At", "-c", q], { env: { ...process.env, PGPASSWORD: "postgres" }, timeout: 20_000 }).toString().trim() || null; }
@@ -59,11 +59,6 @@ async function fillAndPost(page: Page, open: RegExp, post: RegExp, fill: (d: Ret
 async function openRow(page: Page, row: ReturnType<Page["locator"]>, url: RegExp) {
   await expect(async () => { await row.click(); await page.waitForURL(url, { timeout: 15_000 }); }).toPass({ timeout: 240_000, intervals: [1000] });
 }
-const pickFirst = async (page: Page, label: string | RegExp) => {
-  const sel = page.getByLabel(label).first();
-  const value = await sel.locator("option:not([value=''])").first().getAttribute("value");
-  await sel.selectOption(value!);
-};
 
 test.beforeEach(async ({ page }) => { await page.setViewportSize(DESKTOP); });
 
@@ -138,64 +133,21 @@ test("student sees what is due, opens it and the hand-in form", async ({ page })
   }
 });
 
-test("admin posts a class announcement; student feed", async ({ page }) => {
-  await login(page, SLUG, "admin");
-  await go(page, "/app/announcements");
-  await shot(page, "a1-staff");
-  await phone(page, "a1-staff");
-  const d = await openDialog(page, /new announcement/i);
-  await d.getByLabel(/^title/i).fill(`Class picnic ${STAMP}`);
-  await d.getByLabel(/^message/i).fill("Bring a water bottle and a cap. Leaving at 8 am.");
-  await d.getByLabel(/send to/i).selectOption("class");
-  await pickFirst(d, /which class/i);
-  await shot(page, "a2-compose");
-  await d.getByRole("button", { name: /^post$/i }).click();
-  await expect(page.getByText(`Class picnic ${STAMP}`).first()).toBeVisible({ timeout: 200_000 });
-  await shot(page, "a3-posted");
-});
-
-test("events list, month calendar, create an event", async ({ page }) => {
-  await login(page, SLUG, "admin");
-  await go(page, "/app/events");
-  await shot(page, "e1-list");
-  await phone(page, "e1-list");
-  const d = await openDialog(page, /new event/i);
-  await d.getByLabel(/^title/i).fill(`Book fair ${STAMP}`);
-  await d.getByLabel(/^starts/i).fill("2026-11-25T10:00");
-  await d.getByLabel(/who is invited/i).selectOption("parents");
-  await shot(page, "e2-form");
-  await d.getByRole("button", { name: /add event/i }).click();
-  await expect(page.getByText(`Book fair ${STAMP}`).first()).toBeVisible({ timeout: 200_000 });
-  await go(page, "/app/events?view=month&month=2026-11");
-  await expect(page.getByText(`Book fair ${STAMP}`).first()).toBeVisible();
-  await shot(page, "e3-month");
-  await phone(page, "e3-month");
-});
-
+// Notices, calendar and messages as people use them: comm-notices, comm-calendar and comm-talk. Here only the phone layout of the family screens.
 // No parent logins: the student login is the family login.
-test("student: messages list and thread on phone, announcements and events", async ({ page }) => {
+test("student: messages, notices and calendar on phone", async ({ page }) => {
   const dob = sql("select to_char(dob,'DDMMYYYY') from students where admission_no='GR0001' limit 1");
   test.skip(!dob, "local database not reachable");
   await loginStudent(page, SLUG, "GR0001", dob!);
   await go(page, "/app/messages");
   await shot(page, "m1-inbox");
   await phone(page, "m1-inbox");
-  const d = await openDialog(page, /new message/i);
-  await expect(d.getByRole("list", { name: /people you can message/i }).getByRole("button").first()).toBeVisible({ timeout: 200_000 });
-  await d.getByRole("list", { name: /people you can message/i }).getByRole("button").first().click();
-  await d.getByLabel(/^subject/i).fill(`Homework help ${STAMP}`);
-  await d.getByLabel(/^message/i).fill("Hello, could you share this week's homework plan?");
-  await shot(page, "m2-compose");
-  await d.getByRole("button", { name: /^send$/i }).click();
-  await expect(page.getByText(`Homework help ${STAMP}`).first()).toBeVisible({ timeout: 200_000 });
-  await shot(page, "m3-thread");
-  await phone(page, "m3-thread");
-
   await go(page, "/app/announcements");
   await shot(page, "p1-announcements");
   await phone(page, "p1-announcements");
   await go(page, "/app/events");
-  await shot(page, "p2-events");
+  await shot(page, "p2-calendar");
+  await phone(page, "p2-calendar");
   await go(page, "/app/assignments");
   await shot(page, "p3-assignments");
   await phone(page, "p3-assignments");

@@ -2,12 +2,31 @@ import { AppShell, ShellBanner } from "@smw/ui/shell/AppShell";
 import { panelCss } from "@smw/themes";
 import { getSchool, getSession, requireCtx } from "@smw/runtime";
 import { buildMenu, ROLE_LABEL } from "@/lib/menu";
+import { pulseCounts } from "@/lib/pulse-sources";
 import { logout } from "@/lib/auth-actions";
 import { NotificationBellServer } from "@smw/feature-notifications/ui/bell-server";
-import { MessageService } from "@smw/feature-messages/service";
 import { AwaitingApproval } from "@smw/feature-setup/ui/awaiting-approval";
+import { UrgentBanner } from "@smw/feature-announcements/ui/urgent-banner";
+import { activeClosures } from "@smw/feature-attendance/holidays";
+import { sql, withSchool } from "@smw/db";
 import { redirect } from "next/navigation";
 import { Button } from "@smw/ui/ui/button";
+
+/** Emergency closures today and tomorrow for this person: staff by the staff rule, a family by each child's class. A failure here never breaks a page. */
+async function closureLines(ctx: Awaited<ReturnType<typeof requireCtx>>) {
+  if (!ctx.features.has("attendance")) return [];
+  try {
+    return await withSchool(ctx.schoolId, async (tx) => {
+      const who = ctx.role === "student"
+        ? [...new Set([...(await tx.execute(sql`select class_id::text as c from students where user_id = ${ctx.userId}::uuid and status = 'active'`))].map((r) => (r as { c: string | null }).c))].map((classId) => ({ classId }))
+        : [{ staff: true as const }];
+      const found = (await Promise.all(who.map((w) => activeClosures(tx, w)))).flat();
+      return [...new Map(found.map((c) => [`${c.date}:${c.name}`, c])).values()].map((c) => ({
+        key: `${c.date}:${c.name}`, text: `School is closed ${c.when}: ${c.name}.${c.note ? ` ${c.note}` : ""}`,
+      }));
+    });
+  } catch { return []; }
+}
 
 export default async function PanelLayout({ children }: { children: React.ReactNode }) {
   const [school, ctx] = await Promise.all([getSchool(), requireCtx()]);
@@ -23,8 +42,8 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   }
   // First run after approval: the admin finishes the setup wizard before the panel.
   if (!school.setupCompleted && ctx.role === "admin" && !ctx.supportStaffId) redirect("/app/setup");
-  // Sidebar badges: a failure here must never take the whole panel down.
-  const unread = ctx.features.has("messages") ? await new MessageService(ctx).unreadCount().catch(() => 0) : 0;
+  // Sidebar badges and the bell's live numbers come from the same function the pulse route uses; each source fails alone.
+  const counts = await pulseCounts(ctx).catch(() => ({ messages: 0, requests: 0, notices: 0 }));
   const banner = ctx.supportStaffId ? <ShellBanner tone="warning">Support session{ctx.readOnly ? " (read-only)" : ""}. Every action is logged.</ShellBanner>
     : school.readOnly ? <ShellBanner tone="danger">Your school is read-only. Renew the plan in Billing to make changes; exports still work.</ShellBanner>
     : school.status === "trial" && school.trialEndsAt ? <ShellBanner>Free trial: {Math.max(0, Math.ceil((school.trialEndsAt.getTime() - Date.now()) / 86_400_000))} days left.</ShellBanner>
@@ -32,9 +51,10 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: panelCss(school.theme) }} />
-      <AppShell brand={{ name: school.name, logoUrl: school.logoUrl, homeHref: "/app" }} groups={buildMenu(ctx, { "/app/messages": unread })}
+      <AppShell brand={{ name: school.name, logoUrl: school.logoUrl, homeHref: "/app" }} groups={buildMenu(ctx, { "/app/messages": counts.messages, "/app/requests": counts.requests, "/app/announcements": counts.notices })}
         user={{ name: ctx.name, meta: ROLE_LABEL[ctx.role] }} logout={logout} banner={banner}
-        topbar={ctx.features.has("notifications") ? <NotificationBellServer /> : null}>
+        topbar={ctx.features.has("notifications") ? <NotificationBellServer messages={counts.messages} requests={counts.requests} /> : null}>
+        <UrgentBanner closures={await closureLines(ctx)} />
         {children}
       </AppShell>
     </>

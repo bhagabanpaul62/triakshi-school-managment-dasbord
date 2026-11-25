@@ -7,11 +7,10 @@ import { SegmentedGauge } from "@smw/ui/kit/SegmentedGauge";
 import { TickBar } from "@smw/ui/kit/TickBar";
 import { EntityList, ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { paise, relative, shortDate } from "@smw/ui/format";
-import type { Announcement } from "@smw/feature-announcements/service";
 import type { SchoolEvent } from "@smw/feature-events/service";
 import type { DueRow } from "@smw/feature-fees/service";
 import { attendanceTone, clock12 } from "../rules";
-import type { AssignmentsDue, AttendanceMonth, LatestResult, TodayTimetable } from "../home-service";
+import type { ActionItem, AssignmentsDue, AttendanceMonth, HomeNotice, LatestResult, MeetingSlotToday, RequestsSummary, TodayTimetable } from "../home-service";
 
 const LINK = "text-sm text-[var(--ds-color-primary-300)] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]";
 
@@ -25,14 +24,56 @@ export const open = (href: string, label: string) => <ArrowButton href={href} la
 
 // ---------- announcements and events ----------
 
-export function AnnouncementsBody({ rows }: { rows: Announcement[] }) {
+export function AnnouncementsBody({ rows }: { rows: HomeNotice[] }) {
   return (
     <EntityList
       maxItems={5}
       empty={{ title: "No announcements yet.", description: "Notices from the school appear here." }}
       items={rows.map((a) => ({
-        id: a.id, title: a.title, subtitle: a.body, meta: relative(a.publishedAt), href: "/app/announcements",
-        badge: a.pinned ? <ToneBadge label="Pinned" tone="info" /> : undefined,
+        id: a.id, title: a.title, subtitle: a.excerpt, meta: relative(a.publishedAt), href: a.href,
+        badge: a.needsAnswer ? <ToneBadge label="Needs your answer" tone="warning" /> : a.pinned ? <ToneBadge label="Pinned" tone="info" /> : undefined,
+      }))}
+    />
+  );
+}
+
+/** The top things waiting on this person: approvals, answers, requests. Each row opens the thing. */
+export function NeedsActionBody({ rows }: { rows: ActionItem[] }) {
+  return (
+    <EntityList
+      maxItems={5}
+      empty={{ title: "Nothing is waiting on you.", description: "Approvals, answers and requests for you show here." }}
+      items={rows.map((n) => ({ id: n.id, title: n.title, subtitle: n.body ?? undefined, meta: relative(n.createdAt), href: n.href ?? "/app/notifications?tab=action" }))}
+    />
+  );
+}
+
+/** What the office has on its desk: mine, not taken by anyone, late. */
+export function RequestsBody({ r }: { r: RequestsSummary }) {
+  if (!r.mine && !r.unassigned && !r.overdue) return <><WidgetEmptyState title="No requests waiting." description="Families' requests show here as they arrive." /><NextStep href="/app/requests">Open requests</NextStep></>;
+  return (
+    <EntityList
+      maxItems={3}
+      empty={{ title: "", description: "" }}
+      items={[
+        { id: "mine", title: "Waiting for me", meta: String(r.mine), href: "/app/requests?view=mine" },
+        { id: "unassigned", title: "Nobody has taken them", meta: String(r.unassigned), href: "/app/requests?view=unassigned", badge: r.unassigned ? <ToneBadge label="Take one" tone="info" /> : undefined },
+        { id: "overdue", title: "Late", meta: String(r.overdue), href: "/app/requests?view=overdue", badge: r.overdue ? <ToneBadge label="Late" tone="danger" /> : undefined },
+      ]}
+    />
+  );
+}
+
+/** A teacher's parent-meeting slots for today, in time order. */
+export function MeetingsTodayBody({ rows }: { rows: MeetingSlotToday[] }) {
+  return (
+    <EntityList
+      maxItems={6}
+      empty={{ title: "No parent meetings today.", description: "Booked slots for today show here." }}
+      items={rows.map((m) => ({
+        id: m.slotId, title: m.studentName, subtitle: [m.studentLabel, m.meetingTitle].filter(Boolean).join(" · "),
+        meta: new Date(m.startsAt).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" }),
+        href: `/app/meetings/${m.meetingId}/day`, badge: m.visit ? <ToneBadge label={m.visit === "came" ? "Came" : m.visit === "late" ? "Late" : "Missed"} tone={m.visit === "missed" ? "danger" : "success"} /> : undefined,
       }))}
     />
   );
@@ -42,10 +83,9 @@ export function EventsBody({ rows }: { rows: SchoolEvent[] }) {
   return (
     <EntityList
       maxItems={5}
-      empty={{ title: "Nothing coming up.", description: "Events and holidays show here once they are on the calendar." }}
+      empty={{ title: "Nothing coming up.", description: "Events show here once they are on the calendar." }}
       items={rows.map((e) => ({
-        id: e.id, title: e.title, subtitle: e.location ?? undefined, meta: shortDate(e.startsAt), href: "/app/events",
-        badge: e.isHoliday ? <ToneBadge label="Holiday" tone="warning" /> : undefined,
+        id: e.id, title: e.title, subtitle: e.location ?? undefined, meta: shortDate(e.startsAt), href: `/app/events/${e.id}`,
       }))}
     />
   );
@@ -54,7 +94,8 @@ export function EventsBody({ rows }: { rows: SchoolEvent[] }) {
 // ---------- timetable ----------
 
 export function TimetableBody({ t, emptyHint }: { t: TodayTimetable; emptyHint: string }) {
-  if (t.day === null) return <WidgetEmptyState title="No classes today." description="It is Sunday. Enjoy the day off." />;
+  if (t.dayOff) return <WidgetEmptyState title="No classes today." description={t.dayOff === "Sunday" ? "It is Sunday. Enjoy the day off." : `${t.dayOff}. Enjoy the day off.`} />;
+  if (t.day === null) return <WidgetEmptyState title="No periods are set for today." description="School is open today but the timetable has no periods for it." />;
   if (t.rows.length === 0) return <WidgetEmptyState title="Your timetable is not set yet." description={emptyHint} />;
   return (
     <ul className="flex flex-col gap-0.5">

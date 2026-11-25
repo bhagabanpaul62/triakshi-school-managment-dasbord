@@ -4,6 +4,7 @@ import { ArrowButton, IconChip } from "@smw/ui/kit/Panel";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { backHref, stepHref } from "../steps";
 import { FinishButton } from "./finish-button";
+import { SetupService } from "../service";
 import { SetupFrame, loadWizard } from "./frame";
 
 export const metadata = { title: "Setup: Review and finish" };
@@ -21,6 +22,7 @@ export default async function DonePage() {
 
   if (p.completedAt) {
     const actions = NEXT_ACTIONS.filter((a) => ctx.features.has(a.feature));
+    const comm = await new SetupService(ctx).communication().catch(() => []);
     return (
       <SetupFrame current="done" progress={p}>
         <h1 className="text-[28px] font-medium tracking-tight text-[var(--ds-on-surface)]">{p.facts.schoolName} is set up</h1>
@@ -37,6 +39,23 @@ export default async function DonePage() {
             </li>
           ))}
         </ul>
+        {comm.length ? (
+          <>
+            <h2 className="mt-8 text-sm font-medium text-[var(--ds-on-surface)]">Talking to families: {comm.filter((c) => c.done).length} of {comm.length} done</h2>
+            <ul className="mt-3 flex flex-col gap-2">
+              {comm.map((c) => (
+                <li key={c.key} className="flex items-center gap-3 rounded-2xl bg-white/[0.04] px-4 py-3">
+                  <ToneBadge label={c.done ? "Done" : "To do"} tone={c.done ? "success" : "warning"} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-[var(--ds-on-surface)]">{c.label}</p>
+                    <p className="text-xs text-[var(--ds-on-surface-muted)]">{c.text}</p>
+                  </div>
+                  <Link href={c.href} className="shrink-0 text-sm text-[var(--ds-on-surface-variant)] hover:text-[var(--ds-on-surface)]">{c.done ? "Open" : "Do it"}</Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
         {open.length ? (
           <p className="mt-6 text-sm text-[var(--ds-on-surface-muted)]">
             Still open: {open.map((s, i) => <span key={s.key}>{i ? ", " : ""}<Link href={stepHref(s.key)} className="text-[var(--ds-on-surface-variant)] underline">{s.label.toLowerCase()}</Link></span>)}. Do them whenever you like.

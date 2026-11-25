@@ -2,7 +2,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, eq, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
-import { MemoryEmailSender, useServices } from "@smw/integrations";
 import { notifications } from "@smw/feature-notifications/schema";
 import { students } from "@smw/feature-students/schema";
 import { DocumentExpiryAlerts } from "./expiry";
@@ -14,10 +13,8 @@ import { VehicleCareService, todayIST } from "./vehicle-care";
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 });
 
 let a: TestSchool, b: TestSchool;
-const mail = new MemoryEmailSender();
 beforeAll(async () => {
   ({ a, b } = await createSchoolPair(["students", "academics", "transport", "fees", "notifications"], "tc"));
-  useServices({ email: mail });
 });
 afterAll(closeDb);
 
@@ -75,7 +72,6 @@ describe("vehicle papers", () => {
     await new VehicleCareService(a.as.admin).addDocument({ vehicleId: v.id, kind: "insurance", expiresOn: expiry });
     const run = (day: string) => new DocumentExpiryAlerts(a.as.admin).run(day);
     const titles = async () => (await notesOf(a, a.users.admin)).filter((x) => x.title.includes(v.registrationNo)).map((x) => x.title);
-    const mails = () => mail.sent.filter((m) => m.subject.includes(v.registrationNo)).length;
     await run(today); // 30 days out
     await run(today); // same day again
     expect(await titles()).toHaveLength(1);
@@ -92,7 +88,7 @@ describe("vehicle papers", () => {
     expect(all.some((t) => t.includes("expires in 30 days"))).toBe(true);
     expect(all.some((t) => t.includes("expires in 7 days"))).toBe(true);
     expect(all.some((t) => t.includes("expires today"))).toBe(true);
-    expect(mails()).toBe(3); // the admin's email, once per alert
+    expect((await notesOf(a, a.users.admin)).filter((x) => x.title.includes(v.registrationNo)).every((x) => x.topic === "work.update" && x.subjectType === "vehicle-document")).toBe(true);
     // renewing gives the new expiry date its own alerts
     const [doc] = (await new VehicleCareService(a.as.admin).detail(v.id)).documents;
     await new VehicleCareService(a.as.admin).updateDocument(doc!.id, { vehicleId: v.id, kind: "insurance", expiresOn: addDays(today, 29) });
@@ -140,7 +136,7 @@ describe("safety checklist", () => {
 });
 
 describe("route notices", () => {
-  it("reach every student on the route in the app, by email, and nobody else", async () => {
+  it("reach every student on the route in the app (topic transport.notice), and nobody else", async () => {
     const v = await vehicle(a);
     const routes = new RouteService(a.as.admin);
     const r = await routes.create({ name: `Notice route ${++n}`, vehicleId: v.id, morningStart: "07:00", eveningStart: "14:30" });
@@ -157,7 +153,7 @@ describe("route notices", () => {
 
     const sent = await new RouteNoticeService(a.as.admin).send({ routeId: r.id, title: "Bus late by 20 minutes", body: "Heavy traffic on the main road." });
     expect(sent).toMatchObject({ riders: 2, notified: 1 });
-    expect((await notesOf(a, a.users.student)).some((x) => x.title.includes("Bus late by 20 minutes"))).toBe(true);
+    expect((await notesOf(a, a.users.student)).some((x) => x.title.includes("Bus late by 20 minutes") && x.topic === "transport.notice" && x.subjectType === "route")).toBe(true);
     expect((await notesOf(a, a.users.parent)).some((x) => x.title.includes("Bus late"))).toBe(false);
     await expect(new RouteNoticeService(a.as.teacher).send({ routeId: r.id, title: "Hello", body: "Nope" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new RouteNoticeService(inCharge(a)).send({ routeId: r.id, title: "Hello", body: "In-charge may" })).resolves.toBeTruthy();

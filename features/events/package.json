@@ -27,7 +27,8 @@
     "@tabler/icons-react": "^3.52.0",
     "@smw/feature-notifications": "workspace:*",
     "@smw/feature-students": "workspace:*",
-    "@smw/feature-academics": "workspace:*"
+    "@smw/feature-academics": "workspace:*",
+    "@smw/feature-attendance": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

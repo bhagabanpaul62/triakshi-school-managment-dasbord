@@ -4,6 +4,7 @@ import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
 import { monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
 import { finApprovals } from "@smw/feature-finance/schema";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { computeMonth, refreshTotals, saveItem, ratesOf, TYPED_CODES, type CalcEnv, type ItemRow, type LineRow } from "../compute";
 import { monthLabel } from "../csv";
 import type { Flag } from "../engine";
@@ -100,6 +101,7 @@ export class RunService extends PayrollService {
       }
       const rates = ratesOf(items) as { key: string; state: string | null; confidence: string; source: string }[];
       const [approval] = await tx.select().from(finApprovals).where(and(eq(finApprovals.refId, id), eq(finApprovals.status, "pending"), sql`${finApprovals.kind} like 'payroll.%'`));
+      if (approval && !this.ctx.readOnly && !this.ctx.supportStaffId) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: approval.id }, this.ctx);
       const asker = approval ? (await tx.select({ name: users.name }).from(users).where(eq(users.id, approval.requestedBy)))[0]?.name ?? null : null;
       return {
         run, items: views, totals: run.totals, blockers, warnings, lowConfidence: rates.filter((r) => r.confidence === "low").map(({ key, state, confidence, source }) => ({ key, state, confidence, source })),
@@ -353,6 +355,7 @@ export class RunService extends PayrollService {
     if (!a) return;
     if (a.requestedBy !== this.ctx.userId) throw new ForbiddenError("Someone else sent this for approval. Ask them to withdraw it.");
     await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(eq(finApprovals.id, a.id));
+    await NotificationWriter.done(tx, this.ctx.schoolId, { type: "approval", id: a.id });
   }
 
   /** Ask for approval; the money is posted when someone else approves. */

@@ -117,7 +117,7 @@ export class ChequeService extends FeesBase {
         const id = await bills.createDraft(tx, { studentId: r!.studentId, yearId: year.id, kind: "bounce", label: `Bounced cheque ${c.chequeNo}`, dueDate: date, sourceKey: `bounce:${c.id}`, lines: [{ kind: "bounce", label: "Bounced cheque charge", amountPaise: bounceChargePaise }] });
         await bills.issueIn(tx, [id], date);
       }
-      await this.tell(tx, [r!.studentId], "Cheque bounced", `Cheque ${c.chequeNo} bounced${bounceChargePaise ? `. A charge of ${rupees(bounceChargePaise)} was added.` : "."} The dues are open again.`);
+      await this.tell(tx, [r!.studentId], "fees.due", "Cheque bounced", `Cheque ${c.chequeNo} bounced${bounceChargePaise ? `. A charge of ${rupees(bounceChargePaise)} was added.` : "."} The dues are open again.`, "/app/fees", { type: "cheque", id: c.id });
     });
   }
 }

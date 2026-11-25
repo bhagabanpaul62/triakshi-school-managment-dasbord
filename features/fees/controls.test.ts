@@ -1,6 +1,8 @@
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, withSchool } from "@smw/db";
+import { finApprovals } from "@smw/feature-finance/schema";
+import { notifications } from "@smw/feature-notifications/schema";
 import { students } from "@smw/feature-students/schema";
 import { checkDocument } from "@smw/feature-finance/templates/verify";
 import { TemplateService } from "@smw/feature-finance/templates/service";
@@ -49,7 +51,13 @@ describe("nobody lowers what a student owes alone", () => {
     expect(second.requested).toBe(true);
     expect((await svc.get(a2!.id)).invoice.status).toBe("issued");
     expect(await open(fx.students.meera)).toBe(100_000); // M2 is still owed
+    const [ask] = await withSchool(fx.school.id, (tx) => tx.select().from(finApprovals).where(eq(finApprovals.refId, second.changeId!)));
+    const rowsOf = () => withSchool(fx.school.id, (tx) => tx.select().from(notifications).where(eq(notifications.subjectId, ask!.id)));
+    const asked = (await rowsOf()).filter((n) => n.topic === "work.approval");
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((n) => n.action && !n.doneAt)).toBe(true);
     await decide(fx, "fees.invoice_change", second.changeId!);
+    expect((await rowsOf()).filter((n) => n.topic === "work.approval").every((n) => n.doneAt)).toBe(true);
     expect((await svc.get(a2!.id)).invoice.status).toBe("cancelled");
     expect(await new ChecksService(fx.school.as.admin).run().then((r) => r.mismatches)).toEqual([]);
   });

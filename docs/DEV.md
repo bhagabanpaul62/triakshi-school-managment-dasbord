@@ -48,8 +48,13 @@ TypeScript 7 (`tsgo`, from `@typescript/native-preview`) runs every `typecheck` 
 | `pnpm db:reset` | Drop and rebuild the local schema from the schema files |
 | `pnpm --filter @smw/db generate` | Generate the SQL migration for production |
 | `node scripts/new-feature.mjs <key> <requires>` | Scaffold a feature package |
+| `pnpm --filter @smw/worker job <name> '<json>'` | Run one worker job once, for example `comms.publish-due` or `comms.deliver` (data is optional, e.g. `'{"schoolId":"..."}'`). Names are in [COMMUNICATION](COMMUNICATION.md#jobs-that-run-by-themselves) |
 
 ## Email
+
+Communication: the guide is [COMMUNICATION](COMMUNICATION.md). Locally, push needs `VAPID_*` keys (`npx web-push generate-vapid-keys`; empty hides push). Unsubscribe links and circular QR codes use a fixed development key when `DATA_KEY` is empty, so they work on your machine. Mail goes out only when the worker runs `comms.deliver` (every minute), so after sending something run `pnpm --filter @smw/worker job comms.deliver` to see it in Mailpit at once. Digests: `pnpm --filter @smw/worker job notifications.digest '{"hour":8}'`.
+
+Browser tests for communication (`tests/e2e/comm-*.spec.ts`: notices, talk, calendar, crawl, axe, and `ux-communication.spec.ts`) need the production build and a fresh database: `npx playwright test comm- --project=desktop --workers=1`. The crawl takes `--workers=3`.
 
 Finance: the guide is [FINANCE](FINANCE.md). `DATA_KEY` (32+ random characters) encrypts PAN, bank and ID numbers; keep a copy and never change it. `CASHFREE_SUBSCRIPTIONS=true` turns on Triakshi's own recurring billing.
 

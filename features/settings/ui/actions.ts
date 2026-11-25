@@ -43,8 +43,11 @@ export async function signOutUser(fd: FormData) {
 }
 
 // Data export
+const ticked = (fd: FormData, name: string) => fd.get(name) === "true" || fd.get(name) === "on";
 export async function exportSchoolData(fd: FormData) {
-  return serviceAction(ExportService, (s) => s.exportSchool({ includePayroll: fd.get("includePayroll") === "true" || fd.get("includePayroll") === "on" }), "Export ready. Download it from the list.");
+  return serviceAction(ExportService, (s) => s.exportSchool({
+    includePayroll: ticked(fd, "includePayroll"), includePrivate: ticked(fd, "includePrivate"), reason: String(fd.get("reason") ?? ""),
+  }), "Export ready. Download it from the list.");
 }
 export async function exportStudentData(fd: FormData) {
   return serviceAction(ExportService, (s) => s.exportStudent(formToObject(fd)), "Export ready. Download it from the list.");

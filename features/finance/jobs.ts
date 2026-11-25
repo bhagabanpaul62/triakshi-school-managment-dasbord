@@ -13,7 +13,7 @@ export const financeJobs = (extra: ControlCheck[] = []) => ({
           if (!found.length) return;
           const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")));
           await NotificationWriter.insert(tx, schoolId, admins.map((a) => ({
-            userId: a.id, kind: "system" as const, title: "The books do not match",
+            userId: a.id, topic: "work.update" as const, subject: { type: "control-check", id: "books" }, groupKey: "books-mismatch", title: "The books do not match",
             body: `${found.length} problem${found.length === 1 ? "" : "s"}. First: ${found[0]!.problem}`, href: "/app/finance",
           })));
         });
