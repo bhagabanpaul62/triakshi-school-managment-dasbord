@@ -3,7 +3,7 @@
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
-import { allows, ConflictError, ForbiddenError, pgErrorCode, NotFoundError, ReadOnlyError, ValidationError, type Ctx } from "@smw/feature-kit";
+import { allows, ConflictError, ForbiddenError, pgErrorCode, NotFoundError, ReadOnlyError, refuseSupport, ValidationError, type Ctx } from "@smw/feature-kit";
 import { quietUntil } from "@smw/feature-notifications/quiet";
 import { notificationPrefs } from "@smw/feature-notifications/schema";
 import { loadCommSettings, type CommSettings } from "@smw/feature-notifications/settings";
@@ -14,6 +14,7 @@ import messagesFeature from "./feature";
 import { filePrefix, type StoredFile } from "./files";
 import { messageFiles, messageReports, messageRestrictions, messageReviews, messages, messageThreads, threadMembers } from "./schema";
 import { istDay } from "@smw/feature-kit/words";
+import { dayAt } from "./when";
 
 export { fileResponse } from "@smw/integrations";
 export { filePrefix, readStored, removeStored, signedLink, storeFiles, type StoredBytes, type StoredFile, type UploadedFile } from "./files";
@@ -26,23 +27,18 @@ export interface Member { userId: string; name: string; role: string }
 /** Who to add. Name and role are read from the database; anything passed here is ignored. */
 export type Who = { userId: string; name?: string; role?: string }
 /** Who is looking. A Ctx fits. `review` is set only by the safeguarding service after it logged why. */
-export interface Viewer { userId: string; role: string; supportStaffId?: string | null; review?: boolean }
+export interface Viewer { schoolId: string; userId: string; role: string; supportStaffId?: string | null; review?: boolean }
 
 export const isFamily = (role: string) => role === "student" || role === "parent";
 /** Today in IST as YYYY-MM-DD. */
 const clock = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" });
 const lockOn = (tx: Tx, key: string) => tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 
-/** Triakshi support works inside a school's account but never inside its private conversations. */
-export function noSupport(who: { supportStaffId?: string | null }) {
-  if (who.supportStaffId) throw new ForbiddenError("Private messages are not available in a support session.");
-}
-
 // ---------- guards ----------
 
 /** The only way to a conversation. Not a member (or a conversation that does not exist) is "not found", so nobody learns what exists. */
-export async function requireMember(tx: Tx, ctx: Pick<Ctx, "userId" | "supportStaffId">, threadId: string): Promise<{ thread: ThreadRow; member: MemberRow }> {
-  noSupport(ctx);
+export async function requireMember(tx: Tx, ctx: Pick<Ctx, "schoolId" | "userId" | "supportStaffId">, threadId: string): Promise<{ thread: ThreadRow; member: MemberRow }> {
+  refuseSupport(ctx, "open a private conversation");
   if (!z.uuid().safeParse(threadId).success) throw new NotFoundError("Conversation");
   const [row] = await tx.select({ thread: messageThreads, member: threadMembers }).from(threadMembers)
     .innerJoin(messageThreads, eq(messageThreads.id, threadMembers.threadId))
@@ -92,8 +88,9 @@ async function checkNewPerDay(tx: Tx, ctx: Pick<Ctx, "userId" | "role">) {
     .where(and(eq(messageThreads.createdBy, ctx.userId), isNull(messageThreads.batchId), sql`${messageThreads.createdAt} > now() - interval '1 day'`));
   const cap = isFamily(ctx.role) ? NEW_PER_DAY.family : NEW_PER_DAY.staff;
   if (Number(r?.n) >= cap) {
-    const when = new Date(new Date(r!.first as unknown as string).getTime() + 86_400_000);
-    throw new ValidationError({ body: `You have started many conversations today. Try again at ${clock(when)}.` });
+    // The window rolls from the oldest start of the last day, so the time is always ahead; never say one that has passed.
+    const when = new Date(Math.max(new Date(r!.first as unknown as string).getTime() + 86_400_000, Date.now() + 60_000));
+    throw new ValidationError({ body: `You have started many conversations today. You can start a new one ${dayAt(when)}.` });
   }
 }
 
@@ -112,7 +109,7 @@ async function realPeople(tx: Tx, schoolId: string, wanted: Who[]): Promise<Memb
 export interface NewThread { kind: Exclude<ThreadKind, "legacy">; subject: string; studentId?: string | null; batchId?: string | null; members: Who[] }
 
 export async function createThread(tx: Tx, ctx: Ctx, input: NewThread): Promise<ThreadRow> {
-  noSupport(ctx);
+  refuseSupport(ctx, "start a conversation");
   if (ctx.readOnly) throw new ReadOnlyError();
   const subject = input.subject.trim();
   if (subject.length < 2 || subject.length > 120) throw new ValidationError({ subject: "Add a subject (2 to 120 characters)" });
@@ -143,7 +140,7 @@ export async function createThread(tx: Tx, ctx: Ctx, input: NewThread): Promise<
  * permission (the requests queue assigning an owner); it is the only way past membership and never set from a form.
  */
 export async function addMember(tx: Tx, ctx: Ctx, threadId: string, who: Who, opts: { trusted?: boolean } = {}): Promise<void> {
-  noSupport(ctx);
+  refuseSupport(ctx, "add a person to a conversation");
   if (ctx.readOnly) throw new ReadOnlyError();
   if (!opts.trusted) await requireMember(tx, ctx, threadId);
   const [t] = await tx.select({ kind: messageThreads.kind }).from(messageThreads).where(eq(messageThreads.id, threadId));
@@ -184,7 +181,7 @@ export async function markThreadRead(tx: Tx, ctx: Ctx, threadId: string, upTo?: 
     await tx.update(threadMembers).set({ lastReadAt: sql`greatest(coalesce(${threadMembers.lastReadAt}, '-infinity'::timestamptz), ${upTo}::timestamptz)` }).where(eq(threadMembers.id, member.id));
   }
   const left = (await unreadByThread(tx, ctx, [threadId], thread.kind === "request")).get(threadId) ?? 0;
-  if (!left) await NotificationWriter.seen(tx, ctx.schoolId, { type: "thread", id: threadId }, ctx.userId);
+  if (!left) await NotificationWriter.seen(tx, ctx.schoolId, { type: "thread", id: threadId }, ctx);
   return !left;
 }
 
@@ -321,7 +318,7 @@ export interface ThreadData {
 }
 
 export async function loadThread(tx: Tx, threadId: string, viewer: Viewer, o: { before?: string | null; limit?: number } = {}): Promise<ThreadData> {
-  noSupport(viewer);
+  refuseSupport(viewer, "read a private conversation");
   let thread: ThreadRow;
   if (viewer.review) {
     if (!z.uuid().safeParse(threadId).success) throw new NotFoundError("Conversation");
@@ -398,6 +395,14 @@ export async function loadThread(tx: Tx, threadId: string, viewer: Viewer, o: { 
     messages: views, hasOlder, newestAt: page.at(-1)?.at ?? null, oldestAt: page[0]?.at ?? null, officeName: settings.officeName,
     holdUntil: holdUntil(active.filter((x) => x.m.userId !== viewer.userId).map((x) => quietUntil(now, quietRule(settings, prefOf(x.m.userId))))),
   };
+}
+
+/** When these people would be told if I wrote now (their quiet hours or away days); null when at least one is told at once. */
+export async function holdForPeople(tx: Tx, userIds: string[], now = new Date()): Promise<Date | null> {
+  if (!userIds.length) return null;
+  const settings = await loadCommSettings(tx);
+  const prefs = await tx.select().from(notificationPrefs).where(inArray(notificationPrefs.userId, userIds));
+  return holdUntil(userIds.map((id) => quietUntil(now, quietRule(settings, prefs.find((p) => p.userId === id)))));
 }
 
 const holdUntil = (waits: (Date | null)[]) => (waits.length && waits.every((w) => w) ? new Date(Math.min(...waits.map((w) => w!.getTime()))) : null);

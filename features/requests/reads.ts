@@ -33,6 +33,10 @@ export interface RequestView extends RequestRow {
   firstAnswerAt: Date | null; closedAt: Date | null; reopenedCount: number; solved: boolean | null; feedback: string | null;
   mergedInto: { id: string; number: string } | null;
   nextLevel: string | null;
+  /** The level it sits at now, once escalated ("Office"); null while with the owner. */
+  levelName: string | null;
+  /** Names of the people the family named. Never shown to them. */
+  about: string[];
   thread: ThreadData;
   timeline: TimelineEntry[];
   /** True when nobody on staff may see this (it is about the only people who could): the family is shown outside contacts. */
@@ -126,22 +130,23 @@ export abstract class RequestReads extends RequestBase {
       const [x] = await this.select(tx).where(eq(requests.id, r.id));
       const [member] = await tx.select({ id: threadMembers.id }).from(threadMembers).where(and(eq(threadMembers.threadId, r.threadId), eq(threadMembers.userId, this.ctx.userId), eq(threadMembers.state, "active")));
       // Office readers who are not in the conversation read it through a logged-in office viewer, never as a member.
-      const thread = await loadThread(tx, r.threadId, member ? this.ctx : { userId: this.ctx.userId, role: this.ctx.role, review: true });
+      const thread = await loadThread(tx, r.threadId, member ? this.ctx : { schoolId: this.ctx.schoolId, userId: this.ctx.userId, role: this.ctx.role, review: true });
       if (mark) {
         // The bell row of the request clears only once the conversation is fully read, so the Requests badge and the bell agree.
         const caughtUp = member ? await markThreadRead(tx, this.ctx, r.threadId, thread.newestAt) : true;
-        if (caughtUp) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "request", id: r.id }, this.ctx.userId);
+        if (caughtUp) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "request", id: r.id }, this.ctx);
       }
       const settings = await loadCommSettings(tx);
       const events = await tx.select().from(requestEvents).where(eq(requestEvents.requestId, r.id)).orderBy(asc(requestEvents.createdAt), asc(requestEvents.id));
       const [into] = r.mergedIntoId ? await tx.select({ id: requests.id, number: requests.number }).from(requests).where(eq(requests.id, r.mergedIntoId)) : [];
       const levels: EscalationLevel[] = cat.escalation;
+      const named = r.aboutUserIds.length ? await tx.select({ name: users.name }).from(users).where(inArray(users.id, r.aboutUserIds)) : [];
       const unstaffed = r.aboutUserIds.length > 0 && !(await leadIds(tx, r.aboutUserIds)).length && !(await officeIds(tx, r.aboutUserIds)).length;
       return {
         ...this.row(x!, v, now),
         categoryId: r.categoryId, studentId: r.studentId, raisedBy: r.raisedBy, ownerId: r.ownerId, ownerRole: r.ownerRole,
         answers: answersOf(cat.fields, r.values), linked: r.linked ?? null, firstAnswerAt: r.firstAnswerAt, closedAt: r.closedAt, reopenedCount: r.reopenedCount,
-        solved: r.solved, feedback: r.feedback, mergedInto: into ?? null, nextLevel: levels[r.level]?.label ?? null, thread, needsOutsideHelp: unstaffed,
+        solved: r.solved, feedback: r.feedback, mergedInto: into ?? null, nextLevel: levels[r.level]?.label ?? null, levelName: r.level > 0 ? levels[r.level - 1]?.label ?? null : null, about: named.map((n) => n.name), thread, needsOutsideHelp: unstaffed,
         safetyContacts: unstaffed || v.family ? settings.safetyContacts : [],
         timeline: events.filter((e) => !v.family || (FAMILY_EVENTS as readonly string[]).includes(e.action)).map((e) => ({
           id: e.id, at: e.createdAt, action: e.action, by: v.family && e.byUserId !== this.ctx.userId ? settings.officeName : e.byName,

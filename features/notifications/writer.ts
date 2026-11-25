@@ -109,8 +109,13 @@ export class NotificationWriter {
     return and(eq(notifications.schoolId, schoolId), eq(notifications.subjectType, subject.type), eq(notifications.subjectId, subject.id), userId ? eq(notifications.userId, userId) : undefined);
   }
 
-  /** The thing was opened: mark its notifications read (one person, or everyone when `userId` is left out) and drop their pending sends. */
-  static async seen(tx: Tx, schoolId: string, subject: { type: string; id: string }, userId?: string): Promise<number> {
+  /**
+   * The thing was opened: mark its notifications read (one person, or everyone when `who` is left out) and drop their pending sends.
+   * Pass the ctx as `who`: a support session looks, it never marks anything read, so it does nothing here.
+   */
+  static async seen(tx: Tx, schoolId: string, subject: { type: string; id: string }, who?: { userId: string; supportStaffId?: string | null }): Promise<number> {
+    if (who?.supportStaffId) return 0;
+    const userId = who?.userId;
     const where = this.aboutSubject(schoolId, subject, userId);
     const rows = await tx.update(notifications).set({ readAt: sql`now()` }).where(and(where, isNull(notifications.readAt))).returning({ id: notifications.id });
     await this.skipRead(tx, where);

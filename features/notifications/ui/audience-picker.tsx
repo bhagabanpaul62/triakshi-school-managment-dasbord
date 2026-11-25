@@ -182,7 +182,7 @@ export function AudiencePicker({ name, value, onChange, options, allow, labels =
       {count && count.unreachable.length ? (
         <div>
           <button type="button" aria-expanded={showSkipped} aria-controls={`${uid}-skipped`} onClick={() => setShowSkipped((s) => !s)} className={cn("inline-flex min-h-10 items-center gap-2 rounded-full text-sm text-[var(--ds-on-surface-variant)]", FOCUS)}>
-            {count.unreachable.length}{count.unreachable.length === 100 ? "+" : ""} will not get a message on their phone or email
+            {count.unreachable.length}{count.unreachable.length === 100 ? "+" : ""} {count.unreachable.length === 1 ? "person has" : "people have"} no phone alerts and no email. They will see it when they open the app.
             <IconChevronDown aria-hidden className={cn("h-4 w-4 transition-transform", showSkipped && "rotate-180")} />
           </button>
           {showSkipped ? (

@@ -35,7 +35,11 @@ export class ResponseService extends NoticeBase {
       if (n.state !== "published" || (n.expiresAt && n.expiresAt <= new Date())) throw new ConflictError(n.state === "withdrawn" ? "The school withdrew this notice, so it cannot be answered." : "This notice is closed, so it cannot be answered.");
       if (n.dueAt && n.dueAt.getTime() < Date.now()) throw new ConflictError("The last date has passed, so answers are locked.");
       const answer = await this.withFiles(n, d.answer, files, who.id);
-      const changed = await this.save(tx, who, answer, { byName: d.byName, byRelation: d.byRelation, onPaper: false, fileKey: null, recordedBy: null });
+      if (!(n.type === "urgent" && answer.kind === "ack")) {
+        if ((d.byName?.length ?? 0) < 2) this.fieldError("byName", "Write your name");
+        if (!d.byRelation) this.fieldError("byRelation", "Say who you are");
+      }
+      const changed = await this.save(tx, who, answer, { byName: d.byName ?? "", byRelation: d.byRelation ?? "", onPaper: false, fileKey: null, recordedBy: null });
       await this.closeIfAnswered(tx, n.id, who.userId);
       await this.audit(tx, { action: "respond", entity: "Notice", entityId: n.id, summary: `Answered "${n.title}" for ${who.name}` });
       return { recipientId: who.id, changed };
@@ -75,8 +79,9 @@ export class ResponseService extends NoticeBase {
   }
 
   private async save(tx: Tx, who: Recipient, answer: Answer, by: { byName: string; byRelation: string; onPaper: boolean; fileKey: string | null; recordedBy: string | null }): Promise<boolean> {
-    const [had] = await tx.select({ id: announcementResponses.id, fileKey: announcementResponses.fileKey }).from(announcementResponses).where(eq(announcementResponses.recipientId, who.id));
-    const row = { ...by, ip: this.ctx.ip ?? null, answer, fileKey: by.fileKey ?? had?.fileKey ?? null, updatedAt: new Date() };
+    const [had] = await tx.select({ id: announcementResponses.id, fileKey: announcementResponses.fileKey, byName: announcementResponses.byName, byRelation: announcementResponses.byRelation }).from(announcementResponses).where(eq(announcementResponses.recipientId, who.id));
+    // A tap on "I am safe" sends no names; a name already given stays.
+    const row = { ...by, byName: by.byName || had?.byName || "", byRelation: by.byRelation || had?.byRelation || "", ip: this.ctx.ip ?? null, answer, fileKey: by.fileKey ?? had?.fileKey ?? null, updatedAt: new Date() };
     await tx.insert(announcementResponses).values({ schoolId: this.ctx.schoolId, recipientId: who.id, ...row }).onConflictDoUpdate({ target: announcementResponses.recipientId, set: row });
     await tx.update(announcementRecipients).set({ seenAt: sql`coalesce(${announcementRecipients.seenAt}, now())` }).where(eq(announcementRecipients.id, who.id));
     return !!had;

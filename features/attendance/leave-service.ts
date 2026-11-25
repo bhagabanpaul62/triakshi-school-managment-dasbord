@@ -195,7 +195,7 @@ export class LeaveService extends SchoolService<Perm> {
 
   /** Opening a request reads its bell row for this person; done() still closes the approver's row when it is decided. */
   private async seenLeave(tx: Tx, rows: { id: string }[]) {
-    if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "leave", id: r.id }, this.ctx.userId);
+    if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "leave", id: r.id }, this.ctx);
   }
 
   /** Your own requests, newest first. */

@@ -44,6 +44,7 @@
     "@smw/feature-transport": "workspace:*",
     "@smw/feature-library": "workspace:*",
     "@smw/feature-requests": "workspace:*",
+    "@smw/feature-setup": "workspace:*",
     "@smw/feature-meetings": "workspace:*"
   },
   "peerDependencies": {

@@ -13,7 +13,7 @@ import { feeReceiptMethods, feeReceipts } from "@smw/feature-fees/schema";
 import { students } from "@smw/feature-students/schema";
 import { HomeService, type Slot } from "./home-service";
 
-const FEATURES = ["home", "students", "academics", "attendance", "fees", "exams", "timetable", "assignments", "announcements", "events", "website", "support", "notifications"];
+const FEATURES = ["home", "students", "academics", "attendance", "fees", "exams", "timetable", "assignments", "announcements", "events", "website", "support", "notifications", "setup"];
 // A Wednesday in the past: deterministic, and attendance may be marked on it.
 const WED = "2026-11-11";
 const wed = () => new Date(`${WED}T10:00:00+05:30`);
@@ -78,6 +78,14 @@ describe("admin home", () => {
     expect(ok(home.capacity)).toMatchObject({ active: 5, cap: 300, percent: 2, warning: false });
     expect(ok(home.fees).summary).toMatchObject({ collectedThisMonth: 0, outstanding: 0 });
     expect(ok(home.fees).trend).toHaveLength(6);
+  });
+
+  it("carries the first-day checklist, each step ticked from the data, and none for a school without setup", async () => {
+    const steps = ok((await new HomeService(a.as.admin, wed).admin()).firstDay);
+    expect(steps.map((x) => x.key)).toEqual(["email", "quiet", "notice"]);
+    expect(steps.find((x) => x.key === "notice")!.done).toBe(true); // the notices published above
+    const off = { ...a.as.admin, features: new Set(FEATURES.filter((f) => f !== "setup")) };
+    expect((await new HomeService(off, wed).admin()).firstDay).toEqual({ state: "off" });
   });
 
   it("shows today's school-wide attendance from the attendance module", async () => {

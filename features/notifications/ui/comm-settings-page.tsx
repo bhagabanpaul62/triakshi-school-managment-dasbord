@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { CommSettingsService } from "../settings";
@@ -7,7 +8,7 @@ import { CommSettingsForm } from "./comm-settings-form";
 
 export const metadata = { title: "Communication settings" };
 
-export default async function CommSettingsPage() {
+async function CommSettingsPage() {
   const svc = new CommSettingsService(await requireCtx());
   if (!svc.can("manage")) {
     return (
@@ -25,3 +26,5 @@ export default async function CommSettingsPage() {
     </>
   );
 }
+
+export default function Page() { return refusalOr(CommSettingsPage); }

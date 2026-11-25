@@ -67,7 +67,7 @@ export async function UsersTab({ ctx, searchParams }: { ctx: Ctx; searchParams: 
         <ModalButton key={r.id} label="Manage" title={r.name} description={`${roleLabels[r.roleKey] ?? r.role} · ${r.email ?? r.loginId}`}>
           {(STAFF_ROLES as readonly string[]).includes(r.role) ? (
             <Line title="Role" hint="Changing it signs them out on every device.">
-              <FormModal title={`Change role for ${r.name}`} icon="users" fields={roleFields(roleOptions)} values={{ role: r.roleId ?? r.role }} hidden={{ id: r.id }} action={changeUserRole}
+              <FormModal key={r.roleKey} title={`Change role for ${r.name}`} icon="users" fields={roleFields(roleOptions)} values={{ role: r.roleId ?? r.role }} hidden={{ id: r.id }} action={changeUserRole}
                 trigger={{ label: "Change role", variant: "secondary", size: "sm" }} />
             </Line>
           ) : null}

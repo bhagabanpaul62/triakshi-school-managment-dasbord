@@ -232,7 +232,7 @@ export class ReceiptService extends FeesBase {
       const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
       if (!r) throw new NotFoundError("Receipt");
       this.assertVisible(own, r.studentId, "Receipt");
-      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "receipt", id }, this.ctx.userId);
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "receipt", id }, this.ctx);
       const [methods, cheque, allocations, journal, by, reversal, prints] = await Promise.all([
         tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
         tx.select().from(feeCheques).where(eq(feeCheques.receiptId, id)),

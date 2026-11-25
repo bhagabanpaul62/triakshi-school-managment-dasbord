@@ -59,7 +59,7 @@ describe("request bodies", () => {
     expect(rsvpBody.safeParse({ answer: "maybe" }).success).toBe(true);
     expect(rsvpBody.safeParse({ answer: "sure" }).success).toBe(false);
     expect(answerBody.safeParse({ body: "   " }).success).toBe(false);
-    expect(respondBody.safeParse({ answer: { kind: "ack" } }).success).toBe(false);
+    expect(respondBody.safeParse({ answer: { kind: "shout" } }).success).toBe(false);
     expect(prefsBody.safeParse({ groups: [{ group: "nope", push: true, email: "off" }] }).success).toBe(false);
     expect(prefsBody.safeParse({ quiet: null, away: { until: null } }).success).toBe(true);
   });

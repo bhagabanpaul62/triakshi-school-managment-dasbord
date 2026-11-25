@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { IconAlertTriangle, IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 import { Modal, ModalField, ModalFooter } from "@smw/ui/kit/Modal";
@@ -48,7 +49,7 @@ export interface NoticeFormProps {
 }
 
 type F = Omit<FormInitial, "id" | "mode" | "files">;
-type Check = { mode: "free" | "approval"; approvers: string[]; people: { families: number; staff: number; total: number; sample: string[]; unreachable: { name: string; label: string; why: string }[]; text: string } };
+type Check = { mode: "free" | "approval"; approvers: string[]; school: { students: number; classes: number }; people: { families: number; staff: number; total: number; sample: string[]; unreachable: { name: string; label: string; why: string }[]; text: string } };
 type Status = { kind: "idle" } | { kind: "saving" } | { kind: "saved"; at: Date } | { kind: "failed"; message: string };
 type Errors = Record<string, string>;
 
@@ -452,8 +453,8 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
       </div>
 
       <Modal open={dialog === "send"} onOpenChange={(o) => !o && setDialog(null)} size="md" title={urgent ? "Send this alert now?" : mode === "approval" ? "Send for approval?" : "Publish this notice?"} description={f.title}
-        footer={<ModalFooter secondary={{ onClick: () => setDialog(null), label: "Not yet" }} primary={{ label: urgent ? `Send to ${check?.people.total ?? "all"} now` : mode === "approval" ? "Send for approval" : onlyWebsite ? "Put on the website" : `Publish to ${check?.people.total ?? "all"}`, onClick: doSend, loading: busy, disabled: !onlyWebsite && !check }} />}>
-        <CheckSummary check={check} error={checkError} websiteOnly={onlyWebsite} mode={mode} urgent={urgent} content={content()} />
+        footer={<ModalFooter secondary={{ onClick: () => setDialog(null), label: "Not yet" }} primary={{ label: urgent ? `Send to ${check?.people.total ?? "all"} now` : mode === "approval" ? "Send for approval" : onlyWebsite ? "Put on the website" : `Publish to ${check?.people.total ?? "all"}`, onClick: doSend, loading: busy, disabled: !onlyWebsite && (!check || check.people.total === 0) }} />}>
+        <CheckSummary check={check} error={checkError} websiteOnly={onlyWebsite} mode={mode} urgent={urgent} content={content()} back={`/app/announcements/${id.current}/edit`} onChoose={() => setDialog(null)} />
       </Modal>
 
       <Modal open={dialog === "schedule"} onOpenChange={(o) => !o && setDialog(null)} size="sm" title="Schedule it"
@@ -470,7 +471,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
 }
 
 /** The small check before anything leaves: who it reaches, who it will not reach and why, what they must do. */
-function CheckSummary({ check, error, websiteOnly, mode, urgent, content }: { check: Check | null; error: string | null; websiteOnly: boolean; mode: "free" | "approval"; urgent: boolean; content: NoticeContent }) {
+function CheckSummary({ check, error, websiteOnly, mode, urgent, content, back, onChoose }: { check: Check | null; error: string | null; websiteOnly: boolean; mode: "free" | "approval"; urgent: boolean; content: NoticeContent; back: string; onChoose: () => void }) {
   const asks = content.response.kind !== "none";
   const reach = check?.people;
   const skipped = reach?.unreachable ?? [];
@@ -482,7 +483,14 @@ function CheckSummary({ check, error, websiteOnly, mode, urgent, content }: { ch
           : error ? <p role="alert" className="text-[var(--ds-color-danger-400)]">{error}</p>
           : !reach ? <p className="text-[var(--ds-on-surface-muted)]">Counting people</p>
           : <>
-              <p className="text-[var(--ds-on-surface-variant)]">{reach.total === 0 ? "Nobody. Change the audience first." : [reach.families ? `${plural(reach.families, "family", "families")}` : "", reach.staff ? `${reach.staff} staff` : ""].filter(Boolean).join(" and ")}{reach.text ? `: ${reach.text}` : ""}</p>
+              <p className="text-[var(--ds-on-surface-variant)]">{reach.total === 0 ? "Nobody." : [reach.families ? `${plural(reach.families, "family", "families")}` : "", reach.staff ? `${reach.staff} staff` : ""].filter(Boolean).join(" and ")}{reach.text ? `: ${reach.text}` : ""}</p>
+              {reach.total === 0 ? (
+                <p className="mt-2 flex flex-wrap gap-2">
+                  {check && !check.school.students ? <Link href={`/app/students?next=${encodeURIComponent(back)}`} className={cn(PILL_BTN, "no-underline")}>Add students</Link> : null}
+                  {check && !check.school.classes ? <Link href={`/app/academics/classes?next=${encodeURIComponent(back)}`} className={cn(PILL_BTN, "no-underline")}>Create classes</Link> : null}
+                  {check && check.school.students && check.school.classes ? <button type="button" className={PILL_BTN} onClick={onChoose}>Choose other people</button> : null}
+                </p>
+              ) : null}
               {reach.sample.length ? <p className="text-xs text-[var(--ds-on-surface-muted)]">{reach.sample.join(", ")}{reach.total > reach.sample.length ? " and others" : ""}</p> : null}
             </>}
       </div>
@@ -491,7 +499,7 @@ function CheckSummary({ check, error, websiteOnly, mode, urgent, content }: { ch
           <h3 className="font-medium text-[var(--ds-on-surface)]">Who will not be reached</h3>
           {skipped.length ? (
             <>
-              <p className="text-[var(--ds-on-surface-variant)]">{skipped.length}{skipped.length === 100 ? "+" : ""} will not get a message on their phone or email. They can still see it in the app, and you can print a sign sheet for them.</p>
+              <p className="text-[var(--ds-on-surface-variant)]">{skipped.length}{skipped.length === 100 ? "+" : ""} people have no phone alerts and no email. They will see it when they open the app, and you can print a sign sheet for them.</p>
               <ul className="custom-scrollbar mt-1 flex max-h-32 flex-col gap-1 overflow-y-auto">{skipped.slice(0, 8).map((u, i) => <li key={i} className="text-xs text-[var(--ds-on-surface-muted)]"><span className="text-[var(--ds-on-surface)]">{u.name}</span> {u.label}: {u.why}</li>)}</ul>
             </>
           ) : <p className="text-[var(--ds-on-surface-variant)]">Everyone has a way to be reached.</p>}

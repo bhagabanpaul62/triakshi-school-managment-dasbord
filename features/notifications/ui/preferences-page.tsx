@@ -1,11 +1,12 @@
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { PreferenceService } from "../prefs";
 import { PreferencesPanel } from "./preferences-panel";
 
 export const metadata = { title: "Notification settings" };
 
-export default async function PreferencesPage() {
+async function PreferencesPage() {
   const svc = new PreferenceService(await requireCtx());
   const [prefs, devices] = await Promise.all([svc.mine(), svc.devices()]);
   return (
@@ -15,3 +16,5 @@ export default async function PreferencesPage() {
     </>
   );
 }
+
+export default function Page() { return refusalOr(PreferencesPage); }

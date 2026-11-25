@@ -1264,6 +1264,9 @@ importers:
       '@smw/feature-settings':
         specifier: workspace:*
         version: link:../settings
+      '@smw/feature-setup':
+        specifier: workspace:*
+        version: link:../setup
       '@smw/feature-staff':
         specifier: workspace:*
         version: link:../staff
@@ -1921,6 +1924,9 @@ importers:
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -2325,6 +2331,9 @@ importers:
       '@smw/themes':
         specifier: workspace:*
         version: link:../themes
+      '@smw/ui':
+        specifier: workspace:*
+        version: link:../ui
       zod:
         specifier: ^4.6.7
         version: 4.6.7

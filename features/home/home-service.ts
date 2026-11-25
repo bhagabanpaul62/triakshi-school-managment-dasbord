@@ -18,6 +18,7 @@ import { RequestService } from "@smw/feature-requests/service";
 import { DayService, MeetingService } from "@smw/feature-meetings/service";
 import { EventService, type SchoolEvent } from "@smw/feature-events/service";
 import { EnquiryService } from "@smw/feature-website/service";
+import { communicationSteps, type CommStep } from "@smw/feature-setup/communication";
 import homeFeature from "./feature";
 import { staffLinks } from "./staff-links";
 import { clockIST, dayLabel, greeting, markPeriods, monthStart, todayIST, type PeriodState } from "./rules";
@@ -61,6 +62,8 @@ export interface AdminHome extends Common {
   events: Slot<SchoolEvent[]>;
   attention: Slot<{ items: AttentionItem[]; unchecked: string[] }>;
   requests: Slot<RequestsSummary>;
+  /** The first-day checklist; the card shows until every step is done (or the admin hides it). */
+  firstDay: Slot<CommStep[]>;
 }
 export interface AccountantHome extends Common {
   money: Slot<{ todayPaise: number; todayCount: number; summary: FeeSummary }>;
@@ -238,7 +241,7 @@ export class HomeService extends SchoolService<Perm> {
       const [summary, trend] = await Promise.all([this.feeSummary(), d.trend("month", 6)]);
       return { summary, trend };
     });
-    const [header, capacity, attendance, feesDone, events, announcements, attention, needsAction, requests] = await Promise.all([
+    const [header, capacity, attendance, feesDone, events, announcements, attention, needsAction, requests, firstDay] = await Promise.all([
       this.header(),
       this.slot("students", () => new StudentService(this.ctx).capacity()),
       this.attendanceToday(),
@@ -248,8 +251,9 @@ export class HomeService extends SchoolService<Perm> {
       this.attention(fees),
       this.needsAction(),
       this.requests(),
+      this.slot("setup", () => this.read("view", (tx) => communicationSteps(tx, (f) => this.ctx.features.has(f)))),
     ]);
-    return { header, capacity, attendance, fees: feesDone, events, announcements, attention, needsAction, requests };
+    return { header, capacity, attendance, fees: feesDone, events, announcements, attention, needsAction, requests, firstDay };
   }
 
   /** "Needs attention": only things with a count above zero, each with the page that fixes it. `unchecked` names sources that failed, so "all clear" is never claimed blindly. */

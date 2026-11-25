@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { NotFoundError } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { Fact, FactList } from "@smw/ui/kit/FactList";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
@@ -9,6 +10,7 @@ import { StatusTrack, type TrackStep } from "@smw/ui/finance/StatusTrack";
 import { Timeline } from "@smw/ui/finance/Timeline";
 import { dateTime } from "@smw/ui/format";
 import { CategoryService } from "../categories";
+import { escalatedWords } from "../clock";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { REQUEST_STATE_TONE, type RequestState } from "../constants";
 import { RequestService, type RequestView } from "../service";
@@ -17,6 +19,7 @@ import { Conversation } from "./conversation";
 import { NextSteps } from "./next-steps";
 import { ReplyBox } from "./reply-box";
 
+import { NoSupport } from "@smw/feature-messages/ui/empty";
 export const metadata = { title: "Request" };
 
 function steps(v: RequestView, family: boolean): TrackStep[] {
@@ -32,8 +35,9 @@ function replyGate(v: RequestView, family: boolean): { reason: string; action?: 
   return { reason: family ? "This request is closed. Open it again, or ask a new question." : "This request is closed." };
 }
 
-export default async function RequestPage({ params }: { params: Promise<{ id: string }> }) {
+async function RequestPage({ params }: { params: Promise<{ id: string }> }) {
   const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
   const { id } = await params;
   const family = isFamilyRole(ctx);
   const svc = new RequestService(ctx);
@@ -90,7 +94,8 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
               <Fact label="Raised">{dateTime(v.createdAt)}</Fact>
               {family ? null : <Fact label="Owner">{v.ownerName ?? "Nobody yet"}</Fact>}
               <Fact label={family ? "The school aims to answer by" : "Due"}>{v.state === "resolved" || v.state === "closed" ? null : v.paused ? "Waiting for the family" : dateTime(v.dueAt)}</Fact>
-              {family ? null : <Fact label="Level">{v.level ? `${v.level} (escalated)` : "Owner"}</Fact>}
+              {family ? null : <Fact label="Level">{v.level ? `${v.levelName ?? "Higher level"} (escalated ${escalatedWords(v.level)})` : "Owner"}</Fact>}
+              {v.about.length ? <Fact label="About">{v.about.join(", ")}</Fact> : null}
               {v.firstAnswerAt ? <Fact label="First answer">{dateTime(v.firstAnswerAt)}</Fact> : null}
               {v.resolvedAt ? <Fact label="Resolved">{dateTime(v.resolvedAt)}</Fact> : null}
               {v.solved !== null ? <Fact label="Family said">{v.solved ? "Solved" : "Not solved"}{v.feedback ? `: ${v.feedback}` : ""}</Fact> : null}
@@ -98,7 +103,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
               {v.answers.map((a) => <Fact key={a.label} label={a.label}>{a.value}</Fact>)}
               {family || !v.studentId ? null : <Fact label="Child's record"><Link href={`/app/students/${v.studentId}`} className="underline underline-offset-4">Open the student record</Link></Fact>}
               {family || !v.studentId || !/certificate/i.test(v.categoryName) || !mayOpen(ctx, "fees", "read", ["admin", "accountant"]) ? null : <Fact label="Fee certificates"><Link href={`/app/fees/students/${v.studentId}/tuition-certificate`} className="underline underline-offset-4">Open the fee certificates</Link></Fact>}
-              {v.linked ? <Fact label="About"><Link href={v.linked.href} className="underline underline-offset-4">{v.linked.label}</Link></Fact> : null}
+              {v.linked ? <Fact label="Related to"><Link href={v.linked.href} className="underline underline-offset-4">{v.linked.label}</Link></Fact> : null}
               {v.mergedInto ? <Fact label="Joined with"><Link href={`/app/requests/${v.mergedInto.id}`} className="underline underline-offset-4">{v.mergedInto.number}</Link></Fact> : null}
             </FactList>
           </Panel>
@@ -118,3 +123,5 @@ function tone(action: string, state: RequestState) {
   if (action === "asked") return "warning" as const;
   return REQUEST_STATE_TONE[state] === "danger" ? "danger" as const : "default" as const;
 }
+
+export default function Page(...a: Parameters<typeof RequestPage>) { return refusalOr(() => RequestPage(...a)); }

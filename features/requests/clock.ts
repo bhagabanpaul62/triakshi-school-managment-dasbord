@@ -32,3 +32,6 @@ export const hoursWords = (h: number | null) => (h === null ? "Not yet" : h < 1 
 
 /** How long a request has existed, with its unit: "Today", "1 day", "5 days". */
 export const ageWords = (days: number) => (days < 1 ? "Today" : `${plural(days, "day")}`);
+
+/** "once", "twice", "3 times". */
+export const escalatedWords = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);

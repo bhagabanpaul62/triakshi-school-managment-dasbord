@@ -9,7 +9,9 @@ import { INPUT, keepValues } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { cn } from "@smw/ui/utils";
 import { MAX_FILE_MB, MAX_FILES, REVIEW_BANNER } from "../constants";
-import { searchStaff, searchStudents, startThread } from "./actions";
+import { holdFor, searchStaff, searchStudents, startThread } from "./actions";
+import { dayTime } from "../when";
+import { useFormErrors } from "./form-errors";
 import { PILL_BTN, PRIMARY_BTN } from "./styles";
 
 type Hit = { id: string; name: string; label: string };
@@ -72,31 +74,44 @@ export function NewMessageForm(p: NewMessageProps) {
   const [student, setStudent] = useState<Hit | null>(p.student ?? null);
   const [people, setPeople] = useState<Hit[]>([]);
   const [childId, setChildId] = useState(p.children[0]?.id ?? "");
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const f = useFormErrors(["studentId", "recipientIds", "subject", "body", "files"]);
+  const { errors } = f;
+  const [hold, setHold] = useState<string | null>(null);
   const [pending, run] = useTransition();
   const kids = useSearch(async (q) => { const r = await searchStudents(fd({ q })); return r.ok ? r.data.map((s) => ({ id: s.id, name: s.name, label: s.label })) : []; });
   const staff = useSearch(async (q) => { const r = await searchStaff(fd({ q })); return r.ok ? r.data.map((s) => ({ id: s.id, name: s.name, label: s.label })) : []; });
 
   const toStudent = !p.family && mode === "family";
+  // Say it before sending: at night the message waits until the person's morning.
+  const holdKey = `${p.family ? childId : toStudent ? student?.id ?? "" : ""}|${people.map((x) => x.id).join(",")}`;
+  useEffect(() => {
+    let live = true;
+    const ids = people.map((x) => x.id), sid = p.family ? childId : toStudent ? student?.id : undefined;
+    if (!ids.length && !sid) { setHold(null); return; }
+    void holdFor(ids, sid).then((r) => { if (live) setHold(r.ok ? r.data : null); });
+    return () => { live = false; };
+    // holdKey is the whole input
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [holdKey]);
   const submit = (data: FormData) => run(async () => {
     if (toStudent && student) data.set("studentId", student.id);
     if (p.family) data.set("studentId", childId);
     for (const c of people) data.append("recipientIds", c.id);
     data.set("clientId", clientId);
     const r = await startThread(data);
-    if (!r.ok) { setErrors(r.fieldErrors ?? {}); return toast(r.error, "danger"); }
+    if (!r.ok) { f.fail(r); return toast(r.error, "danger"); }
     router.push(`/app/messages?thread=${(r.data as { id: string }).id}`);
   });
-  const togglePerson = (h: Hit) => setPeople((cur) => (cur.some((x) => x.id === h.id) ? cur.filter((x) => x.id !== h.id) : [...cur, h]));
+  const togglePerson = (h: Hit) => { f.clear("recipientIds"); setPeople((cur) => (cur.some((x) => x.id === h.id) ? cur.filter((x) => x.id !== h.id) : [...cur, h])); };
   const lbl = "text-sm text-[var(--ds-on-surface-variant)]";
   const err = (k: string) => (errors[k] ? <p role="alert" className="mt-1 text-xs text-[var(--ds-color-danger-400)]">{errors[k]}</p> : null);
 
   return (
-    <form onSubmit={keepValues(submit)} className="mx-auto flex max-w-2xl flex-col gap-5" noValidate>
+    <form onChange={f.onChange} onSubmit={keepValues(submit)} className="mx-auto flex max-w-2xl flex-col gap-5" noValidate>
       {!p.family ? (
         <div role="radiogroup" aria-label="Who to write to" className="flex gap-2">
           {([["family", "A family, about a student"], ["staff", "Colleagues"]] as const).map(([k, label]) => (
-            <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => { setMode(k); setPeople([]); setErrors({}); }}
+            <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => { setMode(k); setPeople([]); f.reset(); }}
               className={cn(PILL_BTN, mode === k && "bg-white/[0.12] text-[var(--ds-on-surface)] hover:bg-white/[0.12]")}>{label}</button>
           ))}
         </div>
@@ -113,7 +128,7 @@ export function NewMessageForm(p: NewMessageProps) {
           ) : (
             <>
               <input id={`${uid}-s`} value={kids.q} onChange={(e) => kids.setQ(e.target.value)} placeholder="Student name or admission number" autoComplete="off" className={INPUT} />
-              <Results found={kids.found} chosen={[]} onPick={setStudent} label="Students you can write to" none={kids.q ? `No student named “${kids.q}” that you can write to.` : "No students found. You can write to the families of students you teach."} />
+              <Results found={kids.found} chosen={[]} onPick={(h) => { f.clear("studentId"); setStudent(h); }} label="Students you can write to" none={kids.q ? `No student named “${kids.q}” that you can write to.` : "No students found. You can write to the families of students you teach."} />
             </>
           )}
           {err("studentId")}
@@ -162,6 +177,8 @@ export function NewMessageForm(p: NewMessageProps) {
       {!p.family || p.teachers.length ? (
         <p className="text-xs text-[var(--ds-on-surface-muted)]">{toStudent || p.family ? REVIEW_BANNER : "Staff conversations are private to the people in them."}</p>
       ) : null}
+      {hold ? <p className="text-xs text-[var(--ds-on-surface-variant)]" role="status">Will be delivered {dayTime(hold)}. They can read it in the app now.</p> : null}
+      {f.note}
       <div className="flex items-center justify-end gap-2">
         <Link href="/app/messages" className={PILL_BTN}>Cancel</Link>
         <button type="submit" disabled={pending || (toStudent && !student) || (!toStudent && !people.length)} className={PRIMARY_BTN}>{pending ? "Sending…" : "Send"}</button>

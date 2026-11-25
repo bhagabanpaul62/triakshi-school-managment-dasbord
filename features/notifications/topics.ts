@@ -40,6 +40,7 @@ export const TOPICS = {
   "meeting.changed": t("calendar", "Meeting changed or cancelled", true, "instant", { priority: 3 }),
   "meeting.reminder": t("calendar", "Meeting reminders", true, "off"),
   "work.approval": t("work", "Waiting for your approval", true, "digest"),
+  "work.cover": t("work", "Cover duty", true, "instant", { priority: 2 }),
   "work.decision": t("work", "Decisions on your requests", true, "digest"),
   "work.update": t("work", "Other updates", false, "digest"),
   "payroll.payslip": t("work", "Payslips and salary", true, "digest"),

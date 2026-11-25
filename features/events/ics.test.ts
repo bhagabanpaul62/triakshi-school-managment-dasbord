@@ -10,6 +10,10 @@ const lines = (s: string) => s.split("\r\n");
 const unfold = (s: string) => s.replace(/\r\n /g, "");
 
 describe("iCalendar text", () => {
+  it("a title with ; , and a backslash is escaped in SUMMARY", () => {
+    expect(buildCalendar([item({ title: "A; B, C\\D" })], { name: "S" })).toContain("SUMMARY:A\\; B\\, C\\\\D\r\n");
+  });
+
   it("a timed event in UTC, golden", () => {
     expect(buildCalendar([item({ location: "Main hall, Block A", description: "Bring the card;\nsee you", sequence: 2, url: "https://s.test/app/events/e1" })], { name: "School", refreshHours: 12 })).toBe([
       "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Triakshi//School calendar//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:School", "X-WR-TIMEZONE:Asia/Kolkata",

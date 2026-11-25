@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { listQueryFrom, type Ctx } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
@@ -38,7 +39,7 @@ function nextStep(m: MeetingRow, manage: boolean): { label: string; href: string
 }
 
 /** /app/meetings: managers and teachers get a table, families get their invitations. */
-export default async function MeetingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+async function MeetingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   if (ctx.role === "parent") notFound();
   return ctx.role === "student" ? <FamilyList ctx={ctx} /> : <StaffList ctx={ctx} searchParams={await searchParams} />;
@@ -87,3 +88,5 @@ async function FamilyList({ ctx }: { ctx: Ctx }) {
     </>
   );
 }
+
+export default function Page(props: Parameters<typeof MeetingsPage>[0]) { return refusalOr(() => MeetingsPage(props)); }

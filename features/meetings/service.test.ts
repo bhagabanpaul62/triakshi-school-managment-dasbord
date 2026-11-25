@@ -119,7 +119,19 @@ describe("booking", () => {
     expect(await row()).toMatchObject({ doneAt: null });
     expect((await row()).readAt).not.toBeNull();
     await new BookingService(a.as.student).book(m.id, { slotId: (await freeOf(m.id, ids.t1))[0]!.id });
+    expect((await row()).doneAt).toBeNull();
+    await new BookingService(a.as.student).book(m.id, { slotId: (await freeOf(m.id, ids.t2)).at(-1)!.id });
     expect((await row()).doneAt).not.toBeNull();
+  });
+
+  it("the 'book a time' action closes when booking closes or the meeting is cancelled", async () => {
+    for (const end of [(m: { id: string }) => admin().close(m.id), (m: { id: string }) => admin().cancel(m.id, { reason: "Rain" })]) {
+      const m = await openMeeting({ title: "Ends" });
+      const row = async () => (await noteCount(a.users.student, "meeting.open")).find((n) => n.subjectId === m.id)!;
+      expect(await row()).toMatchObject({ doneAt: null });
+      await end(m);
+      expect((await row()).doneAt).not.toBeNull();
+    }
   });
 
   it("books, refuses a second time with the same teacher, enforces the per-family limit", async () => {

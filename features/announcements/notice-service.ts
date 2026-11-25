@@ -92,12 +92,14 @@ export class NoticeService extends NoticeBase {
   }
 
   /** Whether this audience goes out at once or needs approval, and who would approve. Same rule as publish. */
-  async reachFor(input: unknown, website = false): Promise<{ mode: "free" | "approval"; approvers: string[] }> {
+  async reachFor(input: unknown, website = false): Promise<{ mode: "free" | "approval"; approvers: string[]; school: { students: number; classes: number } }> {
     this.staffOnly();
     const audience = this.parse(audienceField, input);
     return this.read("draft", async (tx) => ({
       mode: this.can("publish") ? await this.publishReach(tx, { audience, website }) : "approval",
       approvers: (await this.approvers(tx)).filter((a) => a.id !== this.ctx.userId).map((a) => a.name),
+      // So a check that reaches nobody can say whether the school has people at all, and what to add.
+      school: ([...(await tx.execute(sql`select (select count(*) from students where status = 'active')::int as students, (select count(*) from classes)::int as classes`))] as { students: number; classes: number }[])[0]!,
     }));
   }
 

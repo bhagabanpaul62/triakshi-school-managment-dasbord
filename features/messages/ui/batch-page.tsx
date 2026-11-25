@@ -1,19 +1,22 @@
 import Link from "next/link";
 import { NotFoundError } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { Panel } from "@smw/ui/kit/Panel";
 import { relative, shortDate } from "@smw/ui/format";
 import { plural } from "@smw/feature-kit/words";
 import { BatchService, type BatchView } from "../batch";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 import { PILL_BTN } from "./styles";
 
 export const metadata = { title: "Sent to families" };
 
 /** "32 seen, 9 replied" for one send, then every family with where it stands. */
-export default async function BatchPage({ params }: { params: Promise<{ id: string }> }) {
-  const svc = new BatchService(await requireCtx());
+async function BatchPage({ params }: { params: Promise<{ id: string }> }) {
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const svc = new BatchService(ctx);
   let b: BatchView;
   try { b = await svc.get((await params).id); } catch (e) { if (e instanceof NotFoundError) return <UnreadFallback title="That message was not found" text="It may belong to someone else." href="/app/messages/families/sent" label="Sent to families" />; throw e; }
   const waiting = b.rows.filter((r) => !r.seen).length;
@@ -61,7 +64,9 @@ export default async function BatchPage({ params }: { params: Promise<{ id: stri
 }
 
 export async function BatchListPage() {
-  const rows = await new BatchService(await requireCtx()).list();
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const rows = await new BatchService(ctx).list();
   return (
     <>
       <PageHeader eyebrow="Message families" title="Sent to families" description="Every send, with how many families saw it and answered."
@@ -79,3 +84,5 @@ export async function BatchListPage() {
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof BatchPage>) { return refusalOr(() => BatchPage(...a)); }

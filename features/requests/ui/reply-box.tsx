@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Composer } from "@smw/ui/comm/Composer";
 import { TabBar } from "@smw/ui/kit/TabBar";
 import { MODE_WORDS, type ReplyMode } from "../constants";
+import { pulseNow } from "@smw/feature-notifications/ui/live-pulse";
 import { sendReply } from "./actions";
 
 const TABS = (Object.keys(MODE_WORDS) as Exclude<ReplyMode, "reply">[]).map((id) => ({ id, label: MODE_WORDS[id].tab }));
@@ -15,7 +16,7 @@ export function ReplyBox({ id, staff, disabled }: { id: string; staff: boolean; 
   const [mode, setMode] = useState<ReplyMode>(staff ? "answer" : "reply");
   const send = async (fd: FormData) => {
     const r = await sendReply(fd);
-    if (r.ok) router.refresh();
+    if (r.ok) { router.refresh(); pulseNow(); }
     return r.ok ? { ok: true as const } : { ok: false as const, error: r.error };
   };
   const words = mode === "reply" ? null : MODE_WORDS[mode];

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { NotFoundError } from "@smw/feature-kit";
 import { isEveryone } from "@smw/feature-notifications/audience-rules";
 import { Markdown } from "@smw/ui/comm/Markdown";
@@ -32,7 +33,7 @@ function stateOf(e: { state: string; startsAt: Date; endsAt: Date | null }) {
   return istDay(e.startsAt) === istDay(now) ? "today" : "upcoming";
 }
 
-export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
+async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const ctx = await requireCtx();
   const svc = new EventService(ctx);
@@ -90,13 +91,13 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
         <div className="flex min-w-0 flex-col gap-3 lg:col-span-5">
           <Panel title="Details">
             <FactList>
-              <Fact label="When">{whenLabel(view)}</Fact>
-              <Fact label="Where">{e.location ? <span>{e.location}{e.mapUrl ? <> · <a href={e.mapUrl} target="_blank" rel="noopener noreferrer" className={LINK}>Open map</a></> : null}</span> : e.mapUrl ? <a href={e.mapUrl} target="_blank" rel="noopener noreferrer" className={LINK}>Open map</a> : null}</Fact>
-              <Fact label="Who it is for">{e.audienceLabel || null}</Fact>
-              <Fact label="Added by">{d.owner}</Fact>
-              {e.rsvp.on ? <Fact label="Answers">{[e.rsvp.capacity ? `${e.rsvp.capacity} places` : "No limit", e.rsvp.guests ? `up to ${e.rsvp.guests} guests each` : null, e.rsvp.closesAt ? `close ${whenLabel({ startsAt: e.rsvp.closesAt, endsAt: null, allDay: false })}` : null].filter(Boolean).join(", ")}</Fact> : null}
-              {e.type === "trip" ? <Fact label="Consent">{e.consentHref ? <Link href={e.consentHref} className={LINK}>Open the consent notice</Link> : d.canRun ? <span className={MUTED}>No consent notice linked. <Link href={`/app/events/${e.id}/edit`} className={LINK}>Add one</Link></span> : null}</Fact> : null}
-              {series ? <Fact label="Series">{series.number} of {series.total}{series.previous ? <> · <Link href={`/app/events/${series.previous}`} className={LINK}>Earlier</Link></> : null}{series.next ? <> · <Link href={`/app/events/${series.next}`} className={LINK}>Next</Link></> : null}</Fact> : null}
+              <Fact wrap label="When">{whenLabel(view)}</Fact>
+              <Fact wrap label="Where">{e.location ? <span>{e.location}{e.mapUrl ? <> · <a href={e.mapUrl} target="_blank" rel="noopener noreferrer" className={LINK}>Open map</a></> : null}</span> : e.mapUrl ? <a href={e.mapUrl} target="_blank" rel="noopener noreferrer" className={LINK}>Open map</a> : null}</Fact>
+              <Fact wrap label="Who it is for">{e.audienceLabel || null}</Fact>
+              <Fact wrap label="Added by">{d.owner}</Fact>
+              {e.rsvp.on ? <Fact wrap label="Answers">{[e.rsvp.capacity ? `${e.rsvp.capacity} places` : "No limit", e.rsvp.guests ? `up to ${e.rsvp.guests} guests each` : null, e.rsvp.closesAt ? `close ${whenLabel({ startsAt: e.rsvp.closesAt, endsAt: null, allDay: false })}` : null].filter(Boolean).join(", ")}</Fact> : null}
+              {e.type === "trip" ? <Fact wrap label="Consent">{e.consentHref ? <Link href={e.consentHref} className={LINK}>Open the consent notice</Link> : d.canRun ? <span className={MUTED}>No consent notice linked. <Link href={`/app/events/${e.id}/edit`} className={LINK}>Add one</Link></span> : null}</Fact> : null}
+              {series ? <Fact wrap label="Series">{series.number} of {series.total}{series.previous ? <> · <Link href={`/app/events/${series.previous}`} className={LINK}>Earlier</Link></> : null}{series.next ? <> · <Link href={`/app/events/${series.next}`} className={LINK}>Next</Link></> : null}</Fact> : null}
             </FactList>
           </Panel>
         </div>
@@ -104,3 +105,5 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
     </>
   );
 }
+
+export default function Page(props: Parameters<typeof EventPage>[0]) { return refusalOr(() => EventPage(props)); }

@@ -36,7 +36,7 @@ export abstract class MeetingBase extends SchoolService<Perm> {
 
   /** The meeting page was opened: its bell rows are read. A "book a time" action stays open until the family books. */
   protected async seen(tx: Tx, meetingId: string) {
-    await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "meeting", id: meetingId }, this.ctx.userId);
+    await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "meeting", id: meetingId }, this.ctx);
   }
 
   /** Every active family login this meeting's audience reaches, once each. */

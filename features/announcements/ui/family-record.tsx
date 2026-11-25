@@ -6,6 +6,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { dateTime } from "@smw/ui/format";
 import type { Tone } from "@smw/ui/tone";
+import { stop } from "../content";
 import { FeedService, type FeedNotice } from "../service";
 import { AnswerCard } from "./answer-form";
 import { BackLink, HOME, LinkButton, Notice, RelatedLinks, TYPE_LABEL, type Related } from "./shared";
@@ -29,7 +30,7 @@ export async function FamilyRecord({ ctx, id, lang, related = [] }: { ctx: Ctx; 
           <span>{n.publishedAt ? `Sent ${dateTime(n.publishedAt)}` : ""}{n.correctedAt ? ` · Updated ${dateTime(n.correctedAt)}` : ""}</span>
         </span>} />
       <div className="flex max-w-3xl flex-col gap-4">
-        {n.withdrawn ? <Notice tone="warning">The school withdrew this notice{n.withdrawn.reason ? `: ${n.withdrawn.reason}` : "."} Please do not act on what it said. It was withdrawn {dateTime(n.withdrawn.at)}.</Notice> : null}
+        {n.withdrawn ? <Notice tone="warning">The school withdrew this notice{n.withdrawn.reason ? `: ${stop(n.withdrawn.reason)}` : "."} Please do not act on what it said. It was withdrawn {dateTime(n.withdrawn.at)}.</Notice> : null}
         {ctx.supportStaffId ? <Notice>Answers are not shown in a support session.</Notice> : null}
         {asks && !ctx.supportStaffId ? (
           <section aria-label="Your answer" className="flex flex-col gap-3 rounded-3xl bg-[var(--ds-surface-container-low)] p-4 sm:p-6">
@@ -37,7 +38,7 @@ export async function FamilyRecord({ ctx, id, lang, related = [] }: { ctx: Ctx; 
             {n.answering === "open" && n.dueAt ? <p className="text-sm text-[var(--ds-on-surface-muted)]">Answer by {dateTime(n.dueAt)}. You can change it until then.</p> : null}
             {n.recipients.map((r) => (
               <AnswerCard key={r.recipientId} noticeId={n.id} recipientId={r.recipientId} childName={r.name} showChild={n.recipients.length > 1} spec={n.response} urgent={n.urgent} dueAt={n.dueAt?.toISOString() ?? null}
-                answering={n.answering === "none" ? "closed" : n.answering} given={r.answer ? { ...r.answer, at: r.answer.at.toISOString() } : null} />
+                answering={n.answering === "none" ? "closed" : n.answering} guardian={r.guardian} given={r.answer ? { ...r.answer, at: r.answer.at.toISOString() } : null} />
             ))}
           </section>
         ) : null}

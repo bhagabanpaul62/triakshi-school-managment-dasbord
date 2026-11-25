@@ -54,11 +54,15 @@ describe("concerns (M10, acceptance 18)", () => {
 
   it("a conversation report names the other side; the reporter can add a person; a stranger cannot report", async () => {
     const t = await svc(w.own).start({ studentId: w.st2.id, recipientIds: [w.form.userId], subject: "Concern two", body: "x" });
-    await svc(w.student2).report({ threadId: t.id, category: "unsafe", note: "Something is off.", aboutUserId: w.form.userId });
+    await svc(w.student2).report({ threadId: t.id, category: "unsafe", note: "Something is off.", aboutUserIds: [w.form.userId] });
     const [row] = await sql_((tx) => tx.select().from(messageReports).where(eq(messageReports.threadId, t.id)));
-    expect(new Set(row!.aboutUserIds)).toEqual(new Set([w.own.userId, w.form.userId]));
+    expect(new Set(row!.aboutUserIds)).toEqual(new Set([w.form.userId]));
+    await svc(w.student2).report({ threadId: t.id, category: "other", note: "Not sure who.", unsure: true });
+    await expect(svc(w.student2).report({ threadId: t.id, category: "other", note: "No choice made" })).rejects.toMatchObject({ fieldErrors: { aboutUserIds: expect.any(String) } });
+    const rows = await sql_((tx) => tx.select().from(messageReports).where(eq(messageReports.threadId, t.id)));
+    expect(rows.some((x) => x.aboutUserIds.includes(w.own.userId))).toBe(true);
     await expect(svc(w.other).report({ threadId: t.id, category: "other", note: "hello there" })).rejects.toBeInstanceOf(NotFoundError);
-    await expect(svc(w.student2).report({ threadId: t.id, category: "other", note: "hi", aboutUserId: w.student3.userId })).rejects.toBeInstanceOf(ValidationError);
+    await expect(svc(w.student2).report({ threadId: t.id, category: "other", note: "hi", aboutUserIds: [w.student3.userId] })).rejects.toBeInstanceOf(ValidationError);
     await expect(svc(w.student2).report({ threadId: t.id, category: "nonsense", note: "hi" })).rejects.toBeInstanceOf(ValidationError);
   });
 
@@ -68,7 +72,7 @@ describe("concerns (M10, acceptance 18)", () => {
     expect(mine.rows.some((x) => x.id === r.report)).toBe(true);
     // an admin named in a report cannot see it
     const t = await svc(lead2).start(about(w.st2, { subject: "Named admin", body: "Admin writes" }));
-    const rep = await svc(w.student2).report({ threadId: t.id, category: "abusive", note: "Rude." });
+    const rep = await svc(w.student2).report({ threadId: t.id, category: "abusive", note: "Rude.", unsure: true });
     const named = await guard(lead2).queue();
     expect(named.rows.some((x) => x.id === rep.id)).toBe(false);
     expect(named.open).toBe((await guard(w.a.as.admin).queue()).open - 1);
@@ -143,7 +147,7 @@ describe("review with a reason (M11, acceptance 19)", () => {
     const r = await reported("Review two");
     const named = await addUser(w.a, "admin", "named");
     const t = await svc(named).start(about(w.st2, { subject: "Named", body: "x" }));
-    await svc(w.student2).report({ threadId: t.id, category: "abusive", note: "Rude" });
+    await svc(w.student2).report({ threadId: t.id, category: "abusive", note: "Rude", unsure: true });
     await guard(w.a.as.admin).open({ threadId: t.id, reason: "Reading the report about a colleague" });
     await expect(guard(named).open({ threadId: t.id, reason: "Let me see it" })).rejects.toBeInstanceOf(NotFoundError);
     await expect(guard(named).exportPdf({ threadId: t.id, reason: "Export it please" })).rejects.toBeInstanceOf(NotFoundError);

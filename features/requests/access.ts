@@ -1,8 +1,8 @@
 // Who may see a request. This is the ONLY place that decides: list, counts, search, get, report, csv, files and notifications all use `scope`.
 import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
-import { allows, ForbiddenError, type Ctx } from "@smw/feature-kit";
-import { may, noSupport, isFamily } from "@smw/feature-messages/core";
+import { allows, ForbiddenError, refuseSupport, type Ctx } from "@smw/feature-kit";
+import { may, isFamily } from "@smw/feature-messages/core";
 import { sections } from "@smw/feature-academics/schema";
 import { teacherSections } from "@smw/feature-notifications/audience";
 import { students } from "@smw/feature-students/schema";
@@ -24,7 +24,7 @@ export interface Viewer {
 
 /** Who is looking. A support session sees nothing, ever. */
 export async function viewerOf(tx: Tx, ctx: Ctx): Promise<Viewer> {
-  noSupport(ctx);
+  refuseSupport(ctx, "use requests");
   if (!allows(ctx, requestsFeature, "use") && !allows(ctx, requestsFeature, "office")) throw new ForbiddenError();
   const [u] = await tx.select({ roleId: users.roleId }).from(users).where(eq(users.id, ctx.userId));
   return {

@@ -40,6 +40,18 @@ const make = async (rsvpOn: Record<string, unknown>, o: Record<string, unknown> 
 const rows = (id: string) => withSchool(s.id, (tx) => tx.select().from(eventPeople).where(eq(eventPeople.eventId, id)));
 const stat = async (id: string) => { const r = await rows(id); return { going: r.filter((p) => p.answer === "yes" && !p.waitingSince), waiting: r.filter((p) => p.answer === "yes" && p.waitingSince) }; };
 
+describe("series", () => {
+  it("answering any date closes the series' action row", async () => {
+    const first = await make({}, { repeat: "weekly", repeatUntil: addDays(istDay(new Date()), 5 + 14), notify: "true" });
+    const dates = await withSchool(s.id, (tx) => tx.select().from(events).where(eq(events.seriesId, first.seriesId!)).orderBy(events.startsAt));
+    expect(dates.length).toBeGreaterThan(1);
+    const open = () => withSchool(s.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, logins[5]!), eq(notifications.subjectId, first.id))));
+    expect((await open()).filter((n) => n.action && !n.doneAt)).toHaveLength(1);
+    await rsvp(logins[5]!).answer(dates[1]!.id, { answer: "yes", guests: 0 });
+    expect((await open()).every((n) => !n.action || n.doneAt)).toBe(true);
+  });
+});
+
 describe("answers", () => {
   it("yes, maybe and no; changing the answer; guests within the limit", async () => {
     const e = await make({ guests: 2 });

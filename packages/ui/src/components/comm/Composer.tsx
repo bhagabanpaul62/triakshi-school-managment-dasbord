@@ -19,7 +19,7 @@ export interface ComposerProps {
   files?: Omit<FilesFieldProps, "name" | "existing" | "removeIdsName">;
   /** Replaces the box with the reason it is closed and the way forward: "Replies are closed. Ask the school office to reopen." */
   disabled?: { reason: string; action?: { label: string; href: string } };
-  /** A line under the box, for example "Will be delivered at 7:00 am". */
+  /** A line under the box, for example "Will be delivered tomorrow 7:00 am". */
   notice?: string;
   /** Slot above the box for saved replies. */
   savedReplies?: ReactNode;
@@ -72,7 +72,7 @@ export function Composer({ send, hidden = {}, placeholder = "Write a message", m
       {savedReplies}
       {showFiles && files ? <FilesField {...files} /> : null}
       <div className="flex items-end gap-2">
-        <textarea ref={area} name="text" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} rows={1} maxLength={maxLength} placeholder={placeholder} aria-label="Message"
+        <textarea ref={area} name="text" value={text} onChange={(e) => { setText(e.target.value); setError(null); }} onKeyDown={onKey} rows={1} maxLength={maxLength} placeholder={placeholder} aria-label="Message"
           className={cn(INPUT, "h-auto max-h-40 min-h-11 flex-1 resize-none py-2.5 leading-6 [field-sizing:content]")} />
         {files ? <button type="button" onClick={() => setShowFiles((v) => !v)} aria-pressed={showFiles} className={cn(PILL_BTN, "px-3")}>Files</button> : null}
         <button type="submit" disabled={pending} className={cn(PRIMARY_BTN, "px-4")}><IconSend className="h-4 w-4" aria-hidden /><span className="sr-only sm:not-sr-only">{pending ? "Sending…" : "Send"}</span></button>

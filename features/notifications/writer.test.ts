@@ -136,12 +136,21 @@ describe("deliveries", () => {
     expect((await sends()).filter((d) => d.channel === "email")).toHaveLength(1);
   });
 
+  it("a support session never marks anything read", async () => {
+    const subject = { type: "notice", id: "n2" };
+    await put({ userId: student(), topic: "notice.published", title: "Hello", subject });
+    await withSchool(a.id, async (tx) => {
+      expect(await NotificationWriter.seen(tx, a.id, subject, { userId: student(), supportStaffId: crypto.randomUUID() })).toBe(0);
+      expect(await NotificationWriter.seen(tx, a.id, subject, { userId: student(), supportStaffId: null })).toBe(1);
+    });
+  });
+
   it("seen and done skip pending sends; rewrite changes the words", async () => {
     const subject = { type: "notice", id: "n1" };
     await put({ userId: student(), topic: "notice.answer", title: "Answer", subject, action: true }, { userId: a.users.teacher, topic: "notice.published", title: "Old", subject });
     await withSchool(a.id, async (tx) => {
       expect(await NotificationWriter.rewrite(tx, a.id, subject, { title: "Corrected", body: "New text" })).toBe(2);
-      expect(await NotificationWriter.seen(tx, a.id, subject, a.users.teacher)).toBe(1);
+      expect(await NotificationWriter.seen(tx, a.id, subject, { userId: a.users.teacher })).toBe(1);
     });
     let d = await sends();
     expect(d.filter((x) => x.userId === a.users.teacher).every((x) => x.state === "skipped" && x.reason === "Already read in the app")).toBe(true);

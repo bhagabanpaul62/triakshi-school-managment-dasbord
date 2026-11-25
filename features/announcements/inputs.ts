@@ -95,8 +95,9 @@ export const respondInput = z.object({
   /** Needed only when the login is the family of more than one child. */
   recipientId: z.uuid().optional(),
   answer: answerSchema,
-  byName: z.string().trim().min(2, "Write your name").max(80),
-  byRelation: z.enum(RELATIONS, { error: "Say who you are" }),
+  /** Both may be left out for "I am safe" on an urgent alert: the family is asked once it is saved. */
+  byName: z.string().trim().max(80).optional(),
+  byRelation: z.enum(RELATIONS, { error: "Say who you are" }).optional(),
 });
 export const paperInput = z.object({
   noticeId: z.uuid(),

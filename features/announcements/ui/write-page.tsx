@@ -34,20 +34,20 @@ async function Screen({ ctx, initial, title, back, banner }: { ctx: Ctx; initial
 
 const refuse = (text: string, back = HOME) => <><BackLink href={back}>Notices</BackLink><Notice tone="warning">{text}</Notice></>;
 
-/** /app/announcements/new: a blank notice, or one started from a template (`?template=`) or a kind (`?type=`). */
+/** /app/announcements/new: a blank notice, or one started from a template (`?template=`) or a kind (`?type=` or `?kind=`, with `?title=` and `?text=` filled in). */
 export default async function NewNoticePage({ searchParams }: { searchParams: Promise<Query> }) {
   const [ctx, sp] = await Promise.all([requireCtx(), searchParams]);
   if (ctx.role === "student" || ctx.role === "parent") notFound();
   const svc = new NoticeService(ctx);
   const may = svc.mayDo();
   if (!may.draft) return refuse("Your role cannot write notices. Ask the school admin to give you the right to write them.");
-  const asked = one(sp.type), type: NoticeType = (NOTICE_TYPES as readonly string[]).includes(asked ?? "") && (asked !== "urgent" || may.urgent) ? (asked as NoticeType) : "notice";
+  const asked = one(sp.type) ?? one(sp.kind), type: NoticeType = (NOTICE_TYPES as readonly string[]).includes(asked ?? "") && (asked !== "urgent" || may.urgent) ? (asked as NoticeType) : "notice";
   const [options, categories, templates] = await Promise.all([new AudienceService(ctx).options(), new AnnouncementCategoryService(ctx).options(), new TemplateService(ctx).list()]);
   const tpl = templates.find((x) => x.id === one(sp.template)), t = tpl?.draft;
   const kind = t?.type && (t.type !== "urgent" || may.urgent) ? t.type : type;
   const initial: FormInitial = {
     id: null, mode: "draft", type: kind, categoryId: categories.find((c) => c.name.toLowerCase() === t?.categoryName?.toLowerCase())?.id ?? "",
-    title: t?.title ?? "", body: t?.body ?? "", lang2: "", title2: "", body2: "",
+    title: t?.title ?? one(sp.title)?.slice(0, 160) ?? "", body: t?.body ?? one(sp.text)?.slice(0, 10_000) ?? "", lang2: "", title2: "", body2: "",
     // A teacher starts with the sections they are class teacher of; none means nothing chosen ("My sections" stays a chip).
     audience: ctx.role === "teacher" && options.classTeacherSections.length ? { include: options.classTeacherSections.map((id) => ({ type: "section", id })), exclude: [] } : NONE,
     response: kind === "urgent" ? { kind: "ack" } : t?.response ?? { kind: "none" }, dueAt: "", reminders: { before: true, onDay: true, after: true }, website: "app", pinnedUntil: "", expiresAt: "", files: [],

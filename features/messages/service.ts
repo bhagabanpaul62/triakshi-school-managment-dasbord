@@ -1,13 +1,13 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
-import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, refuseSupport, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { notificationPrefs } from "@smw/feature-notifications/schema";
 import { loadCommSettings, type CommSettings } from "@smw/feature-notifications/settings";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { REMOVE_MINUTES, PAGE_SIZE, type ReportCategory, type ReportState, type ThreadKind } from "./constants";
 import { Starters, type Contact, type StudentContact } from "./contact-rules";
 import {
-  activeRestriction, addMember, canOpenThread, createThread, isFamily, loadThread, markThreadRead, noSupport, postMessage, postSystem, removeStored, requireMember,
+  activeRestriction, addMember, canOpenThread, createThread, isFamily, loadThread, holdForPeople, markThreadRead, postMessage, postSystem, removeStored, requireMember,
   reportedBy, readStored, signedLink, openThread, storeFiles, unreadByThread, type Message, type StoredBytes, type StoredFile, type ThreadData, type UploadedFile,
 } from "./core";
 import { conversationPdf } from "./conversation-pdf";
@@ -17,7 +17,8 @@ import { reportInput, savedReplyInput, sendInput, startInput } from "./inputs";
 import { isNamed, leadIds } from "./leads";
 import { students } from "@smw/feature-students/schema";
 import { messageFiles, messageReports, messages, messageThreads, savedReplies, threadMembers } from "./schema";
-import { clock, istDay } from "@smw/feature-kit/words";
+import { istDay } from "@smw/feature-kit/words";
+import { dayTime } from "./when";
 
 type Perm = keyof typeof messagesFeature.permissions;
 export type { Contact, Message, StudentContact, ThreadData };
@@ -63,7 +64,7 @@ export class MessageService extends SchoolService<Perm> {
 
   /** Triakshi support works inside a school's account but never inside its private conversations. */
   protected authorize(permission: Perm, mode: "read" | "write") {
-    noSupport(this.ctx);
+    refuseSupport(this.ctx, "use private conversations");
     super.authorize(permission, mode);
   }
 
@@ -164,7 +165,7 @@ export class MessageService extends SchoolService<Perm> {
     else if ((await activeRestriction(tx, this.ctx.userId))?.kind === "blocked") block = { reason: "The school has switched off your messages for now. Please contact the school office." };
     else if (others.length && !others.some((m) => m.canReceive)) block = { reason: `This cannot be delivered: ${others.map((m) => m.name).join(", ")} can no longer sign in. Contact the school office.` };
     const away = others.filter((m) => m.away).map((m) => `${m.name} is away until ${dayWords(new Date(`${m.away!.until}T00:00:00+05:30`))}${m.away!.text ? `: ${m.away!.text}` : "."}`);
-    const wait = data.holdUntil ? `Will be delivered at ${clock(data.holdUntil)}${data.holdUntil.getTime() - Date.now() > 86_400_000 ? `, ${dayWords(data.holdUntil)}` : ""}. They can read it in the app now.` : null;
+    const wait = data.holdUntil ? `Will be delivered ${dayTime(data.holdUntil)}. They can read it in the app now.` : null;
     return {
       ...data, block, notice: [wait, ...away].filter(Boolean).join(" ") || null,
       reviewBanner: t.kind === "student" || t.kind === "request",
@@ -286,6 +287,18 @@ export class MessageService extends SchoolService<Perm> {
     });
   }
 
+  /** When the people a new message goes to would be told, so the form can say it before sending. Only people the caller may write to. */
+  async holdFor(recipientIds: string[], studentId?: string): Promise<Date | null> {
+    return this.read("use", async (tx) => {
+      const rules = new Starters(this.ctx, await loadCommSettings(tx));
+      const ids = [...new Set(recipientIds)].filter((id) => /^[0-9a-f-]{36}$/i.test(id) && id !== this.ctx.userId);
+      if (this.family) { if (studentId) await this.allowed(tx, rules, ids, studentId); else return null; }
+      else if (studentId) { ids.push((await rules.studentFor(tx, studentId)).userId); await this.allowed(tx, rules, ids.slice(0, -1), undefined); }
+      else await this.allowed(tx, rules, ids, undefined);
+      return holdForPeople(tx, ids);
+    });
+  }
+
   // ---------- my marks on a conversation (they work in a read-only school too) ----------
 
   async mark(threadId: string, flag: "pinned" | "muted" | "archived", on: boolean): Promise<void> {
@@ -339,15 +352,17 @@ export class MessageService extends SchoolService<Perm> {
         const [m] = await tx.select({ senderId: messages.senderId, internal: messages.internal }).from(messages).where(and(eq(messages.id, data.messageId), eq(messages.threadId, thread.id)));
         if (!m || (this.family && m.internal)) throw new NotFoundError("Message");
         if (m.senderId) about.push(m.senderId);
-      } else {
-        const rest = await tx.select({ id: threadMembers.userId }).from(threadMembers).where(and(eq(threadMembers.threadId, thread.id), ne(threadMembers.userId, this.ctx.userId)));
-        about = rest.map((r) => r.id).filter((x): x is string => !!x);
       }
-      if (data.aboutUserId) {
-        const [p] = await tx.select({ id: threadMembers.userId }).from(threadMembers).where(and(eq(threadMembers.threadId, thread.id), eq(threadMembers.userId, data.aboutUserId)));
-        if (!p) throw new ValidationError({ aboutUserId: "Choose someone in this conversation" });
-        about.push(data.aboutUserId);
+      const rest = (await tx.select({ id: threadMembers.userId }).from(threadMembers).where(and(eq(threadMembers.threadId, thread.id), ne(threadMembers.userId, this.ctx.userId)))).map((r) => r.id).filter((x): x is string => !!x);
+      if (!data.messageId && !data.unsure && !data.aboutUserIds.length) throw new ValidationError({ aboutUserIds: "Choose who it is about, or Not sure" });
+      if (data.aboutUserIds.length) {
+        // Someone in this conversation, or another staff member it talks about (the school's own lookup scopes it).
+        const outside = data.aboutUserIds.filter((id) => !rest.includes(id));
+        const staff = outside.length ? await tx.select({ id: users.id }).from(users).where(and(inArray(users.id, outside), eq(users.status, "active"), notInArray(users.role, ["student", "parent"]))) : [];
+        if (staff.length !== new Set(outside).size) throw new ValidationError({ aboutUserIds: "Choose people from the list" });
+        about.push(...data.aboutUserIds);
       }
+      if (data.unsure) about.push(...rest);
       about = named = [...new Set(about.filter((a) => a !== this.ctx.userId))];
       const [row] = await tx.insert(messageReports).values({
         schoolId: this.ctx.schoolId, threadId: thread.id, messageId: data.messageId ?? null, category: data.category, note: data.note,

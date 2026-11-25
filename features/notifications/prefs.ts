@@ -124,13 +124,40 @@ export class PreferenceService extends SchoolService<Perm> {
     });
   }
 
+  /** What the unsubscribe page names: the person the link is for, the address, and (same school only) other children who share that address, each with their own link token. A GET never changes what is sent. */
+  static async unsubscribeInfo(schoolId: string, token: string): Promise<{ person: string; email: string | null; others: { name: string; token: string }[] } | null> {
+    return withSchool(schoolId, async (tx) => {
+      const [p] = await tx.select({ userId: notificationPrefs.userId }).from(notificationPrefs).where(and(eq(notificationPrefs.schoolId, schoolId), eq(notificationPrefs.unsubscribeHash, sha256(token)))).limit(1);
+      if (!p) return null;
+      const [u] = await tx.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, p.userId)).limit(1);
+      if (!u) return null;
+      const named = async (id: string, fallback: string) => {
+        const kids = (await tx.execute(sql`select name from students where user_id = ${id}::uuid and status = 'active' order by name`)) as unknown as { name: string }[];
+        return [...kids].map((k) => k.name).join(", ") || fallback;
+      };
+      const key = tokenKey();
+      const email = u.email?.trim().toLowerCase() || null;
+      const same = key && email ? await tx.select({ id: users.id, name: users.name }).from(users)
+        .where(and(sql`lower(${users.email}) = ${email}`, eq(users.role, "student"), eq(users.status, "active"), sql`${users.id} <> ${p.userId}`)).orderBy(users.name) : [];
+      const others: { name: string; token: string }[] = [];
+      for (const o of same) others.push({ name: await named(o.id, o.name), token: await this.tokenFor(tx, schoolId, o.id) });
+      return { person: await named(p.userId, u.name), email: u.email, others };
+    });
+  }
+
+  /** The person's link token; makes sure the lookup hash exists (the token itself is derived, so this is the same every time). */
+  private static async tokenFor(tx: Tx, schoolId: string, userId: string): Promise<string> {
+    const token = tokenFor(tokenKey()!, schoolId, userId);
+    await tx.insert(notificationPrefs).values({ schoolId, userId, unsubscribeHash: sha256(token) })
+      .onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set: { unsubscribeHash: sha256(token) } });
+    return token;
+  }
+
   /** The unsubscribe link for an email to this person (never signs in; the page behind it only calls unsubscribeByToken). Null when the server has no secret to sign it with. */
   static async unsubscribeUrlFor(tx: Tx, schoolId: string, slug: string, userId: string, group?: TopicGroup): Promise<string | null> {
     const key = tokenKey();
     if (!key) return null;
-    const token = tokenFor(key, schoolId, userId);
-    await tx.insert(notificationPrefs).values({ schoolId, userId, unsubscribeHash: sha256(token) })
-      .onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set: { unsubscribeHash: sha256(token) } });
+    const token = await this.tokenFor(tx, schoolId, userId);
     return schoolUrl(slug, `/unsubscribe?${new URLSearchParams({ t: token, ...(group ? { g: group } : {}) })}`);
   }
 }

@@ -2,8 +2,8 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { expect, request, test, type Page } from "@playwright/test";
 import { crawl } from "./crawl-lib";
-import { at, dialog, job, mails, main, People, says, sql, SLUG, FAMILIES } from "./comm-lib";
-import { login, SCHOOL } from "./helpers";
+import { at, dialog, job, mails, main, People, sql, SLUG } from "./comm-lib";
+import { login, reloadIfSchoolNotFound, SCHOOL, STUDENT_PASSWORD } from "./helpers";
 
 // J9 to J13 of docs/COMMUNICATION-PRD.md 13.1, walked as people do: click what is on screen, family on a 375 px phone.
 // The database helpers (sql, job) only make time pass or put things back; every step a person takes is done in the browser.
@@ -46,6 +46,12 @@ async function clipped(page: Page): Promise<string[]> {
 const LAYOUT = `${tmpdir()}/comm-calendar-layout.log`;
 let journey = "";
 const fits = async (page: Page, where: string) => { for (const f of await clipped(page)) appendFileSync(LAYOUT, `${Date.now()}\t${journey} ${where}: ${f}\n`); };
+/** A finding about something other than layout, judged by one test at the end of its journey. */
+const found = (key: string, msg: string) => appendFileSync(LAYOUT, `${Date.now()}\t${key} ${msg}\n`);
+const foundBy = (key: string, title: string) => test(title, () => {
+  const lines = existsSync(LAYOUT) ? readFileSync(LAYOUT, "utf8").split("\n").filter(Boolean).map((l) => l.split("\t")) : [];
+  expect([...new Set(lines.filter(([t, l]) => Date.now() - Number(t) < 15 * 60_000 && l!.startsWith(`${key} `)).map(([, l]) => l!.slice(key.length + 1)))]).toEqual([]);
+});
 const noClipping = (j: string) => test(`${j}: nothing is clipped or cut off at 375 px`, () => {
   const lines = existsSync(LAYOUT) ? readFileSync(LAYOUT, "utf8").split("\n").filter(Boolean).map((l) => l.split("\t")) : [];
   expect([...new Set(lines.filter(([t, l]) => Date.now() - Number(t) < 15 * 60_000 && l!.startsWith(j)).map(([, l]) => l))]).toEqual([]);
@@ -58,13 +64,16 @@ async function bell(page: Page) {
 }
 /** The "(n) " in front of the browser tab title, or 0. */
 const tabCount = async (page: Page) => Number(/^\((\d+)\) /.exec(await page.title())?.[1] ?? 0);
-/** The number beside a side-menu link (Messages 6), or 0. Opens and closes the phone menu. */
-async function badge(page: Page, name: string) {
+/** The numbers beside side-menu links (Messages 6), 0 when none. Opens and closes the phone menu once. */
+async function badges(page: Page, names: string[]) {
   if (isPhone(page)) await page.getByRole("button", { name: /open menu/i }).click();
-  const link = page.getByRole("link", { name: new RegExp(`^${name}\\b`) }).and(page.locator(":visible")).first();
-  const n = Number(/(\d+)\s*$/.exec((await link.innerText()).trim())?.[1] ?? 0);
-  if (isPhone(page)) await page.getByRole("button", { name: /close menu/i }).first().click();
-  return n;
+  const out: Record<string, number> = {};
+  for (const name of names) {
+    const link = page.getByRole("link", { name: new RegExp(`^${name}\\b`) }).and(page.locator(":visible")).first();
+    out[name] = Number(/(\d+)\s*$/.exec((await link.innerText()).trim())?.[1] ?? 0);
+  }
+  if (isPhone(page)) await page.getByRole("button", { name: /close menu/i }).last().click();
+  return out;
 }
 /** Records every toast a page shows (they last four seconds), so a message that came and went can still be read. */
 const watchToasts = (page: Page) => page.evaluate(() => {
@@ -73,8 +82,6 @@ const watchToasts = (page: Page) => page.evaluate(() => {
   new MutationObserver(() => document.querySelectorAll("[aria-live=polite] [role=status]").forEach((e) => { const t = (e as HTMLElement).innerText.trim(); if (t && !w.__toasts!.includes(t)) w.__toasts!.push(t); })).observe(document.body, { childList: true, subtree: true, characterData: true });
 });
 const toasts = (page: Page) => page.evaluate(() => (window as unknown as { __toasts?: string[] }).__toasts ?? []);
-/** A refusal shown to a person: toast or alert text that says "cannot" or "not allowed". */
-const refusals = (page: Page) => page.locator("[role=alert], [role=status], [data-sonner-toast]").filter({ hasText: /cannot|can't|not allowed|do not have|only the school|sorry|refus/i });
 
 /** Where the fresh browsers of this file keep their people. */
 let crowd: People;
@@ -623,3 +630,259 @@ test.describe("J11 preferences", () => {
   });
 });
 noClipping("J11");
+
+// ======================================================================================================
+// J12  The bell: a message, a notice and an approval; open each from another screen; every count agrees
+// ======================================================================================================
+/** Every place a number shows: bell, tab title, side menu, the list's own sentence. */
+async function counts(page: Page) {
+  const b = await badges(page, ["Messages", "Notices"]);
+  return { bell: await bell(page), tab: await tabCount(page), messages: b.Messages!, notices: b.Notices! };
+}
+/** The list page's sentence ("12 unread."), read by going there through the bell like a person. */
+async function listSays(page: Page) {
+  await page.getByRole("button", { name: /^notifications/i }).click();
+  await dialog(page).getByRole("link", { name: "See all" }).click();
+  await expect(page.getByRole("heading", { name: "Notifications", level: 1 })).toBeVisible();
+  const text = (await main(page).innerText()).replace(/\s+/g, " ");
+  return { unread: Number(/(\d+) unread/.exec(text)?.[1] ?? 0), action: Number(/(\d+) waiting for you/.exec(text)?.[1] ?? 0) };
+}
+/** Nudge the page the way a phone waking up does, then wait for the bell to reach at least n (other journeys notify every family too). */
+async function bellReaches(page: Page, n: number) {
+  await expect.poll(async () => { await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange"))); return bell(page); }, { timeout: 90_000, message: `bell reaches ${n} without a reload` }).toBeGreaterThanOrEqual(n);
+}
+type Seen = { bell: number; tab: number; messages: number; notices: number };
+/** The tab title and the bell say the same; with `from`, the numbers have also gone down by what was opened (never up by less: other journeys notify every family too). */
+const agree = async (page: Page, where: string, from?: Seen, dropped: { bell?: number; messages?: number; notices?: number } = {}) => {
+  // A number may take a moment to settle after a click; one that needs a reload or the next minute's check is a fault.
+  let c = await counts(page);
+  const ok = (x: Seen) => x.tab === x.bell && (!from || ((!dropped.bell || x.bell <= from.bell - dropped.bell) && (!dropped.messages || x.messages <= from.messages - dropped.messages) && (!dropped.notices || x.notices <= from.notices - dropped.notices)));
+  for (let i = 0; i < 4 && !ok(c); i++) { await page.waitForTimeout(1000); c = await counts(page); }
+  if (c.tab !== c.bell) found("COUNTS12", `${where}: tab title says (${c.tab}) but the bell says ${c.bell}`);
+  if (from) {
+    if (dropped.bell && c.bell > from.bell - dropped.bell) found("COUNTS12", `${where}: bell still ${c.bell} (was ${from.bell}) after opening it`);
+    if (dropped.messages && c.messages > from.messages - dropped.messages) found("COUNTS12", `${where}: Messages badge still ${c.messages} (was ${from.messages})`);
+    if (dropped.notices && c.notices > from.notices - dropped.notices) found("COUNTS12", `${where}: Notices badge still ${c.notices} (was ${from.notices})`);
+  }
+  return c;
+};
+/** What the list page itself says, against what the bell on the same screen says. */
+const listAgrees = async (page: Page, where: string, c: Seen) => {
+  const list = await listSays(page);
+  if (list.unread !== c.bell) found("COUNTS12", `${where}: the list page says ${list.unread} unread, the bell on the screen before said ${c.bell}`);
+  return list;
+};
+
+test.describe("J12 bell and counts", () => {
+  test.describe.configure({ mode: "serial" });
+  test.beforeAll(() => { journey = "J12"; });
+  const noticeTitle = `J12 notice ${RUN}`, approvalTitle = `J12 for approval ${RUN}`, subject = `J12 about homework ${RUN}`;
+  let fam: Page;
+  let base: Seen = { bell: 0, tab: 0, messages: 0, notices: 0 };
+  let arrived: Seen = base;
+
+  test.beforeAll(async ({ browser }) => {
+    // Their own family, so no other journey reads their notices while this one counts them.
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 812 } });
+    fam = await ctx.newPage();
+    // The date-of-birth password first (a fresh school), the chosen one on a re-run; each wrong try fails in seconds.
+    for (const pw of ["06042023", STUDENT_PASSWORD]) {
+      await fam.goto(`${SCHOOL(SLUG)}/login`);
+      await fam.getByLabel(/email, phone or admission number/i).fill("GR0004");
+      await fam.getByLabel(/^password$/i).fill(pw);
+      await fam.getByRole("button", { name: /sign in/i }).click();
+      await fam.waitForURL((u) => u.pathname.startsWith("/app"), { timeout: 15_000 }).catch(() => undefined);
+      if (!fam.url().includes("/app")) continue;
+      if (fam.url().includes("/app/change-password")) {
+        await reloadIfSchoolNotFound(fam);
+        await fam.locator('input[name="current"]').fill(pw);
+        await fam.locator('input[name="next"]').fill(STUDENT_PASSWORD);
+        await fam.locator('input[name="confirm"]').fill(STUDENT_PASSWORD);
+        await fam.getByRole("button", { name: /save and continue/i }).click();
+        await fam.waitForURL((u) => u.pathname.startsWith("/app") && !u.pathname.includes("change-password"));
+      }
+      break;
+    }
+    expect(fam.url()).toContain("/app");
+  });
+  test.afterAll(async () => { await fam?.context().close(); });
+
+  test("before anything: the numbers already agree", async () => {
+    await fam.goto(at(""));
+    base = await agree(fam, "start");
+    await listAgrees(fam, "start", base);
+    await fits(fam, "notifications list");
+  });
+
+  test("the office writes to the family and publishes a notice; the family's numbers move together without a reload", async () => {
+    const admin = await crowd.as("admin");
+    await admin.goto(at(""));
+    await menu(admin, /^Messages\b/);
+    await admin.getByRole("link", { name: "New message" }).first().click();
+    await admin.getByPlaceholder("Student name or admission number").fill("GR0004");
+    await admin.getByRole("list", { name: "Students you can write to" }).getByRole("button", { name: /Navya Verma/ }).first().click();
+    await admin.getByLabel("Subject").fill(subject);
+    await admin.getByLabel("Message", { exact: true }).fill("Please send the notebook on Monday.");
+    await admin.getByRole("button", { name: "Send", exact: true }).click();
+    await expect(admin.getByText(subject).first()).toBeVisible();
+
+    await menu(admin, /^Notices\b/);
+    await admin.getByRole("button", { name: "New notice" }).first().click();
+    await admin.getByRole("menuitem", { name: "Notice", exact: true }).click();
+    await admin.getByRole("button", { name: "All families", exact: true }).click();
+    await admin.getByLabel(/^Title/).fill(noticeTitle);
+    await admin.locator("textarea").first().fill("The school is open on Saturday.");
+    await admin.getByRole("button", { name: "Publish" }).last().click();
+    await expect(dialog(admin).getByRole("heading", { name: "Publish this notice?" })).toBeVisible();
+    await dialog(admin).getByRole("button", { name: /^Publish to \d+/ }).click();
+    await expect(admin.getByText(noticeTitle).first()).toBeVisible();
+    // The notice has a 30-second undo window before it goes out; time passes, and the worker sends it.
+    sql(`update announcements set send_at = now() - interval '1 second' where school_id = '${GREEN}' and title = '${noticeTitle}' and state = 'sending'`);
+    job("comms.publish-due");
+
+    await fam.goto(at(""));
+    await bellReaches(fam, base.bell + 2);
+    const c = await agree(fam, "after message and notice");
+    if (c.messages <= base.messages) found("COUNTS12", `Messages badge did not move after a new message (${base.messages} to ${c.messages})`);
+    if (c.notices <= base.notices) found("COUNTS12", `Notices badge did not move after a new notice (${base.notices} to ${c.notices})`);
+    await listAgrees(fam, "after message and notice", c);
+    arrived = c;
+    await fits(fam, "notifications after arrivals");
+  });
+
+  test("opening the notice from the Notices list takes one off everywhere", async () => {
+    await menu(fam, /^Notices\b/);
+    await fam.getByRole("link", { name: new RegExp(noticeTitle) }).first().click();
+    await expect(fam.getByRole("heading", { name: noticeTitle })).toBeVisible();
+    const c = await agree(fam, "after opening the notice", arrived, { bell: 1, notices: 1 });
+    await listAgrees(fam, "after opening the notice", c);
+    arrived = c;
+  });
+
+  test("opening the message from the Messages list takes one off everywhere", async () => {
+    await menu(fam, /^Messages\b/);
+    await fam.getByText(subject).first().click();
+    await expect(fam.getByText("Please send the notebook on Monday.").first()).toBeVisible();
+    const c = await agree(fam, "after opening the message", arrived, { bell: 1, messages: 1 });
+    await listAgrees(fam, "after opening the message", c);
+  });
+
+  test("an approval: the teacher asks, the office sees it in the bell, approves from another screen, and the numbers fall", async () => {
+    const teacher = await crowd.as("teacher");
+    await teacher.goto(at("announcements/new"));
+    await teacher.getByRole("button", { name: "All families", exact: true }).click();
+    await teacher.getByLabel(/^Title/).fill(approvalTitle);
+    await teacher.locator("textarea").first().fill("Needs the office to approve.");
+    await teacher.getByRole("button", { name: "Send for approval" }).click();
+    await dialog(teacher).getByRole("button", { name: /approval|^Send/i }).last().click();
+    await expect(teacher.getByText(/waiting for approval|sent for approval|Waiting/i).first()).toBeVisible();
+
+    const admin = await crowd.as("admin");
+    await admin.goto(at(""));
+    const before = await bell(admin);
+    await admin.getByRole("button", { name: /^notifications/i }).click();
+    await admin.keyboard.press("Escape");
+    await admin.reload();
+    const after = await bell(admin);
+    expect(after, "the office's bell moves for a notice waiting for approval").toBeGreaterThan(before - 1);
+    await admin.getByRole("button", { name: /^notifications/i }).click();
+    await dialog(admin).getByRole("link", { name: new RegExp("approval|waiting", "i") }).first().click();
+    await expect(admin.getByText(approvalTitle).first()).toBeVisible();
+    const sums = await agree(admin, "office after opening the approval");
+    await admin.getByRole("button", { name: /^approve/i }).first().click();
+    const d = dialog(admin);
+    if (await d.getByRole("button", { name: /^approve|^publish/i }).count()) await d.getByRole("button", { name: /^approve|^publish/i }).first().click();
+    await expect(admin.getByText(/approved|published/i).first()).toBeVisible();
+    await admin.reload();
+    const done = await agree(admin, "office after approving");
+    if (done.bell > sums.bell) found("COUNTS12", `office: bell ${done.bell} after approving, was ${sums.bell}: the approval notification did not close`);
+    await listAgrees(admin, "office after approving", done);
+  });
+});
+foundBy("COUNTS12", "J12: bell, tab title, side menu and list agree after each open");
+noClipping("J12");
+
+// ======================================================================================================
+// J13  Roles made in Settings: front office, safeguarding lead, coordinator, transport in-charge, auditor
+// ======================================================================================================
+const COMM = /^\/app\/(announcements|circulars|messages|safeguarding|requests|events|meetings|notifications|attendance\/holidays|settings\/communication)|^\/app$/;
+const COMM_LINK = /^\/app\/(announcements|events|meetings|messages|requests|safeguarding|notifications)$/;
+
+test.describe("J13 custom roles", () => {
+  test.describe.configure({ mode: "serial" });
+  test.setTimeout(900_000);
+  test.beforeAll(() => { journey = "J13"; });
+  const login0 = sql(`select coalesce(role_id::text, '') from users where school_id = '${GREEN}' and login_id = 'cashier'`);
+  // Whatever happens, the cashier login goes back to what it was.
+  test.afterAll(() => { sql(`update users set role = 'staff', role_id = ${login0 ? `'${login0}'` : "null"} where school_id = '${GREEN}' and login_id = 'cashier'`); });
+
+  /** The office gives a staff login a ready-made role through Settings, Users, Manage, Change role. */
+  async function assign(admin: Page, who: string, roleLabel: string) {
+    await admin.goto(at(""));
+    await menu(admin, /^Settings$/);
+    await admin.getByRole("tab", { name: /Users/ }).click();
+    await admin.getByPlaceholder(/Search by name, email or login/).fill(who);
+    const row = admin.getByRole("row").filter({ hasText: who });
+    await expect(row).toHaveCount(1);
+    await row.getByRole("button", { name: "Manage" }).click();
+    await dialog(admin).getByRole("button", { name: "Change role" }).click();
+    await dialog(admin).getByLabel(/^Role/).selectOption({ label: roleLabel });
+    await dialog(admin).getByRole("button", { name: "Save" }).click();
+    await expect(admin.getByText(new RegExp(`^${roleLabel} · `)).first()).toBeVisible({ timeout: 15_000 });
+    await admin.keyboard.press("Escape");
+  }
+
+  const WANT: Record<string, { sees: string[]; hidden: string[]; writeNotice: "publish" | "approval" | "no"; addEvent: boolean }> = {
+    "Front office": { sees: ["Notices", "Calendar", "Meetings", "Messages", "Requests"], hidden: ["Safeguarding"], writeNotice: "approval", addEvent: false },
+    "Safeguarding lead": { sees: ["Notices", "Calendar", "Messages", "Requests", "Safeguarding"], hidden: ["Meetings"], writeNotice: "no", addEvent: false },
+    "Coordinator": { sees: ["Notices", "Calendar", "Messages", "Requests"], hidden: ["Safeguarding"], writeNotice: "publish", addEvent: true },
+    "Transport in-charge": { sees: ["Notices", "Calendar", "Messages", "Transport"], hidden: ["Safeguarding", "Meetings"], writeNotice: "no", addEvent: false },
+    "Auditor": { sees: ["Notices", "Calendar", "Messages"], hidden: ["Safeguarding", "Meetings"], writeNotice: "no", addEvent: false },
+  };
+
+  for (const [roleLabel, want] of Object.entries(WANT)) {
+    test(`${roleLabel}: sees only what works, and every communication link they are shown works`, async ({ browser }) => {
+      const admin = await crowd.as("admin");
+      const loginId = roleLabel === "Auditor" ? "auditor" : "cashier";
+      if (loginId === "cashier") await assign(admin, "Suresh Cashier", roleLabel);
+      const ctx = await browser.newContext();
+      const page = await ctx.newPage();
+      try {
+        await login(page, SLUG, loginId);
+        await page.goto(at(""));
+        const nav = page.getByRole("navigation", { name: "Main" });
+        for (const name of want.sees) await expect(nav.getByRole("link", { name: new RegExp(`^${name}\\b`) }), `${roleLabel} sees ${name}`).toBeVisible();
+        for (const name of want.hidden) await expect(nav.getByRole("link", { name: new RegExp(`^${name}\\b`) }), `${roleLabel} does not see ${name}`).toHaveCount(0);
+
+        // What they may write is what the buttons offer, with no button that ends in a refusal.
+        await page.goto(at("announcements/new"));
+        if (want.writeNotice === "no") {
+          await expect(page.getByText("Your role cannot write notices.")).toBeVisible();
+        } else {
+          await expect(page.getByRole("button", { name: want.writeNotice === "publish" ? "Publish" : "Send for approval" })).toBeVisible();
+          await expect(page.getByRole("button", { name: want.writeNotice === "publish" ? "Send for approval" : "Publish" })).toHaveCount(0);
+        }
+        await page.goto(at("events"));
+        await expect(page.getByRole("link", { name: /add event/i }), `${roleLabel}: Add event`).toHaveCount(want.addEvent ? 1 : 0);
+        // Where the menu shows no link, the address still refuses in a sentence, not as a failure of the school's system.
+        for (const [name, path] of [["Meetings", "meetings"], ["Safeguarding", "safeguarding"]] as const) {
+          if (!want.hidden.includes(name)) continue;
+          await page.goto(at(path));
+          const text = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+          if (/something went wrong|couldn.t load|could not load|check your connection/i.test(text)) found("ROLES13", `${roleLabel} opening ${path} by address: "${/.{0,30}(something went wrong|couldn.t load|could not load).{0,60}/i.exec(text)?.[0]}" (a refusal shown as a system fault)`);
+        }
+        const starts = (await page.goto(at("")).then(() => page.locator("nav[aria-label=Main] a[href]").evaluateAll((as) => as.map((a) => new URL((a as HTMLAnchorElement).href).pathname)))).filter((h) => COMM_LINK.test(h));
+        const problems = await crawl(page, { slug: SLUG, sections: COMM, starts: [...new Set(["/app", ...starts])], role: roleLabel });
+        expect(problems.join("\n"), `${roleLabel}: links they are shown`).toBe("");
+      } finally { await ctx.close(); }
+    });
+  }
+
+  test("the cashier login goes back to Cashier through the same screen", async () => {
+    const admin = await crowd.as("admin");
+    await assign(admin, "Suresh Cashier", "Cashier");
+    expect(sql(`select role_id::text from users where school_id = '${GREEN}' and login_id = 'cashier'`)).toBe(login0);
+  });
+});
+foundBy("ROLES13", "J13: a role that may not open a screen is told so in a sentence");
+noClipping("J13");

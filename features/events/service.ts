@@ -80,7 +80,7 @@ export class EventService extends CrudService<typeof events, Perm> {
     return this.read("read", async (tx) => {
       const spans = [...(await tx.execute(sql`select distinct coalesce(span_id, id)::text as id from attendance_holidays where date >= ${istDay(from)}::date and date < ${istDay(to)}::date limit 200`))] as { id: string }[];
       let n = 0;
-      for (const s of spans) n += await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "holiday", id: s.id }, this.ctx.userId);
+      for (const s of spans) n += await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "holiday", id: s.id }, this.ctx);
       return n;
     });
   }
@@ -121,7 +121,7 @@ export class EventService extends CrudService<typeof events, Perm> {
   async detail(id: string) {
     return this.read("read", async (tx) => {
       const e = await this.findOrThrow(tx, id);
-      await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "event", id }, this.ctx.userId);
+      await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "event", id }, this.ctx);
       const runs = canRun(this.ctx, e) && this.can("write");
       const [files, mine, siblings, owner] = await Promise.all([
         tx.select().from(eventFiles).where(eq(eventFiles.eventId, id)).orderBy(asc(eventFiles.createdAt)),

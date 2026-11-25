@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, autoCloseAt, dueFor, familyMayReopen, isOverdue, median, nextLevel, resumeDue } from "./clock";
+import { addDays, autoCloseAt, dueFor, escalatedWords, familyMayReopen, isOverdue, median, nextLevel, resumeDue } from "./clock";
 import { allowed, next } from "./transitions";
 import type { RequestState } from "./constants";
 
@@ -84,5 +84,8 @@ describe("words the screens use", () => {
     expect(ageWords(0)).toBe("Today");
     expect(ageWords(1)).toBe("1 day");
     expect(ageWords(5)).toBe("5 days");
+  });
+  it("says how often it was escalated", () => {
+    expect([1, 2, 3].map(escalatedWords)).toEqual(["once", "twice", "3 times"]);
   });
 });

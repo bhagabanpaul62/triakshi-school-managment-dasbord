@@ -3,7 +3,7 @@ import { Markdown } from "@smw/ui/comm/Markdown";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { dateTime } from "@smw/ui/format";
 import type { Tone } from "@smw/ui/tone";
-import { RESPONSE_WORDS } from "../content";
+import { answerButtons, RESPONSE_WORDS } from "../content";
 import type { NoticeType, ResponseSpec } from "../constants";
 import { TYPE_LABEL } from "./shared";
 
@@ -41,9 +41,10 @@ export function NoticeCard({ type, number, category, title, body, files = [], re
         </ul>
       ) : null}
       {asks ? (
-        <p className="rounded-xl bg-white/[0.06] px-3 py-2 text-sm text-[var(--ds-on-surface)]">
-          {type === "urgent" ? "Press I am safe, or Received" : RESPONSE_WORDS[response.kind]}{dueAt ? `, by ${dateTime(dueAt)}` : ""}
-        </p>
+        <div className="flex flex-col gap-2 rounded-xl bg-white/[0.06] px-3 py-2 text-sm text-[var(--ds-on-surface)]">
+          <p>{type === "urgent" ? "Tell the school you are safe" : RESPONSE_WORDS[response.kind]}{dueAt ? `, by ${dateTime(dueAt)}` : ""}</p>
+          <p className="flex flex-wrap gap-2" aria-hidden>{answerButtons(response.kind, type === "urgent").map((w) => <span key={w} className="inline-flex min-h-9 items-center rounded-full bg-white/[0.12] px-4 text-sm font-medium">{w}</span>)}</p>
+        </div>
       ) : null}
     </article>
   );

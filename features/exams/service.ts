@@ -574,7 +574,7 @@ export class ResultService extends ResultReader {
     const perm = this.viewPerm();
     return this.read(perm, async (tx) => {
       const exam = await this.visible(tx, examId, studentId, perm);
-      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "result", id: `${exam.id}:${studentId}` }, this.ctx.userId);
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "result", id: `${exam.id}:${studentId}` }, this.ctx);
       return { exam, result: await this.resultFor(tx, exam, studentId) };
     });
   }

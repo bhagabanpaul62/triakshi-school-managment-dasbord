@@ -360,7 +360,7 @@ export class StudentTransportService extends TransportBase {
         .innerJoin(routeStops, eq(routeStops.id, studentTransport.stopId))
         .leftJoin(vehicles, eq(vehicles.id, routes.vehicleId))
         .where(inArray(studentTransport.studentId, ids)).orderBy(asc(students.name));
-      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const id of new Set(rows.map((r) => r.routeId))) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "route", id }, this.ctx.userId);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const id of new Set(rows.map((r) => r.routeId))) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "route", id }, this.ctx);
       return rows.map(({ routeId: _r, ...r }) => ({ ...r, trip: tripLabel(r.pickup, r.drop), feePaise: monthlyFeeFor(r.monthlyFeePaise, r.pickup, r.drop) }));
     });
   }

@@ -5,7 +5,9 @@ import { NotFoundError } from "@smw/feature-kit";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { markdownToText } from "@smw/ui/markdown";
 import { NoticeBase, notExpired } from "./base";
-import type { Answer, NoticeType, ResponseSpec } from "./constants";
+import { RELATIONS, type Answer, type NoticeType, type ResponseSpec } from "./constants";
+
+type Relation = (typeof RELATIONS)[number];
 import { subjectOf } from "./fan-out";
 import { NoticeFileService } from "./files";
 import { feedInput, type FeedQuery } from "./inputs";
@@ -32,12 +34,20 @@ export interface FeedNotice {
   /** open: may answer or change; locked: the due date passed; closed: expired or withdrawn; none: nothing is asked. */
   answering: "open" | "locked" | "closed" | "none";
   /** One per child this login is the family of, with the answer given so far. */
-  recipients: { recipientId: string; name: string; seenAt: Date | null; answer: null | { answer: Answer; byName: string; byRelation: string; onPaper: boolean; at: Date } }[];
+  recipients: { recipientId: string; name: string; seenAt: Date | null; /** The child's main guardian on the student record: a family's "I am safe" is answered by name without asking. */ guardian: { name: string; relation: Relation } | null; answer: null | { answer: Answer; byName: string; byRelation: string; onPaper: boolean; at: Date } }[];
 }
 
 const kindOf = announcements.response;
 const needsAnswer = sql`(${announcements.state} = 'published' and ${notExpired} and ${kindOf}->>'kind' <> 'none' and ${announcementResponses.id} is null and (${announcements.dueAt} is null or ${announcements.dueAt} > now()))`;
 const pinned = sql`(${announcements.pinnedUntil} is not null and ${announcements.pinnedUntil} > now())`;
+/**
+ * "Needs your answer" order: urgent alerts, then what is due within 7 days (soonest first), then notices with no date (newest first),
+ * then what is due later. Rows that need no answer all rank the same, so the order after this is unchanged.
+ */
+const answerOrder = [
+  asc(sql`case when not ${needsAnswer} then 0 when ${announcements.type} = 'urgent' then 1 when ${announcements.dueAt} is not null and ${announcements.dueAt} <= now() + interval '7 days' then 2 when ${announcements.dueAt} is null then 3 else 4 end`),
+  asc(sql`case when ${needsAnswer} then ${announcements.dueAt} end`),
+];
 const fresh = sql`${announcements.withdrawnAt} > now() - interval '14 days'`;
 
 /** What a reader (a family login or staff) sees of the notices sent to them, and the act of opening one. */
@@ -56,7 +66,7 @@ export class FeedService extends NoticeBase {
       }).from(announcementRecipients).innerJoin(announcements, eq(announcements.id, announcementRecipients.announcementId))
         .leftJoin(announcementCategories, eq(announcementCategories.id, announcements.categoryId)).leftJoin(announcementResponses, eq(announcementResponses.recipientId, announcementRecipients.id)).where(where);
       const [rows, total, unread] = await Promise.all([
-        base().orderBy(desc(sql`${needsAnswer}`), desc(sql`${pinned}`), desc(announcements.publishedAt), asc(announcements.id)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
+        base().orderBy(desc(sql`${needsAnswer}`), ...answerOrder, desc(sql`${pinned}`), desc(announcements.publishedAt), asc(announcements.id)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: count() }).from(announcementRecipients).innerJoin(announcements, eq(announcements.id, announcementRecipients.announcementId)).where(where),
         this.unreadIn(tx),
       ]);
@@ -66,7 +76,7 @@ export class FeedService extends NoticeBase {
         rows: rows.map(({ a, rid, seenAt, child, studentId, cat, tone, answered, needs, pin }): FeedItem => {
           const gone = a.state === "withdrawn";
           return {
-            noticeId: a.id, recipientId: rid, title: gone ? "Withdrawn by the school" : a.title, excerpt: gone ? a.withdrawReason ?? "" : markdownToText(a.body, 160), type: a.type, number: a.number,
+            noticeId: a.id, recipientId: rid, title: a.title, excerpt: gone ? a.withdrawReason ?? "" : markdownToText(a.body, 160), type: a.type, number: a.number,
             urgent: a.type === "urgent", pinned: pin, categoryName: cat, categoryTone: tone, publishedAt: a.publishedAt, correctedAt: a.correctedAt, seen: !!seenAt, needsAnswer: needs, answered,
             dueAt: a.dueAt, responseKind: a.response.kind, withdrawn: gone, childName: studentId && (mine.get(a.id) ?? 0) > 1 ? child : null,
           };
@@ -104,14 +114,22 @@ export class FeedService extends NoticeBase {
       if (!n) throw new NotFoundError("Notice");
       if (!this.inSupport) {
         await tx.update(announcementRecipients).set({ seenAt: sql`coalesce(${announcementRecipients.seenAt}, now())` }).where(and(eq(announcementRecipients.announcementId, id), eq(announcementRecipients.userId, this.ctx.userId)));
-        await NotificationWriter.seen(tx, this.ctx.schoolId, subjectOf(id), this.ctx.userId);
+        await NotificationWriter.seen(tx, this.ctx.schoolId, subjectOf(id), this.ctx);
       }
-      const [[cat], files, answers, pref] = await Promise.all([
+      const studentIds = mine.flatMap((m) => (m.studentId ? [m.studentId] : []));
+      const [[cat], files, answers, pref, guardians] = await Promise.all([
         n.categoryId ? tx.select({ name: announcementCategories.name, tone: announcementCategories.tone }).from(announcementCategories).where(eq(announcementCategories.id, n.categoryId)) : Promise.resolve([]),
         tx.select().from(announcementFiles).where(eq(announcementFiles.announcementId, id)).orderBy(asc(announcementFiles.sort)),
         this.inSupport ? Promise.resolve([]) : tx.select().from(announcementResponses).where(sql`${announcementResponses.recipientId} in (${sql.join(mine.map((m) => sql`${m.id}`), sql`, `)})`),
         tx.execute(sql`select language from notification_prefs where user_id = ${this.ctx.userId}::uuid limit 1`),
+        this.inSupport || !studentIds.length ? Promise.resolve([]) : tx.execute(sql`select sg.student_id::text as student_id, g.name, g.relation from student_guardians sg join guardians g on g.id = sg.guardian_id
+          where sg.student_id in (${sql.join(studentIds.map((i) => sql`${i}::uuid`), sql`, `)}) order by sg.is_primary desc, g.name`),
       ]);
+      const guardianOf = new Map<string, { name: string; relation: Relation }>();
+      for (const g of [...guardians] as { student_id: string; name: string; relation: string }[]) {
+        const relation = RELATIONS.find((r) => r.toLowerCase() === g.relation.toLowerCase()) ?? "Guardian";
+        if (!guardianOf.has(g.student_id)) guardianOf.set(g.student_id, { name: g.name, relation });
+      }
       const gone = n.state === "withdrawn";
       const second = n.lang2 && n.title2 && n.body2 ? { lang: n.lang2, title: n.title2, body: n.body2 } : null;
       const main = { lang: null as string | null, title: n.title, body: n.body };
@@ -128,7 +146,7 @@ export class FeedService extends NoticeBase {
         response: n.response, dueAt: n.dueAt, answering: n.response.kind === "none" ? "none" : closed ? "closed" : locked ? "locked" : "open",
         recipients: mine.map((m) => {
           const a = byId.get(m.id);
-          return { recipientId: m.id, name: m.name, seenAt: m.seenAt, answer: a ? { answer: a.answer, byName: a.byName, byRelation: a.byRelation, onPaper: a.onPaper, at: a.updatedAt } : null };
+          return { recipientId: m.id, name: m.name, seenAt: m.seenAt, guardian: (m.studentId && guardianOf.get(m.studentId)) || null, answer: a ? { answer: a.answer, byName: a.byName, byRelation: a.byRelation, onPaper: a.onPaper, at: a.updatedAt } : null };
         }),
       };
     });

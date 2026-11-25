@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { shortDate } from "@smw/ui/format";
 import { REPORT_CATEGORIES } from "../constants";
 import { MessageService } from "../service";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 
 export const metadata = { title: "My concerns" };
 
 /** Concerns I reported, and where each stands. Only the state is shown, never what the school decided about a person. */
-export default async function ConcernsPage() {
-  const rows = await new MessageService(await requireCtx()).myReports();
+async function ConcernsPage() {
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const rows = await new MessageService(ctx).myReports();
   return (
     <>
       <PageHeader eyebrow="Messages" title="My concerns" description="What you reported, and where it stands."
@@ -29,3 +32,5 @@ export default async function ConcernsPage() {
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof ConcernsPage>) { return refusalOr(() => ConcernsPage(...a)); }

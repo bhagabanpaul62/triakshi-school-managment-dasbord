@@ -1,17 +1,19 @@
 // The school's safety side of messages: concerns, reviews with a typed reason, an append-only review log and restrictions.
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
-import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, refuseSupport, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { REPORT_STATE_WORDS, RESTRICTION_WORDS, REVIEW_HOURS, type ReportCategory, type ReportState, type RestrictionKind } from "./constants";
 import { conversationPdf } from "./conversation-pdf";
-import { hasActiveReview, isFamily, loadThread, noSupport, postSystem, type ThreadData } from "./core";
+import { hasActiveReview, isFamily, loadThread, postSystem, type ThreadData } from "./core";
 import messagesFeature from "./feature";
 import { findInput, handleReportInput, restrictInput, reviewInput } from "./inputs";
 import { hasOpenReport, isNamed, namedIn } from "./leads";
 import { messageRestrictions, messageReports, messageReviews, messageThreads, threadMembers } from "./schema";
 import { istDay } from "@smw/feature-kit/words";
+
+export const REVIEWED_LINE = "The school reviewed this conversation to check it is safe.";
 
 type Perm = keyof typeof messagesFeature.permissions;
 
@@ -31,7 +33,7 @@ export class SafeguardService extends SchoolService<Perm> {
   constructor(ctx: Ctx) { super(ctx); }
 
   protected authorize(permission: Perm, mode: "read" | "write") {
-    noSupport(this.ctx);
+    refuseSupport(this.ctx, "use safeguarding");
     super.authorize(permission, mode);
   }
 
@@ -139,7 +141,7 @@ export class SafeguardService extends SchoolService<Perm> {
       if (data.reportId) await tx.update(messageReports).set({ state: "reviewing", handledBy: this.ctx.userId, handledAt: new Date() }).where(and(eq(messageReports.id, data.reportId), eq(messageReports.state, "new"), eq(messageReports.threadId, thread.id)));
       // The standing banner already tells both sides. A line in the conversation is added only when no open report is behind the review, so it can never hint at one.
       if (!recent?.r && !(await hasOpenReport(tx, thread.id))) await this.tellBothSides(tx, thread.id);
-      return loadThread(tx, thread.id, { userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 500 });
+      return loadThread(tx, thread.id, { schoolId: this.ctx.schoolId, userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 500 });
     }, () => ({ action: "review", entity: "Conversation", entityId: data.threadId, summary: "Opened a conversation for review", meta: { aboutUserIds: named } }));
   }
 
@@ -152,7 +154,7 @@ export class SafeguardService extends SchoolService<Perm> {
   }
 
   private async tellBothSides(tx: Tx, threadId: string) {
-    await postSystem(tx, this.ctx.schoolId, threadId, "The school reviewed this conversation to check it is safe.");
+    await postSystem(tx, this.ctx.schoolId, threadId, REVIEWED_LINE);
     const members = await tx.select({ id: threadMembers.userId }).from(threadMembers).where(and(eq(threadMembers.threadId, threadId), eq(threadMembers.state, "active")));
     await NotificationWriter.insert(tx, this.ctx.schoolId, members.filter((m) => m.id && m.id !== this.ctx.userId).map((m) => ({
       userId: m.id!, topic: "work.update" as const, title: "The school reviewed a conversation you are in", body: "A safeguarding lead opened it to check it is safe.", href: `/app/messages?thread=${threadId}`, subject: { type: "thread", id: threadId },
@@ -164,7 +166,16 @@ export class SafeguardService extends SchoolService<Perm> {
     return this.read("safeguard", async (tx) => {
       const thread = await this.reviewable(tx, threadId);
       if (!(await hasActiveReview(tx, this.ctx.userId, thread.id))) return null;
-      return loadThread(tx, thread.id, { userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 500 });
+      return loadThread(tx, thread.id, { schoolId: this.ctx.schoolId, userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 500 });
+    });
+  }
+
+  /** Were both sides told? True once the "school reviewed" line is in the conversation; false while an open concern kept the review quiet. */
+  async told(threadId: string): Promise<boolean> {
+    return this.read("safeguard", async (tx) => {
+      const thread = await this.reviewable(tx, threadId);
+      const [r] = [...(await tx.execute(sql`select exists (select 1 from messages where thread_id = ${thread.id}::uuid and kind = 'system' and body = ${REVIEWED_LINE}) as t`))] as { t: boolean }[];
+      return !!r?.t;
     });
   }
 
@@ -177,7 +188,7 @@ export class SafeguardService extends SchoolService<Perm> {
       const thread = await this.reviewable(tx, data.threadId);
       named = await namedIn(tx, thread.id);
       await tx.insert(messageReviews).values({ schoolId: this.ctx.schoolId, threadId: thread.id, reportId: data.reportId ?? null, reviewerId: this.ctx.userId, reviewerName: this.ctx.name, reason: data.reason, action: "exported" });
-      const view = await loadThread(tx, thread.id, { userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 5000 });
+      const view = await loadThread(tx, thread.id, { schoolId: this.ctx.schoolId, userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 5000 });
       const [school] = [...(await tx.execute(sql`select name from schools limit 1`))] as { name: string }[];
       return { name: `conversation-${thread.id.slice(0, 8)}.pdf`, bytes: await conversationPdf(view, { school: school?.name ?? "School", exportedBy: this.ctx.name, reason: data.reason }) };
     }, () => ({ action: "export", entity: "Conversation", entityId: data.threadId, summary: "Exported a conversation for review", meta: { aboutUserIds: named } }));

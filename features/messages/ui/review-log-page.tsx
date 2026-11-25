@@ -1,16 +1,19 @@
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { dateTime } from "@smw/ui/format";
 import { SafeguardService } from "../safeguard";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 import { SafeguardNav } from "./safeguarding-page";
 
 export const metadata = { title: "Review log" };
 
 /** Every time somebody opened or exported a conversation they were not in. Nobody can edit or delete a line, not even an admin. */
-export default async function ReviewLogPage() {
-  const rows = await new SafeguardService(await requireCtx()).log();
+async function ReviewLogPage() {
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const rows = await new SafeguardService(ctx).log();
   return (
     <>
       <PageHeader eyebrow="Safeguarding" title="Review log" description="Who opened a conversation they were not in, when and why. It cannot be edited." />
@@ -36,3 +39,5 @@ export default async function ReviewLogPage() {
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof ReviewLogPage>) { return refusalOr(() => ReviewLogPage(...a)); }

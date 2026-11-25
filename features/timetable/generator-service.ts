@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, lte, ne, sql } from "drizzle-orm";
 import { ConflictError, NotFoundError, SchoolService, ValidationError, f, type Ctx } from "@smw/feature-kit";
 import { users, type Tx } from "@smw/db";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { z } from "zod";
 import { academicYears, classes, sectionTeachers, sections, subjects } from "@smw/feature-academics/schema";
 import { DAYS, istDate } from "./bell";
@@ -310,9 +311,7 @@ export class GeneratorService extends SchoolService<Perm> {
       where s.block_slot_id = o.id and o.version_id <> ${newId} and s.date >= ${today}::date returning s.cover_teacher_id as cover, s.date::text as date`);
     const gone = [...goneSlots, ...goneBlocks];
     if (!gone.length || !this.ctx.features.has("notifications")) return;
-    const ok = [...(await tx.execute<{ ok: boolean }>(sql`select to_regclass('notifications') is not null as ok`))][0]?.ok;
-    if (!ok) return;
-    for (const g of gone) await tx.execute(sql`insert into notifications (id, school_id, user_id, kind, title, body, href) values (gen_random_uuid(), ${this.ctx.schoolId}, ${g.cover}, 'system', 'Cover duty cancelled', ${`The timetable changed, so your cover on ${g.date} was removed.`}, '/app/timetable')`);
+    await NotificationWriter.insert(tx, this.ctx.schoolId, gone.map((g) => ({ userId: g.cover, topic: "work.cover" as const, subject: { type: "cover", id: `${g.cover}:${g.date}` }, title: "Cover duty cancelled", body: `The timetable changed, so your cover on ${g.date} was removed.`, href: "/app/timetable" })));
   }
 
   /** Throw a draft away. */

@@ -23,7 +23,8 @@ function Card({ n }: { n: FeedItem }) {
           {n.pinned && !n.needsAnswer ? <ToneBadge label="Pinned" tone="info" /> : null}
           <time dateTime={n.publishedAt?.toISOString()} className="ml-auto text-xs text-[var(--ds-on-surface-muted)]">{shortDate(n.publishedAt)}</time>
         </span>
-        <span className={`break-words text-base text-[var(--ds-on-surface)] ${n.seen ? "font-normal" : "font-medium"}`}>{n.title}</span>
+        <span className={`break-words text-base text-[var(--ds-on-surface)] ${n.seen ? "font-normal" : "font-medium"} ${n.withdrawn ? "line-through opacity-70" : ""}`}>{n.title}</span>
+        {n.withdrawn ? <span className="text-sm font-medium text-[var(--ds-color-warning-400)]">Withdrawn by the school</span> : null}
         {n.excerpt ? <span className="line-clamp-2 break-words text-sm text-[var(--ds-on-surface-variant)]">{n.excerpt}</span> : null}
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ds-on-surface-muted)]">
           {n.needsAnswer ? <span className="font-medium text-[var(--ds-color-warning-400)]">{n.dueAt ? `Answer by ${dateTime(n.dueAt)}` : "Needs your answer"}</span> : null}

@@ -55,3 +55,12 @@ export function readyErrors(c: NoticeContent, o: { languages: readonly string[];
 
 /** The answer asked of people, in a few words for lists. */
 export const RESPONSE_WORDS: Record<ResponseSpec["kind"], string> = { none: "", ack: "Confirm you have read it", consent: "Yes or no", poll: "Pick an option", form: "Fill a short form" };
+
+/** The button words on the family's card. The phone preview shows the same words. */
+export const ANSWER_SAVE = "Save my answer";
+export const ackButton = (urgent: boolean) => (urgent ? "I am safe" : "I have read this");
+export const answerButtons = (kind: ResponseSpec["kind"], urgent: boolean): string[] =>
+  kind === "none" ? [] : kind === "ack" ? [ackButton(urgent)] : kind === "consent" ? ["Yes", "No", ANSWER_SAVE] : [ANSWER_SAVE];
+
+/** A sentence with one full stop at the end, whatever the person typed ("Moved to Saturday." stays one). */
+export const stop = (s: string) => { const t = s.trim(); return /[.!?।]$/.test(t) ? t : `${t}.`; };

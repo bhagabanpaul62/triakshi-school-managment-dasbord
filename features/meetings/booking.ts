@@ -186,10 +186,23 @@ export class BookingService extends MeetingBase {
     if (!won) throw new ConflictError(TAKEN);
     await this.dropWait(tx, m.id, slot.teacherId, kid.id);
     if (kid.userId) {
-      await this.notices.booked(tx, m.id, kid.userId);
+      if (await this.familyFull(tx, m, kid.userId)) await this.notices.booked(tx, m.id, kid.userId);
       if (staff) await this.notices.changed(tx, m, [kid.userId], `A time was booked for ${kid.name}`, `${slot.teacherName}, ${when(slot.startsAt)}.`);
     }
     return slot;
+  }
+
+  /** Every invited child of this login holds as many times as the meeting lets them (or all their teachers): the "book a time" row has done its job. */
+  private async familyFull(tx: Tx, m: Meeting, userId: string): Promise<boolean> {
+    for (const f of (await this.families(tx, m)).filter((x) => x.userId === userId && x.studentId)) {
+      const ids = (await teachersOf(tx, f.studentId!)).map((t) => t.teacherId);
+      if (!ids.length) continue;
+      const [w] = await rows<{ teachers: number; held: number }>(tx, sql`select
+        (select count(distinct teacher_id)::int from meeting_windows where meeting_id = ${m.id}::uuid and teacher_id in (${idList(ids)})) as teachers,
+        (select count(*)::int from meeting_slots where meeting_id = ${m.id}::uuid and state = 'booked' and student_id = ${f.studentId}::uuid) as held`);
+      if (w!.held < Math.min(m.perFamily, w!.teachers)) return false;
+    }
+    return true;
   }
 
   private async ownSlot(tx: Tx, m: Meeting, kid: Kid, slotId: string) {

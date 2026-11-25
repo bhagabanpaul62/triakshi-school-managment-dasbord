@@ -50,7 +50,7 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
         tx.select().from(finApprovals).where(where).orderBy(desc(finApprovals.createdAt)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: sql<number>`count(*)::int` }).from(finApprovals).where(where),
       ]);
-      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) if (r.status === "pending") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: r.id }, this.ctx.userId);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) if (r.status === "pending") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: r.id }, this.ctx);
       const ids = [...new Set(rows.flatMap((r) => [r.requestedBy, r.decidedBy]).filter((x): x is string => !!x))];
       const names = new Map(ids.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))).map((u) => [u.id, u.name]) : []);
       return toPage(rows.map((r) => ({ ...r, requestedByName: names.get(r.requestedBy) ?? null, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null })), Number(n?.n ?? 0), q);
@@ -61,7 +61,7 @@ export class ApprovalService extends SchoolService<keyof typeof financeFeature.p
   async mine(): Promise<(Approval & { decidedByName: string | null })[]> {
     return withSchool(this.ctx.schoolId, async (tx) => {
       const rows = await tx.select().from(finApprovals).where(eq(finApprovals.requestedBy, this.ctx.userId)).orderBy(desc(finApprovals.createdAt)).limit(100);
-      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) if (r.status !== "pending") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: r.id }, this.ctx.userId);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const r of rows) if (r.status !== "pending") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: r.id }, this.ctx);
       const ids = [...new Set(rows.flatMap((r) => r.decidedBy ?? []))];
       const names = new Map(ids.length ? (await tx.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))).map((u) => [u.id, u.name]) : []);
       return rows.map((r) => ({ ...r, decidedByName: r.decidedBy ? names.get(r.decidedBy) ?? null : null }));

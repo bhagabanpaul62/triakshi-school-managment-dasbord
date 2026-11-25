@@ -101,7 +101,7 @@ export class ReportService extends NoticeBase {
     for (const s of sent) last.set(`${s.userId}:${s.channel}`, { state: s.state, reason: s.reason });
     return found.map(({ r, a, reached }): PersonRow => ({
       recipientId: r.id, name: r.name, label: r.label, sectionId: r.sectionId, hasLogin: !!r.userId, joinedLate: r.joinedLate, reached: !!reached,
-      seenAt: !showSeen && !r.studentId ? null : r.seenAt, answer: a?.answer ?? null, answerText: answerText(a?.answer), onPaper: !!a?.onPaper, hasSlip: !!a?.fileKey,
+      seenAt: !showSeen && !r.studentId ? null : r.seenAt, answer: a?.answer ?? null, answerText: answerText(a?.answer, n.type === "urgent"), onPaper: !!a?.onPaper, hasSlip: !!a?.fileKey,
       byName: a?.byName ?? null, byRelation: a?.byRelation ?? null, answeredAt: a?.updatedAt ?? null,
       channels: { push: (r.userId && last.get(`${r.userId}:push`)) || null, email: (r.userId && last.get(`${r.userId}:email`)) || null },
     }));

@@ -286,7 +286,7 @@ export class StudentAttendanceService extends AttendanceBase {
         tx.select({ classId: students.classId }).from(students).where(eq(students.id, studentId)).limit(1),
       ]);
       // Opening the month reads the alerts for its absent and late days, for this viewer only.
-      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const m of marks) if (m.status === "absent" || m.status === "late") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "attendance", id: `${studentId}:${m.date}` }, this.ctx.userId);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) for (const m of marks) if (m.status === "absent" || m.status === "late") await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "attendance", id: `${studentId}:${m.date}` }, this.ctx);
       const closed = await closedDays(tx, days[0]!, days.at(-1)!, { classId: kid?.classId ?? null });
       const looks = days.map((date) => ({ date, ...dayLook(closed, date) }));
       return {

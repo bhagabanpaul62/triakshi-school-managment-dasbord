@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { NotFoundError } from "@smw/feature-kit";
 import { AudienceService } from "@smw/feature-notifications/audience";
 import { EVERYONE } from "@smw/feature-notifications/audience-rules";
@@ -10,7 +11,7 @@ import { EventService } from "../service";
 import { EventForm, type FormInitial } from "./event-form";
 
 /** New event (no id) or change an event. Defaults: tomorrow at 10:00 for an hour, for the author's own sections (or everyone, for the office). */
-export default async function EventFormPage({ params }: { params?: Promise<{ id: string }> }) {
+async function EventFormPage({ params }: { params?: Promise<{ id: string }> }) {
   const id = params ? (await params).id : undefined;
   const ctx = await requireCtx();
   const svc = new EventService(ctx);
@@ -49,3 +50,5 @@ export default async function EventFormPage({ params }: { params?: Promise<{ id:
     </>
   );
 }
+
+export default function Page(props: Parameters<typeof EventFormPage>[0]) { return refusalOr(() => EventFormPage(props)); }

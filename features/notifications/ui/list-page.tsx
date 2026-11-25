@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { shortDate } from "@smw/ui/format";
@@ -14,7 +15,7 @@ export const metadata = { title: "Notifications" };
 
 const pill = (active: boolean) => `inline-flex h-10 items-center rounded-full px-4 text-sm ${active ? "bg-white/[0.1] text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)] hover:bg-white/[0.04]"}`;
 
-export default async function NotificationsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+async function NotificationsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const svc = new NotificationService(await requireCtx());
   const sp = await searchParams;
   const pulse = await svc.pulse();
@@ -79,3 +80,5 @@ export default async function NotificationsPage({ searchParams }: { searchParams
     </>
   );
 }
+
+export default function Page(props: Parameters<typeof NotificationsPage>[0]) { return refusalOr(() => NotificationsPage(props)); }

@@ -166,7 +166,7 @@ export class BookService extends CrudService<typeof books, Perm> {
   async detail(id: string) {
     return this.read("read", async (tx) => {
       const book = await this.findOrThrow(tx, id);
-      if (!this.ctx.readOnly && !this.ctx.supportStaffId) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "book", id }, this.ctx.userId);
+      if (!this.ctx.readOnly && !this.ctx.supportStaffId) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "book", id }, this.ctx);
       const rows = await tx.select({
         copy: bookCopies, loanId: loans.id, dueOn: loans.dueOn, waived: loans.fineWaived, borrowerKind: loans.borrowerKind, studentName: students.name, userName: users.name,
       }).from(bookCopies)
@@ -280,7 +280,7 @@ export class LoanService extends SchoolService<Perm> {
   /** Opening a member's loans reads this person's overdue notices for the loans still out (not in a read-only school or a support session). */
   private async seenLoans(tx: Tx, rows: LoanRow[]) {
     if (!(!this.ctx.readOnly && !this.ctx.supportStaffId)) return;
-    for (const r of rows) if (!r.returnedOn) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "loan", id: r.id }, this.ctx.userId);
+    for (const r of rows) if (!r.returnedOn) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "loan", id: r.id }, this.ctx);
   }
 
   /** Everything one member has borrowed. Give a studentId or a staff userId. */

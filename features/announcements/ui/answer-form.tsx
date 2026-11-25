@@ -9,6 +9,7 @@ import { toast } from "@smw/ui/shell/toast";
 import { cn } from "@smw/ui/utils";
 import { answerText } from "../answer-text";
 import { RELATIONS, type Answer, type ResponseSpec } from "../constants";
+import { ackButton, ANSWER_SAVE } from "../content";
 import { recordPaperAnswer, respondNotice } from "./actions";
 
 const BY_KEY = "smw-notice-answered-by";
@@ -113,10 +114,12 @@ function useRememberedBy() {
 export interface AnswerCardProps {
   noticeId: string; recipientId: string; childName: string | null; spec: ResponseSpec; urgent: boolean;
   dueAt: string | null; answering: "open" | "locked" | "closed"; given: Given | null; showChild: boolean;
+  /** The child's guardian on the student record, used to answer without asking when this device has no name yet. */
+  guardian?: { name: string; relation: string } | null;
 }
 
 /** One child's answer: the form first, a clear "Saved", and the way to change it until the last date. */
-export function AnswerCard({ noticeId, recipientId, childName, spec, urgent, dueAt, answering, given, showChild }: AnswerCardProps) {
+export function AnswerCard({ noticeId, recipientId, childName, spec, urgent, dueAt, answering, given, showChild, guardian }: AnswerCardProps) {
   const router = useRouter();
   const [now, setNow] = useState<Given | null>(given);
   const [editing, setEditing] = useState(!given);
@@ -124,39 +127,71 @@ export function AnswerCard({ noticeId, recipientId, childName, spec, urgent, due
   const { by, setBy, remember } = useRememberedBy();
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const name = by.name || (given?.byName ?? ""), relation = by.relation || (given?.byRelation ?? "");
+  const quick = urgent && spec.kind === "ack";
+  const name = by.name || (given?.byName ?? "") || (quick ? guardian?.name ?? "" : ""), relation = by.relation || (given?.byRelation ?? "") || (quick ? guardian?.relation ?? "" : "");
   const until = dueAt ? `until ${dateTime(dueAt)}` : "any time";
 
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const answer = toAnswer(spec, draft);
-    if (!answer) { setErrors({ answer: "Choose your answer first" }); return; }
+  /** Paint "Saved" at once; the server confirms, and a refusal puts the form back with what was typed. */
+  const send = async (answer: Answer, fd: FormData) => {
     const before = now;
-    const fd = new FormData(e.currentTarget);
-    fd.set("payload", JSON.stringify({ noticeId, recipientId, answer, byName: name.trim(), byRelation: relation }));
+    fd.set("payload", JSON.stringify({ noticeId, recipientId, answer, byName: name.trim() || undefined, byRelation: relation || undefined }));
     setBusy(true); setErrors({});
-    // Paint "Saved" at once; the server confirms, and a refusal puts the form back with what was typed.
     setNow({ answer, byName: name.trim(), byRelation: relation, onPaper: false, at: new Date().toISOString() }); setEditing(false);
     const r = await respondNotice(fd).catch(() => null);
     setBusy(false);
-    if (r?.ok) { remember({ name: name.trim(), relation }); router.refresh(); return; }
+    if (r?.ok) { if (name.trim() && relation) remember({ name: name.trim(), relation }); router.refresh(); return; }
     setNow(before); setEditing(true);
     setErrors(r && !r.ok ? r.fieldErrors ?? {} : {});
     toast(r && !r.ok ? r.error : "No connection. Your answer was not saved. Try again.", "danger");
   };
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const answer = toAnswer(spec, draft);
+    if (!answer) { setErrors({ answer: "Choose your answer first" }); return; }
+    await send(answer, new FormData(e.currentTarget));
+  };
+  /** After "I am safe" was saved without a name: the adult says who answered. */
+  const saveWho = async () => {
+    if (!now) return;
+    const fd = new FormData();
+    fd.set("payload", JSON.stringify({ noticeId, recipientId, answer: now.answer, byName: name.trim(), byRelation: relation || undefined }));
+    setBusy(true); setErrors({});
+    const r = await respondNotice(fd).catch(() => null);
+    setBusy(false);
+    if (r?.ok) { setNow({ ...now, byName: name.trim(), byRelation: relation }); remember({ name: name.trim(), relation }); router.refresh(); return; }
+    setErrors(r && !r.ok ? r.fieldErrors ?? {} : {});
+    toast(r && !r.ok ? r.error : "No connection. Your name was not saved. Try again.", "danger");
+  };
 
+  const shown = (a: Answer) => (quick && a.kind === "ack" ? "Safe, received" : answerText(a));
   const heading = showChild && childName ? <h3 className="text-sm font-medium text-[var(--ds-on-surface)]">For {childName}</h3> : null;
   let body: ReactNode;
   if (answering !== "open") {
     body = now
-      ? <p className="text-sm text-[var(--ds-on-surface-variant)]">Your answer: <span className="font-medium text-[var(--ds-on-surface)]">{answerText(now.answer) || "Saved"}</span>. {answering === "locked" ? `The last date has passed, so answers are locked${dueAt ? ` (${dateTime(dueAt)})` : ""}.` : "This notice is closed."}</p>
+      ? <p className="text-sm text-[var(--ds-on-surface-variant)]">Your answer: <span className="font-medium text-[var(--ds-on-surface)]">{shown(now.answer) || "Saved"}</span>. {answering === "locked" ? `The last date has passed, so answers are locked${dueAt ? ` (${dateTime(dueAt)})` : ""}.` : "This notice is closed."}</p>
       : <p className="text-sm text-[var(--ds-on-surface-variant)]">{answering === "locked" ? "The last date has passed and no answer was saved. Ask the school office if you still need to answer." : "This notice is closed, so it cannot be answered."}</p>;
   } else if (!editing && now) {
+    const who = now.byName ? ` · ${now.byName}, ${now.byRelation}` : "";
     body = (
       <div className="flex flex-col gap-2">
-        <p role="status" className="text-sm font-medium text-[var(--ds-color-success-400)]">Saved. You can change this {until}.</p>
-        <p className="text-sm text-[var(--ds-on-surface-variant)]">{answerText(now.answer)}{now.onPaper ? " (written down from paper)" : ""} · {now.byName}, {now.byRelation}, {dateTime(now.at)}</p>
-        <button type="button" className={`${PILL_BTN} self-start`} onClick={() => { setDraft(blank(now.answer)); setEditing(true); }}>Change my answer</button>
+        <p role="status" className="text-sm font-medium text-[var(--ds-color-success-400)]">{quick ? "Safe, received. Thank you." : `Saved. You can change this ${until}.`}</p>
+        <p className="text-sm text-[var(--ds-on-surface-variant)]">{shown(now.answer)}{now.onPaper ? " (written down from paper)" : ""}{who} · {dateTime(now.at)}</p>
+        {quick && !now.byName ? (
+          <div className="flex flex-col gap-3 pt-1">
+            <p className="text-sm text-[var(--ds-on-surface)]">Who is answering? The school sees this next to your child's name.</p>
+            <ByFields name={name} relation={relation} onName={(v) => setBy({ name: v, relation })} onRelation={(v) => setBy({ name, relation: v })} errors={errors} />
+            <button type="button" disabled={busy} onClick={saveWho} className={`${PRIMARY_BTN} self-start`}>Save my name</button>
+          </div>
+        ) : null}
+        {quick ? null : <button type="button" className={`${PILL_BTN} self-start`} onClick={() => { setDraft(blank(now.answer)); setEditing(true); }}>Change my answer</button>}
+      </div>
+    );
+  } else if (quick) {
+    // One tap, nothing to fill in first. A name already known (this device, the student record) goes with it; if none is, it is asked after.
+    body = (
+      <div className="flex flex-col gap-2">
+        <p className="text-sm text-[var(--ds-on-surface-variant)]">Press the button to tell the school you are safe and have received this.</p>
+        <button type="button" disabled={busy} onClick={() => void send({ kind: "ack" }, new FormData())} className={`${PRIMARY_BTN} min-h-14 self-start px-8 text-base`}>{ackButton(true)}</button>
       </div>
     );
   } else {
@@ -166,7 +201,7 @@ export function AnswerCard({ noticeId, recipientId, childName, spec, urgent, due
         {errors.answer ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{errors.answer}</p> : null}
         <ByFields name={name} relation={relation} onName={(v) => setBy({ name: v, relation })} onRelation={(v) => setBy({ name, relation: v })} errors={errors} />
         <div className="flex flex-wrap items-center gap-2">
-          <button type="submit" disabled={busy} className={PRIMARY_BTN}>{spec.kind === "ack" ? (urgent ? "I am safe, received" : "I have read this") : "Save my answer"}</button>
+          <button type="submit" disabled={busy} className={PRIMARY_BTN}>{spec.kind === "ack" ? ackButton(urgent) : ANSWER_SAVE}</button>
           {now ? <button type="button" className={PILL_BTN} onClick={() => setEditing(false)}>Keep my old answer</button> : null}
           <p className="text-xs text-[var(--ds-on-surface-muted)]">You can change it {until}.</p>
         </div>

@@ -11,3 +11,13 @@ export function UnreadFallback({ title, text, href, label }: { title: string; te
     </div>
   );
 }
+
+/** Support staff work inside a school's account but never inside its private talk. One page for every screen that would show it. */
+export function NoSupport() {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+      <p className="text-base font-medium text-[var(--ds-on-surface)]">Private conversations are not available in a support session.</p>
+      <Link href="/app" className={PILL_BTN}>Home</Link>
+    </div>
+  );
+}

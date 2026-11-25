@@ -225,7 +225,7 @@ describe("limits (M14, acceptance 16)", () => {
 
   it("a family may start 10 conversations a day, staff 60, and the refusal says when to try again", async () => {
     for (let i = 0; i < 10; i++) await svc(w.student4).start(about(w.st5, { recipientIds: [w.own.userId], subject: `Question ${i}` }));
-    await expect(svc(w.student4).start(about(w.st5, { recipientIds: [w.own.userId], subject: "Question 11" }))).rejects.toMatchObject({ fieldErrors: { body: expect.stringMatching(/Try again at/) } });
+    await expect(svc(w.student4).start(about(w.st5, { recipientIds: [w.own.userId], subject: "Question 11" }))).rejects.toMatchObject({ fieldErrors: { body: expect.stringMatching(/You can start a new one (today|tomorrow) at \d/) } });
     const busy = await addUser(w.a, "staff", "sixty", ["messages:use"]);
     for (let i = 0; i < 60; i++) {
       if (i % 15 === 14) await migrateDb().execute(sql`update messages set created_at = created_at - interval '90 seconds'`); // 20 messages a minute is a separate limit
@@ -352,7 +352,7 @@ describe("sending: client id, quiet hours, away, files, removal (M6, M8, M9, M17
     expect(m.deliverAfter?.toISOString()).toBe("2026-12-03T01:30:00.000Z"); // 7:00 IST
     const view = await svc(w.own).thread(id);
     expect(view.holdUntil?.toISOString()).toBe("2026-12-03T01:30:00.000Z");
-    expect(view.notice).toMatch(/Will be delivered at 7:00 am/);
+    expect(view.notice).toMatch(/Will be delivered (today|tomorrow|[A-Z][a-z]{2} \d+ [A-Z][a-z]{2}) 7:00 am/);
     const rows = await sql_((tx) => tx.select({ at: commDeliveries.nextAt }).from(commDeliveries).innerJoin(notifications, eq(notifications.id, commDeliveries.notificationId))
       .where(and(eq(notifications.userId, w.a.as.student.userId), eq(notifications.subjectId, id))));
     expect(rows.length).toBeGreaterThan(0);
@@ -414,7 +414,7 @@ describe("sending: client id, quiet hours, away, files, removal (M6, M8, M9, M17
     await migrateDb().execute(sql`update messages set created_at = now() - interval '11 minutes' where id = ${late.id}::uuid`);
     await expect(svc(w.own).remove(late.id)).rejects.toMatchObject({ message: expect.stringContaining("10 minutes") });
     const held = await svc(w.own).send(id, "reported soon");
-    await svc(w.a.as.student).report({ threadId: id, category: "other", note: "Looks wrong to me." });
+    await svc(w.a.as.student).report({ threadId: id, category: "other", note: "Looks wrong to me.", unsure: true });
     // the person named is told nothing about a report; the reporter is told why
     await expect(svc(w.own).remove(held.id)).rejects.toMatchObject({ message: "This message cannot be removed now." });
     const mine = await svc(w.a.as.student).send(id, "my own words");

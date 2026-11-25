@@ -8,6 +8,7 @@ import { FilesField } from "@smw/ui/comm/FilesField";
 import { PRIMARY_BTN } from "@smw/ui/finance/ui";
 import { toast } from "@smw/ui/shell/toast";
 import type { FormResult } from "@smw/ui/shell/FormModal";
+import { useFormErrors } from "@smw/feature-messages/ui/form-errors";
 import type { RequestField } from "../constants";
 
 interface Category { id: string; name: string; nature: string; fields: RequestField[] }
@@ -27,31 +28,30 @@ export function AskForm({ categories, child, office, link, defaultCategory, init
   const router = useRouter();
   const [pending, start] = useTransition();
   const [catId, setCatId] = useState(categories.find((c) => c.id === defaultCategory)?.id ?? "");
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
   const [picked, setPicked] = useState(child);
   const [people, setPeople] = useState<Person[]>(initialPeople);
   const [found, setFound] = useState<{ id: string; name: string; admissionNo: string }[]>([]);
   const cat = categories.find((c) => c.id === catId);
+  const { errors, fail, reset, clear, onChange, note } = useFormErrors(["categoryId", "studentId", "subject", "details", "values.*"], (n) => (n.startsWith("v_") ? `values.${n.slice(2)}` : n));
 
   const search = async (q: string) => { if (q.trim().length < 2) return setFound([]); const r = await students(q); setFound(r.ok ? r.data : []); };
-  const choose = async (s: { id: string; name: string }) => { setPicked(s); setFound([]); const r = await context(s.id); setPeople(r.ok ? r.data.people : []); };
+  const choose = async (s: { id: string; name: string }) => { clear("studentId"); setPicked(s); setFound([]); const r = await context(s.id); setPeople(r.ok ? r.data.people : []); };
 
   const submit = (fd: FormData) => start(async () => {
-    setMessage(""); setErrors({});
+    reset();
     if (picked) fd.set("studentId", picked.id);
     const r = await action(fd);
     if (r.ok) { toast("Sent. We will reply here."); router.push(`/app/requests/${(r.data as { id: string }).id}`); return; }
-    setErrors(r.fieldErrors ?? {}); setMessage(r.error);
+    fail(r);
   });
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); submit(new FormData(e.currentTarget)); }} className="mx-auto flex max-w-2xl flex-col gap-6 pb-24" noValidate>
+    <form onChange={onChange} onSubmit={(e) => { e.preventDefault(); submit(new FormData(e.currentTarget)); }} className="mx-auto flex max-w-2xl flex-col gap-6 pb-24" noValidate>
       <fieldset className="flex flex-col gap-2">
         <legend className={label}>What is it about?</legend>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Category">
           {categories.map((c) => (
-            <button key={c.id} type="button" role="radio" aria-checked={c.id === catId} onClick={() => setCatId(c.id)}
+            <button key={c.id} type="button" role="radio" aria-checked={c.id === catId} onClick={() => { setCatId(c.id); clear("categoryId"); }}
               className={cn("min-h-11 rounded-full px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]", c.id === catId ? "bg-[var(--ds-on-surface)] font-medium text-[var(--ds-surface)]" : "bg-white/[0.06] text-[var(--ds-on-surface-variant)] hover:bg-white/[0.1]")}>{c.name}</button>
           ))}
         </div>
@@ -102,7 +102,7 @@ export function AskForm({ categories, child, office, link, defaultCategory, init
           <FilesField accept={["application/pdf", "image/*"]} maxCount={5} maxMb={15} label="Photos or PDFs (optional)" />
 
           {cat.nature === "safety" ? <p className="rounded-2xl bg-white/[0.05] p-3 text-sm">This goes straight to the people at school who look after safety. If a child is in danger right now, please also call the helpline or the police.</p> : null}
-          {message && !Object.keys(errors).length ? <p role="alert" className={err}>{message}</p> : null}
+          {note}
           <div className="sticky bottom-3 flex justify-end"><button type="submit" disabled={pending} className={cn(PRIMARY_BTN, "shadow-lg")}>{pending ? "Sending…" : "Send to the school"}</button></div>
         </>
       ) : <p className="text-sm text-[var(--ds-on-surface-muted)]">Choose a category above to continue.</p>}

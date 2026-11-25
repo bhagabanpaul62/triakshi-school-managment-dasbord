@@ -59,7 +59,7 @@ export class InvoiceService extends FeesBase {
       if (!inv) throw new NotFoundError("Invoice");
       this.assertVisible(own, inv.studentId, "Invoice");
       if (own && inv.status === "draft") throw new NotFoundError("Invoice");
-      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "invoice", id }, this.ctx.userId);
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "invoice", id }, this.ctx);
       const today = todayIST();
       const [notes, allocations, versions, student] = await Promise.all([
         tx.select().from(feeNotes).where(eq(feeNotes.invoiceId, id)).orderBy(asc(feeNotes.createdAt)),

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { SavedViews } from "@smw/ui/comm/SavedViews";
@@ -8,7 +9,7 @@ import { INPUT } from "@smw/ui/shell/FormModal";
 import { cn } from "@smw/ui/utils";
 import { REPORT_CATEGORIES } from "../constants";
 import { SafeguardService } from "../safeguard";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 import { PILL_BTN } from "./styles";
 
 export const metadata = { title: "Safeguarding" };
@@ -23,8 +24,10 @@ export function SafeguardNav({ here }: { here: string }) {
   );
 }
 
-export default async function SafeguardingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const svc = new SafeguardService(await requireCtx());
+async function SafeguardingPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const svc = new SafeguardService(ctx);
   const sp = await searchParams;
   const view = sp.view === "all" ? "all" : "open";
   const q = typeof sp.q === "string" ? sp.q.trim() : "", day = typeof sp.day === "string" ? sp.day : "";
@@ -79,3 +82,5 @@ export default async function SafeguardingPage({ searchParams }: { searchParams:
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof SafeguardingPage>) { return refusalOr(() => SafeguardingPage(...a)); }

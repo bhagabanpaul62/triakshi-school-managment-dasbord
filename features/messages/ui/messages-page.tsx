@@ -3,9 +3,9 @@ import { MenuLink, MoreMenu } from "@smw/ui/shell/MoreMenu";
 import { IconBellOff, IconPin } from "@tabler/icons-react";
 import { NotFoundError, ForbiddenError } from "@smw/feature-kit";
 import { CommSettingsService } from "@smw/feature-notifications/settings";
-import { NotificationService } from "@smw/feature-notifications/service";
 import { LivePulse } from "@smw/feature-notifications/ui/live-pulse";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { SavedViews } from "@smw/ui/comm/SavedViews";
@@ -17,7 +17,7 @@ import { cn } from "@smw/ui/utils";
 import { INPUT } from "@smw/ui/shell/FormModal";
 import { isFamily } from "../core";
 import { MessageService, type InboxQuery, type InboxThread } from "../service";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 import { ThreadPane } from "./thread-pane";
 
 export const metadata = { title: "Messages" };
@@ -50,8 +50,9 @@ function Row({ t, selected, href }: { t: InboxThread; selected: boolean; href: s
   );
 }
 
-export default async function MessagesPage({ searchParams }: { searchParams: Promise<Params> }) {
+async function MessagesPage({ searchParams }: { searchParams: Promise<Params> }) {
   const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
   const svc = new MessageService(ctx);
   const sp = await searchParams;
   const thread = one(sp.thread) ?? one(sp.t);
@@ -65,9 +66,8 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
   if (thread) {
     try { open = await svc.thread(thread, { before: one(sp.before) }); } catch (e) { if (e instanceof NotFoundError || e instanceof ForbiddenError) missing = true; else throw e; }
   }
-  const [inbox, kids, rules, replies, pulse, settings] = await Promise.all([
+  const [inbox, kids, rules, replies, settings] = await Promise.all([
     svc.inbox(query), staff ? svc.inboxStudents() : Promise.resolve([]), svc.startRules(), open && staff ? svc.savedReplies() : Promise.resolve([]),
-    ctx.features.has("notifications") ? new NotificationService(ctx).pulse() : Promise.resolve({ bell: 0 }),
     ctx.features.has("notifications") ? new CommSettingsService(ctx).get() : Promise.resolve(null),
   ]);
   const teachers = open && svc.can("manage") && open.thread.state === "closed" && one(sp.move) ? await svc.teacherChoices() : [];
@@ -83,7 +83,8 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      {ctx.features.has("notifications") ? <LivePulse fast={!!open} bell={pulse.bell} messages={inbox.unread} requests={0} /> : null}
+      {/* An open conversation is re-read every few seconds, so a new message, an away note or a delivery shows without a reload. The numbers come from the panel's own pulse. */}
+      {ctx.features.has("notifications") && open ? <LivePulse fast watch={[open.messages.at(-1)?.id, open.notice, open.block?.reason, open.thread.state].join("|")} /> : null}
       <PageHeader eyebrow="Communication" title="Messages" description={staff ? "Private conversations with families and colleagues. The school can review a conversation for safety." : "Private conversations with your child's teachers and the school office."}
         actions={<>
           {staff ? <MoreMenu><MenuLink href="/app/messages/families">Message families</MenuLink><MenuLink href="/app/messages/hours">My hours</MenuLink></MoreMenu> : null}
@@ -119,13 +120,14 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
               {query.cursor ? <Link href={link({ thread: thread ?? undefined })} className={PILL_BTN}>Back to newest</Link> : <span />}
               {inbox.next ? <Link href={link({ cursor: inbox.next, thread: thread ?? undefined })} className={PILL_BTN}>Older conversations</Link> : null}
             </nav>
+            <p className="px-2 pb-2 text-xs"><Link href="/app/messages/concerns" className="text-[var(--ds-on-surface-muted)] underline underline-offset-4 hover:text-[var(--ds-on-surface)]">My concerns</Link></p>
           </div>
         </Panel>
 
         <Panel className={cn("min-h-[60dvh] lg:min-h-0", open || missing ? "flex" : "hidden lg:flex")} bodyClassName="flex min-h-0 flex-1 flex-col">
           {open ? (
             <ThreadPane
-              id={open.thread.id} subject={open.thread.subject} studentName={open.thread.studentName} reviewBanner={open.reviewBanner} firstWrite={open.firstWrite}
+              id={open.thread.id} subject={open.thread.subject} studentId={open.thread.studentId} studentName={open.thread.studentName} reviewBanner={open.reviewBanner} firstWrite={open.firstWrite}
               people={open.members.filter((m) => m.state === "active").map((m) => ({ userId: m.userId, name: m.name, role: m.role, mine: m.mine }))}
               messages={open.messages.map((m) => ({
                 id: m.id, kind: m.kind, sender: m.sender, mine: m.mine, body: m.body, at: m.at.toISOString(), deliverAfter: m.deliverAfter?.toISOString() ?? null, removed: m.removed, removedByName: m.removedByName,
@@ -145,3 +147,5 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof MessagesPage>) { return refusalOr(() => MessagesPage(...a)); }

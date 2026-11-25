@@ -1,14 +1,14 @@
 // "Message families": one private conversation per family, tied together by a batch the sender follows on one page.
 import { desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, refuseSupport, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { audienceField, type Audience } from "@smw/feature-notifications/audience-rules";
 import { audienceOptions, audiencePreview, describeAudience, resolveAudience, type AudienceOptions, type AudiencePreview } from "@smw/feature-notifications/audience";
 import { AudiencePolicy } from "@smw/feature-notifications/policy";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { MAX_FAMILIES } from "./constants";
 import { Starters } from "./contact-rules";
-import { createThread, isFamily, noSupport, postMessage } from "./core";
+import { createThread, isFamily, postMessage } from "./core";
 import messagesFeature from "./feature";
 import { batchInput } from "./inputs";
 import { messageBatches } from "./schema";
@@ -27,7 +27,7 @@ export class BatchService extends SchoolService<Perm> {
   constructor(ctx: Ctx) { super(ctx); }
 
   protected authorize(permission: Perm, mode: "read" | "write") {
-    noSupport(this.ctx);
+    refuseSupport(this.ctx, "message families");
     if (isFamily(this.ctx.role)) throw new ForbiddenError();
     super.authorize(permission, mode);
   }

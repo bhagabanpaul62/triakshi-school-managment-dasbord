@@ -23,8 +23,12 @@ export async function GET(req: Request) {
   const school = await getSchool();
   const { token, group, bad } = read(req);
   if (!token || bad) return page("This link does not work", `<p>It may be too old or cut short. Open the email again and use the link at the bottom, or ask the school office.</p>`, 400);
+  const info = await PreferenceService.unsubscribeInfo(school.id, token);
+  if (!info) return page("This link does not work", `<p>It may be too old. Ask the school office for help.</p>`, 400);
   const what = group ? `emails about ${TOPIC_GROUPS[group].toLowerCase()}` : "emails that you are allowed to turn off";
-  return page(`Stop ${escapeHtml(what)}?`, `<p>${escapeHtml(school.name)} will stop sending you ${escapeHtml(what)}. You will still see everything in the app, and urgent safety and account emails still reach you.</p>` +
+  const own = `Emails about ${info.person}'s ${group ? TOPIC_GROUPS[group].toLowerCase() : "notices"}${info.email ? ` to ${info.email}` : ""} stop.`;
+  const others = info.others.length ? `<p>Other children with the same address are not changed. To stop emails for them too:</p><ul>${info.others.map((o) => `<li><a href="?${new URLSearchParams({ t: o.token, ...(group ? { g: group } : {}) })}">${escapeHtml(o.name)}</a></li>`).join("")}</ul>` : `<p>Other children with the same address are not changed.</p>`;
+  return page(`Stop ${escapeHtml(what)}?`, `<p>${escapeHtml(own)} ${escapeHtml(school.name)} will stop sending them. You will still see everything in the app, and urgent safety and account emails still reach you.</p>${others}` +
     `<form method="post"><button type="submit" style="${btn}">Stop these emails</button></form><p style="color:#666;font-size:14px">You can turn them back on any time in your notification settings.</p>`);
 }
 

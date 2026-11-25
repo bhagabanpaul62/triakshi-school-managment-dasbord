@@ -2,7 +2,7 @@
 import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
-import { allows, ConflictError, ForbiddenError, NotFoundError, SchoolService, type Ctx } from "@smw/feature-kit";
+import { allows, ConflictError, ForbiddenError, NotFoundError, refuseSupport, SchoolService, type Ctx } from "@smw/feature-kit";
 import { addMember, postMessage, postSystem, removeStored, storeFiles, type Message, type UploadedFile } from "@smw/feature-messages/core";
 import { threadMembers } from "@smw/feature-messages/schema";
 import { notifications } from "@smw/feature-notifications/schema";
@@ -26,7 +26,7 @@ export abstract class RequestBase extends SchoolService<Perm> {
 
   /** Triakshi support sees nothing of requests. A custom role with only the office grant may use the screens too. */
   protected authorize(permission: Perm, mode: "read" | "write") {
-    if (this.ctx.supportStaffId) throw new ForbiddenError("Requests are not available in a support session.");
+    refuseSupport(this.ctx, "use requests");
     super.authorize(permission === "use" && allows(this.ctx, this.feature, "office") ? "office" : permission, mode);
   }
 

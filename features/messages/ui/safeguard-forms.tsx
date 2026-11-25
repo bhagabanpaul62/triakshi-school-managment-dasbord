@@ -6,6 +6,7 @@ import { INPUT, keepValues } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { cn } from "@smw/ui/utils";
 import { REPORT_STATE_WORDS, RESTRICTION_WORDS } from "../constants";
+import { useFormErrors } from "./form-errors";
 import { handleReport, liftRestriction, openReview, restrictPerson, searchPeople } from "./actions";
 import { PILL_BTN, PRIMARY_BTN } from "./styles";
 
@@ -14,15 +15,17 @@ const fail = (e: string) => <p role="alert" className="text-xs text-[var(--ds-co
 
 /** Opening a conversation you are not in needs a typed reason, every time. It goes in the log the other side can rely on. */
 export function ReviewForm({ threadId, reportId }: { threadId: string; reportId?: string }) {
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const f = useFormErrors(["reason"]);
+  const errors = f.errors;
   const [pending, run] = useTransition();
   return (
-    <form noValidate onSubmit={keepValues((fd) => run(async () => { const r = await openReview(fd); if (r && !r.ok) { setErrors(r.fieldErrors ?? { reason: r.error }); toast(r.error, "danger"); } }))} className="flex flex-col gap-2">
+    <form noValidate onChange={f.onChange} onSubmit={keepValues((fd) => run(async () => { const r = await openReview(fd); if (r && !r.ok) { f.fail(r); toast(r.error, "danger"); } }))} className="flex flex-col gap-2">
       <input type="hidden" name="threadId" value={threadId} />
       {reportId ? <input type="hidden" name="reportId" value={reportId} /> : null}
       <label className={label} htmlFor="review-reason">Why are you opening this conversation?</label>
       <textarea id="review-reason" name="reason" required rows={3} maxLength={500} placeholder="For example: report about pressure to pay for extra lessons" className={cn(INPUT, "h-auto py-2")} aria-invalid={!!errors.reason || undefined} />
-      {errors.reason ? fail(errors.reason) : <p className="text-xs text-[var(--ds-on-surface-muted)]">The reason, your name and the time are logged. Both sides are told the school reviewed it. You cannot change the log afterwards.</p>}
+      {errors.reason ? fail(errors.reason) : <p className="text-xs text-[var(--ds-on-surface-muted)]">Your name, the time and your reason are logged. While a concern is open nobody is told you read it; otherwise both sides see that the school reviewed it.</p>}
+      {f.note}
       <div><button type="submit" disabled={pending} className={PRIMARY_BTN}>{pending ? "Opening…" : "Open the conversation"}</button></div>
     </form>
   );
@@ -31,10 +34,11 @@ export function ReviewForm({ threadId, reportId }: { threadId: string; reportId?
 export function HandleForm({ reportId, state, outcome }: { reportId: string; state: string; outcome: string | null }) {
   const router = useRouter();
   const [pending, run] = useTransition();
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const f = useFormErrors(["state"]);
+  const errors = f.errors;
   const states = ["reviewing", "action", "no_action"] as const;
   return (
-    <form noValidate onSubmit={keepValues((fd) => run(async () => { const r = await handleReport(fd); if (r.ok) { toast("Saved. The reporter was told."); router.refresh(); } else { setErrors(r.fieldErrors ?? {}); toast(r.error, "danger"); } }))} className="flex flex-col gap-3">
+    <form noValidate onChange={f.onChange} onSubmit={keepValues((fd) => run(async () => { const r = await handleReport(fd); if (r.ok) { f.reset(); toast("Saved. The reporter was told."); router.refresh(); } else { f.fail(r); toast(r.error, "danger"); } }))} className="flex flex-col gap-3">
       <input type="hidden" name="reportId" value={reportId} />
       <fieldset className="flex flex-col gap-2"><legend className={label}>Where does it stand?</legend>
         {states.map((s) => (
@@ -44,6 +48,7 @@ export function HandleForm({ reportId, state, outcome }: { reportId: string; sta
       </fieldset>
       <label className={label}>What was decided (kept private, the reporter sees only the state)
         <textarea name="outcome" rows={3} maxLength={1000} defaultValue={outcome ?? ""} className={cn(INPUT, "mt-1 h-auto py-2")} /></label>
+      {f.note}
       <div><button type="submit" disabled={pending} className={PRIMARY_BTN}>{pending ? "Saving…" : "Save"}</button></div>
     </form>
   );
@@ -54,7 +59,8 @@ export function RestrictForm() {
   const [q, setQ] = useState("");
   const [found, setFound] = useState<{ id: string; name: string; label: string }[]>([]);
   const [who, setWho] = useState<{ id: string; name: string; label: string } | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const f = useFormErrors(["userId", "until", "reason"]);
+  const errors = f.errors;
   const [pending, run] = useTransition();
   const latest = useRef(0);
   useEffect(() => {
@@ -64,15 +70,15 @@ export function RestrictForm() {
     return () => clearTimeout(t);
   }, [q]);
   return (
-    <form noValidate onSubmit={keepValues((fd, reset) => run(async () => {
+    <form noValidate onChange={f.onChange} onSubmit={keepValues((fd, reset) => run(async () => {
       if (who) fd.set("userId", who.id);
       const r = await restrictPerson(fd);
-      if (r.ok) { reset(); setWho(null); setQ(""); toast("Limit set. They were told."); router.refresh(); } else { setErrors(r.fieldErrors ?? {}); toast(r.error, "danger"); }
+      if (r.ok) { reset(); f.reset(); setWho(null); setQ(""); toast("Limit set. They were told."); router.refresh(); } else { f.fail(r); toast(r.error, "danger"); }
     }))} className="flex flex-col gap-3">
       <div>
         <label className={label} htmlFor="limit-who">Who</label>
         {who ? (
-          <p className="mt-1 flex items-center justify-between gap-2 rounded-2xl bg-white/[0.05] p-3 text-sm">{who.name} <span className="text-[var(--ds-on-surface-muted)]">{who.label}</span><button type="button" className={PILL_BTN} onClick={() => setWho(null)}>Change</button></p>
+          <p className="mt-1 flex items-center justify-between gap-2 rounded-2xl bg-white/[0.05] p-3 text-sm">{who.name} <span className="text-[var(--ds-on-surface-muted)]">{who.label}</span><button type="button" className={PILL_BTN} onClick={() => { setWho(null); f.clear("userId"); }}>Change</button></p>
         ) : (
           <>
             <input id="limit-who" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name of the staff member or the student" autoComplete="off" className={cn(INPUT, "mt-1")} />
@@ -86,6 +92,7 @@ export function RestrictForm() {
       </fieldset>
       <label className={label}>Until (last day)<input type="date" name="until" required className={cn(INPUT, "mt-1 block")} />{errors.until ? fail(errors.until) : null}</label>
       <label className={label}>Reason (they are told, and it is logged)<textarea name="reason" required rows={3} maxLength={500} className={cn(INPUT, "mt-1 h-auto py-2")} />{errors.reason ? fail(errors.reason) : null}</label>
+      {f.note}
       <div><button type="submit" disabled={pending || !who} className={PRIMARY_BTN}>{pending ? "Saving…" : "Set the limit"}</button></div>
     </form>
   );

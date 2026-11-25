@@ -91,6 +91,15 @@ describe("PreferenceService", () => {
     expect(await withSchool(a.id, (tx) => tx.select().from(notificationPrefs))).toHaveLength(0);
   });
 
+  it("names the person and the address for the unsubscribe page", async () => {
+    const url = await withSchool(a.id, (tx) => PreferenceService.unsubscribeUrlFor(tx, a.id, a.slug, a.users.student));
+    const info = await PreferenceService.unsubscribeInfo(a.id, new URL(url!).searchParams.get("t")!);
+    expect(info?.email).toBeTruthy();
+    expect(info!.person).toBeTruthy();
+    expect(info!.others.some((o) => o.name === info!.person)).toBe(false);
+    expect(await PreferenceService.unsubscribeInfo(a.id, "wrong-token")).toBeNull();
+  });
+
   it("unsubscribes only the person the link belongs to, without a sign-in", async () => {
     const url = await withSchool(a.id, (tx) => PreferenceService.unsubscribeUrlFor(tx, a.id, a.slug, a.users.student, "notices"));
     await withSchool(a.id, (tx) => PreferenceService.unsubscribeUrlFor(tx, a.id, a.slug, a.users.teacher));

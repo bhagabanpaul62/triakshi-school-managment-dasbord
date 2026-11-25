@@ -101,7 +101,7 @@ export class RunService extends PayrollService {
       }
       const rates = ratesOf(items) as { key: string; state: string | null; confidence: string; source: string }[];
       const [approval] = await tx.select().from(finApprovals).where(and(eq(finApprovals.refId, id), eq(finApprovals.status, "pending"), sql`${finApprovals.kind} like 'payroll.%'`));
-      if (approval && !this.ctx.readOnly && !this.ctx.supportStaffId) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: approval.id }, this.ctx.userId);
+      if (approval && !this.ctx.readOnly && !this.ctx.supportStaffId) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "approval", id: approval.id }, this.ctx);
       const asker = approval ? (await tx.select({ name: users.name }).from(users).where(eq(users.id, approval.requestedBy)))[0]?.name ?? null : null;
       return {
         run, items: views, totals: run.totals, blockers, warnings, lowConfidence: rates.filter((r) => r.confidence === "low").map(({ key, state, confidence, source }) => ({ key, state, confidence, source })),

@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { isFamily } from "../core";
 import { MessageService } from "../service";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 import { NewMessageForm } from "./new-message-form";
 
 export const metadata = { title: "New message" };
 
-export default async function NewMessagePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+async function NewMessagePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
   const svc = new MessageService(ctx);
   const sp = await searchParams;
   const rules = await svc.startRules();
@@ -27,3 +29,5 @@ export default async function NewMessagePage({ searchParams }: { searchParams: P
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof NewMessagePage>) { return refusalOr(() => NewMessagePage(...a)); }

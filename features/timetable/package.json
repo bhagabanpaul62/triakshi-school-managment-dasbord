@@ -25,7 +25,8 @@
     "@smw/feature-academics": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7",
-    "@tabler/icons-react": "^3.52.0"
+    "@tabler/icons-react": "^3.52.0",
+    "@smw/feature-notifications": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

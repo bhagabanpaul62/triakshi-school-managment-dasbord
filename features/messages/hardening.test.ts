@@ -56,7 +56,7 @@ describe("a report is invisible to the people it names", () => {
     expect((await svc(w.own).thread(id)).thread.held).toBe(false);
     expect((await svc(w.a.as.student).inbox()).rows.find((r) => r.id === id)!.held).toBe(true);
     expect((await svc(w.own).inbox()).rows.find((r) => r.id === id)!.held).toBe(false);
-    await sql_(async (tx) => expect((await loadThread(tx, id, { userId: w.a.as.admin.userId, role: "admin", review: true })).thread.held).toBe(true));
+    await sql_(async (tx) => expect((await loadThread(tx, id, { schoolId: w.a.as.admin.schoolId, userId: w.a.as.admin.userId, role: "admin", review: true })).thread.held).toBe(true));
   });
 
   it("audit lines carry no subject or text, and report and review lines name who they are about", async () => {

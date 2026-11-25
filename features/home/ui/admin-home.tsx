@@ -11,6 +11,7 @@ import { tilePaise as tile } from "@smw/ui/format";
 import type { AdminHome } from "../home-service";
 import { attendanceTone, plural, planTone } from "../rules";
 import { FeeTrend } from "./fee-trend";
+import { FirstDayCard } from "./first-day-card";
 import { PanelRow, Rows, SlotPanel } from "./layout";
 import { AnnouncementsBody, EventsBody, NeedsActionBody, NextStep, RequestsBody, open } from "./parts";
 
@@ -30,6 +31,7 @@ export function AdminHomeView({ d }: { d: AdminHome }) {
         {fees ? <StatCard label="Outstanding" value={tile(fees.outstanding)} icon={<MenuIconView name="receipt" />} meta={fees.overdueCount ? `${plural(fees.overdueCount, "student")} overdue` : "Nobody is overdue"} href="/app/fees/dues?overdue=1" /> : null}
       </KpiRow>
       <Rows>
+        {d.firstDay.state === "ok" && d.firstDay.data.some((x) => !x.done) ? <FirstDayCard steps={d.firstDay.data} /> : null}
         <PanelRow cells={[
           { slot: d.needsAction, size: 7, node: <SlotPanel slot={d.needsAction} title="Needs action" action={open("/app/notifications?tab=action", "All that needs action")}>{(rows) => <NeedsActionBody rows={rows} />}</SlotPanel> },
           { slot: d.requests, size: 5, node: <SlotPanel slot={d.requests} title="Requests" action={open("/app/requests", "Open requests")}>{(r) => <RequestsBody r={r} />}</SlotPanel> },

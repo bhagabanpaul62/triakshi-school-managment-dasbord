@@ -9,6 +9,7 @@ import { Button } from "@smw/ui/ui/button";
 import { FieldGrid, keepValues, type Field, type FormResult } from "@smw/ui/shell/FormModal";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { toast } from "@smw/ui/shell/toast";
+import { useFormErrors } from "@smw/feature-messages/ui/form-errors";
 import { MAX_LEVELS, MAX_QUESTIONS, NATURE_WORDS, type EscalationLevel, type Nature, type RequestField } from "../constants";
 
 export interface CategoryFormValues { id?: string; name: string; nature: Nature; ownerUserId?: string | null; ownerRole: string; targetDays: number; escalation: EscalationLevel[]; fields: RequestField[] }
@@ -60,7 +61,8 @@ export function CategoryForm({ title, roles, people, initial, action, trigger }:
   title: string; roles: Role[]; people: Role[]; initial?: CategoryFormValues; action: (fd: FormData) => Promise<FormResult>; trigger: { label: string; edit?: boolean };
 }) {
   const [open, setOpen] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const fe = useFormErrors(["name", "nature", "ownerRole", "ownerUserId", "targetDays"]);
+  const { errors } = fe;
   const [pending, start] = useTransition();
   const router = useRouter();
   const formId = useId();
@@ -70,11 +72,11 @@ export function CategoryForm({ title, roles, people, initial, action, trigger }:
   const [levels, setLevels] = useState<Row<EscalationLevel>[]>(() => seed(initial?.escalation));
   const [questions, setQuestions] = useState<Row<RequestField>[]>(() => seed(initial?.fields));
 
-  const reopen = () => { setErrors({}); setLevels(seed(initial?.escalation)); setQuestions(seed(initial?.fields)); setOpen(true); };
+  const reopen = () => { fe.reset(); setLevels(seed(initial?.escalation)); setQuestions(seed(initial?.fields)); setOpen(true); };
   const submit = (fd: FormData) => start(async () => {
     if (initial?.id) fd.set("id", initial.id);
     const r = await action(fd);
-    if (r.ok) { setOpen(false); toast(r.message ?? "Saved"); router.refresh(); } else { setErrors(r.fieldErrors ?? {}); toast(r.error, "danger"); }
+    if (r.ok) { setOpen(false); toast(r.message ?? "Saved"); router.refresh(); } else { fe.fail(r); toast(r.error, "danger"); }
   });
 
   const top: Field[] = [
@@ -91,7 +93,7 @@ export function CategoryForm({ title, roles, people, initial, action, trigger }:
       </Button>
       <Modal open={open} onOpenChange={setOpen} size="lg" title={title} icon={<IconChip className="h-10 w-10"><MenuIconView name="inbox" /></IconChip>} dismissOnOutsideClick={false}
         footer={<ModalFooter secondary={{ onClick: () => setOpen(false) }} primary={{ label: trigger.edit ? "Save" : "Add", type: "submit", form: formId, loading: pending }} />}>
-        <form id={formId} onSubmit={keepValues(submit)} className="flex flex-col gap-6 pt-2" noValidate>
+        <form id={formId} onChange={fe.onChange} onSubmit={keepValues(submit)} className="flex flex-col gap-6 pt-2" noValidate>
           <FieldGrid fields={top} values={initial ? { ...initial, ownerUserId: initial.ownerUserId ?? "" } : { nature: "general", ownerRole: "admin", targetDays: 3 }} errors={errors} />
           <Rows title="If it is late, it goes up" noun="Level" rows={levels} max={MAX_LEVELS} setRows={setLevels} make={fresh}
             render={(r) => <FieldGrid fields={levelFields(r.n, roles)} values={{ [`l${r.n}_label`]: r.value?.label, [`l${r.n}_role`]: r.value?.role ?? roles[0]?.value, [`l${r.n}_days`]: r.value?.afterDays ?? 2 }} errors={errors} />} />
@@ -104,6 +106,7 @@ export function CategoryForm({ title, roles, people, initial, action, trigger }:
                   values={{ [`f${r.n}_label`]: r.value?.label, [`f${r.n}_kind`]: r.value?.kind ?? "text", [`f${r.n}_options`]: r.value?.options?.join(", "), [`f${r.n}_required`]: r.value?.required }} />
               </>
             )} />
+          {fe.note}
         </form>
       </Modal>
     </>

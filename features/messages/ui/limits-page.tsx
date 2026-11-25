@@ -1,4 +1,5 @@
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { shortDate } from "@smw/ui/format";
@@ -7,10 +8,13 @@ import { SafeguardService } from "../safeguard";
 import { LiftButton, RestrictForm } from "./safeguard-forms";
 import { SafeguardNav } from "./safeguarding-page";
 
+import { NoSupport } from "./empty";
 export const metadata = { title: "Message limits" };
 
-export default async function LimitsPage() {
-  const rows = await new SafeguardService(await requireCtx()).restrictions();
+async function LimitsPage() {
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const rows = await new SafeguardService(ctx).restrictions();
   return (
     <>
       <PageHeader eyebrow="Safeguarding" title="Message limits" description="Limit a family login or a staff member until a date. They are told, with the reason." />
@@ -34,3 +38,5 @@ export default async function LimitsPage() {
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof LimitsPage>) { return refusalOr(() => LimitsPage(...a)); }

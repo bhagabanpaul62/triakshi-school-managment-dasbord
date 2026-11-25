@@ -105,7 +105,7 @@ export async function reconcile(tx: Tx, schoolId: string, n: Notice, o: { notify
   const added = reached.filter((r) => newKeys.has(personKey(r)));
   for (const part of chunks(gone.map((g) => g.key))) await tx.update(announcementRecipients).set({ removedAt: now }).where(and(eq(announcementRecipients.announcementId, n.id), inArray(announcementRecipients.personKey, part), isNull(announcementRecipients.removedAt)));
 
-  for (const uid of goneUsers) { await NotificationWriter.seen(tx, schoolId, subjectOf(n.id), uid); await NotificationWriter.done(tx, schoolId, subjectOf(n.id), uid); }
+  for (const uid of goneUsers) { await NotificationWriter.seen(tx, schoolId, subjectOf(n.id), { userId: uid }); await NotificationWriter.done(tx, schoolId, subjectOf(n.id), uid); }
   await tell(tx, schoolId, n, goneUsers, "removed");
   await tell(tx, schoolId, n, usersOf(added, n), "new", { now });
   if (o.notifyAgain) await tell(tx, schoolId, n, usersOf(reached.filter((r) => old.has(personKey(r))), n), "changed");

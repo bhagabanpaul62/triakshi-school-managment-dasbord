@@ -16,7 +16,7 @@ export interface CalendarPageProps {
   /** Layers this person may see, and the ones switched on. */
   layers: LayerKey[]; chosen: LayerKey[]; /** What shows when nobody picked: the address stays short while it holds. */ defaults: LayerKey[];
   canAdd: boolean; holidays: "add" | "view" | null;
-  phone: { active: boolean; lastUsed: string | null };
+  phone: { active: boolean; made: string | null; lastUsed: string | null };
 }
 
 const long = (day: string, o: Intl.DateTimeFormatOptions) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en-IN", { ...o, timeZone: "UTC" });
@@ -61,7 +61,7 @@ export async function CalendarPage({ items, view, anchor, today, layers, chosen,
     <>
       <PageHeader eyebrow="Communication" title="Calendar" description="Events, exams, holidays and homework in one place."
         actions={<>
-          <PhoneCalendar active={phone.active} lastUsed={phone.lastUsed} publicFeed={false} />
+          <PhoneCalendar active={phone.active} made={phone.made} lastUsed={phone.lastUsed} publicFeed={false} />
           {holidays ? <Link href="/app/attendance/holidays" className={PILL}>{holidays === "add" ? "Add holiday" : "Holidays"}</Link> : null}
           {add}
         </>} />
@@ -71,7 +71,7 @@ export async function CalendarPage({ items, view, anchor, today, layers, chosen,
             <Link href={url({ date: step(view, anchor, -1) })} aria-label="Earlier" className={PILL}>Back</Link>
             <Link href={url({ date: today })} className={PILL}>Today</Link>
             <Link href={url({ date: step(view, anchor, 1) })} aria-label="Later" className={PILL}>Next</Link>
-            <h2 className="min-w-0 truncate px-1 text-sm font-medium text-[var(--ds-on-surface)] sm:px-2 sm:text-lg" aria-live="polite">{title(view, anchor)}</h2>
+            <h2 className="min-w-0 break-words px-1 text-sm font-medium text-[var(--ds-on-surface)] sm:px-2 sm:text-lg" aria-live="polite">{title(view, anchor)}</h2>
           </div>
           <nav aria-label="Calendar view" className="flex w-full gap-1 rounded-full bg-white/[0.05] p-1 sm:ml-auto sm:w-auto">
             {VIEWS.map((v) => (

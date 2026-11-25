@@ -17,7 +17,8 @@ import { dateTime } from "@smw/ui/format";
 import { AudienceService } from "@smw/feature-notifications/audience";
 import { toIstInput } from "@smw/feature-kit/words";
 import type { Tone } from "@smw/ui/tone";
-import { RESPONSE_WORDS } from "../content";
+import { RESPONSE_WORDS, stop } from "../content";
+import { changedSettings } from "../what-changed";
 import { NoticeService, type NoticeView } from "../service";
 import { askChanges, deleteDraft, duplicateNotice, recallNotice, rejectNotice, saveAsTemplate, sendScheduledNow, unscheduleNotice, withdrawNotice } from "./actions";
 import { NoticeCard } from "./card";
@@ -41,7 +42,7 @@ function Steps({ v, canTemplate, approve }: { v: NoticeView; canTemplate: boolea
   // The rare steps. The page keeps one main button.
   const more = [
     c.correct ? <MenuLink key="correct" href={`${own}/edit`}>Correct</MenuLink> : null,
-    c.withdraw ? <FormModal key="withdraw" title="Withdraw this notice" description="People see Withdrawn by the school and your reason. The words are hidden from them. A circular keeps its number in the register." icon="megaphone" fields={[text("reason", "Why it is withdrawn, as people will read it")]} hidden={{ id }} action={withdrawNotice} submitLabel="Withdraw" trigger={{ label: "Withdraw", ...menu }} summary="You can copy it to a new notice afterwards." /> : null,
+    c.withdraw ? <FormModal key="withdraw" title="Withdraw this notice" description="People see the title struck through, Withdrawn by the school, and your reason. The words of the notice are hidden from them. A circular keeps its number in the register." icon="megaphone" fields={[text("reason", "Why it is withdrawn, as people will read it")]} hidden={{ id }} action={withdrawNotice} submitLabel="Withdraw" trigger={{ label: "Withdraw", ...menu }} summary="You can copy it to a new notice afterwards." /> : null,
     c.duplicate ? <RunButton key="duplicate" action={duplicateNotice} values={{ id }} label="Duplicate" to={`${HOME}/{id}/edit`} /> : null,
     canTemplate && SENT.includes(n.state) ? <FormModal key="template" title="Save as a template" icon="megaphone" fields={[{ name: "name", label: "Template name", required: true, wide: true }]} hidden={{ id }} action={saveAsTemplate} submitLabel="Save" trigger={{ label: "Save as template", ...menu }} /> : null,
     c.delete ? <ActionButton key="delete" variant="ghost" label="Delete draft" action={deleteDraft} values={{ id }} redirectTo={HOME} confirm={{ title: "Delete this draft?", body: `"${n.title || "This draft"}" and its files are deleted. This cannot be undone.`, confirmLabel: "Delete", danger: true }} /> : null,
@@ -66,10 +67,10 @@ function Steps({ v, canTemplate, approve }: { v: NoticeView; canTemplate: boolea
 function Banner({ v }: { v: NoticeView }) {
   const n = v.notice;
   if (v.review && n.state === "draft") return <Notice tone="warning">{v.review.kind === "rejected" ? "Rejected" : "Sent back with a note"}: {v.review.note}</Notice>;
-  if (n.state === "waiting") return <Notice tone="warning">{v.approvers.length ? `Waiting for ${v.approvers.join(" or ")} to approve it.` : "No one else is set up to approve notices. Ask the school admin to add an approver."} {v.can.recall ? "You can take it back to change it." : ""}</Notice>;
+  if (n.state === "waiting") return <Notice tone="warning">{v.approvers.length ? `Waiting for ${v.approvers.join(" or ")} to approve it. ${v.approvers.join(" and ")} ${v.approvers.length === 1 ? "has" : "have"} been told in the app and by the daily summary.` : "No one else is set up to approve notices. Ask the school admin to add an approver."} {v.can.recall ? "You can take it back to change it." : ""}</Notice>;
   if (n.state === "scheduled" && n.scheduledAt) return <Notice tone="info">Goes out {dateTime(n.scheduledAt)}.</Notice>;
   if (n.state === "sending") return <Notice tone="info">{v.can.undo ? "Sending in a moment. You can undo until the bar below runs out." : "It is on its way to people now."}</Notice>;
-  if (n.state === "withdrawn") return <Notice tone="warning">Withdrawn {dateTime(n.withdrawnAt)}: {n.withdrawReason}. People see Withdrawn by the school.</Notice>;
+  if (n.state === "withdrawn") return <Notice tone="warning">Withdrawn {dateTime(n.withdrawnAt)}: {stop(n.withdrawReason ?? "")} People see the title struck through, Withdrawn by the school, and your reason.</Notice>;
   if (n.state === "expired") return <Notice>This notice ended and is in the archive. It no longer asks for answers.</Notice>;
   return null;
 }
@@ -108,9 +109,13 @@ export async function StaffRecord({ ctx, id, sp, related = [] }: { ctx: Ctx; id:
   const approve = c.approve ? <ApproveDialog id={id} title={n.title} body={n.body} audience={n.audience} dueAt={toIstInput(n.dueAt)} asks={n.response.kind !== "none"}
     options={await new AudienceService(ctx).options()} labels={await svc.labelsFor(n.audience)} earlier={v.versions[0] ? { title: String(v.versions[0].snapshot.title ?? ""), body: String(v.versions[0].snapshot.body ?? "") } : null} needsReason={c.approveNeedsReason} /> : null;
   const asks = n.response.kind !== "none";
-  const tabs = [{ key: "overview", label: "The notice" }, ...(c.report ? [{ key: "responses", label: asks ? "Responses" : "Who has read it", count: v.stats?.answered ?? undefined }] : []), ...(v.versions.length ? [{ key: "history", label: "History", count: v.versions.length }] : [])];
-  const tab = tabs.some((t) => t.key === one(sp.tab)) ? one(sp.tab)! : "overview";
   const s = v.stats;
+  // The tab and the "How it is going" panel read the same `v.stats`, so they cannot disagree.
+  const tabs = [{ key: "overview", label: "The notice" }, ...(c.report ? [asks ? { key: "responses", label: "Responses", count: s?.answered } : { key: "responses", label: s ? `Opened ${s.seen} of ${s.recipients}` : "Who has read it" }] : []), ...(v.versions.length ? [{ key: "history", label: "History", count: v.versions.length }] : [])];
+  const tab = tabs.some((t) => t.key === one(sp.tab)) ? one(sp.tab)! : "overview";
+  // After a send-back the approver sees what changed since they last looked: the words in the diff, the other settings by name.
+  const last = v.versions[0];
+  const sinceLooked = last?.note?.startsWith("As it was when") ? { settings: changedSettings(last.snapshot, n as unknown as Record<string, unknown>) } : null;
   return (
     <>
       <BackLink href={HOME}>Notices</BackLink>
@@ -130,7 +135,12 @@ export async function StaffRecord({ ctx, id, sp, related = [] }: { ctx: Ctx; id:
         {tab === "responses" ? <Responses ctx={ctx} v={v} sp={sp} /> : tab === "history" ? <Panel title="Earlier versions"><Changes v={v} /></Panel> : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <div className="flex min-w-0 flex-col gap-4">
-              {n.state === "waiting" && v.versions.length ? <Panel title="What changed"><Changes v={{ ...v, versions: v.versions.slice(0, 1) }} /></Panel> : null}
+              {n.state === "waiting" && sinceLooked ? (
+                <Panel title="What changed since the approver last looked">
+                  {sinceLooked.settings.length ? <p className="mb-3 text-sm text-[var(--ds-on-surface)]">Also changed: {sinceLooked.settings.join(", ")}. See the details on the right.</p> : null}
+                  <Changes v={{ ...v, versions: v.versions.slice(0, 1) }} />
+                </Panel>
+              ) : null}
               <Panel title="How families read it">
                 <div className="flex flex-col gap-3">
                   <NoticeCard type={n.type} number={n.number} category={v.category} title={n.title} body={n.body} response={n.response} dueAt={n.dueAt} updatedAt={n.correctedAt} />
@@ -150,7 +160,7 @@ export async function StaffRecord({ ctx, id, sp, related = [] }: { ctx: Ctx; id:
                 <Panel title="Who it reaches">
                   <p className="text-sm text-[var(--ds-on-surface)]">{v.preview.total ? `${[v.preview.families ? `${v.preview.families} families` : "", v.preview.staff ? `${v.preview.staff} staff` : ""].filter(Boolean).join(" and ")}` : "Nobody yet"}</p>
                   <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">{v.audienceText}</p>
-                  {v.preview.unreachable.length ? <p className="mt-2 text-xs text-[var(--ds-color-warning-400)]">{v.preview.unreachable.length}{v.preview.unreachable.length === 100 ? "+" : ""} will not get a message on their phone or email: {v.preview.unreachable.slice(0, 3).map((u) => `${u.name} (${u.why})`).join("; ")}.</p> : null}
+                  {v.preview.unreachable.length ? <p className="mt-2 text-xs text-[var(--ds-color-warning-400)]">{v.preview.unreachable.length}{v.preview.unreachable.length === 100 ? "+" : ""} people have no phone alerts and no email. They will see it when they open the app: {v.preview.unreachable.slice(0, 3).map((u) => `${u.name} (${u.why})`).join("; ")}.</p> : null}
                 </Panel>
               ) : null}
               <Panel title="Details">

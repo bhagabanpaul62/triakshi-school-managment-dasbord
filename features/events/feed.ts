@@ -15,11 +15,11 @@ export class CalendarFeedService extends SchoolService<Perm> {
   protected feature = eventsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
-  /** Whether the person has a link, and when a phone last used it. The link itself cannot be shown again. */
-  async mine(): Promise<{ active: boolean; lastUsedAt: Date | null }> {
+  /** Whether the person has a link, when it was made and when a phone last used it. The link itself cannot be shown again. */
+  async mine(): Promise<{ active: boolean; madeAt: Date | null; lastUsedAt: Date | null }> {
     return this.read("read", async (tx) => {
-      const [f] = await tx.select({ at: calendarFeeds.lastUsedAt }).from(calendarFeeds).where(eq(calendarFeeds.userId, this.ctx.userId));
-      return { active: !!f, lastUsedAt: f?.at ?? null };
+      const [f] = await tx.select({ at: calendarFeeds.lastUsedAt, madeAt: calendarFeeds.createdAt }).from(calendarFeeds).where(eq(calendarFeeds.userId, this.ctx.userId));
+      return { active: !!f, madeAt: f?.madeAt ?? null, lastUsedAt: f?.at ?? null };
     });
   }
 
@@ -28,7 +28,7 @@ export class CalendarFeedService extends SchoolService<Perm> {
     noSupport(this.ctx);
     const token = randomBytes(16).toString("base64url");
     await this.write("read", (tx) => tx.insert(calendarFeeds).values({ schoolId: this.ctx.schoolId, userId: this.ctx.userId, tokenHash: sha256(token) })
-      .onConflictDoUpdate({ target: [calendarFeeds.schoolId, calendarFeeds.userId], set: { tokenHash: sha256(token), lastUsedAt: null, updatedAt: new Date() } }),
+      .onConflictDoUpdate({ target: [calendarFeeds.schoolId, calendarFeeds.userId], set: { tokenHash: sha256(token), lastUsedAt: null, createdAt: new Date() } }),
       () => ({ action: "calendar-link", entity: "Calendar link", summary: "Made a new phone calendar link" }));
     return { token };
   }

@@ -189,6 +189,20 @@ describe("HolidayService: spans", () => {
 describe("HolidayService: marks already made", () => {
   const mark = (sectionId: string, date: string, kid: string) => new StudentAttendanceService(a.as.admin).mark({ sectionId, date, entries: [{ studentId: kid, status: "present" }] }, { alerts: false });
 
+  it("a closure for today, when today is marked, says in how many sections and what to do instead", async () => {
+    const today = todayIST();
+    if (isSunday(today)) return; // nobody marks on a Sunday
+    await mark(fx.own, today, fx.kids[0]!);
+    try {
+      expect(await admin().markedToday()).toBe(1);
+      await expect(admin().create({ from: today, name: "Flood", kind: "emergency" })).rejects.toMatchObject({
+        fieldErrors: { from: expect.stringMatching(/already marked on .*, in 1 section\. .*urgent alert.*clear today's marks in the register/) },
+      });
+    } finally {
+      await withSchool(a.id, (tx) => tx.delete(studentAttendance).where(eq(studentAttendance.date, today)));
+    }
+  });
+
   it("lists the marked days and writes nothing; chosen classes look only at their own marks; students-only ignores staff marks", async () => {
     await mark(fx.own, "2026-01-12", fx.kids[0]!);
     await mark(fx.own, "2026-01-13", fx.kids[0]!);

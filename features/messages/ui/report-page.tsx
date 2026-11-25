@@ -1,19 +1,22 @@
 import Link from "next/link";
 import { NotFoundError } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { dateTime } from "@smw/ui/format";
 import { REPORT_CATEGORIES } from "../constants";
 import { SafeguardService, type ReportDetail } from "../safeguard";
-import { UnreadFallback } from "./empty";
+import { NoSupport, UnreadFallback } from "./empty";
 import { HandleForm, ReviewForm } from "./safeguard-forms";
 
 export const metadata = { title: "Concern" };
 
-export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
-  const svc = new SafeguardService(await requireCtx());
+async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
+  const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
+  const svc = new SafeguardService(ctx);
   let r: ReportDetail;
   try { r = await svc.report((await params).id); } catch (e) { if (e instanceof NotFoundError) return <UnreadFallback title="That concern was not found" text="It may not be yours to open." href="/app/safeguarding" label="Back to concerns" />; throw e; }
   return (
@@ -37,3 +40,5 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof ReportPage>) { return refusalOr(() => ReportPage(...a)); }

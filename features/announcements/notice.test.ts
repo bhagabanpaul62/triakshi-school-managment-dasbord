@@ -341,7 +341,7 @@ describe("correct and withdraw (4, 5)", () => {
     const open = await feedOf(fx.school.users.student).open(id);
     expect(open).toMatchObject({ content: null, withdrawn: { reason: "Holiday moved to Saturday" }, answering: "closed", files: [] });
     const item = (await feedOf(fx.school.users.student).feed()).rows.find((r) => r.noticeId === id)!;
-    expect(item).toMatchObject({ withdrawn: true, title: "Withdrawn by the school", excerpt: "Holiday moved to Saturday", needsAnswer: false });
+    expect(item).toMatchObject({ withdrawn: true, title: "Holiday on Friday", excerpt: "Holiday moved to Saturday", needsAnswer: false });
     await expect(new ResponseService(A().student).respond({ noticeId: id, answer: { kind: "ack" }, byName: "Ann Parent", byRelation: "Mother" })).rejects.toThrow(/withdrew/);
     await expect(new NoticeService(A().admin).withdraw(id, "again")).rejects.toBeInstanceOf(ConflictError);
   });
@@ -524,7 +524,8 @@ describe("the family feed and the report", () => {
     const later = await mk("Newest plain");
     const feed = feedOf(fx.school.users.student);
     const order = (await feed.feed({ pageSize: 100 })).rows.map((r) => r.title);
-    expect(order.indexOf("Asks you")).toBe(0);
+    // Earlier tests left urgent and dated notices that need an answer; those rank first by their own rules (see day-one.test.ts).
+    expect(order.indexOf("Asks you")).toBeLessThan(order.indexOf("Pinned one"));
     expect(order.indexOf("Pinned one")).toBeLessThan(order.indexOf("Newest plain"));
     expect(order.indexOf("Newest plain")).toBeLessThan(order.indexOf("Plain old"));
     const before = await feed.unreadCount();

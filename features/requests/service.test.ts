@@ -348,6 +348,14 @@ describe("a complaint about a person is invisible to that person, everywhere", (
     id = r.id; person = r.who;
   });
 
+  it("the people named are shown to those who may see it; Unassigned never lists an owned request", async () => {
+    const v = await svc(a.as.admin).get(id);
+    expect(v.about.sort()).toEqual([aboutTeacher.name, admin2.name].sort());
+    expect(v.levelName).toBeNull();
+    await withSchool(a.id, (tx) => tx.update(requests).set({ ownerId: a.as.admin.userId }).where(eq(requests.id, id)));
+    expect((await svc(a.as.admin).list({ filters: { view: "unassigned" }, pageSize: 100 })).rows.some((r) => r.id === id)).toBe(false);
+  });
+
   it("not in the list, the counts, the search, the report or the page, even for an admin", async () => {
     for (const who of [aboutTeacher, admin2]) {
       expect((await svc(who).list({ pageSize: 100 })).rows.some((r) => r.id === id)).toBe(false);

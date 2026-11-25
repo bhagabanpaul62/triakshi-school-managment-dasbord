@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { NotFoundError, type Ctx } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { AudienceService } from "@smw/feature-notifications/audience";
 import { Panel } from "@smw/ui/kit/Panel";
 import { StatCard } from "@smw/ui/kit/StatCard";
@@ -24,7 +25,7 @@ type Query = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 const hm = (d: Date) => toIstInput(d).slice(11);
 
-export default async function MeetingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Query> }) {
+async function MeetingPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Query> }) {
   const [ctx, { id }, sp] = await Promise.all([requireCtx(), params, searchParams]);
   if (ctx.role === "parent") notFound();
   if (ctx.role === "student") return <FamilyPage ctx={ctx} id={id} />;
@@ -195,3 +196,5 @@ async function PickFamily({ ctx, id, title, q }: { ctx: Ctx; id: string; title: 
     </>
   );
 }
+
+export default function Page(props: Parameters<typeof MeetingPage>[0]) { return refusalOr(() => MeetingPage(props)); }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { buttonVariants } from "@smw/ui/ui/button";
 import { SavedViews } from "@smw/ui/comm/SavedViews";
@@ -12,8 +13,10 @@ import { REQUEST_STATE_TONE, REQUEST_STATE_WORDS, VIEWS, type RequestState, type
 import { CategoryService } from "../categories";
 import { RequestService, type RequestRow } from "../service";
 import { StateChip } from "@smw/ui/comm/StateChip";
+import { RevalidateOnFocus } from "./revalidate";
 import { SectionNav, canWriteFor, dueWithAge, isFamilyRole, mayOpen, one, type Search } from "./shared";
 
+import { NoSupport } from "@smw/feature-messages/ui/empty";
 export const metadata = { title: "Requests" };
 
 function track(state: RequestState): TrackStep[] {
@@ -31,6 +34,7 @@ async function FamilyList({ sp }: { sp: Awaited<Search> }) {
   const rows = [...list.rows].sort((x, y) => Number(y.state === "waiting") - Number(x.state === "waiting"));
   return (
     <>
+      <RevalidateOnFocus />
       <PageHeader eyebrow="Communication" title="Ask the school" description="One place to ask the school office anything, and to see where each request stands."
         actions={<Link href="/app/requests/new" className={buttonVariants({ className: "rounded-full" })}>Ask the school</Link>} />
       <form role="search" className="mb-4 flex gap-2">
@@ -88,6 +92,7 @@ async function StaffQueue({ sp }: { sp: Awaited<Search> }) {
   const nothing = counts.all === 0;
   return (
     <>
+      <RevalidateOnFocus />
       <PageHeader eyebrow="Communication" title="Requests" description="What families have asked the school: who has it, how long it has waited, what is next."
         actions={<>
           <Link href={`/api/requests/csv?${csv}`} prefetch={false} className={buttonVariants({ variant: "ghost", className: "rounded-full" })}>Download CSV</Link>
@@ -108,8 +113,11 @@ async function StaffQueue({ sp }: { sp: Awaited<Search> }) {
   );
 }
 
-export default async function RequestsPage({ searchParams }: { searchParams: Search }) {
+async function RequestsPage({ searchParams }: { searchParams: Search }) {
   const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
   const sp = await searchParams;
   return isFamilyRole(ctx) ? <FamilyList sp={sp} /> : <StaffQueue sp={sp} />;
 }
+
+export default function Page(...a: Parameters<typeof RequestsPage>) { return refusalOr(() => RequestsPage(...a)); }

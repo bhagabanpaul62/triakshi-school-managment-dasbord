@@ -25,6 +25,8 @@ export async function startThread(fd: FormData) {
   input.body = fd.get("text") ?? fd.get("body");
   return serviceAction(MessageService, async (s) => s.start(input, await filesOf(fd)));
 }
+/** When the people a new message goes to would be told (null: at once), so the form says it before sending. */
+export async function holdFor(ids: string[], studentId?: string) { return serviceAction(MessageService, (s) => s.holdFor(ids, studentId || undefined).then((d) => d?.toISOString() ?? null)); }
 export async function searchStudents(fd: FormData) { return serviceAction(MessageService, (s) => s.students(str(fd, "q"))); }
 export async function searchStaff(fd: FormData) { return serviceAction(MessageService, (s) => s.contacts(str(fd, "q"), str(fd, "studentId") || undefined)); }
 

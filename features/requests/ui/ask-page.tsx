@@ -1,4 +1,5 @@
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { CategoryService } from "../categories";
 import { linkFromQuery } from "../inputs";
@@ -7,11 +8,13 @@ import { AskForm } from "./ask-form";
 import { BackLink, Notice, NoAccess, canWriteFor, isFamilyRole, one, type Search } from "./shared";
 import { askContext, findStudents, raiseRequest } from "./actions";
 
+import { NoSupport } from "@smw/feature-messages/ui/empty";
 export const metadata = { title: "Ask the school" };
 
 /** `about` (what it is about) and `href` (where it lives, an in-app path) come from an "Ask about this" button on a notice, receipt or result. */
-export default async function AskPage({ searchParams }: { searchParams: Search }) {
+async function AskPage({ searchParams }: { searchParams: Search }) {
   const ctx = await requireCtx();
+  if (ctx.supportStaffId) return <NoSupport />;
   const sp = await searchParams;
   const family = isFamilyRole(ctx);
   if (!family && !canWriteFor(ctx)) return <NoAccess what="Writing a request for a family" who="the school office" />;
@@ -26,3 +29,5 @@ export default async function AskPage({ searchParams }: { searchParams: Search }
     </>
   );
 }
+
+export default function Page(...a: Parameters<typeof AskPage>) { return refusalOr(() => AskPage(...a)); }

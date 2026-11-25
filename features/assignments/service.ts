@@ -633,7 +633,7 @@ export class SelfService extends SchoolService<Perm> {
       const a = await this.access.assignment(tx, assignmentId);
       const mine = kids.filter((k) => k.sectionId === a.sectionId);
       if (a.status === "draft" || mine.length === 0) throw new NotFoundError("Assignment");
-      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "assignment", id: a.id }, this.ctx.userId);
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "assignment", id: a.id }, this.ctx);
       const [labels, attachments, subs, exts] = await Promise.all([
         this.access.labels(tx, [a.sectionId], [a.subjectId]),
         tx.select().from(assignmentFiles).where(eq(assignmentFiles.assignmentId, a.id)).orderBy(asc(assignmentFiles.createdAt)),

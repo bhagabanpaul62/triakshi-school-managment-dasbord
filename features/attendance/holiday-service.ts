@@ -141,7 +141,7 @@ export class HolidayService extends SchoolService<Perm> {
 
   /** The notices of these holidays were seen: opening the list reads them. */
   async seeDeclared(spanIds: string[]): Promise<void> {
-    await this.read("read", async (tx) => { for (const id of spanIds.slice(0, 200)) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "holiday", id }, this.ctx.userId); });
+    await this.read("read", async (tx) => { for (const id of spanIds.slice(0, 200)) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "holiday", id }, this.ctx); });
   }
 
   private async save(data: HolidayData, spanId: string | null) {
@@ -179,7 +179,12 @@ export class HolidayService extends SchoolService<Perm> {
     const was = new Set(old.map((r) => r.date));
     if (data.kind !== "working") {
       const marked = await this.markedOn(tx, dates.filter((d) => !was.has(d)), data);
-      if (marked.length) throw new ValidationError({ from: `Attendance was already marked on ${list(marked)}. Clear it first or pick other days.` });
+      if (marked.length) {
+        const today = todayIST(), sections = marked.includes(today) ? await this.sectionsMarked(tx, today, data) : 0;
+        throw new ValidationError({ from: sections
+          ? `Attendance was already marked on ${list(marked)}, in ${sections} ${sections === 1 ? "section" : "sections"}. To tell families now, send an urgent alert instead. If the school really was closed today, clear today's marks in the register first, then add the closure.`
+          : `Attendance was already marked on ${list(marked)}. Clear it first or pick other days.` });
+      }
     }
     const before = new Set(staffDays(old)), after = new Set(staffDays(dates.map((date) => ({ date, kind: data.kind, appliesTo: data.appliesTo }))));
     await this.assertPayrollOpen(tx, [...after].filter((d) => !before.has(d)).concat([...before].filter((d) => !after.has(d))));
@@ -198,6 +203,20 @@ export class HolidayService extends SchoolService<Perm> {
     }))).returning();
     const told = data.notify && data.from >= todayIST() ? await this.tell(tx, id, data) : 0;
     return { ...spanOf(rows)[0]!, told };
+  }
+
+  /** In how many sections student attendance was marked on a day (a period mark counts). */
+  private async sectionsMarked(tx: Tx, date: string, data?: Pick<HolidayData, "appliesTo" | "classIds">): Promise<number> {
+    const ids = data?.appliesTo === "classes" ? data.classIds : null;
+    const [a, b] = await Promise.all([studentAttendance, periodAttendance].map((t) => (ids
+      ? tx.selectDistinct({ id: t.sectionId }).from(t).innerJoin(sections, eq(sections.id, t.sectionId)).where(and(eq(t.date, date), inArray(sections.classId, ids)))
+      : tx.selectDistinct({ id: t.sectionId }).from(t).where(eq(t.date, date)))));
+    return new Set([...a!, ...b!].map((r) => r.id)).size;
+  }
+
+  /** How many sections have today's attendance marked: the holiday form uses it to offer an urgent alert before a closure for today is refused. */
+  async markedToday(): Promise<number> {
+    return this.read("read", (tx) => this.sectionsMarked(tx, todayIST()));
   }
 
   /** Days in this list that somebody already marked, for the people this holiday would close. */

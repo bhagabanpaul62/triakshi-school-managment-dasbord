@@ -28,7 +28,12 @@ export class MeetingNotices {
     return this.put(tx, [{ userId, topic: "meeting.reminder", title, body, ...this.link(m.id) }]);
   }
 
-  /** Someone booked: close their "book a time" action. */
+  /** Booking closed, or the meeting is over or cancelled: nobody has a "book a time" row for it any more. */
+  over(tx: Tx, meetingId: string) {
+    return NotificationWriter.done(tx, this.ctx.schoolId, { type: "meeting", id: meetingId });
+  }
+
+  /** The family has booked all it can: close their "book a time" action. */
   booked(tx: Tx, meetingId: string, userId: string) {
     return NotificationWriter.done(tx, this.ctx.schoolId, { type: "meeting", id: meetingId }, userId);
   }

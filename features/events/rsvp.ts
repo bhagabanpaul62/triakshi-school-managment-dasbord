@@ -93,8 +93,11 @@ export class RsvpService extends SchoolService<Perm> {
       }
     }
     await tx.update(eventPeople).set({ answer: input.answer, guests, answeredAt: new Date(), waitingSince }).where(eq(eventPeople.id, p.id));
-    // Any answer settles the invitation's "answer" action for that person.
-    if (p.userId) await NotificationWriter.done(tx, this.ctx.schoolId, { type: "event", id: e.id }, p.userId);
+    // Any answer settles the invitation's "answer" action for that person. A series has one row (about its first date), so every date counts.
+    if (p.userId) {
+      const dates = e.seriesId ? await tx.select({ id: events.id }).from(events).where(eq(events.seriesId, e.seriesId)) : [{ id: e.id }];
+      for (const d of dates) await NotificationWriter.done(tx, this.ctx.schoolId, { type: "event", id: d.id }, p.userId);
+    }
     await promoteWaiting(tx, this.ctx.schoolId, e, this.ctx.userId);
     if (input.answer === "no") return "not_going";
     if (input.answer === "maybe") return "maybe";

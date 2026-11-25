@@ -26,8 +26,10 @@ export const reportInput = z.object({
   messageId: f.optId(),
   category,
   note: f.text(3, 1000, "Say what happened"),
-  /** A person named in the concern, beyond the sender of the message. */
-  aboutUserId: f.optId(),
+  /** Whom a concern about a conversation is about: people in it or other staff. For one message the sender is always included. */
+  aboutUserIds: f.list().pipe(z.array(z.uuid("Choose one")).max(5, "Name at most 5 people")),
+  /** "Not sure": the concern is about everyone else in the conversation. */
+  unsure: f.bool(),
 });
 
 export const handleReportInput = z.object({

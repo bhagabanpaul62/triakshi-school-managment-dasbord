@@ -10,6 +10,7 @@ import { todayIST } from "../stats";
 import { checkHolidayImport, commitHolidayImport } from "./actions";
 import { addHolidays, createHoliday } from "./holiday-actions";
 import { holidayFields } from "./fields";
+import { urgentAlertHref } from "./urgent-alert";
 import { HolidayImportForm } from "./holiday-import-form";
 import { HolidayList } from "./holiday-list";
 import { HolidayPicker } from "./holiday-picker";
@@ -39,7 +40,8 @@ export default async function HolidaysPage({ searchParams }: { searchParams: Pro
   const asked = (await searchParams).year;
   const [years, classes, current] = await Promise.all([svc.years(), svc.classOptions(), svc.workingDays()]);
   const year = years.find((y) => y.id === asked) ?? current.year ?? years[0] ?? null;
-  const [days, spans, ideas] = await Promise.all([
+  const [markedToday, days, spans, ideas] = await Promise.all([
+    svc.markedToday(),
     year?.id === current.year?.id ? current : svc.workingDays(year?.id),
     svc.spans(year ? { from: year.startsOn, to: year.endsOn } : undefined),
     svc.suggestions(year?.id),
@@ -47,7 +49,15 @@ export default async function HolidaysPage({ searchParams }: { searchParams: Pro
   await svc.seeDeclared(spans.map((s) => s.id));
   const canWrite = svc.can("manage");
   const today = todayIST();
-  const create = <FormModal title="Add holiday" icon="calendar" fields={holidayFields(classes, { notify: true })} values={{ kind: "other", appliesTo: "all", notify: true }} action={createHoliday} submitLabel="Add" size="lg" />;
+  // Today is marked already, so a closure for today is refused: the way out sits next to the Add button, not behind the refusal.
+  const marked = markedToday ? (
+    <span className="flex flex-wrap items-center gap-2 text-xs text-[var(--ds-on-surface-muted)]">
+      Today is already marked in {markedToday} {markedToday === 1 ? "section" : "sections"}.
+      <Link href={urgentAlertHref("School is closed today")} className="rounded-full bg-white/[0.07] px-3 py-2 text-sm font-medium text-[var(--ds-on-surface)] hover:bg-white/[0.12]">Send an urgent alert instead</Link>
+      <Link href="/app/attendance" className="underline">To close today, clear the marks in the register</Link>
+    </span>
+  ) : undefined;
+  const create = <FormModal title="Add holiday" icon="calendar" fields={holidayFields(classes, { notify: true })} values={{ kind: "other", appliesTo: "all", notify: true }} action={createHoliday} submitLabel="Add" size="lg" summary={marked} />;
   const newCopy = ideas.copy.filter((c) => !c.clash), newNational = ideas.national.filter((c) => !c.clash);
 
   return (

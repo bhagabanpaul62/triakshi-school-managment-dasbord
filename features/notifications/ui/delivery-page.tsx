@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { EmptyLine } from "@smw/ui/finance/States";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
@@ -16,7 +17,7 @@ const STATES = [["sent", "Sent"], ["pending", "Waiting"], ["failed", "Failed"], 
 const TONE = { sent: "success", pending: "default", failed: "danger", skipped: "default", bounced: "warning" } as const;
 const WHY = { failed: "Failed", skipped: "Not sent", bounced: "Refused" } as const;
 
-export default async function DeliveryPage() {
+async function DeliveryPage() {
   const ctx = await requireCtx();
   const svc = new DeliveryService(ctx);
   if (!svc.can("delivery")) {
@@ -95,3 +96,5 @@ export default async function DeliveryPage() {
     </>
   );
 }
+
+export default function Page() { return refusalOr(DeliveryPage); }

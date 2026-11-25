@@ -195,6 +195,7 @@ export class MeetingService extends MeetingBase {
       const m = await this.meeting(tx, id);
       if (m.state !== "open") throw new ConflictError("Only a meeting that is open can be closed.");
       await tx.update(meetingDays).set({ state: "closed", updatedAt: new Date() }).where(eq(meetingDays.id, id));
+      await this.notices.over(tx, id);
       return { id, title: m.title };
     }, (r) => ({ action: "close", entity: "Meeting", entityId: r.id, summary: `Closed booking for "${r.title}"` }));
   }
@@ -221,6 +222,7 @@ export class MeetingService extends MeetingBase {
       await tx.update(meetingDays).set({ state: "cancelled", cancelReason: data.reason, updatedAt: new Date() }).where(eq(meetingDays.id, id));
       const held = await rows<{ userId: string | null; teacherId: string }>(tx, sql`select st.user_id as "userId", s.teacher_id as "teacherId" from meeting_slots s join students st on st.id = s.student_id where s.meeting_id = ${id}::uuid and s.state = 'booked'`);
       const people = [...new Set(held.flatMap((h) => [h.userId, h.teacherId]).filter((u): u is string => !!u))];
+      await this.notices.over(tx, id);
       await this.notices.changed(tx, m, people, `Cancelled: ${m.title}`, data.reason);
       return { id, title: m.title, told: people.length };
     }, (r) => ({ action: "cancel", entity: "Meeting", entityId: r.id, summary: `Cancelled "${r.title}" (${data.reason}); ${r.told} people told` }));

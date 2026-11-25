@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { ConflictError, ForbiddenError, NotFoundError } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { refusalOr } from "@smw/runtime/refusal";
 import { Panel } from "@smw/ui/kit/Panel";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
@@ -53,7 +54,7 @@ function Row({ r, v, next, followUp }: { r: DayRow; v: DayView; next: boolean; f
 }
 
 /** /app/meetings/{id}/day: one teacher's list in order, big buttons, usable with one hand on a phone. */
-export default async function DayPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+async function DayPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [ctx, { id }, sp] = await Promise.all([requireCtx(), params, searchParams]);
   if (ctx.role === "student" || ctx.role === "parent") notFound();
   const svc = new DayService(ctx);
@@ -97,3 +98,5 @@ export default async function DayPage({ params, searchParams }: { params: Promis
     </>
   );
 }
+
+export default function Page(props: Parameters<typeof DayPage>[0]) { return refusalOr(() => DayPage(props)); }
