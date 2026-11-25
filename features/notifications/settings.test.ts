@@ -41,6 +41,8 @@ describe("comm settings", () => {
     await expect(svc.save({ retentionYears: 0 })).rejects.toBeInstanceOf(ValidationError);
     await expect(svc.save({ retentionYears: 8 })).rejects.toBeInstanceOf(ValidationError);
     await expect(svc.save({ circularFormat: "CIR/no-number" })).rejects.toBeInstanceOf(ValidationError);
+    await expect(svc.save({ circularFormat: "CIR/{n}" })).rejects.toMatchObject({ fieldErrors: { circularFormat: "The circular number must contain {session} and {n}" } });
+    await expect(svc.save({ requestFormat: "REQ/{session}" })).rejects.toMatchObject({ fieldErrors: { requestFormat: "The request number must contain {session} and {n}" } });
     await expect(svc.save({ teacherPublish: "never" })).rejects.toBeInstanceOf(ValidationError);
     await expect(svc.save({ channelDefaults: { staff: { nonsense: { push: true, email: "off" } } } })).rejects.toBeInstanceOf(ValidationError);
     expect((await svc.get()).retentionYears).toBe(5);
@@ -62,5 +64,12 @@ describe("comm settings", () => {
     await withSchool(b.id, (tx) => tx.execute(sql`update comm_settings set settings = '{"retentionYears": 99}'::jsonb`));
     expect((await withSchool(b.id, loadCommSettings)).retentionYears).toBe(3);
     expect(commSettingsSchema.parse({}).quietSundays).toBe(true);
+  });
+
+  it("falls back field by field: a bad field keeps its default, the good ones stay, approval switches turn safe", async () => {
+    await withSchool(b.id, (tx) => tx.execute(sql`update comm_settings set settings = '{"retentionYears": 99, "officeName": "Kept", "circularFormat": "CIR/{n}", "teacherPublish": "never", "approvalFor": {"families": "yes", "wholeSchool": false}}'::jsonb`));
+    expect(await withSchool(b.id, loadCommSettings)).toMatchObject({
+      retentionYears: 3, officeName: "Kept", circularFormat: "CIR/{session}/{n}", teacherPublish: "approval", approvalFor: { families: true, wholeSchool: false, website: true },
+    });
   });
 });

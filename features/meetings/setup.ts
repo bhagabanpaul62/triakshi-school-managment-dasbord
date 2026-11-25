@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, toPage, ValidationError, listQuerySchema, type ListQuery, type Page } from "@smw/feature-kit";
-import { audienceMatches, describeAudience, resolveAudience } from "@smw/feature-notifications/audience";
+import { audienceMatches, describeAudience, expandGroups, resolveAudience } from "@smw/feature-notifications/audience";
 import type { Audience } from "@smw/feature-notifications/audience-rules";
 import { kidOfLogin, rows, idList, ts, type Meeting } from "./access";
 import { MeetingBase } from "./base";
@@ -141,11 +141,19 @@ export class MeetingService extends MeetingBase {
 
   // ---- the meeting itself ----
 
+  /** Saved groups become their rules now, so a later edit to a group cannot change who was invited. Dues lists are never a meeting audience. */
+  private async freeze(tx: Tx, audience: Audience): Promise<Audience> {
+    const frozen = await expandGroups(tx, audience);
+    if ([...frozen.include, ...frozen.exclude].some((r) => r.type === "fee_overdue")) throw new ValidationError({ audience: "A meeting cannot be for families with dues. Choose classes, sections or students." });
+    return frozen;
+  }
+
   /** Create (id null) or change a meeting. After booking opens, who it is for and the slot length are fixed. */
   async saveDraft(id: string | null, input: unknown): Promise<Meeting> {
     this.authorize("manage", "write");
-    const data = this.parse(meetingInput, input);
+    const parsed = this.parse(meetingInput, input);
     return this.write("manage", async (tx) => {
+      const data = { ...parsed, audience: await this.freeze(tx, parsed.audience) };
       if (!id) {
         const [row] = await tx.insert(meetingDays).values({ ...data, schoolId: this.ctx.schoolId, state: "draft", createdBy: this.ctx.userId }).returning();
         await this.audit(tx, { action: "create", entity: "Meeting", entityId: row!.id, summary: `Started meeting "${row!.title}"` });
@@ -180,11 +188,12 @@ export class MeetingService extends MeetingBase {
   /** Open booking: tells every family in the audience, each with one action that closes when they book. */
   async open(id: string) {
     return this.write("manage", async (tx) => {
-      const m = await this.meeting(tx, id);
+      let m = await this.meeting(tx, id);
       if (m.state !== "draft") throw new ConflictError(m.state === "open" ? "Booking is already open." : "Only a draft can be opened. Use Reopen for a closed meeting.");
+      m = { ...m, audience: await this.freeze(tx, m.audience) };
       const check = await this.checkIn(tx, m);
       if (check.problems.length) throw new ConflictError(check.problems[0]!);
-      await tx.update(meetingDays).set({ state: "open", openedAt: this.now(), updatedAt: new Date() }).where(eq(meetingDays.id, id));
+      await tx.update(meetingDays).set({ state: "open", audience: m.audience, openedAt: this.now(), updatedAt: new Date() }).where(eq(meetingDays.id, id));
       const told = await this.notices.opened(tx, m, [...new Set((await this.families(tx, m)).flatMap((f) => (f.userId ? [f.userId] : [])))]);
       return { id, told, title: m.title };
     }, (r) => ({ action: "open", entity: "Meeting", entityId: r.id, summary: `Opened booking for "${r.title}" to ${r.told} families` }));

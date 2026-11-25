@@ -9,7 +9,8 @@ import { loadCommSettings } from "./settings";
 export type Reach = "free" | "approval";
 
 const FAMILY_SIDE = new Set(["families", "class", "section", "subject", "house", "route", "stop", "student", "fee_overdue"]);
-const WIDE = new Set(["everyone", "families", "staff", "fee_overdue"]);
+/** Other staff (a custom role) are free only for these: not everyone, not "all families", and no staff-side rule. */
+const OTHER_STAFF_FREE = new Set([...FAMILY_SIDE].filter((t) => t !== "families"));
 
 export class AudiencePolicy {
   /** "free": send now. "approval": goes to a reviewer first. Throws ForbiddenError when never allowed. Saved groups are expanded first, so a group can never hide a wider rule. */
@@ -30,7 +31,7 @@ export class AudiencePolicy {
     }
     if (ctx.role === "teacher") return (await AudiencePolicy.isOwn(tx, ctx.userId, audience)) ? "free" : "approval";
     if (ctx.role === "accountant") return audience.include.every((r) => FAMILY_SIDE.has(r.type)) ? "free" : "approval";
-    return audience.include.some((r) => WIDE.has(r.type)) ? "approval" : "free";
+    return audience.include.every((r) => OTHER_STAFF_FREE.has(r.type)) ? "free" : "approval";
   }
 
   /** True when every include rule stays inside the teacher's own sections. */

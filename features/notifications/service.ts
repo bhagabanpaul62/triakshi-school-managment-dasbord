@@ -28,14 +28,13 @@ export class NotificationService extends SchoolService<Perm> {
   private mine = () => eq(notifications.userId, this.ctx.userId);
   private needsAction = () => and(eq(notifications.action, true), isNull(notifications.doneAt));
 
-  /** The bell and the Needs action count in one cheap query. */
+  /** The bell and the Needs action count: two index-only counts, each on its own partial index (unread, open action). */
   async pulse(): Promise<{ bell: number; needsAction: number }> {
     return this.read("read", async (tx) => {
-      const [r] = await tx.select({
-        bell: sql<number>`count(*) filter (where ${notifications.readAt} is null)`.mapWith(Number),
-        needsAction: sql<number>`count(*) filter (where ${notifications.action} and ${notifications.doneAt} is null)`.mapWith(Number),
-      }).from(notifications).where(and(this.mine(), sql`(${notifications.readAt} is null or (${notifications.action} and ${notifications.doneAt} is null))`));
-      return { bell: r?.bell ?? 0, needsAction: r?.needsAction ?? 0 };
+      const mine = and(eq(notifications.schoolId, this.ctx.schoolId), this.mine());
+      const [bell] = await tx.select({ n: count() }).from(notifications).where(and(mine, isNull(notifications.readAt)));
+      const [action] = await tx.select({ n: count() }).from(notifications).where(and(mine, this.needsAction()));
+      return { bell: bell?.n ?? 0, needsAction: action?.n ?? 0 };
     });
   }
 

@@ -40,6 +40,14 @@ describe("Message families checks every student, not only the shape of the list"
     await expect(new BatchService(plain).preview(section(w.s1))).rejects.toBeInstanceOf(ForbiddenError);
     await expect(new BatchService(w.a.as.accountant).preview(section(w.s1))).resolves.toMatchObject({ families: 3 });
   });
+
+  it("a dues list is for the fees team only, the office with messages:all included", async () => {
+    const dues = JSON.stringify({ include: [{ type: "fee_overdue", days: 0 }], exclude: [] });
+    const office = await addUser(w.a, "staff", "officeh", ["messages:use", "messages:all"]);
+    await expect(new BatchService(office).preview(dues)).rejects.toMatchObject({ message: "Only the fees team can pick families with dues." });
+    await expect(new BatchService(office).send({ audience: dues, subject: "Dues", body: "x", clientId: "hard-batch-0009" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new BatchService(w.a.as.admin).preview(dues)).resolves.toBeDefined();
+  });
 });
 
 describe("a report is invisible to the people it names", () => {

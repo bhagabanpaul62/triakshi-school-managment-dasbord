@@ -75,6 +75,7 @@ export class RequestService extends RequestWorkflow {
   async raise(input: unknown, files: UploadedFile[] = []): Promise<{ id: string; number: string }> {
     this.authorize("use", "write");
     const d = this.parse(raiseInput, input);
+    let aboutIds: string[] = [];
     return this.write("use", async (tx) => {
       const v = await viewerOf(tx, this.ctx);
       if (!v.family && !v.office && !v.teacher) throw new ForbiddenError("Ask the school office to write this down for the family.");
@@ -113,7 +114,8 @@ export class RequestService extends RequestWorkflow {
       await this.log(tx, row!.id, "raised", v.family ? "Raised by the family" : `Written down by ${this.ctx.name}`);
       await this.tellStaff(tx, row!, route.notify, `New request ${number}`, `${cat.name} about ${child.name}. Open it to answer.`);
       if (!v.family) await this.tellFamily(tx, row!, `The school wrote down your request ${number}`, `${cat.name}. Open it to follow it.`);
+      aboutIds = about;
       return { id: row!.id, number };
-    }, (r) => ({ action: "create", entity: "Request", entityId: r.id, summary: `Raised request ${r.number}` }));
+    }, (r) => ({ action: "create", entity: "Request", entityId: r.id, summary: `Raised request ${r.number}`, meta: { aboutUserIds: aboutIds } }));
   }
 }

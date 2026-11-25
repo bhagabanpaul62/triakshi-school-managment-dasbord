@@ -3,7 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ForbiddenError, NotFoundError, refuseSupport, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { audienceField, type Audience } from "@smw/feature-notifications/audience-rules";
-import { audienceOptions, audiencePreview, describeAudience, resolveAudience, type AudienceOptions, type AudiencePreview } from "@smw/feature-notifications/audience";
+import { audienceOptions, audiencePreview, canTargetFeeOverdue, describeAudience, expandGroups, resolveAudience, type AudienceOptions, type AudiencePreview } from "@smw/feature-notifications/audience";
 import { AudiencePolicy } from "@smw/feature-notifications/policy";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { MAX_FAMILIES } from "./constants";
@@ -43,6 +43,9 @@ export class BatchService extends SchoolService<Perm> {
   private async resolve(tx: Tx, audience: Audience) {
     const office = this.can("all") || this.can("manage");
     if (!office && this.ctx.role !== "teacher") throw new ForbiddenError();
+    // Families with dues are the fees team's list, the office included; a saved group can hide the rule.
+    const expanded = await expandGroups(tx, audience);
+    if ([...expanded.include, ...expanded.exclude].some((r) => r.type === "fee_overdue") && !canTargetFeeOverdue(this.ctx)) throw new ForbiddenError("Only the fees team can pick families with dues.");
     if (!office && (await AudiencePolicy.reach(tx, this.ctx, audience, { feature: messagesFeature, permission: "use" })) === "approval") {
       throw new ForbiddenError("You can message the families of your own classes and subjects. Ask the school office to send this one.");
     }

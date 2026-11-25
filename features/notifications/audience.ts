@@ -1,7 +1,7 @@
 // Who an audience reaches. Reads other modules' tables by raw SQL only (no feature imports); optional tables go through to_regclass.
 import { sql, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
-import { ForbiddenError, SchoolService, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { audienceField, type Audience, type AudienceRule, type Reached } from "./audience-rules";
 import notificationsFeature from "./feature";
 
@@ -90,6 +90,8 @@ export async function expandGroups(tx: Tx, audience: Audience): Promise<Audience
   const [t] = await rows<{ ok: boolean }>(tx, sql`select to_regclass('comm_groups') is not null as ok`);
   const groups = new Map<string, Audience>();
   if (t?.ok) for (const g of await rows<{ id: string; audience: Audience }>(tx, sql`select id, audience from comm_groups where id in (${ids(wanted)})`)) groups.set(g.id, g.audience);
+  // A missing group in an exclude would quietly widen the audience, and in an include would quietly narrow it: refuse both.
+  if (wanted.some((id) => !groups.has(id))) { const say = "A saved group used here was deleted. Choose people again."; throw new ValidationError({ audience: say }, say); }
   const plain = (rs: AudienceRule[]) => rs.filter((r) => r.type !== "group");
   const include: AudienceRule[] = [], exclude: AudienceRule[] = plain(audience.exclude);
   for (const r of audience.include) {

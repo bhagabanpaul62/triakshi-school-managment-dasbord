@@ -14,6 +14,15 @@ const KEYS = ["bell", "messages", "requests", "notices", "stamp"] as const;
 // One truth for every LivePulse on the page (the panel's and an open conversation's): the last numbers the server rendered or told us.
 let shared: Partial<Pulse> = {};
 
+// The tab title has one owner: every LivePulse puts back the same count, so two on a page can never fight over it.
+let shownBell = 0;
+function setTitle(n = shownBell) {
+  shownBell = n;
+  const base = document.title.replace(PREFIX, "");
+  const next = n > 0 ? `(${n}) ${base}` : base;
+  if (document.title !== next) document.title = next;
+}
+
 /** Ask for the numbers now. Call it after any action of the person's own (send, mark, archive), so bell, sidebar and tab move with it. */
 export const pulseNow = () => { if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENT)); };
 
@@ -27,24 +36,17 @@ export function LivePulse({ bell, messages, requests, notices, stamp, fast = fal
   const router = useRouter();
   const path = usePathname();
   const search = useSearchParams().toString();
-  const shown = useRef(bell ?? 0);
   const [said, setSaid] = useState("");
-
-  const setTitle = (n: number) => {
-    shown.current = n;
-    const base = document.title.replace(PREFIX, "");
-    const next = n > 0 ? `(${n}) ${base}` : base;
-    if (document.title !== next) document.title = next;
-  };
 
   // Page changes rewrite the title: put the count back.
   useEffect(() => {
-    setTitle(shown.current);
+    setTitle(bell);
     const el = document.querySelector("title");
     if (!el) return;
-    const mo = new MutationObserver(() => setTitle(shown.current));
+    const mo = new MutationObserver(() => setTitle());
     mo.observe(el, { childList: true, characterData: true, subtree: true });
     return () => mo.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the count is kept true by the effect below
   }, []);
 
   // What the server rendered is the truth whenever the page re-renders with new numbers.

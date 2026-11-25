@@ -14,7 +14,7 @@ import { conversationPdf } from "./conversation-pdf";
 import messagesFeature from "./feature";
 import { LINK_SECONDS } from "./constants";
 import { reportInput, savedReplyInput, sendInput, startInput } from "./inputs";
-import { isNamed, leadIds } from "./leads";
+import { leadIds } from "./leads";
 import { students } from "@smw/feature-students/schema";
 import { messageFiles, messageReports, messages, messageThreads, savedReplies, threadMembers } from "./schema";
 import { istDay } from "@smw/feature-kit/words";
@@ -318,17 +318,14 @@ export class MessageService extends SchoolService<Perm> {
     });
   }
 
-  /** Remove my own message within 10 minutes. It shows "Message removed"; the original stays for safeguarding. A held conversation keeps everything. */
+  /** Remove my own message within 10 minutes. It shows "Message removed"; the original stays for safeguarding. Held or not, it looks the same from the sender's side. */
   async remove(messageId: string): Promise<void> {
     await this.write("use", async (tx) => {
-      const [m] = await tx.select({ m: messages, held: messageThreads.heldAt }).from(messages).innerJoin(messageThreads, eq(messageThreads.id, messages.threadId))
-        .where(eq(messages.id, messageId));
+      const [m] = await tx.select({ m: messages }).from(messages).where(eq(messages.id, messageId));
       if (!m) throw new NotFoundError("Message");
       await requireMember(tx, this.ctx, m.m.threadId);
       if (m.m.senderId !== this.ctx.userId || m.m.kind !== "text") throw new ForbiddenError("You can remove only your own messages.");
       if (m.m.removedAt) return;
-      // Only the person who reported is told why; anyone else, the person named included, learns nothing about a report.
-      if (m.held) throw new ForbiddenError((await reportedBy(tx, this.ctx.userId, [m.m.threadId])).size ? "This conversation is under review, so nothing in it can be removed." : "This message cannot be removed now.");
       if (Date.now() - m.m.createdAt.getTime() > REMOVE_MINUTES * 60_000) throw new ForbiddenError(`A message can be removed within ${REMOVE_MINUTES} minutes of sending it.`);
       await tx.update(messages).set({ removedAt: new Date(), removedBy: this.ctx.userId }).where(eq(messages.id, messageId));
     });
@@ -441,8 +438,6 @@ export class MessageService extends SchoolService<Perm> {
   async exportPdf(threadId: string): Promise<{ name: string; bytes: Uint8Array }> {
     return this.read("use", async (tx) => {
       const data = await loadThread(tx, threadId, this.ctx, { limit: 5000 });
-      const [raw] = await tx.select({ heldAt: messageThreads.heldAt }).from(messageThreads).where(eq(messageThreads.id, data.thread.id));
-      if (raw?.heldAt && (await isNamed(tx, threadId, this.ctx.userId))) throw new ForbiddenError("This conversation cannot be exported now.");
       const [school] = [...(await tx.execute(sql`select name from schools limit 1`))] as { name: string }[];
       return { name: `conversation-${threadId.slice(0, 8)}.pdf`, bytes: await conversationPdf(data, { school: school?.name ?? "School", exportedBy: this.ctx.name }) };
     });

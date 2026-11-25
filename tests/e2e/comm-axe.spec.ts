@@ -4,6 +4,8 @@ import { at, People, type Who } from "./comm-lib";
 
 // Accessibility of the communication screens on the production build: axe (serious or critical fail) and keyboard-only. Read only.
 test.describe.configure({ timeout: 300_000 });
+// Traces of big pages take more memory than the tab has.
+test.use({ trace: "off" });
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** A screen: a fixed path, or the first link on a list page that matches `open` (a record, a conversation...). */
@@ -44,13 +46,16 @@ async function resolve(page: Page, s: Screen) {
 
 for (const who of ["admin", "teacher", "family"] as Who[]) {
   test(`axe: ${who}`, async () => {
-    const page = await people.as(who);
+    const home = await people.as(who);
     const found: string[] = [], skipped: string[] = [];
     for (const s of SCREENS) {
-      if (!(await resolve(page, s))) { skipped.push(s.name); continue; }
+      // A fresh tab per screen: sixteen passes in one tab use up its memory.
+      const page = await home.context().newPage();
+      if (!(await resolve(page, s))) { skipped.push(s.name); await page.close(); continue; }
       const r = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
       for (const v of r.violations.filter((v) => v.impact === "serious" || v.impact === "critical"))
-        for (const n of v.nodes) found.push(`${v.impact} ${v.id} | ${who}/${s.name} ${new URL(page.url()).pathname.replace(new RegExp(UUID), ":id")} | ${n.target.join(" ").replace(/:nth-child\(\d+\)/g, "")} | ${n.html.slice(0, 90)}`);
+        for (const n of v.nodes) found.push(`${v.impact} ${v.id} | ${who}/${s.name} ${new URL(page.url()).pathname.replace(new RegExp(UUID), ":id")} | ${n.target.join(" ").replace(/:nth-child\(\d+\)/g, "")} | ${n.html.slice(0, 90)} | ${n.any[0]?.message?.slice(0, 110) ?? ""}`);
+      await page.close();
     }
     console.log(`axe ${who}: checked ${SCREENS.length - skipped.length}, skipped [${skipped.join(", ")}], violations ${found.length}`);
     const uniq = [...new Set(found)];

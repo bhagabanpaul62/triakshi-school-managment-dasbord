@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@smw/db";
-import { ForbiddenError, NotFoundError, SchoolService } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, refuseSupport, SchoolService } from "@smw/feature-kit";
 import { resolveAudience } from "@smw/feature-notifications/audience";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { rows, type Meeting } from "./access";
@@ -33,6 +33,9 @@ export abstract class MeetingBase extends SchoolService<Perm> {
     if (!m) throw new NotFoundError("Meeting");
     return m;
   }
+
+  /** Triakshi support sessions see no bookings, remarks, private notes or teacher days: services that hold them call this. */
+  protected refuseSupport() { refuseSupport(this.ctx, "use meetings"); }
 
   /** The meeting page was opened: its bell rows are read. A "book a time" action stays open until the family books. */
   protected async seen(tx: Tx, meetingId: string) {

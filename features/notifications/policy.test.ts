@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, withSchool } from "@smw/db";
-import { defineFeature, ForbiddenError, type Ctx, type FeatureDef } from "@smw/feature-kit";
+import { defineFeature, ForbiddenError, ValidationError, type Ctx, type FeatureDef } from "@smw/feature-kit";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sections, sectionTeachers, subjects } from "../academics/schema";
 import { students } from "../students/schema";
@@ -84,7 +84,7 @@ describe("who may reach whom", () => {
     expect(await reach(a.as.accountant, dues)).toBe("free");
     expect(await reach(a.as.admin, dues)).toBe("free");
     await expect(reach(custom(["announcements:publish"]), dues)).rejects.toBeInstanceOf(ForbiddenError);
-    expect(await reach(custom(["announcements:publish", "finance:read"]), dues)).toBe("approval");
+    expect(await reach(custom(["announcements:publish", "finance:read"]), dues)).toBe("free");
     await expect(reach(custom(["announcements:publish", "fees:read"], "teacher"), dues)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
@@ -99,6 +99,11 @@ describe("who may reach whom", () => {
     expect(await reach(a.as.accountant, aud([{ type: "families" }]))).toBe("free");
     expect(await reach(custom(["announcements:publish"]), aud([{ type: "staff" }]))).toBe("approval");
     expect(await reach(custom(["announcements:publish"]), aud([{ type: "section", id: f.s5a! }]))).toBe("free");
+    expect(await reach(custom(["announcements:publish"]), aud([{ type: "section", id: f.s5a! }, { type: "teachers_of", sectionId: f.s5a! }]))).toBe("approval");
+    expect(await reach(custom(["announcements:publish"]), aud([{ type: "everyone" }]))).toBe("approval");
+    expect(await reach(custom(["announcements:publish"]), aud([{ type: "families" }]))).toBe("approval");
+    expect(await reach(custom(["announcements:publish"]), aud([{ type: "role", id: "teacher" }]))).toBe("approval");
+    expect(await reach(custom(["announcements:publish", "announcements:whole"]), aud([{ type: "staff" }]))).toBe("free");
     expect(await reach(a.as.teacher, aud([{ type: "section", id: f.s5a! }]), "events", "write")).toBe("free");
     expect(await reach(a.as.teacher, aud([{ type: "everyone" }]), "events", "write")).toBe("approval");
   });
@@ -155,5 +160,16 @@ describe("school settings", () => {
     expect(await reach(a.as.accountant, aud([{ type: "families" }]))).toBe("free");
     expect(await reach(custom(["announcements:publish", "announcements:manage"]), aud([{ type: "everyone" }]))).toBe("free");
     await new CommSettingsService(a.as.admin).save({ approvalFor: { families: false, wholeSchool: false, website: true } });
+  });
+});
+
+describe("a deleted saved group", () => {
+  it("is refused in plain words, in include or exclude, never widened", async () => {
+    const [g] = await withSchool(a.id, (tx) => tx.insert(commGroups).values({ schoolId: a.id, name: "Gone", audience: aud([{ type: "section", id: f.s5a! }]) }).returning());
+    const gone = g!.id;
+    await withSchool(a.id, (tx) => tx.delete(commGroups));
+    const say = /A saved group used here was deleted. Choose people again./;
+    await expect(reach(a.as.admin, aud([{ type: "group", id: gone }]))).rejects.toThrow(say);
+    await expect(reach(a.as.admin, aud([{ type: "everyone" }], [{ type: "group", id: gone }]))).rejects.toBeInstanceOf(ValidationError);
   });
 });

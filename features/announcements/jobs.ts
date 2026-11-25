@@ -1,6 +1,7 @@
 // Worker jobs. Each one runs school by school; one school failing never stops the rest (same pattern as assignments).
 import { and, asc, eq, gt, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schools, withConsole } from "@smw/db";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { SchoolService, systemCtx, type Ctx } from "@smw/feature-kit";
 import { type Perm } from "./base";
 import { closeForAll, addLateJoiners, fanOut } from "./fan-out";
@@ -10,6 +11,8 @@ import { remindUnanswered } from "./report-service";
 import { announcements } from "./schema";
 import { LATE_JOIN_DAYS } from "./constants";
 import { transition } from "./state";
+
+const SEND_TRIES = 3;
 
 class NoticeJobs extends SchoolService<Perm> {
   protected feature = announcementsFeature;
@@ -32,11 +35,33 @@ class NoticeJobs extends SchoolService<Perm> {
       await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent scheduled notice "${n.title}"` });
     }));
     const ready = await this.write("manage", (tx) => tx.select({ id: announcements.id }).from(announcements).where(and(eq(announcements.state, "sending"), lte(announcements.sendAt, now), isNull(announcements.fannedOutAt))).orderBy(asc(announcements.sendAt), asc(announcements.id)));
-    await each(ready.map((r) => r.id), (id) => fanOut(this.ctx.schoolId, id, now));
+    await each(ready.map((r) => r.id), async (id) => {
+      try { await fanOut(this.ctx.schoolId, id, now); } catch (err) { await this.sendFailed(id, err, now); throw err; }
+    });
     await each(["expire"], () => this.expire(now));
     await each(["close"], () => this.closeDue(now));
     if (failed.length) throw new Error(`${failed.length} notice step(s) failed: ${String(failed[0])}`);
     return ready.length;
+  }
+
+  /**
+   * A send that failed again. The count lives in the review note ("Sending failed 2 times: ..."), so a notice that can never go out does not
+   * stay "sending" for ever: on the third failure it goes back to a draft with the reason, and the writer gets an action row.
+   */
+  private sendFailed(id: string, err: unknown, now: Date): Promise<void> {
+    const why = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+    return this.write("manage", async (tx) => {
+      const [n] = await tx.select().from(announcements).where(and(eq(announcements.id, id), eq(announcements.state, "sending"))).for("update");
+      if (!n) return;
+      const times = Number(/^Sending failed (\d+) time/.exec(n.reviewNote ?? "")?.[1] ?? 0) + 1;
+      if (times < SEND_TRIES) { await tx.update(announcements).set({ reviewNote: `Sending failed ${times} time${times > 1 ? "s" : ""}: ${why}` }).where(eq(announcements.id, id)); return; }
+      const note = `Could not be sent: ${why}`;
+      await tx.update(announcements).set({ state: transition(n.state, "undo") as "draft", reviewNote: note, sendAt: null, publishedAt: null, submittedAt: null, updatedAt: now }).where(eq(announcements.id, id));
+      if (n.createdBy) {
+        await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: n.createdBy, topic: "work.update", title: `${note}: ${n.title}`, href: `/app/announcements/${id}`, subject: { type: "notice-review", id }, action: true }]);
+      }
+      await this.audit(tx, { action: "send-failed", entity: "Notice", entityId: id, summary: `Could not send "${n.title}" after ${SEND_TRIES} tries: ${why}` });
+    });
   }
 
   /** The last date has passed: the "answer me" rows of that notice close, so no one is asked for what can no longer be given. */

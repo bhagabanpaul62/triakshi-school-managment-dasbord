@@ -34,7 +34,7 @@ function BookedCard({ b, kid, meetingId, studentId, can }: { b: BookedView; kid:
         <p className="font-medium">{b.teacherName}</p>
         <p className="text-sm tabular-nums">{dayLong(b.startsAt)}, {clock(b.startsAt)} to {clock(b.endsAt)}</p>
       </div>
-      <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">{b.place ?? "Place to be announced"}{b.videoUrl ? <> · <a href={b.videoUrl} className="underline" target="_blank" rel="noreferrer">Join by video</a></> : null}</p>
+      <p className="mt-1 text-sm text-[var(--ds-on-surface-variant)]">{b.place ?? "Place to be announced"}{b.videoUrl ? <> · <a href={b.videoUrl} className="underline" target="_blank" rel="noreferrer">Join by video</a></> : null}</p>
       {b.endsAt > new Date() ? <p className="mt-2"><a href={`/api/calendar/slot/${b.slotId}.ics`} className="text-sm underline">Add to calendar</a></p> : null}
       {b.remark ? <p className="mt-3 rounded-xl bg-white/[0.06] p-3 text-sm"><span className="block text-xs text-[var(--ds-on-surface-muted)]">Note from {b.teacherName}</span>{b.remark}</p> : null}
       {can ? (

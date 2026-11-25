@@ -16,6 +16,8 @@ export async function GET() {
     ]);
     return Response.json({ bell: pulse.bell, ...counts, stamp }, { headers });
   } catch (err) {
-    return Response.json({ error: err instanceof UnauthenticatedError ? "signed out" : "unavailable" }, { status: err instanceof UnauthenticatedError ? 401 : 403, headers });
+    if (err instanceof UnauthenticatedError) return Response.json({ error: "signed out" }, { status: 401, headers });
+    console.error(JSON.stringify({ level: "error", msg: "pulse failed", err: String(err) }));
+    return Response.json({ error: "unavailable" }, { status: 500, headers });
   }
 }

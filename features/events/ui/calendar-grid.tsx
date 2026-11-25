@@ -38,7 +38,7 @@ export function ItemRow({ item }: { item: CalendarItem }) {
     </>
   );
   const cls = cn("flex min-h-11 items-start gap-3 rounded-xl px-2 py-2", item.href && cn("hover:bg-white/[0.05]", FOCUS));
-  return item.href ? <Link href={item.href} className={cls}>{inner}</Link> : <div className={cls}>{inner}</div>;
+  return item.href ? <Link prefetch={false} href={item.href} className={cls}>{inner}</Link> : <div className={cls}>{inner}</div>;
 }
 
 const dayHeading = (day: string, today: string) => {
@@ -51,14 +51,14 @@ export function Agenda({ items, anchor, today, url, empty }: { items: CalendarIt
   const keys = [...days.keys()].filter((d) => d >= anchor && d < addDays(anchor, AGENDA_DAYS)).sort();
   return (
     <div className="flex flex-col gap-4">
-      <Link href={url({ view: "agenda", date: addDays(anchor, -AGENDA_DAYS) })} className={cn(LINK, "self-start text-sm text-[var(--ds-on-surface-muted)]")}>Earlier</Link>
+      <Link prefetch={false} href={url({ view: "agenda", date: addDays(anchor, -AGENDA_DAYS) })} className={cn(LINK, "self-start text-sm text-[var(--ds-on-surface-muted)]")}>Earlier</Link>
       {keys.length === 0 ? empty : keys.map((d) => (
         <section key={d} aria-labelledby={`d-${d}`} className="rounded-3xl bg-[var(--ds-surface-container-low)] p-4">
           <h2 id={`d-${d}`} className={cn("px-2 pb-1 text-[13px] font-medium", d === today ? "text-[var(--ds-color-primary-300)]" : "text-[var(--ds-on-surface-variant)]")}>{dayHeading(d, today)}</h2>
           <ul>{days.get(d)!.map((i) => <li key={`${i.layer}-${i.id}`}><ItemRow item={i} /></li>)}</ul>
         </section>
       ))}
-      <Link href={url({ view: "agenda", date: addDays(anchor, AGENDA_DAYS) })} className={cn(PILL, "self-start")}>Later</Link>
+      <Link prefetch={false} href={url({ view: "agenda", date: addDays(anchor, AGENDA_DAYS) })} className={cn(PILL, "self-start")}>Later</Link>
     </div>
   );
 }
@@ -77,7 +77,7 @@ export function Month({ items, anchor, today, url }: { items: CalendarItem[]; an
         {cells.map((d) => {
           const list = days.get(d) ?? [], inMonth = d.startsWith(ym);
           return (
-            <Link key={d} role="gridcell" href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${plural(list.length, "item")}`}
+            <Link prefetch={false} key={d} role="gridcell" href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${plural(list.length, "item")}`}
               className={cn("flex min-h-14 min-w-0 flex-col gap-0.5 rounded-lg bg-white/[0.03] p-1 hover:bg-white/[0.07] sm:min-h-24 sm:p-1.5", FOCUS, !inMonth && "opacity-40")}>
               <span className={cn("flex h-6 w-6 items-center justify-center rounded-full text-xs tabular-nums", d === today && "bg-[var(--ds-primary)] font-medium text-[var(--ds-on-primary)]")}>{Number(d.slice(8))}</span>
               <span className="flex flex-wrap gap-0.5 sm:hidden" aria-hidden>{list.slice(0, 4).map((i) => <span key={`${i.layer}-${i.id}`} className={cn("h-1.5 w-1.5 rounded-full", toneOf(i).dot)} />)}</span>
@@ -117,14 +117,14 @@ export function Year({ items, anchor, today, url }: { items: CalendarItem[]; anc
         for (let d = weekStart(`${ym}-01`); d < `${shiftMonth(ym, 1)}-01` || cells.length % 7; d = addDays(d, 1)) cells.push(d);
         return (
           <section key={ym} aria-labelledby={`y-${ym}`} className="rounded-3xl bg-[var(--ds-surface-container-low)] p-4">
-            <h2 id={`y-${ym}`} className="pb-2 text-[13px] font-medium"><Link href={url({ view: "month", date: `${ym}-01` })} className={cn("rounded hover:underline", FOCUS)}>{label(`${ym}-01`, { month: "long" })}</Link></h2>
+            <h2 id={`y-${ym}`} className="pb-2 text-[13px] font-medium"><Link prefetch={false} href={url({ view: "month", date: `${ym}-01` })} className={cn("rounded hover:underline", FOCUS)}>{label(`${ym}-01`, { month: "long" })}</Link></h2>
             <div className="grid grid-cols-7 gap-0.5 text-center text-[11px]">
               {WEEKDAYS.map((w) => <span key={w} aria-hidden className="text-[var(--ds-on-surface-muted)]">{w[0]}</span>)}
               {cells.map((d) => {
                 if (!d.startsWith(ym)) return <span key={d} />;
                 const n = days.get(d)?.length ?? 0;
                 return (
-                  <Link key={d} href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${plural(n, "item")}`}
+                  <Link prefetch={false} key={d} href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${plural(n, "item")}`}
                     className={cn("flex h-7 items-center justify-center rounded-md tabular-nums hover:bg-white/[0.12]", FOCUS, n ? "bg-white/[0.12] font-medium" : "text-[var(--ds-on-surface-variant)]", d === today && "ring-1 ring-[var(--ds-primary)]")}>{Number(d.slice(8))}</Link>
                 );
               })}

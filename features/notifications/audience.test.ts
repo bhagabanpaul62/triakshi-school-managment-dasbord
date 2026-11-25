@@ -293,7 +293,7 @@ describe("groups never widen what a person may see or send", () => {
       expect(await expandGroups(tx, aud([{ type: "group", id: inner!.id }], [{ type: "class", id: f.c6! }]))).toEqual(aud([{ type: "house", id: f.red! }], [{ type: "class", id: f.c6! }, { type: "section", id: f.s5b! }]));
       // a group inside a group is dropped
       expect((await expandGroups(tx, aud([{ type: "group", id: outer!.id }]))).include).toEqual([{ type: "student", id: f.bob! }]);
-      expect(await expandGroups(tx, aud([{ type: "group", id: crypto.randomUUID() }, { type: "families" }]))).toEqual(aud([{ type: "families" }]));
+      await expect(expandGroups(tx, aud([{ type: "group", id: crypto.randomUUID() }, { type: "families" }]))).rejects.toThrow("A saved group used here was deleted. Choose people again.");
       expect(await expandGroups(tx, aud([{ type: "families" }]))).toEqual(aud([{ type: "families" }]));
     });
   });

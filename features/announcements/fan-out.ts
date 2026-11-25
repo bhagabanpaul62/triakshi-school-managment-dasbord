@@ -78,7 +78,7 @@ export async function fanOut(schoolId: string, noticeId: string, now = new Date(
     const notified = await tell(tx, schoolId, n, usersOf(fresh, n), "new", { now });
     if (n.state === "sending") {
       await giveNumber(tx, schoolId, n);
-      await tx.update(announcements).set({ state: "published", fannedOutAt: now, updatedAt: now }).where(eq(announcements.id, n.id));
+      await tx.update(announcements).set({ state: "published", fannedOutAt: now, reviewNote: null, updatedAt: now }).where(eq(announcements.id, n.id));
     }
     return { recipients: fresh.length, notified };
   });

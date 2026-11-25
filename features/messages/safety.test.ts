@@ -104,11 +104,17 @@ describe("concerns (M10, acceptance 18)", () => {
     await expect(guard(w.a.as.student).queue()).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("held: nothing can be removed, the named person cannot export, retention keeps it", async () => {
+  it("held: removing looks the same, the original stays, nothing is deleted or rewritten, everyone can export, retention keeps it", async () => {
     const r = await reported("Concern five");
-    await expect(svc(w.own).exportPdf(r.thread)).rejects.toMatchObject({ message: "This conversation cannot be exported now." });
-    await expect(svc(w.a.as.student).exportPdf(r.thread)).resolves.toBeDefined(); // the reporter keeps their own copy
-    await expect(svc(w.own).remove(r.msg)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc(w.own).exportPdf(r.thread)).resolves.toBeDefined();
+    await expect(svc(w.a.as.student).exportPdf(r.thread)).resolves.toBeDefined();
+    await svc(w.own).remove(r.msg);
+    expect((await svc(w.a.as.student).thread(r.thread)).messages.find((x) => x.id === r.msg)).toMatchObject({ removed: true, body: "" });
+    const row = () => sql_((tx) => tx.select().from(messages).where(eq(messages.id, r.msg))).then((x) => x[0]!);
+    expect((await row()).body).not.toBe("");
+    await expect(sql_((tx) => tx.delete(messages).where(eq(messages.id, r.msg)))).rejects.toThrow();
+    await expect(sql_((tx) => tx.update(messages).set({ removedAt: null }).where(eq(messages.id, r.msg)))).rejects.toThrow();
+    await expect(sql_((tx) => tx.update(messages).set({ body: "changed" }).where(eq(messages.id, r.msg)))).rejects.toThrow();
     await expect(sql_((tx) => tx.delete(messageThreads).where(eq(messageThreads.id, r.thread)))).rejects.toThrow(); // reports restrict the delete
   });
 });

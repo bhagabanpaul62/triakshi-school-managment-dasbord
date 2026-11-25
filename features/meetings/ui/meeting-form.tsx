@@ -62,7 +62,7 @@ export function MeetingForm({ options, meeting }: { options: AudienceOptions; me
           <ModalField label="Who is it for" htmlFor={`${formId}-aud`} required error={errors.audience ?? errors["include"]} hint={meeting?.locked ? "Fixed once booking has opened." : "Families of these children can book."}>
             {meeting?.locked
               ? <><input type="hidden" name="audience" value={JSON.stringify(meeting.audience)} /><p className="text-sm text-[var(--ds-on-surface-variant)]">Chosen when the meeting was created.</p></>
-              : <AudiencePicker name="audience" value={meeting?.audience ?? { include: [], exclude: [] }} options={options} allow={["class", "section", "subject", "student", "group", "house"]} />}
+              : <AudiencePicker name="audience" value={meeting?.audience ?? { include: [], exclude: [] }} options={{ ...options, canFeeOverdue: false }} allow={["class", "section", "subject", "student", "group", "house"]} />}
           </ModalField>
           <FieldGrid fields={fields} values={values} errors={errors} />
         </form>

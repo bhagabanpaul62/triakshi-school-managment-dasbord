@@ -3,7 +3,7 @@ import type { Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, pgErrorCode, ValidationError } from "@smw/feature-kit";
 import { audienceMatches, resolveAudience } from "@smw/feature-notifications/audience";
 import { clashFor, idList, ts, kidById, kidOfLogin, lockFamily, rows, siblingIds, teachersOf, type Kid, type Meeting, type Teacher } from "./access";
-import { MeetingBase } from "./base";
+import { MeetingBase, type Perm } from "./base";
 import type { MeetingState, VisitState } from "./constants";
 import { bookInput, changeBookingInput, waitInput } from "./inputs";
 import { when } from "./format";
@@ -33,6 +33,8 @@ export interface BookingView {
 
 /** A family picks times with the teachers of their child; staff do the same on a family's behalf. */
 export class BookingService extends MeetingBase {
+  protected authorize(permission: Perm, mode: "read" | "write") { this.refuseSupport(); super.authorize(permission, mode); }
+
   /** Why this caller cannot change bookings of the meeting right now, or null. */
   private gate(m: Meeting, staff: boolean): string | null {
     const now = this.now();

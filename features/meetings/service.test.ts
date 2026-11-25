@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, eq, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
-import { notifications } from "@smw/feature-notifications/schema";
+import { commGroups, notifications } from "@smw/feature-notifications/schema";
 import { students } from "@smw/feature-students/schema";
 import { BookingService, DayService, MeetingService, TAKEN } from "./service";
 import { MeetingSchedule } from "./schedule";
@@ -399,14 +399,27 @@ describe("the day", () => {
     expect((await t1.day(m.id)).rows[0]!.privateNote).toMatch(/Struggles/);
   });
 
-  it("a support session cannot read or write private notes", async () => {
+  it("a support session sees no day, notes, remarks or bookings", async () => {
     const { m, s } = await running();
     await new DayService(a.as.teacher).saveNotes(s[0]!.id, { privateNote: "secret words" });
-    const support = new DayService(as(a.as.admin, { supportStaffId: "00000000-0000-0000-0000-0000000000aa" }));
-    await expect(support.saveNotes(s[0]!.id, { privateNote: "hack" })).rejects.toBeInstanceOf(ForbiddenError);
-    const v = await support.day(m.id, ids.t1);
-    expect(v.privateNotesHidden).toBe(true);
-    expect(JSON.stringify(v)).not.toContain("secret words");
+    const sup = as(a.as.admin, { supportStaffId: "00000000-0000-0000-0000-0000000000aa" });
+    const day = new DayService(sup);
+    await expect(day.day(m.id, ids.t1)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(day.saveNotes(s[0]!.id, { sharedRemark: "hi" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(day.mark(s[0]!.id, { visit: "came" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(day.notCame(m.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new BookingService(as(a.as.student, { supportStaffId: sup.supportStaffId })).forFamily(m.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("a meeting audience is frozen when saved and opened, and never for families with dues", async () => {
+    const group = await withSchool(a.id, async (tx) => (await tx.insert(commGroups).values({ schoolId: a.id, name: `PTM group ${nextDay}`, audience: everyoneInA() }).returning())[0]!);
+    const m = await draft({ audience: { include: [{ type: "group", id: group.id }], exclude: [] } });
+    expect(m.audience).toEqual(everyoneInA());
+    await withSchool(a.id, (tx) => tx.update(commGroups).set({ audience: { include: [{ type: "section", id: ids.sectionB }], exclude: [] } }).where(eq(commGroups.id, group.id)));
+    expect((await admin().get(m.id)).meeting.audience).toEqual(everyoneInA());
+    const due = { type: "fee_overdue" as const, days: 0 };
+    await expect(draft({ audience: { include: [due], exclude: [] } })).rejects.toMatchObject({ fieldErrors: { audience: expect.any(String) } });
+    await expect(admin().saveDraft(m.id, { title: "x", audience: { include: everyoneInA().include, exclude: [due] }, slotMinutes: "10", perFamily: "4", opensAt: hours(-1), closesAt: hours(48) })).rejects.toBeInstanceOf(ValidationError);
   });
 
   it("a walk-in takes a slot starting now, already marked as came; double walk-in is refused", async () => {

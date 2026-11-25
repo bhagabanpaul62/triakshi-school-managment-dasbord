@@ -4,7 +4,7 @@ import { ConflictError, ForbiddenError, NotFoundError, pgErrorCode } from "@smw/
 import { csvText, PdfBuilder, slugOf } from "@smw/integrations";
 import { teacherSections } from "@smw/feature-notifications/audience";
 import { idList, rows, ts, type Meeting } from "./access";
-import { MeetingBase } from "./base";
+import { MeetingBase, type Perm } from "./base";
 import type { MeetingState, VisitState } from "./constants";
 import { noteInput, visitInput, walkInInput } from "./inputs";
 import { dayOf, when } from "./format";
@@ -29,13 +29,12 @@ export interface DayView {
   nextSlotId: string | null; now: Date;
   /** A manager can switch to another teacher's list. */
   teachers: { id: string; name: string }[];
-  privateNotesHidden: boolean;
 }
 export interface NotCameRow { slotId: string; studentId: string; studentName: string; studentLabel: string | null; phone: string | null; teacherName: string; startsAt: Date; status: "Did not come" | "Not marked" }
 
 /** The teacher's day: who is next, who came, notes. A teacher sees only their own list; a manager sees every teacher's. */
 export class DayService extends MeetingBase {
-  private get support() { return !!this.ctx.supportStaffId; }
+  protected authorize(permission: Perm, mode: "read" | "write") { this.refuseSupport(); super.authorize(permission, mode); }
 
   private guardStaff() {
     if (this.isFamily) throw new ForbiddenError("This page is for teachers.");
@@ -61,7 +60,7 @@ export class DayService extends MeetingBase {
       const win = wins.find((w) => w.day === pick)!;
       const found = await rows<Omit<DayRow, "isNow" | "canMark">>(tx, sql`
         select s.id as "slotId", s.starts_at as "startsAt", s.ends_at as "endsAt", s.student_id as "studentId", st.name as "studentName", coalesce(c.name || coalesce('-' || sec.name, ''), null) as "studentLabel",
-          s.walk_in as "walkIn", s.visit, ${this.support ? sql`null` : sql`s.private_note`} as "privateNote", s.shared_remark as "sharedRemark"
+          s.walk_in as "walkIn", s.visit, s.private_note as "privateNote", s.shared_remark as "sharedRemark"
         from meeting_slots s join students st on st.id = s.student_id left join classes c on c.id = st.class_id left join sections sec on sec.id = st.section_id
         where s.meeting_id = ${meetingId}::uuid and s.teacher_id = ${who}::uuid and s.state = 'booked' and (s.starts_at at time zone 'Asia/Kolkata')::date = ${pick}::date order by s.starts_at`);
       const [free] = await rows<{ n: number }>(tx, sql`select count(*)::int as n from meeting_slots where meeting_id = ${meetingId}::uuid and teacher_id = ${who}::uuid and state = 'open' and starts_at > ${ts(now)}
@@ -74,7 +73,7 @@ export class DayService extends MeetingBase {
         rows: list, free: free?.n ?? 0,
         counts: { booked: list.length, came: count("came"), late: count("late"), missed: count("missed"), unmarked: list.filter((r) => !r.visit).length },
         nextSlotId: pick === today ? (list.find((r) => r.isNow && !r.visit) ?? list.find((r) => !r.visit && r.endsAt > now))?.slotId ?? null : null,
-        now, teachers, privateNotesHidden: this.support,
+        now, teachers,
       };
     });
   }
@@ -100,11 +99,10 @@ export class DayService extends MeetingBase {
     }, (r) => ({ action: "mark", entity: "Meeting", entityId: slotId, summary: `Marked the ${clock(r.startsAt)} time as ${r.visit ?? "not marked"}` }));
   }
 
-  /** The private note stays with staff. The shared remark reaches the family once the time is over. Support sessions never touch private notes. */
+  /** The private note stays with staff. The shared remark reaches the family once the time is over. */
   async saveNotes(slotId: string, input: unknown) {
     this.authorize("use", "write");
     const data = this.parse(noteInput, input);
-    if (data.privateNote !== undefined && this.support) throw new ForbiddenError("Support sessions cannot read or write private notes.");
     return this.write("use", async (tx) => {
       const { s } = await this.ownSlot(tx, slotId);
       const set: Partial<typeof meetingSlots.$inferInsert> = {};

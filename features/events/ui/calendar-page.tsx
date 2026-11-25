@@ -51,7 +51,7 @@ export async function CalendarPage({ items, view, anchor, today, layers, chosen,
     if (!isDefault(next)) p.set("layers", next.join(",") || "none");
     return p.toString() ? `/app/events?${p}` : "/app/events";
   };
-  const add = canAdd ? <Link href="/app/events/new" className={PRIMARY}><IconPlus className="h-4 w-4" aria-hidden />Add event</Link> : null;
+  const add = canAdd ? <Link prefetch={false} href="/app/events/new" className={PRIMARY}><IconPlus className="h-4 w-4" aria-hidden />Add event</Link> : null;
   const empty = (
     <EmptyLine title={chosen.length < layers.length && !chosen.length ? "All layers are switched off." : "Nothing on the calendar here."}
       hint={chosen.length < layers.length ? "Switch a layer on above, or look at another time." : canAdd ? "Add an event so families, students and staff can plan around it." : "Events, exams and holidays show here when they are added."} action={add} />
@@ -62,20 +62,20 @@ export async function CalendarPage({ items, view, anchor, today, layers, chosen,
       <PageHeader eyebrow="Communication" title="Calendar" description="Events, exams, holidays and homework in one place."
         actions={<>
           <PhoneCalendar active={phone.active} made={phone.made} lastUsed={phone.lastUsed} publicFeed={false} />
-          {holidays ? <Link href="/app/attendance/holidays" className={PILL}>{holidays === "add" ? "Add holiday" : "Holidays"}</Link> : null}
+          {holidays ? <Link prefetch={false} href="/app/attendance/holidays" className={PILL}>{holidays === "add" ? "Add holiday" : "Holidays"}</Link> : null}
           {add}
         </>} />
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <Link href={url({ date: step(view, anchor, -1) })} aria-label="Earlier" className={PILL}>Back</Link>
-            <Link href={url({ date: today })} className={PILL}>Today</Link>
-            <Link href={url({ date: step(view, anchor, 1) })} aria-label="Later" className={PILL}>Next</Link>
+            <Link prefetch={false} href={url({ date: step(view, anchor, -1) })} aria-label="Earlier" className={PILL}>Back</Link>
+            <Link prefetch={false} href={url({ date: today })} className={PILL}>Today</Link>
+            <Link prefetch={false} href={url({ date: step(view, anchor, 1) })} aria-label="Later" className={PILL}>Next</Link>
             <h2 className="min-w-0 break-words px-1 text-sm font-medium text-[var(--ds-on-surface)] sm:px-2 sm:text-lg" aria-live="polite">{title(view, anchor)}</h2>
           </div>
           <nav aria-label="Calendar view" className="flex w-full gap-1 rounded-full bg-white/[0.05] p-1 sm:ml-auto sm:w-auto">
             {VIEWS.map((v) => (
-              <Link key={v.key} href={url({ view: v.key, date: v.key === "agenda" ? today : anchor })} aria-current={v.key === view ? "page" : undefined}
+              <Link prefetch={false} key={v.key} href={url({ view: v.key, date: v.key === "agenda" ? today : anchor })} aria-current={v.key === view ? "page" : undefined}
                 className={cn("inline-flex min-h-9 flex-1 items-center justify-center rounded-full px-4 text-sm sm:flex-none", v.key === view ? "bg-[var(--ds-primary)] font-medium text-[var(--ds-on-primary)]" : "text-[var(--ds-on-surface-variant)] hover:bg-white/[0.08]")}>{v.label}</Link>
             ))}
           </nav>
@@ -83,7 +83,7 @@ export async function CalendarPage({ items, view, anchor, today, layers, chosen,
         {layers.length > 1 ? (
           <nav aria-label="Layers" className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
             {layers.map((l) => (
-              <Link key={l} href={toggle(l)} aria-current={chosen.includes(l) ? "true" : undefined} className={cn("inline-flex min-h-9 shrink-0 items-center whitespace-nowrap rounded-full px-3 text-xs font-medium", chosen.includes(l) ? "bg-white/[0.14] text-[var(--ds-on-surface)]" : "bg-white/[0.04] text-[var(--ds-on-surface-muted)] hover:bg-white/[0.08]")}>{LAYERS[l]}</Link>
+              <Link prefetch={false} key={l} href={toggle(l)} aria-current={chosen.includes(l) ? "true" : undefined} className={cn("inline-flex min-h-9 shrink-0 items-center whitespace-nowrap rounded-full px-3 text-xs font-medium", chosen.includes(l) ? "bg-white/[0.14] text-[var(--ds-on-surface)]" : "bg-white/[0.04] text-[var(--ds-on-surface-muted)] hover:bg-white/[0.08]")}>{LAYERS[l]}</Link>
             ))}
           </nav>
         ) : null}

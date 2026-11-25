@@ -402,7 +402,7 @@ describe("sending: client id, quiet hours, away, files, removal (M6, M8, M9, M17
     spy.mockRestore();
   });
 
-  it("remove your own message within 10 minutes; the original stays; a held conversation keeps everything", async () => {
+  it("remove your own message within 10 minutes; the original stays, held or not", async () => {
     const { id } = await svc(w.own).start(about(w.st1, { subject: "Remove" }));
     const m = await svc(w.own).send(id, "oops wrong child");
     await expect(svc(w.a.as.student).remove(m.id)).rejects.toBeInstanceOf(ForbiddenError);
@@ -415,12 +415,12 @@ describe("sending: client id, quiet hours, away, files, removal (M6, M8, M9, M17
     await expect(svc(w.own).remove(late.id)).rejects.toMatchObject({ message: expect.stringContaining("10 minutes") });
     const held = await svc(w.own).send(id, "reported soon");
     await svc(w.a.as.student).report({ threadId: id, category: "other", note: "Looks wrong to me.", unsure: true });
-    // the person named is told nothing about a report; the reporter is told why
-    await expect(svc(w.own).remove(held.id)).rejects.toMatchObject({ message: "This message cannot be removed now." });
+    // held or not, removing looks the same and says nothing about a report
+    await svc(w.own).remove(held.id);
+    expect((await svc(w.a.as.student).thread(id)).messages.find((x) => x.id === held.id)).toMatchObject({ removed: true, body: "" });
+    expect((await sql_((tx) => tx.select().from(messages).where(eq(messages.id, held.id))))[0]!.body).toBe("reported soon");
     const mine = await svc(w.a.as.student).send(id, "my own words");
-    await expect(svc(w.a.as.student).remove(mine.id)).rejects.toMatchObject({ message: expect.stringContaining("under review") });
-    // and the database agrees
-    await expect(sql_((tx) => tx.update(messages).set({ removedAt: new Date() }).where(eq(messages.id, held.id)))).rejects.toThrow();
+    await svc(w.a.as.student).remove(mine.id);
   });
 
   it("a disabled login cannot be written to; names stay as they were", async () => {

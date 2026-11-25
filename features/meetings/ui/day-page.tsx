@@ -22,7 +22,7 @@ const VISIT: Record<VisitState, { label: string; tone: Tone }> = { came: { label
 
 function Row({ r, v, next, followUp }: { r: DayRow; v: DayView; next: boolean; followUp: boolean }) {
   const fields: Field[] = [
-    ...(v.privateNotesHidden ? [] : [{ name: "privateNote", label: "Private note", type: "textarea" as const, wide: true, hint: "Only staff see this. It never reaches the family." }]),
+    { name: "privateNote", label: "Private note", type: "textarea", wide: true, hint: "Only staff see this. It never reaches the family." },
     { name: "sharedRemark", label: "Remark for the family", type: "textarea", wide: true, hint: "The family reads this after the meeting time is over." },
   ];
   return (
@@ -84,7 +84,6 @@ async function DayPage({ params, searchParams }: { params: Promise<{ id: string 
         </>} />
       {v.teachers.length > 1 ? <nav aria-label="Teachers" className="mb-3 flex flex-wrap gap-2">{v.teachers.map((t) => <LinkButton key={t.id} href={`/app/meetings/${id}/day?teacher=${t.id}`} primary={t.id === v.teacher.id}>{t.name}</LinkButton>)}</nav> : null}
       {v.dates.length > 1 ? <nav aria-label="Days" className="mb-3 flex flex-wrap gap-2">{v.dates.map((d) => <LinkButton key={d} href={`/app/meetings/${id}/day${link({ date: d })}`} primary={d === v.date}>{dayOf(atIst(d, "12:00"))}</LinkButton>)}</nav> : null}
-      {v.privateNotesHidden ? <Notice>This is a support session: private notes are hidden and cannot be written.</Notice> : null}
       {v.rows.length === 0 ? (
         <Panel title="Nobody has booked yet"><Notice>{v.free ? `${v.free} free times are waiting. Families book from their meetings page.` : "No free times left either. Ask the school office to widen your time."}{svc.canManage ? " You can book for a family from the meeting page." : ""}</Notice></Panel>
       ) : (

@@ -508,7 +508,7 @@ FROM (
     CASE WHEN fam = 1 AND staff > 0 THEN sid END AS student_id
   FROM message_threads t JOIN LATERAL (
     SELECT count(*) FILTER (WHERE u.role IN ('student','parent')) AS fam, count(*) FILTER (WHERE u.role NOT IN ('student','parent')) AS staff,
-      (SELECT s.id FROM students s JOIN thread_members m2 ON m2.user_id = s.user_id WHERE m2.thread_id = t.id ORDER BY s.status = 'active' DESC LIMIT 1) AS sid
+      (SELECT s.id FROM students s JOIN thread_members m2 ON m2.user_id = s.user_id WHERE m2.thread_id = t.id ORDER BY s.status = 'active' DESC, s.admission_no LIMIT 1) AS sid
     FROM thread_members m JOIN users u ON u.id = m.user_id WHERE m.thread_id = t.id) x ON true) k
 WHERE k.id = t.id;--> statement-breakpoint
 -- Notices already posted are published; "students" and "families" are one audience now.
@@ -519,9 +519,12 @@ UPDATE events SET is_public = false WHERE is_public AND id NOT IN (SELECT id FRO
 UPDATE announcements a SET audience_label = CASE WHEN audience->'include'->0->>'type' = 'everyone' THEN 'Everyone' WHEN audience->'include'->0->>'type' = 'staff' THEN 'All staff' WHEN audience->'include'->0->>'type' = 'class' THEN coalesce((SELECT c.name FROM classes c WHERE c.id = (audience->'include'->0->>'id')::uuid), 'One class') ELSE 'All families' END;--> statement-breakpoint
 UPDATE events a SET audience_label = CASE WHEN audience->'include'->0->>'type' = 'everyone' THEN 'Everyone' WHEN audience->'include'->0->>'type' = 'staff' THEN 'All staff' WHEN audience->'include'->0->>'type' = 'class' THEN coalesce((SELECT c.name FROM classes c WHERE c.id = (audience->'include'->0->>'id')::uuid), 'One class') ELSE 'All families' END;--> statement-breakpoint
 -- Notifications get a topic; message and notice rows know what they are about.
-UPDATE notifications SET topic = CASE kind WHEN 'announcement' THEN 'notice.published' WHEN 'fee_due' THEN 'fees.due' WHEN 'result' THEN 'exam.result' WHEN 'assignment' THEN 'homework.new' WHEN 'message' THEN 'message.new' ELSE 'work.update' END;--> statement-breakpoint
-UPDATE notifications SET subject_type = 'thread', subject_id = substring(href from 'thread=([0-9a-f-]{36})'), private_body = true WHERE kind = 'message' AND href ~ 'thread=[0-9a-f-]{36}';--> statement-breakpoint
-UPDATE notifications n SET read_at = now() FROM thread_members m, messages x WHERE n.subject_type = 'thread' AND n.read_at IS NULL AND m.user_id = n.user_id AND m.thread_id::text = n.subject_id AND m.last_read_at >= n.created_at AND x.thread_id = m.thread_id;--> statement-breakpoint
+UPDATE notifications n SET
+  topic = CASE kind WHEN 'announcement' THEN 'notice.published' WHEN 'fee_due' THEN 'fees.due' WHEN 'result' THEN 'exam.result' WHEN 'assignment' THEN 'homework.new' WHEN 'message' THEN 'message.new' ELSE 'work.update' END,
+  subject_type = CASE WHEN kind = 'message' AND href ~ 'thread=[0-9a-f-]{36}' THEN 'thread' END,
+  subject_id = CASE WHEN kind = 'message' THEN substring(href from 'thread=([0-9a-f-]{36})') END,
+  private_body = (kind = 'message'),
+  read_at = CASE WHEN read_at IS NULL AND kind = 'message' AND EXISTS (SELECT 1 FROM thread_members m WHERE m.user_id = n.user_id AND m.thread_id::text = substring(n.href from 'thread=([0-9a-f-]{36})') AND m.last_read_at >= n.created_at) THEN now() ELSE read_at END;--> statement-breakpoint
 UPDATE notification_prefs SET groups = (SELECT jsonb_object_agg(g, '{"push":true,"email":"off"}'::jsonb) FROM unnest(ARRAY['attendance','notices','messages','homework','exams','fees','services','calendar','work']) g) WHERE NOT email_digest;--> statement-breakpoint
 -- Who the notices of the last 90 days were for. Nobody measured seen, so it is marked as before tracking.
 INSERT INTO announcement_recipients (id, school_id, announcement_id, person_key, user_id, student_id, name, label, section_id, before_tracking, created_at)
@@ -554,10 +557,10 @@ DELETE FROM events e WHERE e.is_holiday AND NOT EXISTS (SELECT 1 FROM holiday_da
 INSERT INTO event_people (id, school_id, event_id, person_key, user_id, student_id, name, label)
 SELECT gen_random_uuid(), e.school_id, e.id, 's:' || s.id, s.user_id, s.id, s.name, concat_ws(' ', c.name, sec.name)
 FROM events e JOIN students s ON s.school_id = e.school_id AND s.status = 'active' LEFT JOIN classes c ON c.id = s.class_id LEFT JOIN sections sec ON sec.id = s.section_id
-WHERE e.audience->'include'->0->>'type' IN ('everyone','families') OR (e.audience->'include'->0->>'type' = 'class' AND s.class_id = (e.audience->'include'->0->>'id')::uuid);--> statement-breakpoint
+WHERE coalesce(e.ends_at, e.starts_at) > now() - interval '400 days' AND (e.audience->'include'->0->>'type' IN ('everyone','families') OR (e.audience->'include'->0->>'type' = 'class' AND s.class_id = (e.audience->'include'->0->>'id')::uuid));--> statement-breakpoint
 INSERT INTO event_people (id, school_id, event_id, person_key, user_id, name, label)
 SELECT gen_random_uuid(), e.school_id, e.id, 'u:' || u.id, u.id, u.name, initcap(u.role)
-FROM events e JOIN users u ON u.school_id = e.school_id AND u.status = 'active' AND u.role NOT IN ('student','parent') WHERE e.audience->'include'->0->>'type' IN ('everyone','staff');--> statement-breakpoint
+FROM events e JOIN users u ON u.school_id = e.school_id AND u.status = 'active' AND u.role NOT IN ('student','parent') WHERE coalesce(e.ends_at, e.starts_at) > now() - interval '400 days' AND e.audience->'include'->0->>'type' IN ('everyone','staff');--> statement-breakpoint
 -- Reminders already due are not sent for old events.
 UPDATE events SET reminded_for = reminders WHERE starts_at < now() + interval '1 day';--> statement-breakpoint
 -- Custom roles: write became draft and publish; everyone reads notices and the calendar and may raise requests.
@@ -690,6 +693,7 @@ CREATE INDEX "messages_sender" ON "messages" USING btree ("school_id","sender_id
 CREATE UNIQUE INDEX "messages_client" ON "messages" USING btree ("school_id","sender_id","client_id");--> statement-breakpoint
 CREATE INDEX "notification_prefs_unsub" ON "notification_prefs" USING btree ("unsubscribe_hash");--> statement-breakpoint
 CREATE INDEX "notifications_subject" ON "notifications" USING btree ("school_id","subject_type","subject_id","user_id");--> statement-breakpoint
+CREATE INDEX "notifications_unread" ON "notifications" USING btree ("school_id","user_id") WHERE "notifications"."read_at" is null;--> statement-breakpoint
 CREATE INDEX "notifications_open_action" ON "notifications" USING btree ("school_id","user_id") WHERE "notifications"."action" and "notifications"."done_at" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "notifications_group_open" ON "notifications" USING btree ("school_id","user_id","group_key") WHERE "notifications"."group_key" is not null and "notifications"."read_at" is null and "notifications"."done_at" is null;--> statement-breakpoint
 CREATE INDEX "thread_members_user" ON "thread_members" USING btree ("school_id","user_id");--> statement-breakpoint

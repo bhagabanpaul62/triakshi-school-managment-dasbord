@@ -59,7 +59,7 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
         {step === 0 ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-[var(--ds-on-surface-variant)]">Choose a section, a subject group or chosen students. Each family gets its own private conversation; families never see each other.</p>
-            <AudiencePicker name="audience" value={audience} onChange={setAudience} options={options} allow={[...RULES]} />
+            <AudiencePicker name="audience" value={audience} onChange={setAudience} options={{ ...options, canFeeOverdue: false }} allow={[...RULES]} />
           </div>
         ) : null}
         {step === 1 ? (

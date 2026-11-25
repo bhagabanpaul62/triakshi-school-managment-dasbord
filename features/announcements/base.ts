@@ -5,7 +5,7 @@ import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx
 import { AudiencePolicy, type Reach } from "@smw/feature-notifications/policy";
 import type { Audience } from "@smw/feature-notifications/audience-rules";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
-import type { Notice } from "./content";
+import { publicAudience, type Notice } from "./content";
 import announcementsFeature from "./feature";
 import { announcements } from "./schema";
 
@@ -54,10 +54,21 @@ export abstract class NoticeBase extends SchoolService<Perm> {
     return AudiencePolicy.reach(tx, this.ctx, audience, { feature: this.feature, permission });
   }
 
-  /** `reach` plus the website rule: a notice for the website needs approval when the school asks for it, unless the person approves notices. A website-only notice has no audience to check. */
+  /** The one website rule: only a notice for everyone (or the website alone), and only by an approver or manager, or by a person who may publish while the school does not ask for approval of website notices. */
+  protected async mayShowOnWebsite(tx: Tx, c: { audience: Audience }): Promise<boolean> {
+    if (!publicAudience(c.audience)) return false;
+    return this.isManager || this.can("approve") || (this.can("publish") && !(await this.settings(tx)).approvalFor.website);
+  }
+
+  /** Turning the website on later (a correction, an approver's edits) needs the same right as sending it there. */
+  protected async mustShowOnWebsite(tx: Tx, before: { website: boolean }, after: { audience: Audience; website: boolean }): Promise<void> {
+    if (after.website && !before.website && !(await this.mayShowOnWebsite(tx, after))) throw new ForbiddenError("Putting a notice on the website needs an approver. Ask one to do it.");
+  }
+
+  /** `reach` plus the website rule: a notice for the website needs approval unless `mayShowOnWebsite`. A website-only notice has no audience to check. */
   protected async publishReach(tx: Tx, c: { audience: Audience; website: boolean }): Promise<Reach> {
     const base = c.audience.include.length ? await this.reach(tx, c.audience, "publish") : "free";
-    return base === "free" && c.website && !this.isManager && !this.can("approve") && (await this.settings(tx)).approvalFor.website ? "approval" : base;
+    return base === "free" && c.website && !(await this.mayShowOnWebsite(tx, c)) ? "approval" : base;
   }
 
   /** People who may approve, by name. Built-in roles follow feature.ts; custom roles follow their grants. */

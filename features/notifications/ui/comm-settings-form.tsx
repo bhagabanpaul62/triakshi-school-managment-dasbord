@@ -163,9 +163,9 @@ export function CommSettingsForm({ initial }: { initial: CommSettings }) {
 
       <Panel title="Text messages and WhatsApp" className="lg:col-span-2">
         <ul className="flex flex-col gap-3">
-          <li className="text-sm text-[var(--ds-on-surface)]">Text messages (SMS) <span className={`ml-2 rounded-full bg-white/[0.08] px-2 py-0.5 text-xs ${soft}`}>Not available yet</span>
+          <li className="text-sm text-[var(--ds-on-surface)]">Text messages (SMS) <span className={`ml-2 rounded-full bg-white/[0.08] px-2 py-0.5 text-xs text-[var(--ds-on-surface-variant)]`}>Not available yet</span>
             <span className={`mt-1 block text-xs ${soft}`}>In India a school must register with the telecom rules (called DLT) and get each message wording approved before any text can go out. Until that is done, nothing is sent by text.</span></li>
-          <li className="text-sm text-[var(--ds-on-surface)]">WhatsApp <span className={`ml-2 rounded-full bg-white/[0.08] px-2 py-0.5 text-xs ${soft}`}>Not available yet</span>
+          <li className="text-sm text-[var(--ds-on-surface)]">WhatsApp <span className={`ml-2 rounded-full bg-white/[0.08] px-2 py-0.5 text-xs text-[var(--ds-on-surface-variant)]`}>Not available yet</span>
             <span className={`mt-1 block text-xs ${soft}`}>WhatsApp has to approve the school's business number and each message wording first. Until then, families get phone alerts and email.</span></li>
         </ul>
       </Panel>

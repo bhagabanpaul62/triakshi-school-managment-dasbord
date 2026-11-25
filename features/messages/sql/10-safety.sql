@@ -34,10 +34,13 @@ END $$;
 DROP TRIGGER IF EXISTS message_reports_fixed ON message_reports;
 CREATE TRIGGER message_reports_fixed BEFORE UPDATE ON message_reports FOR EACH ROW EXECUTE FUNCTION message_reports_fixed();
 
--- Nothing in a held conversation (one that was reported) can be removed.
+-- A message can be marked removed (the original stays) but never changed. A held conversation (one that was reported) also keeps every row and every removal.
 CREATE OR REPLACE FUNCTION messages_held_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF (TG_OP = 'DELETE' OR NEW.removed_at IS DISTINCT FROM OLD.removed_at) AND
+  IF TG_OP = 'UPDATE' AND NEW.body IS DISTINCT FROM OLD.body THEN
+    RAISE EXCEPTION 'a message cannot be changed' USING ERRCODE = '42501';
+  END IF;
+  IF (TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND OLD.removed_at IS NOT NULL AND NEW.removed_at IS DISTINCT FROM OLD.removed_at)) AND
      EXISTS (SELECT 1 FROM message_threads t WHERE t.id = OLD.thread_id AND t.held_at IS NOT NULL) THEN
     RAISE EXCEPTION 'this conversation is held for review' USING ERRCODE = '42501';
   END IF;

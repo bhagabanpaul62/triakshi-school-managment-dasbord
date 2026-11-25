@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, closeDb, eq, users, withSchool } from "@smw/db";
+import { and, auditLogs, closeDb, eq, users, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, systemCtx, ValidationError, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
@@ -11,6 +11,7 @@ import { REQUEST_STATES } from "./constants";
 import { COMM_STATES } from "@smw/ui/comm/states";
 import { CategoryService, ReportService, RequestService } from "./service";
 import { reportRows } from "./report";
+import { AuditService } from "../settings/service";
 
 let a: TestSchool, b: TestSchool;
 let classTeacher: Ctx, outsider: Ctx, aboutTeacher: Ctx, admin2: Ctx, family2: Ctx, desk: Ctx;
@@ -380,6 +381,15 @@ describe("a complaint about a person is invisible to that person, everywhere", (
     await svc(a.as.admin).internalNote(id, "Talk to the principal first");
     await svc(a.as.admin).resolve(id);
     for (const who of [aboutTeacher, admin2]) expect(await bell(who.userId, id)).toHaveLength(0);
+  });
+
+  it("every audit line of it names them, so the audit screen hides it from them", async () => {
+    const lines = await withSchool(a.id, (tx) => tx.select({ id: auditLogs.id, meta: auditLogs.meta, summary: auditLogs.summary }).from(auditLogs).where(eq(auditLogs.entityId, id)));
+    expect(lines.length).toBeGreaterThan(3);
+    for (const l of lines) expect(new Set((l.meta as { aboutUserIds?: string[] }).aboutUserIds), l.summary ?? "").toEqual(new Set([aboutTeacher.userId, admin2.userId]));
+    const seen = (who: Ctx) => new AuditService({ ...who, features: new Set([...who.features, "settings"]) }).list({ filters: { module: "requests" }, pageSize: 100 }).then((p) => p.rows.filter((x) => lines.some((l) => l.id === x.id)).length);
+    expect(await seen(a.as.admin)).toBe(lines.length);
+    expect(await seen(admin2)).toBe(0);
   });
 });
 

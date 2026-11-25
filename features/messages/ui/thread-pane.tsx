@@ -38,7 +38,7 @@ export interface PaneProps {
   safetyContacts: { name: string; phone: string }[];
 }
 
-const SMALL = cn("rounded-full px-2 py-1 text-xs text-[var(--ds-on-surface-muted)] underline-offset-2 hover:text-[var(--ds-on-surface)] hover:underline", FOCUS);
+const SMALL = cn("rounded-full px-2 py-1 text-xs text-[var(--ds-on-surface-variant)] underline-offset-2 hover:text-[var(--ds-on-surface)] hover:underline", FOCUS);
 
 export function ThreadPane(p: PaneProps) {
   const router = useRouter();
@@ -71,7 +71,7 @@ export function ThreadPane(p: PaneProps) {
           <ChatBubble kind={m.kind === "text" ? "message" : m.kind} mine={m.mine} sender={m.sender} at={m.at} text={m.body} removed={m.removed} removedBy={m.removedByName ?? undefined} seenLine={seenLine}
             files={m.files.map((f) => ({ id: f.id, name: f.name, sizeBytes: f.size, type: f.type, href: `/api/messages/files/${f.id}` }))} />
           {m.kind === "text" && !m.removed ? (
-            <div className={cn("flex gap-1 opacity-70 transition-opacity focus-within:opacity-100 group-hover:opacity-100", m.mine && "justify-end")}>
+            <div className={cn("flex gap-1", m.mine && "justify-end")}>
               {young && confirmId !== m.id ? <button type="button" className={SMALL} onClick={() => setConfirmId(m.id)}>Remove</button> : null}
               {confirmId === m.id ? (
                 <span role="alert" className="flex flex-wrap items-center gap-2 text-xs text-[var(--ds-on-surface-variant)]">

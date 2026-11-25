@@ -30,6 +30,7 @@ export const notifications = pgTable("notifications", {
 }, (t) => [...tenant(t, "notifications"),
   index("notifications_user_created").on(t.schoolId, t.userId, t.createdAt),
   index("notifications_subject").on(t.schoolId, t.subjectType, t.subjectId, t.userId),
+  index("notifications_unread").on(t.schoolId, t.userId).where(sql`${t.readAt} is null`),
   index("notifications_open_action").on(t.schoolId, t.userId).where(sql`${t.action} and ${t.doneAt} is null`),
   uniqueIndex("notifications_group_open").on(t.schoolId, t.userId, t.groupKey).where(sql`${t.groupKey} is not null and ${t.readAt} is null and ${t.doneAt} is null`)]);
 

@@ -315,6 +315,7 @@ export class NoticeService extends NoticeBase {
       if (d.edits && Object.keys(d.edits).length) {
         const c = await this.shape(tx, contentOf(n), d.edits);
         await this.mayChangeAudience(tx, n.audience, c);
+        await this.mustShowOnWebsite(tx, n, c);
         await tx.insert(announcementVersions).values({ schoolId: this.ctx.schoolId, announcementId: n.id, version: n.version, snapshot: snapshotOf(n), note: "As sent for approval", changedBy: n.createdBy });
         cur = (await tx.update(announcements).set({ ...this.values(c, await labelOf(tx, c)), version: n.version + 1 }).where(eq(announcements.id, n.id)).returning())[0]!;
       }
@@ -437,6 +438,7 @@ export class NoticeService extends NoticeBase {
       transition(n.state, "correct");
       const c = await this.shape(tx, contentOf(n), d.edits);
       await this.mayChangeAudience(tx, n.audience, c);
+      await this.mustShowOnWebsite(tx, n, c);
       if (!sameJson(c.response, n.response)) {
         const [answered] = await tx.select({ n: count() }).from(announcementResponses).innerJoin(announcementRecipients, eq(announcementRecipients.id, announcementResponses.recipientId)).where(eq(announcementRecipients.announcementId, n.id));
         if (Number(answered?.n ?? 0) > 0) this.fieldError("response", "People have already answered, so what you ask them cannot change. Withdraw and send a new notice instead.");

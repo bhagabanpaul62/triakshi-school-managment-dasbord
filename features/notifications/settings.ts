@@ -9,7 +9,7 @@ import { commSettings } from "./schema";
 import { TOPIC_GROUPS, type TopicGroup } from "./topics";
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 20:00");
-const format = (what: string) => z.string().trim().max(60).refine((s) => s.includes("{n}"), `${what} must contain {n}`);
+const format = (what: string) => z.string().trim().max(60).refine((s) => s.includes("{session}") && s.includes("{n}"), `${what} must contain {session} and {n}`);
 
 const sideDefaults = z.partialRecord(z.enum(Object.keys(TOPIC_GROUPS) as [TopicGroup, ...TopicGroup[]]), z.object({ push: z.boolean(), email: z.enum(EMAIL_MODES) })).default({});
 
@@ -37,11 +37,24 @@ export const commSettingsSchema = z.object({
 });
 export type CommSettings = z.infer<typeof commSettingsSchema>;
 
-/** The school's settings with every missing value filled. A damaged row falls back to the defaults, never an error. */
+const APPROVAL_DEFAULT = { families: false, wholeSchool: false, website: true };
+
+/** The school's settings with every missing value filled. A damaged field falls back alone and the rest stay; a damaged approval switch becomes "approval needed". Never an error. */
 export async function loadCommSettings(tx: Tx): Promise<CommSettings> {
   const [row] = [...(await tx.execute(sql`select settings from comm_settings limit 1`))] as { settings: unknown }[];
-  const parsed = commSettingsSchema.safeParse(row?.settings ?? {});
-  return parsed.success ? parsed.data : commSettingsSchema.parse({});
+  const whole = commSettingsSchema.safeParse(row?.settings ?? {});
+  if (whole.success) return whole.data;
+  const raw = (row?.settings && typeof row.settings === "object" ? row.settings : {}) as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(commSettingsSchema.shape)) {
+    if (field.safeParse(raw[key]).success) out[key] = raw[key];
+    else if (key === "teacherPublish") out[key] = "approval";
+    else if (key === "approvalFor") {
+      const sw = raw[key] && typeof raw[key] === "object" ? (raw[key] as Record<string, unknown>) : null;
+      out[key] = Object.fromEntries(Object.entries(APPROVAL_DEFAULT).map(([k, d]) => [k, !sw ? true : sw[k] === undefined ? d : typeof sw[k] === "boolean" ? sw[k] : true]));
+    }
+  }
+  return commSettingsSchema.parse(out);
 }
 
 type Perm = keyof typeof notificationsFeature.permissions;

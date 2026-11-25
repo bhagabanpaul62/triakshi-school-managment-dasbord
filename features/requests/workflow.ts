@@ -14,7 +14,7 @@ import { resolveRoute, STAFF_ROLES, type Route } from "./routing";
 import { requestCategories, requests } from "./schema";
 import { RequestReads } from "./reads";
 
-type Run<T> = (tx: Tx, c: { v: Viewer; r: Req; cat: Category }) => Promise<T>;
+type Run<T> = (tx: Tx, c: { v: Viewer; r: Req; cat: Category; about: Set<string> }) => Promise<T>;
 const subjectOf = (r: Pick<Req, "id">) => ({ type: "request", id: r.id });
 
 export abstract class RequestWorkflow extends RequestReads {
@@ -23,7 +23,10 @@ export abstract class RequestWorkflow extends RequestReads {
   /** Load the request this person may see, run `fn`, audit it. */
   protected async act<T>(id: string, summary: string, fn: Run<T>): Promise<T> {
     this.authorize("use", "write");
-    return this.write("use", async (tx) => fn(tx, await this.load(tx, id, true)), () => ({ action: "update", entity: "Request", entityId: id, summary }));
+    const about = new Set<string>();
+    // The audit screen hides a complaint from the people it names, so every entry carries them.
+    return this.write("use", async (tx) => { const c = await this.load(tx, id, true); c.r.aboutUserIds.forEach((u) => about.add(u)); return fn(tx, { ...c, about }); },
+      () => ({ action: "update", entity: "Request", entityId: id, summary, meta: { aboutUserIds: [...about] } }));
   }
 
   private handled(tx: Tx, r: Req, ...people: (string | null)[]) {
@@ -297,12 +300,13 @@ export abstract class RequestWorkflow extends RequestReads {
   /** Same child only. Nothing is moved: this one is closed with a link to the one that stays. */
   async merge(input: unknown) {
     const d = this.parse(mergeInput, input);
-    return this.act(d.id, "Joined two requests", async (tx, { v, r }) => {
+    return this.act(d.id, "Joined two requests", async (tx, { v, r, about }) => {
       this.staffOnly(v);
       if (d.intoId === r.id) throw new ValidationError({ intoId: "Choose a different request" });
       const keep = await this.load(tx, d.intoId, true).catch(() => null);
       if (!keep) throw new ValidationError({ intoId: "Choose a request you can see" });
       if (!r.studentId || keep.r.studentId !== r.studentId) throw new ValidationError({ intoId: "Only requests about the same child can be joined" });
+      keep.r.aboutUserIds.forEach((u) => about.add(u));
       if (keep.r.mergedIntoId || !isOpen(keep.r.state)) throw new ValidationError({ intoId: "Choose a request that is still open" });
       this.go(r, "merge");
       await this.closeRow(tx, r, `Joined with ${keep.r.number}`, { mergedIntoId: keep.r.id });

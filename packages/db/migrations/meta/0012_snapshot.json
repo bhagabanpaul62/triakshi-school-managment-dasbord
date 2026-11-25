@@ -1,5 +1,5 @@
 {
-  "id": "b447aad6-a0fe-443b-a08a-a3897bce55e6",
+  "id": "d690ee8f-290d-4750-880f-b135097c7e8a",
   "prevId": "eca8672f-0fd7-48b9-9dd1-e532e6092b2b",
   "version": "7",
   "dialect": "postgresql",
@@ -26940,6 +26940,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "notifications_unread": {
+          "name": "notifications_unread",
+          "columns": [
+            {
+              "expression": "school_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"notifications\".\"read_at\" is null",
           "concurrently": false,
           "method": "btree",
           "with": {}
