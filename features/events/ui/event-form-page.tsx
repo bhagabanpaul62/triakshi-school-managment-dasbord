@@ -20,10 +20,10 @@ export default async function EventFormPage({ params }: { params?: Promise<{ id:
 
   if (!id) {
     const day = addDays(istDay(new Date()), 1);
-    const mine = options.mySections.map((s) => ({ type: "section" as const, id: s }));
+    const mine = options.classTeacherSections.map((s) => ({ type: "section" as const, id: s }));
     const initial: FormInitial = {
       title: "", type: "event", description: "", allDay: false, startsAt: `${day}T10:00`, endsAt: `${day}T11:00`, location: "", mapUrl: "", bring: "", isPublic: false, reminders: DEFAULT_REMINDERS,
-      audience: !manage && mine.length ? { include: mine, exclude: [] } : manage ? EVERYONE : { include: [{ type: "families" }], exclude: [] }, rsvpOn: false, capacity: "", guests: "", closesAt: "", consentHref: "",
+      audience: !manage && mine.length ? { include: mine, exclude: [] } : manage ? EVERYONE : { include: [], exclude: [] }, rsvpOn: false, capacity: "", guests: "", closesAt: "", consentHref: "",
     };
     return (<><PageHeader eyebrow="Calendar" title="Add event" description="Put it on the calendar of the people it is for." /><EventForm mode="create" options={options} initial={initial} canWebsite={manage} cancelHref="/app/events" /></>);
   }

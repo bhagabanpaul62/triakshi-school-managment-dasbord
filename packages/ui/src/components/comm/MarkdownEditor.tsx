@@ -90,7 +90,7 @@ export function MarkdownEditor({ name, defaultValue = "", label, maxLength = 500
         <div role="tablist" aria-label="Write or preview" className="flex gap-1 rounded-full bg-white/[0.05] p-1">
           {(["write", "preview"] as const).map((t) => (
             <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-              className={cn("h-8 rounded-full px-3 text-xs capitalize", FOCUS, tab === t ? "bg-[var(--ds-on-surface)] font-medium text-[var(--ds-surface)]" : "text-[var(--ds-on-surface-variant)]")}>{t}</button>
+              className={cn("h-8 rounded-full px-3 text-xs capitalize", FOCUS, tab === t ? "bg-white/[0.12] font-medium text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)] hover:text-[var(--ds-on-surface-variant)]")}>{t}</button>
           ))}
         </div>
       </div>

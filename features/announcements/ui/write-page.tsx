@@ -48,8 +48,8 @@ export default async function NewNoticePage({ searchParams }: { searchParams: Pr
   const initial: FormInitial = {
     id: null, mode: "draft", type: kind, categoryId: categories.find((c) => c.name.toLowerCase() === t?.categoryName?.toLowerCase())?.id ?? "",
     title: t?.title ?? "", body: t?.body ?? "", lang2: "", title2: "", body2: "",
-    // A teacher starts with their own sections chosen: the most common notice is to their own class.
-    audience: ctx.role === "teacher" && options.mySections.length ? { include: options.mySections.map((id) => ({ type: "section", id })), exclude: [] } : NONE,
+    // A teacher starts with the sections they are class teacher of; none means nothing chosen ("My sections" stays a chip).
+    audience: ctx.role === "teacher" && options.classTeacherSections.length ? { include: options.classTeacherSections.map((id) => ({ type: "section", id })), exclude: [] } : NONE,
     response: kind === "urgent" ? { kind: "ack" } : t?.response ?? { kind: "none" }, dueAt: "", reminders: { before: true, onDay: true, after: true }, website: "app", pinnedUntil: "", expiresAt: "", files: [],
   };
   return <Screen ctx={ctx} initial={initial} title={tpl ? `New from ${tpl.name}` : kind === "circular" ? "New circular" : kind === "urgent" ? "New urgent alert" : "New notice"} back={{ href: HOME, label: "Notices" }} />;

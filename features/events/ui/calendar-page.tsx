@@ -63,10 +63,12 @@ export function CalendarPage({ items, view, anchor, today, layers, chosen, defau
         </>} />
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={url({ date: step(view, anchor, -1) })} aria-label="Earlier" className={PILL}>Back</Link>
-          <Link href={url({ date: today })} className={PILL}>Today</Link>
-          <Link href={url({ date: step(view, anchor, 1) })} aria-label="Later" className={PILL}>Next</Link>
-          <h2 className="px-2 text-lg font-medium text-[var(--ds-on-surface)]" aria-live="polite">{title(view, anchor)}</h2>
+          <div className="flex min-w-0 items-center gap-2">
+            <Link href={url({ date: step(view, anchor, -1) })} aria-label="Earlier" className={PILL}>Back</Link>
+            <Link href={url({ date: today })} className={PILL}>Today</Link>
+            <Link href={url({ date: step(view, anchor, 1) })} aria-label="Later" className={PILL}>Next</Link>
+            <h2 className="min-w-0 truncate px-1 text-sm font-medium text-[var(--ds-on-surface)] sm:px-2 sm:text-lg" aria-live="polite">{title(view, anchor)}</h2>
+          </div>
           <nav aria-label="Calendar view" className="flex w-full gap-1 rounded-full bg-white/[0.05] p-1 sm:ml-auto sm:w-auto">
             {VIEWS.map((v) => (
               <Link key={v.key} href={url({ view: v.key, date: v.key === "agenda" ? today : anchor })} aria-current={v.key === view ? "page" : undefined}

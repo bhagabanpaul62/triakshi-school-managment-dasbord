@@ -28,6 +28,11 @@ export const isWebsiteOnly = (c: Pick<NoticeContent, "audience" | "website">) =>
 export const publicAudience = (a: Audience) => a.include.length === 0 || isEveryone(a);
 /** The text that goes in the bell and in the app. */
 export const plain = (c: Pick<NoticeContent, "body">, max = 200) => markdownToText(c.body, max);
+/** Bell and list text: one run of sentences, no dashes or numbers (each list item becomes a sentence). */
+export const sentences = (c: Pick<NoticeContent, "body">, max = 200) => {
+  const t = markdownToText(c.body).split("\n").map((l) => l.replace(/^(?:-|\d+\.) /, "").trim()).filter(Boolean).map((l) => (/[.!?।:]$/.test(l) ? l : `${l}.`)).join(" ");
+  return Array.from(t).length <= max ? t : Array.from(t).slice(0, max - 1).join("").trimEnd() + "…";
+};
 
 /** Why a notice is not ready to send, by field. Empty when it is. */
 export function readyErrors(c: NoticeContent, o: { languages: readonly string[]; categoryName: string | null }): Record<string, string> {

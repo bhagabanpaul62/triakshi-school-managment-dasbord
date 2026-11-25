@@ -97,7 +97,7 @@ export function NewMessageForm(p: NewMessageProps) {
         <div role="radiogroup" aria-label="Who to write to" className="flex gap-2">
           {([["family", "A family, about a student"], ["staff", "Colleagues"]] as const).map(([k, label]) => (
             <button key={k} type="button" role="radio" aria-checked={mode === k} onClick={() => { setMode(k); setPeople([]); setErrors({}); }}
-              className={cn(PILL_BTN, mode === k && "bg-[var(--ds-on-surface)] text-[var(--ds-surface)] hover:bg-[var(--ds-on-surface)]")}>{label}</button>
+              className={cn(PILL_BTN, mode === k && "bg-white/[0.12] text-[var(--ds-on-surface)] hover:bg-white/[0.12]")}>{label}</button>
           ))}
         </div>
       ) : null}

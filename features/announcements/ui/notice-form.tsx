@@ -292,7 +292,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
       {readOnly ? <p role="status" className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm text-[var(--ds-color-warning-400)]">This school is in read only mode. You can read here, but nothing can be saved or sent until the school is open again. Ask the school admin.</p> : null}
       <div role="tablist" aria-label="Write or preview" className="flex gap-1 self-start rounded-full bg-white/[0.05] p-1 lg:hidden">
         {(["write", "preview"] as const).map((t) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn("h-9 rounded-full px-4 text-sm", tab === t ? "bg-[var(--ds-on-surface)] font-medium text-[var(--ds-surface)]" : "text-[var(--ds-on-surface-variant)]")}>{t === "write" ? "Write" : "Phone preview"}</button>
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={cn("h-9 rounded-full px-4 text-sm", tab === t ? "bg-white/[0.12] font-medium text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)]")}>{t === "write" ? "Write" : "Phone preview"}</button>
         ))}
       </div>
 
@@ -327,7 +327,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
             {urgent ? <p className="text-xs text-[var(--ds-color-danger-400)]">An urgent alert reaches everyone on every channel at once, even at night. It cannot be undone or scheduled.</p> : null}
             {f.lang2 ? (
               <div role="tablist" aria-label="Language" className="flex gap-1 self-start rounded-full bg-white/[0.05] p-1">
-                {([["main", "Main language"], ["second", f.lang2]] as const).map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={lang === k} onClick={() => setLang(k)} className={cn("h-8 rounded-full px-3 text-xs", lang === k ? "bg-[var(--ds-on-surface)] font-medium text-[var(--ds-surface)]" : "text-[var(--ds-on-surface-variant)]")}>{label}</button>)}
+                {([["main", "Main language"], ["second", f.lang2]] as const).map(([k, label]) => <button key={k} type="button" role="tab" aria-selected={lang === k} onClick={() => setLang(k)} className={cn("h-8 rounded-full px-3 text-xs", lang === k ? "bg-white/[0.12] font-medium text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)]")}>{label}</button>)}
               </div>
             ) : null}
             {!second ? (

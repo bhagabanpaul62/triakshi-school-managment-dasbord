@@ -231,12 +231,14 @@ export interface AudienceOptions {
   groups: { id: string; name: string; shared: boolean; mine: boolean }[];
   /** Sections the caller teaches: the "my sections" chip. */
   mySections: string[];
+  /** Sections where the caller is the class teacher: the default audience for a teacher. */
+  classTeacherSections: string[];
   canFeeOverdue: boolean;
 }
 
 export async function audienceOptions(tx: Tx, ctx: Ctx): Promise<AudienceOptions> {
   const has = await tablesPresent(tx);
-  const [classes, sections, houses, subjects, custom, mySections] = await Promise.all([
+  const [classes, sections, houses, subjects, custom, mySections, classTeacherSections] = await Promise.all([
     rows<{ id: string; name: string }>(tx, sql`select id::text, ${classLabel(sql`name`)} as name from classes order by display_order, grade, name`),
     rows<{ id: string; classId: string; name: string }>(tx, sql`select s.id::text, s.class_id::text as "classId", ${classLabel(sql`c.name`)} || ' ' || s.name as name from sections s join classes c on c.id = s.class_id
       where s.year_id in (select id from academic_years where is_current) order by c.display_order, c.grade, s.name`),
@@ -244,11 +246,12 @@ export async function audienceOptions(tx: Tx, ctx: Ctx): Promise<AudienceOptions
     rows<{ id: string; name: string }>(tx, sql`select id::text, name from subjects order by name`),
     rows<{ id: string; name: string }>(tx, sql`select id::text, name from school_roles order by name`),
     ctx.role === "teacher" ? teacherSections(tx, ctx.userId) : Promise.resolve([] as string[]),
+    ctx.role === "teacher" ? rows<{ id: string }>(tx, sql`select s.id::text as id from sections s where s.year_id in (select id from academic_years where is_current) and s.class_teacher_id = ${ctx.userId}::uuid`).then((r) => r.map((x) => x.id)) : Promise.resolve([] as string[]),
   ]);
   const routes = has.routes ? await rows<{ id: string; name: string }>(tx, sql`select id::text, name from routes order by name`) : [];
   const stops = has.route_stops ? await rows<{ id: string; routeId: string; name: string }>(tx, sql`select id::text, route_id::text as "routeId", name from route_stops order by route_id, sequence`) : [];
   const groups = has.comm_groups ? await rows<{ id: string; name: string; shared: boolean; mine: boolean }>(tx, sql`select id::text, name, shared, coalesce(created_by = ${ctx.userId}::uuid, false) as mine from comm_groups where shared or created_by = ${ctx.userId}::uuid order by name`) : [];
-  return { classes, sections, houses, routes, stops, subjects, roles: [...Object.entries(BUILT_IN_ROLES).map(([id, name]) => ({ id, name })), ...custom], groups, mySections, canFeeOverdue: canTargetFeeOverdue(ctx) };
+  return { classes, sections, houses, routes, stops, subjects, roles: [...Object.entries(BUILT_IN_ROLES).map(([id, name]) => ({ id, name })), ...custom], groups, mySections, classTeacherSections, canFeeOverdue: canTargetFeeOverdue(ctx) };
 }
 
 // ---- service for the picker ----

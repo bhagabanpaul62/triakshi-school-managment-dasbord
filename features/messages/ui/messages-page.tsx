@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MenuLink, MoreMenu } from "@smw/ui/shell/MoreMenu";
 import { IconBellOff, IconPin } from "@tabler/icons-react";
 import { NotFoundError, ForbiddenError } from "@smw/feature-kit";
 import { CommSettingsService } from "@smw/feature-notifications/settings";
@@ -85,8 +86,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
       {ctx.features.has("notifications") ? <LivePulse fast={!!open} bell={pulse.bell} messages={inbox.unread} requests={0} /> : null}
       <PageHeader eyebrow="Communication" title="Messages" description={staff ? "Private conversations with families and colleagues. The school can review a conversation for safety." : "Private conversations with your child's teachers and the school office."}
         actions={<>
-          {staff ? <Link href="/app/messages/families" className={PILL_BTN}>Message families</Link> : null}
-          {staff ? <Link href="/app/messages/hours" className={PILL_BTN}>My hours</Link> : null}
+          {staff ? <MoreMenu><MenuLink href="/app/messages/families">Message families</MenuLink><MenuLink href="/app/messages/hours">My hours</MenuLink></MoreMenu> : null}
           {rules.canStart ? <Link href="/app/messages/new" className={PRIMARY_BTN}>New message</Link> : null}
         </>} />
       {rules.why ? <p className="mb-3 rounded-2xl bg-white/[0.04] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]" role="status">{rules.why}</p> : null}

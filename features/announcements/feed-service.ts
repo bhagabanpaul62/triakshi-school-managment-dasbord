@@ -83,10 +83,10 @@ export class FeedService extends NoticeBase {
   }
 
   /** Urgent alerts sent to me that I have not opened: the red banner in the panel stays until each is opened. */
-  urgentUnopened(): Promise<{ id: string; title: string }[]> {
-    return this.read("read", (tx) => tx.select({ id: announcements.id, title: announcements.title }).from(announcementRecipients).innerJoin(announcements, eq(announcements.id, announcementRecipients.announcementId))
+  urgentUnopened(): Promise<{ id: string; title: string; asksAnswer: boolean }[]> {
+    return this.read("read", (tx) => tx.select({ id: announcements.id, title: announcements.title, response: announcements.response }).from(announcementRecipients).innerJoin(announcements, eq(announcements.id, announcementRecipients.announcementId))
       .where(and(eq(announcementRecipients.userId, this.ctx.userId), isNull(announcementRecipients.removedAt), isNull(announcementRecipients.seenAt), eq(announcements.state, "published"), notExpired, eq(announcements.type, "urgent")))
-      .orderBy(desc(announcements.publishedAt)).limit(3));
+      .orderBy(desc(announcements.publishedAt)).limit(3)).then((rs) => rs.map(({ response, ...a }) => ({ ...a, asksAnswer: response.kind !== "none" })));
   }
 
   /** Notices sent to me that I have not opened. */

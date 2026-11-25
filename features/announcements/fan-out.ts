@@ -6,7 +6,7 @@ import { resolveAudience } from "@smw/feature-notifications/audience";
 import { personKey, type Reached } from "@smw/feature-notifications/audience-rules";
 import { commDeliveries, notifications } from "@smw/feature-notifications/schema";
 import { NotificationWriter, type NotificationRow } from "@smw/feature-notifications/writer";
-import { plain, type Notice } from "./content";
+import { sentences, type Notice } from "./content";
 import { giveNumber } from "./lifecycle";
 import { announcementRecipients, announcements } from "./schema";
 
@@ -21,7 +21,7 @@ export const asksNow = (n: Notice, now: Date) => n.response.kind !== "none" && !
 /** The one notification a person gets for a notice. All kinds share a group key, so an unread one grows a count instead of piling up. */
 export function noticeRow(n: Notice, userId: string, kind: Kind, now = new Date()): NotificationRow {
   const asks = asksNow(n, now);
-  const base = { userId, subject: subjectOf(n.id), href: noticeHref(n.id), groupKey: `notice:${n.id}`, body: plain(n) };
+  const base = { userId, subject: subjectOf(n.id), href: noticeHref(n.id), groupKey: `notice:${n.id}`, body: sentences(n) };
   switch (kind) {
     case "new": return n.type === "urgent"
       ? { ...base, topic: "urgent.alert", title: `Urgent: ${n.title}`, urgent: true, action: asks }
@@ -93,7 +93,7 @@ export async function reconcile(tx: Tx, schoolId: string, n: Notice, o: { notify
   const back = current.filter((c) => c.removedAt && keys.has(c.key)).map((c) => c.key);
   const old = new Set(current.filter((c) => !c.removedAt).map((c) => c.key));
 
-  await NotificationWriter.rewrite(tx, schoolId, subjectOf(n.id), { title: n.title, body: plain(n) });
+  await NotificationWriter.rewrite(tx, schoolId, subjectOf(n.id), { title: n.title, body: sentences(n) });
   const goneUsers = [...new Set(gone.flatMap((g) => (g.userId ? [g.userId] : [])))];
   // The rewrite above reaches every row of the notice; the people who lose it must not see the new words.
   for (const part of chunks(goneUsers)) await tx.update(notifications).set({ title: NO_LONGER, body: null })

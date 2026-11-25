@@ -59,7 +59,7 @@ export function NotificationItem({ item, time, read, onOpen }: { item: ItemData;
           {item.todo ? <Chip>To do</Chip> : null}
           {item.count > 1 ? <Chip>{item.count} updates</Chip> : null}
         </span>
-        {item.body ? <span className="mt-0.5 block text-sm text-[var(--ds-on-surface-muted)]">{item.body}</span> : null}
+        {item.body ? <span className="mt-0.5 line-clamp-2 text-sm text-[var(--ds-on-surface-muted)]">{item.body}</span> : null}
       </span>
       <span className="shrink-0 pt-0.5 text-xs tabular-nums text-[var(--ds-on-surface-muted)]">{time}</span>
       {item.href ? <IconChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ds-on-surface-muted)]" aria-hidden /> : null}

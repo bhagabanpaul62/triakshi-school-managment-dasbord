@@ -23,7 +23,7 @@ const RULES = ["section", "class", "subject", "student", "group", "house", "rout
 export function FamiliesFlow({ options }: { options: AudienceOptions }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
-  const [audience, setAudience] = useState<Audience>({ include: options.mySections.map((id) => ({ type: "section" as const, id })), exclude: [] });
+  const [audience, setAudience] = useState<Audience>({ include: options.classTeacherSections.map((id) => ({ type: "section" as const, id })), exclude: [] });
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [preview, setPreview] = useState<BatchPreview | null>(null);
@@ -52,7 +52,7 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
       <ol className="flex gap-2" aria-label="Steps">
         {STEPS.map((s, i) => (
-          <li key={s} aria-current={i === step ? "step" : undefined} className={cn("flex h-9 flex-1 items-center justify-center rounded-full text-sm", i === step ? "bg-[var(--ds-on-surface)] font-medium text-[var(--ds-surface)]" : i < step ? "bg-white/[0.1] text-[var(--ds-on-surface)]" : "bg-white/[0.04] text-[var(--ds-on-surface-muted)]")}>{i + 1}. {s}</li>
+          <li key={s} aria-current={i === step ? "step" : undefined} className={cn("flex h-9 flex-1 items-center justify-center rounded-full text-sm", i === step ? "bg-white/[0.12] font-medium text-[var(--ds-on-surface)]" : i < step ? "bg-white/[0.06] text-[var(--ds-on-surface-variant)]" : "bg-white/[0.04] text-[var(--ds-on-surface-muted)]")}>{i + 1}. {s}</li>
         ))}
       </ol>
       <Panel>

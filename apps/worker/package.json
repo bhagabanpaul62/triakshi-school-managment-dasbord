@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "job": "tsx src/run-job.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run"
   },

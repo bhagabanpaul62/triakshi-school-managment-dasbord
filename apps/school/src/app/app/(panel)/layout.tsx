@@ -34,8 +34,9 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     <>
       <style dangerouslySetInnerHTML={{ __html: panelCss(school.theme) }} />
       <AppShell brand={{ name: school.name, logoUrl: school.logoUrl, homeHref: "/app" }} groups={buildMenu(ctx, { "/app/messages": counts.messages, "/app/requests": counts.requests, "/app/announcements": counts.notices })}
-        user={{ name: ctx.name, meta: ROLE_LABEL[ctx.role] }} logout={logout} banner={<>{banner}<UrgentBanner /></>}
+        user={{ name: ctx.name, meta: ROLE_LABEL[ctx.role] }} logout={logout} banner={banner}
         topbar={ctx.features.has("notifications") ? <NotificationBellServer messages={counts.messages} requests={counts.requests} /> : null}>
+        <UrgentBanner />
         {children}
       </AppShell>
     </>

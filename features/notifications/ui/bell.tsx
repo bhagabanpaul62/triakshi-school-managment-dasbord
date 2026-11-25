@@ -52,7 +52,7 @@ export function NotificationBell({ bell, items, listHref = "/app/notifications" 
                       <span className={`flex items-center gap-2 text-sm ${read ? "text-[var(--ds-on-surface-variant)]" : "text-[var(--ds-on-surface)]"}`}>
                         <span className="min-w-0 truncate">{it.title}</span>{it.urgent ? <UrgentChip /> : null}
                       </span>
-                      {it.body ? <span className="block truncate text-xs text-[var(--ds-on-surface-muted)]">{it.body}</span> : null}
+                      {it.body ? <span className="line-clamp-2 text-xs text-[var(--ds-on-surface-muted)]">{it.body}</span> : null}
                       <span className="block text-[11px] text-[var(--ds-on-surface-muted)]">{relative(it.createdAt)}{it.count > 1 ? ` · ${it.count} updates` : ""}</span>
                     </span>
                   </>

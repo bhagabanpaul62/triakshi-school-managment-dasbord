@@ -11,7 +11,7 @@ import { toast } from "@smw/ui/shell/toast";
 import type { Scope } from "../constants";
 import { cancelEvent, deleteEvent, publishEvent } from "./actions";
 import { ScopeChoice } from "./scope-choice";
-import { PRIMARY } from "./styles";
+import { PILL, PRIMARY } from "./styles";
 
 export interface EventActionsProps { id: string; state: "draft" | "live" | "cancelled"; inSeries: boolean; canRun: boolean }
 
@@ -46,7 +46,7 @@ export function EventActions({ id, state, inSeries, canRun }: EventActionsProps)
   const cancel = <MenuItem key="cancel" onClick={open("cancel")}><IconBan className="h-4 w-4" aria-hidden />Cancel event</MenuItem>;
   const del = <MenuItem key="delete" tone="danger" onClick={open("delete")}><IconTrash className="h-4 w-4" aria-hidden />Delete draft</MenuItem>;
   const runs = canRun && state !== "cancelled";
-  const primary = state === "draft" ? (canRun ? publish : null) : runs ? <Link key="edit" href={editHref} className={PRIMARY}>{editIcon}Edit</Link> : <a key="ics" href={icsHref} className={PRIMARY}>{calendarIcon}Add to calendar</a>;
+  const primary = state === "draft" ? (canRun ? publish : null) : runs ? <Link key="edit" href={editHref} className={PRIMARY}>{editIcon}Edit</Link> : <a key="ics" href={icsHref} className={PILL}>{calendarIcon}Add to calendar</a>;
   const more = [
     ...(state === "draft" && runs ? [<MenuLink key="edit" href={editHref}>{editIcon}Edit</MenuLink>] : []),
     ...(state === "live" && runs ? [<MenuLink key="ics" href={icsHref}>{calendarIcon}Add to calendar</MenuLink>, cancel] : []),
