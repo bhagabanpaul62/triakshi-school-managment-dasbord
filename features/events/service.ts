@@ -1,6 +1,6 @@
 import { and, asc, eq, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { CrudService, f, type Ctx } from "@smw/feature-kit";
+import { CrudService, f, ForbiddenError, ValidationError, type Ctx } from "@smw/feature-kit";
 import type { Tx } from "@smw/db";
 import { students } from "@smw/feature-students/schema";
 import eventsFeature from "./feature";
@@ -40,22 +40,32 @@ export class EventService extends CrudService<typeof events, Perm> {
   protected async scopeClause(tx: Tx): Promise<SQL | undefined> {
     if (this.ctx.role !== "student") return undefined;
     // "parents" means families, who sign in as the student. A class event reaches only that class's students.
-    const myClasses = tx.select({ c: students.classId }).from(students).where(eq(students.userId, this.ctx.userId));
+    const myClasses = tx.select({ c: students.classId }).from(students).where(and(eq(students.userId, this.ctx.userId), eq(students.status, "active")));
     return or(inArray(events.audience, ["all", "students", "parents"]), eq(events.isHoliday, true), and(eq(events.audience, "class"), inArray(events.classId, myClasses)));
   }
 
   /** Holidays are all-day by definition; all-day events cover whole days; only class events keep a class. */
-  private shape(data: Record<string, unknown>) {
+  private shape(data: Record<string, unknown>, was?: SchoolEvent) {
+    if (data.isPublic && data.audience !== "all") throw new ValidationError({ isPublic: "Only an event for everyone can go on the website" });
+    if (this.ctx.role !== "admin") {
+      if (data.isPublic && !was?.isPublic) throw new ValidationError({ isPublic: "Only an admin can put an event on the website" });
+      if (data.isHoliday && !was?.isHoliday) throw new ValidationError({ isHoliday: "Only an admin can declare a holiday" });
+    }
     const allDay = Boolean(data.allDay || data.isHoliday);
     const span = allDay ? allDaySpan(data.startsAt as Date, data.endsAt as Date | undefined) : { startsAt: data.startsAt, endsAt: data.endsAt ?? null };
     return { ...data, ...span, allDay, classId: data.audience === "class" ? data.classId : null };
   }
   protected async beforeCreate(_tx: Tx, data: Record<string, unknown>) { return { ...this.shape(data), createdBy: this.ctx.userId }; }
-  protected async beforeUpdate(_tx: Tx, _existing: SchoolEvent, data: Record<string, unknown>) { return this.shape(data); }
+  /** Admins look after every event; anyone else only their own. */
+  private own(row: SchoolEvent) {
+    if (this.ctx.role !== "admin" && row.createdBy !== this.ctx.userId) throw new ForbiddenError("Only the person who added this event, or an admin, can change it.");
+  }
+  protected async beforeUpdate(_tx: Tx, existing: SchoolEvent, data: Record<string, unknown>) { this.own(existing); return this.shape(data, existing); }
+  protected async beforeRemove(_tx: Tx, existing: SchoolEvent) { this.own(existing); }
 
   /** Classes to pick from when an audience is "one class". Raw SQL: this feature does not require academics. */
   async classOptions() {
-    return this.read("read", async (tx) => [...await tx.execute<{ value: string; label: string }>(sql`select id as value, name as label from classes order by name`)]);
+    return this.read("read", async (tx) => [...await tx.execute<{ value: string; label: string }>(sql`select id as value, name as label from classes order by display_order, name`)]);
   }
 
   /** One scoped, time-ordered read. `where` narrows it; the caller's audience scope is always applied. */
@@ -89,6 +99,6 @@ export class EventService extends CrudService<typeof events, Perm> {
 
   /** Public events for the school website (no login). Call with a system context. */
   async publicEvents(limit = 6) {
-    return this.between(and(eq(events.isPublic, true), gte(endOf, sql`now()`)), limit);
+    return this.between(and(eq(events.isPublic, true), eq(events.audience, "all"), gte(endOf, sql`now()`)), limit);
   }
 }

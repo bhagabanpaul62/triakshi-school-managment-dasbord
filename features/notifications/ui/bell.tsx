@@ -12,6 +12,10 @@ export function NotificationBell({ items: initial, unread: initialUnread, listHr
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState(initial);
   const [unread, setUnread] = useState(initialUnread);
+  // The server is the truth: when it sends a new list (after any action or refresh), show that.
+  const key = `${initialUnread}:${initial.map((i) => `${i.id}${i.read}`).join()}`;
+  const [seenKey, setSeenKey] = useState(key);
+  if (key !== seenKey) { setSeenKey(key); setItems(initial); setUnread(initialUnread); }
   const [, start] = useTransition();
   const box = useRef<HTMLDivElement>(null);
 

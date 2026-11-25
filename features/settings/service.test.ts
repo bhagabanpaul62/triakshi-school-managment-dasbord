@@ -26,6 +26,9 @@ describe("FilePolicy", () => {
     expect(FilePolicy.canRead("S1/documents/x.pdf", { schoolId: "S1", role: null })).toBe(false);
     expect(FilePolicy.canRead("S1/documents/x.pdf", caller)).toBe(true);
     expect(FilePolicy.canRead("S1/exports/x.json", caller)).toBe(false);
+    expect(FilePolicy.canRead("S1/private/messages/x.pdf", { schoolId: "S1", role: "admin" })).toBe(false);
+    expect(FilePolicy.canRead("S1/students/x.pdf", { schoolId: "S1", role: "student" })).toBe(false);
+    expect(FilePolicy.canRead("S1/avatars/x.png", { schoolId: "S1", role: "student" })).toBe(true);
     expect(FilePolicy.canRead("S1/exports/x.json", { schoolId: "S1", role: "admin" })).toBe(true);
   });
   it("never crosses schools or walks up the path", () => {

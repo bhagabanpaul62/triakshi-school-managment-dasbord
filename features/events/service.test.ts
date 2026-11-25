@@ -116,4 +116,11 @@ describe("class events", () => {
     expect(names).toEqual(expect.arrayContaining(["Class 5", "Class 6"]));
     expect(await new EventService(b.as.admin).classOptions()).toEqual([]);
   });
+
+  it("only the author or an admin changes an event; teachers declare no holiday and publish nothing", async () => {
+    const admin = new EventService(a.as.admin), teacher = new EventService(a.as.teacher);
+    const x = await admin.create({ title: "Founders day", startsAt: "2026-12-01T09:00" });
+    await expect(teacher.remove(x.id)).rejects.toThrow("Only the person who added");
+    await expect(teacher.create({ title: "Day off", startsAt: "2026-12-02", isHoliday: "true" })).rejects.toMatchObject({ fieldErrors: { isHoliday: expect.any(String) } });
+  });
 });

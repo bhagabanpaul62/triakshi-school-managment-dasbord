@@ -94,4 +94,13 @@ describe("announcement notifications", () => {
     expect(seen).toContain("Class 5 trip");
     expect(seen).not.toContain("Class 6 trip");
   });
+
+  it("only the author or an admin changes a notice; only an admin's notice for everyone reaches the website", async () => {
+    const admin = new AnnouncementService(a.as.admin), teacher = new AnnouncementService(a.as.teacher);
+    const x = await admin.create({ title: "From the principal", body: "x" });
+    await expect(teacher.update(x.id, { title: "Changed", body: "x" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(teacher.remove(x.id)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(teacher.create({ title: "Public", body: "x", isPublic: "true" })).rejects.toMatchObject({ fieldErrors: { isPublic: expect.any(String) } });
+    await expect(admin.create({ title: "Staff only", body: "x", audience: "staff", isPublic: "true" })).rejects.toMatchObject({ fieldErrors: { isPublic: expect.any(String) } });
+  });
 });

@@ -31,14 +31,18 @@ export class FilePolicy {
   /** The storage key behind one of our file URLs, or null for anything else. */
   static keyOf(url: string | null | undefined) { return url?.startsWith(FilePolicy.ROUTE) ? url.slice(FilePolicy.ROUTE.length) : null; }
 
-  /** `role` is null when nobody is signed in. Public files are open to everyone; data exports to admins only; the rest to any signed-in member of the school. */
+  /** `role` is null when nobody is signed in. Public files are open to everyone; `private/` files to nobody (their module checks and signs);
+   * exports to admins; a family login gets pictures and document images only, never another area. */
   static canRead(key: string, caller: { schoolId: string; role: SchoolRole | null }): boolean {
     const parts = key.split("/");
     const [school, area] = parts;
     if (school !== caller.schoolId || !area || parts.length < 3 || parts.some((p) => p === "" || p === "..")) return false;
     if (area === "public") return true;
     if (!caller.role) return false;
-    return area === "exports" ? caller.role === "admin" : true;
+    if (area === "private") return false;
+    if (area === "exports") return caller.role === "admin";
+    if (caller.role === "student" || caller.role === "parent") return area === "avatars" || area === "finance-docs";
+    return true;
   }
 }
 
@@ -533,6 +537,8 @@ const isPayroll = (table: string) => table.startsWith("pay_");
 /** Never exported: login secrets and session material. */
 const SKIP_TABLES = new Set(["sessions", "one_time_tokens", "data_exports"]);
 const SKIP_COLUMNS = new Set(["password_hash", "token_hash"]);
+/** Conversations are private between the people in them, so a school-wide file never carries them. */
+const PRIVATE_TALK = new Set(["message_threads", "thread_members", "messages"]);
 
 export interface ExportResult { id: string; label: string; sizeBytes: number; url: string }
 
@@ -607,7 +613,7 @@ export class ExportService extends SettingsService {
       order by c.table_name, c.ordinal_position`);
     const byTable = new Map<string, string[]>();
     for (const c of cols) {
-      if (SKIP_TABLES.has(c.table_name) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
+      if (SKIP_TABLES.has(c.table_name) || PRIVATE_TALK.has(c.table_name) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
       byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
     }
     const out: Record<string, Record<string, unknown>[]> = {};

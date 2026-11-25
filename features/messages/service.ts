@@ -25,6 +25,7 @@ export interface ThreadView {
 
 const MAX_MESSAGES = 500;
 const PEOPLE_CAP = 30;
+const MAX_PER_MINUTE = 20;
 
 /**
  * Private conversations inside one school. Every query goes through `thread_members`, so a conversation is
@@ -35,6 +36,21 @@ export class MessageService extends SchoolService<Perm> {
   private readonly rule = CONTACT_RULES[this.ctx.role];
 
   constructor(ctx: Ctx) { super(ctx); }
+
+  /** Triakshi support works inside a school's account but never inside its private conversations. */
+  protected authorize(permission: Perm, mode: "read" | "write") {
+    if (this.ctx.supportStaffId) throw new ForbiddenError("Private messages are not available in a support session.");
+    super.authorize(permission, mode);
+  }
+
+  /** At most 20 messages a minute and 60 new conversations a day (10 for a family) from one person. */
+  private async limit(tx: Tx, starting: boolean) {
+    const [m] = await tx.select({ n: count() }).from(messages).where(and(eq(messages.senderId, this.ctx.userId), sql`${messages.createdAt} > now() - interval '1 minute'`));
+    if (Number(m?.n) >= MAX_PER_MINUTE) throw new ValidationError({ body: "That is a lot of messages. Try again in a minute." });
+    if (!starting) return;
+    const [t] = await tx.select({ n: count() }).from(messageThreads).where(and(eq(messageThreads.createdBy, this.ctx.userId), sql`${messageThreads.createdAt} > now() - interval '1 day'`));
+    if (Number(t?.n) >= (this.ctx.role === "student" ? 10 : 60)) throw new ValidationError({ body: "You have started many conversations today. Try again tomorrow." });
+  }
 
   /** Throws NotFoundError (never Forbidden: do not reveal that a conversation exists) unless the caller is a member. */
   private async requireMember(tx: Tx, threadId: string) {
@@ -133,6 +149,7 @@ export class MessageService extends SchoolService<Perm> {
     const data = this.parse(sendInput, { threadId, body });
     return this.write("use", async (tx) => {
       await this.requireMember(tx, data.threadId);
+      await this.limit(tx, false);
       return this.post(tx, data.threadId, data.body);
     });
   }
@@ -155,6 +172,7 @@ export class MessageService extends SchoolService<Perm> {
     const recipients = [...new Set(data.recipientIds)].filter((id) => id !== this.ctx.userId);
     if (!recipients.length) throw new ValidationError({ recipientIds: "Pick at least one person other than yourself" });
     return this.write("use", async (tx) => {
+      await this.limit(tx, true);
       const allowed = await this.rule.reachable(tx, this.ctx, inArray(users.id, recipients), PEOPLE_CAP);
       if (allowed.length !== recipients.length) throw new ForbiddenError("You cannot message one of these people.");
       const [thread] = await tx.insert(messageThreads).values({

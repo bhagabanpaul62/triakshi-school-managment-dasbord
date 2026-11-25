@@ -7,7 +7,8 @@ import { markNotificationRead } from "./actions";
 
 /** One row of the notifications list. Opening it marks it read at once, then saves. */
 export function NotificationItem({ id, title, body, href, time, read: initialRead }: { id: string; title: string; body: string | null; href: string | null; time: string; read: boolean }) {
-  const [read, setRead] = useState(initialRead);
+  const [opened, setRead] = useState(false);
+  const read = opened || initialRead;
   const [, start] = useTransition();
   const markRead = () => { if (read) return; setRead(true); start(async () => { await markNotificationRead(id); }); };
   const inner = (

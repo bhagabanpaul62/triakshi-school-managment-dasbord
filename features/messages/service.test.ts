@@ -173,3 +173,16 @@ describe("message notifications and the unread count", () => {
     for (const u of Object.values(b.users)) expect(await notes(b, u)).toHaveLength(0);
   });
 });
+
+describe("limits and support sessions", () => {
+  it("a support session opens no conversation", async () => {
+    const { id } = await svc(a.as.admin).start({ recipientIds: [own.userId], subject: "Private talk", body: "Hi" });
+    await expect(svc({ ...own, supportStaffId: "00000000-0000-0000-0000-0000000000aa" }).thread(id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("the 21st message in a minute is refused", async () => {
+    const { id } = await svc(a.as.accountant).start({ recipientIds: [other.userId], subject: "Busy day", body: "Hi" });
+    for (let i = 0; i < 20; i++) await svc(other).send(id, `m ${i}`);
+    await expect(svc(other).send(id, "one more")).rejects.toMatchObject({ fieldErrors: { body: expect.any(String) } });
+  });
+});
