@@ -1,6 +1,6 @@
 # Build status (2026-11-25)
 
-Finance was built on 2026-11-24 and 25 and tested locally; Communication followed. Git, CI and the demo server were last checked on 2026-11-24.
+Finance was built on 2026-11-24 and 25 and tested locally; Communication followed. Git and CI were last checked on 2026-11-25 at 19:30, the demo server on 2026-11-24.
 
 ## Finance module (2026-11-25)
 Built on branch `feat/finance`; **merged to `main` as PR #5 (`69f1898`), not deployed**. Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
@@ -27,7 +27,7 @@ Logged 2026-11-25. All three are open.
 | 3 | Rehearse the move of old fee data on a copy of the live data, after a backup (`move-fees --dry-run`, then bootstrap) | It worked on local data: 287 receipts, every difference explained. It has not been run on live data | The report on the copy explains every difference, and Finance shows no red "books do not match" panel |
 
 ## Communication module (2026-11-25)
-Built on local branch `feat/communication`: **not merged, not deployed**. Guide: [COMMUNICATION](COMMUNICATION.md). Rules for changing it: [COMMUNICATION-BUILD](COMMUNICATION-BUILD.md). Plan: [COMMUNICATION-PRD](COMMUNICATION-PRD.md).
+Open as PR #6 (`feat/communication` into `main`), no conflicts: **not merged, not deployed**. Guide: [COMMUNICATION](COMMUNICATION.md). Rules for changing it: [COMMUNICATION-BUILD](COMMUNICATION-BUILD.md). Plan: [COMMUNICATION-PRD](COMMUNICATION-PRD.md).
 
 | Part | State |
 |---|---|
@@ -70,10 +70,10 @@ Built on local branch `feat/communication`: **not merged, not deployed**. Guide:
 ## Where things stand
 | What | State |
 |---|---|
-| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is on `feat/communication`. |
+| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is in PR #6. |
 | `origin/main` | Has everything through Finance (PR #5, `69f1898`). |
 | `63f18d5` (forms keep what was typed after a refusal; e2e fixes) | In `origin/main`; **not on the demo**. |
-| CI | Passes for PR #2, PR #3 and `63f18d5`. |
+| CI | Runs on pushes, on the fork for PR #6 (the PR page shows none). **Red on `main`** since PR #5: an attendance leave test failed on Wednesdays and Sundays; PR #6 fixes it. The first run of PR #6 failed: two events tests needed a file store CI does not have. Fixed in later commits; rehearsed locally with all 39 test packages passing. |
 | Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
 | Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
 | Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) only on `feat/communication`. 0005, 0006, 0008 and 0012 hold hand-written data steps: never regenerate them. |

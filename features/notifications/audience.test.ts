@@ -269,7 +269,7 @@ describe("speed", () => {
     await inA(async (tx) => {
       await tx.execute(sql`insert into users (id, school_id, role, login_id, name, email, status) select gen_random_uuid(), ${a.id}, 'student', 'perf' || g, 'Perf ' || g, 'perf' || g || '@x.test', 'active' from generate_series(1, 6000) g`);
       await tx.execute(sql`insert into students (id, school_id, admission_no, name, class_id, section_id, status, user_id)
-        select gen_random_uuid(), ${a.id}, 'P' || g, 'Perf ' || g, ${f.c5}::uuid, ${f.s5a}::uuid, 'active', (select u.id from users u where u.login_id = 'perf' || g) from generate_series(1, 12000) g`);
+        select gen_random_uuid(), ${a.id}, 'P' || g, 'Perf ' || g, ${f.c5}::uuid, ${f.s5a}::uuid, 'active', u.id from generate_series(1, 12000) g left join (select id, substr(login_id, 5)::int as n from users where login_id like 'perf%' offset 0) u on u.n = g`);
       const t0 = performance.now();
       const all = await resolveAudience(tx, aud([{ type: "everyone" }], [{ type: "house", id: f.red! }]));
       const p = await audiencePreview(tx, aud([{ type: "class", id: f.c5! }, { type: "subject", id: f.math! }]));
@@ -277,8 +277,8 @@ describe("speed", () => {
       expect(all.length).toBeGreaterThanOrEqual(12000);
       expect(p.families).toBeGreaterThanOrEqual(12000);
       console.info(`12,000 people: resolve + preview in ${Math.round(ms)} ms`);
-      // About 60 ms alone; 4.6 s was seen once in a full parallel run (rows just inserted, no table statistics yet). The wide limit still catches a query per person.
-      expect(ms).toBeLessThan(15_000);
+      // About 60 ms alone, 150 ms in a full run. The wide limit is for a busy CI machine and still catches a query per person.
+      expect(ms).toBeLessThan(10_000);
     });
   });
 });
