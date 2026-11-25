@@ -531,13 +531,14 @@ describe("a student's login after leaving, and before joining", () => {
   const CLOSED = "This login was closed because the student left the school. Ask the school office.";
 
   /** A student login (admission number = login ID) with its student row. */
-  async function kid(adm: string, st: { status: string; leftOn?: string | null; joinsOn?: string | null }, user: Partial<typeof users.$inferInsert> = {}) {
+  async function kid(adm: string, st: { status: string; leftOn?: string | null; joinsOn?: string | null; accessUntil?: string | null }, user: Partial<typeof users.$inferInsert> = {}) {
     const u = await newUser({ loginId: adm, role: "student", name: `Kid ${adm}`, email: `${adm.toLowerCase()}@auth.test`, passwordHash: await Passwords.hash(PW), ...user });
-    await withSchool(schoolId, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, joins_on)
-      values (gen_random_uuid(), ${schoolId}, ${adm}, ${`Kid ${adm}`}, ${u.id}, ${st.status}, ${st.leftOn ?? null}::date, ${st.joinsOn ?? null}::date)`));
+    const until = st.accessUntil !== undefined ? st.accessUntil : st.leftOn ? sql`${st.leftOn}::date + 90` : null; // what features/students writes: last day + 90
+    await withSchool(schoolId, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, joins_on, access_until)
+      values (gen_random_uuid(), ${schoolId}, ${adm}, ${`Kid ${adm}`}, ${u.id}, ${st.status}, ${st.leftOn ?? null}::date, ${st.joinsOn ?? null}::date, ${until})`));
     return u;
   }
-  const setLeftOn = (adm: string, leftOn: string | null) => withSchool(schoolId, (tx) => tx.execute(sql`update students set left_on = ${leftOn}::date where admission_no = ${adm}`));
+  const setLeftOn = (adm: string, leftOn: string | null) => withSchool(schoolId, (tx) => tx.execute(sql`update students set left_on = ${leftOn}::date, access_until = ${leftOn}::date + 90 where admission_no = ${adm}`));
   const reason = (p: Promise<unknown>) => p.then(() => "ok", (e) => (e instanceof LoginError ? e.reason : `other:${String(e)}`));
 
   it("an active student, a student with no student row, and staff are unchanged", async () => {
@@ -567,6 +568,26 @@ describe("a student's login after leaving, and before joining", () => {
     expect(await reason(auth.login("LV-NOBODY", "wrong-Pass-1"))).toBe("invalid");
     const err = await auth.login("LV-L91", PW).catch((e) => e);
     expect(loginRefusal(err)).toBe(CLOSED);
+  });
+
+  it("the stored access_until decides, not left_on + 90", async () => {
+    await kid("LV-LATE", { status: "left", leftOn: ist(200), accessUntil: ist(-5) }); // back-dated leaver, 5 days still to go
+    expect((await auth.login("LV-LATE", PW)).token).toBeTruthy();
+    await kid("LV-END", { status: "left", leftOn: ist(10), accessUntil: ist(1) }); // ended yesterday although left_on + 90 is ahead
+    expect(await reason(auth.login("LV-END", PW))).toBe("closed");
+    await kid("LV-NOUNTIL", { status: "left", leftOn: ist(10), accessUntil: null });
+    expect(await reason(auth.login("LV-NOUNTIL", PW))).toBe("closed");
+  });
+
+  it("the right password on a closed or joining login never meets 'Too many attempts'", async () => {
+    await kid("LV-LIM", { status: "left", leftOn: ist(200) });
+    for (let i = 0; i < 9; i++) expect(await reason(auth.login("LV-LIM", "wrong-Pass-1"))).toBe("invalid");
+    expect(await reason(auth.login("LV-LIM", PW))).toBe("closed"); // the 10th try
+    expect(await reason(auth.login("LV-LIM", PW))).toBe("closed"); // and the 11th
+    await kid("LV-LIMJ", { status: "joining", joinsOn: "2027-01-12" }, { status: "disabled" });
+    for (let i = 0; i < 9; i++) await reason(auth.login("LV-LIMJ", "wrong-Pass-1"));
+    expect(await reason(auth.login("LV-LIMJ", PW))).toBe("starts");
+    expect(await reason(auth.login("LV-LIMJ", PW))).toBe("starts");
   });
 
   it("no last day is closed, also for an alumni by promotion", async () => {

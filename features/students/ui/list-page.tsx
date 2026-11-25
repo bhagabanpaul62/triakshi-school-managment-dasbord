@@ -78,7 +78,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
       {canWrite && j.notice ? (
         <Inset className="mb-3 flex flex-wrap items-center gap-3">
           <ToneBadge label="Next year" tone="info" />
-          <p className="text-sm text-[var(--ds-on-surface-variant)]">{j.notice} <Link href="/app/academics/classes" className="underline underline-offset-4">Set up classes and sections</Link></p>
+          <p className="text-sm text-[var(--ds-on-surface-variant)]">{j.notice} <Link href={j.years.every((y) => y.isCurrent) ? "/app/academics/years" : "/app/academics/classes"} className="underline underline-offset-4">{j.years.every((y) => y.isCurrent) ? "Add next year" : "Set up classes and sections"}</Link></p>
         </Inset>
       ) : null}
 

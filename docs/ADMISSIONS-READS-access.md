@@ -1,6 +1,8 @@
 # Admissions: what a student login can reach after leaving
 
-One rule, cut in one place. The session carries the student's phase (`SchoolAuth.validate` returns `phase`). `packages/runtime/src/phase.ts` turns it into the Ctx: for a left or alumni student `features` is the school's features limited to fees, exams, home, notifications, settings, and `leftUntil` is the last day of the 90 days. Both Ctx builders (`index.ts`, `bearer.ts`) use it, so support sessions get it too. After the 90th IST day, or with no last day, the session does not validate at all. The 90 is `LEFT_ACCESS_DAYS` in `packages/auth/src/phase.ts`.
+One rule, cut in one place. The session carries the student's phase (`SchoolAuth.validate` returns `phase`). `packages/runtime/src/phase.ts` turns it into the Ctx: for a left or alumni student `features` is the school's features limited to fees, exams, home, notifications, settings, and `leftUntil` is `students.access_until`. Both Ctx builders (`index.ts`, `bearer.ts`) use it, so support sessions get it too. The date is stored, inclusive, in IST: left or alumni are open until it, and with no date the login is closed (the session does not validate at all). Every reader goes through `accessOf` (sign-in, session, runtime `leftUntil`, notification writer and delivery, home). The 90 is `LEFT_ACCESS_DAYS` in `packages/auth/src/phase.ts`, used only by `accessUntilFor(lastDay)` = max(today, last day) + 90, which `features/students` calls to write the column. Migration 0014 gives students who had already left 90 days from the day it runs.
+
+A right password on a closed or joining login resets the sign-in limiter before the refusal, so a family never reads "Too many attempts" for a correct password.
 
 Anything that goes through `ctx.features` (every `SchoolService` call) is cut by that. This list is for what does not.
 

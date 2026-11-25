@@ -13,17 +13,21 @@ import { ROW_HOVER } from "@smw/ui/tone";
 import { KpiRow, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
-import { dateTime, shortDate } from "@smw/ui/format";
+import { dateTime, paise, shortDate } from "@smw/ui/format";
 import { withSchool } from "@smw/db";
 import { isSuppressed } from "@smw/feature-notifications/email-health";
 import { EmailNotWorking } from "@smw/feature-notifications/ui/email-not-working";
-import { ConsentService, CredentialService, DocumentService, GuardianService, PhotoService, StudentService } from "../service";
+import { LEFT_ACCESS_DAYS } from "@smw/auth";
+import { billsMessage } from "../lifecycle-service";
+import { ConsentService, CredentialService, DocumentService, GuardianService, LifecycleService, PhotoService, StudentService } from "../service";
+import type { OpenItems } from "../lifecycle-service";
 import { DOCUMENT_KINDS } from "../inputs";
 import {
   addGuardian, bringStudentBack, changeJoiningDay, deleteDocument, deleteStudent, markStudentLeft, startStudentNow, withdrawStudent, recordConsent, removeGuardian, resetStudentLogin, setPrimaryGuardian, updateStudent, uploadDocument, uploadPhoto,
 } from "./actions";
 import { cameFromEnquiry } from "../came-from";
-import { bringBackFields, consentFields, documentFields, guardianFields, GENDER_OPTIONS, joiningDayFields, leaveFields, photoFields, studentFields, withdrawFields } from "./fields";
+import { consentFields, documentFields, guardianFields, GENDER_OPTIONS, photoFields, studentFields, withdrawFields, type JoiningChoices } from "./fields";
+import { BringBackModal, JoiningDayModal, LeaveModal, NoteLink } from "./joining-modals";
 import { StudentModal } from "./student-modal";
 import { Avatar, RowList, type RowItem } from "./parts";
 import { RecordTabs } from "./record-tabs";
@@ -65,10 +69,20 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
   // Mail to a family goes to the primary guardian.
   const familyEmail = (guardians.find((g) => g.isPrimary) ?? guardians[0])?.email;
   const emailStopped = canWrite && !!familyEmail && await withSchool(ctx.schoolId, (tx) => isSuppressed(tx, familyEmail));
+  const life = new LifecycleService(ctx);
+  const joining = s.status === "joining", gone = s.status === "left" || s.status === "alumni";
+  const [joinInfo, open, planFull] = await Promise.all([
+    canWrite && joining ? life.joiningInfo(id) : null,
+    canWrite && (joining || s.status === "active") ? life.openItems(id) : null,
+    canWrite && gone ? life.bringBackBlocked() : null,
+  ]);
+  const choices: JoiningChoices | null = look ? {
+    years: look.joining.years, classes: look.joining.classes.map((c) => ({ value: c.id, label: c.name })),
+    sections: look.joining.sections.map((x) => ({ id: x.id, yearId: x.yearId, classId: x.classId, label: x.label })),
+  } : null;
   const sectionOptions = (look?.sections ?? []).map((x) => ({ value: x.id, label: x.label }));
   // A child who has not started edits the planned section of the year they join.
   const plannedOptions = (look?.joining.sections ?? []).filter((x) => x.yearId === s.joinsYearId).map((x) => ({ value: x.id, label: x.label }));
-  const joining = s.status === "joining", gone = s.status === "left" || s.status === "alumni";
   // What is still missing on this record, as a link to the tab that fixes it; plus where else this student's data lives.
   const todo = canWrite ? [
     ov.counts.guardians === 0 ? { label: "Add a guardian contact for the family", href: `?tab=guardians` } : null,
@@ -94,25 +108,24 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
         actions={canWrite ? (<>
           <StudentModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit", undefined, joining ? plannedOptions : undefined)} values={{ ...s }} hidden={{ id: s.id }}
             action={updateStudent} trigger={{ label: "Edit", variant: "secondary" }} />
-          {joining ? (<>
-            <ActionButton variant="secondary" label="Start now" action={startStudentNow} values={{ id: s.id }}
-              confirm={{ title: `Start ${s.name} now?`, body: "They become an active student today: they get the planned section and a roll number, count against the plan, and their login switches on.", confirmLabel: "Start now" }} />
-            <FormModal title="Change the joining day" icon="calendar" fields={joiningDayFields(plannedOptions)} values={{ joinsOn: s.joinsOn, joinsSectionId: s.joinsSectionId }} hidden={{ id: s.id }}
-              action={changeJoiningDay} trigger={{ label: "Change the joining day", variant: "secondary", plus: false }} />
+          {joining && joinInfo && open && choices ? (<>
+            {s.joinsSectionId ? (
+              <StudentModal title={`Start ${s.name} now?`} icon="users" fields={[]} hidden={{ id: s.id }} action={startStudentNow} submitLabel="Start now" blocked={joinInfo.startBlocked}
+                trigger={{ label: "Start now", variant: "secondary", plus: false }}
+                effects={["They become an active student today: they get the planned section and a roll number.", "They count against the plan, and their login switches on.", "Their admission date becomes today."]} />
+            ) : null}
+            <JoiningDayModal studentId={s.id} joinsOn={s.joinsOn} yearId={s.joinsYearId!} sectionId={s.joinsSectionId} classId={s.classId} choices={choices}
+              bills={joinInfo.bills} billsNote={joinInfo.bills ? billsMessage(joinInfo.bills, joinInfo.yearName ?? "the joining year") : null} feesHref={joinInfo.feesHref}
+              action={changeJoiningDay} label={s.joinsSectionId ? "Change the joining day" : "Choose a section first"} />
             <StudentModal title="Withdraw before joining" icon="users" danger fields={withdrawFields} hidden={{ id: s.id }} action={withdrawStudent} submitLabel="Withdraw"
               trigger={{ label: "Withdraw before joining", variant: "secondary", plus: false }}
+              extra={<MoneyNote items={open} fees={has("fees")} />}
               effects={["They become a student who left, with the reason: withdrew before joining.", "Their enrolment for the year is closed.", "Their login stays off.", "Their admission number is kept and never used again.", "Bills and receipts stay."]} />
           </>) : null}
-          {s.status === "active" ? (
-            <StudentModal title="Mark as left" icon="users" danger fields={leaveFields()} hidden={{ id: s.id }} action={markStudentLeft} submitLabel="Mark as left"
-              trigger={{ label: "Mark as left", variant: "secondary", plus: false }}
-              effects={["This year's enrolment closes as left.", "Their last section stays on the record, for papers.", "They stop counting in registers, audiences and the plan limit, and the seat is free.", "Their login can still open fees, exams and results for 90 days after the last day, then it closes.", "Bills, receipts and marks stay."]} />
+          {s.status === "active" && open ? (
+            <LeaveModal studentId={s.id} days={LEFT_ACCESS_DAYS} action={markStudentLeft} extra={<StillOpen items={open} studentId={s.id} fees={has("fees")} library={has("library") && libraryRead(ctx)} transport={has("transport")} />} />
           ) : null}
-          {gone ? (
-            <StudentModal title="Bring back" icon="users" fields={bringBackFields(sectionOptions)} hidden={{ id: s.id }} action={bringStudentBack} submitLabel="Bring back"
-              trigger={{ label: "Bring back", variant: "secondary", plus: false }}
-              effects={["They become an active student in the section you choose, with the next roll number.", "The plan must have room: they count against it again.", "This year's enrolment is opened, and their login is switched on."]} />
-          ) : null}
+          {gone && choices ? <BringBackModal studentId={s.id} sections={sectionOptions} choices={choices} planFull={planFull} action={bringStudentBack} /> : null}
           <FormModal title="Change photo" icon="user" fields={photoFields} hidden={{ studentId: s.id }} action={uploadPhoto}
             trigger={{ label: "Photo", variant: "secondary" }} submitLabel="Upload" />
           <ActionButton variant="secondary" label="Reset login" action={resetStudentLogin} values={{ id: s.id }}
@@ -206,6 +219,8 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
                   {joining ? <Fact label="Joining year">{ov.joining?.yearName}</Fact> : null}
                   {s.leftOn ? <Fact label="Last day at school">{shortDate(s.leftOn)}</Fact> : null}
                   {gone || s.leftReason ? <Fact label="Reason for leaving">{ov.leftReason}</Fact> : null}
+                  {s.leftNote ? <Fact label="In their words">{s.leftNote}</Fact> : null}
+                  {gone && s.accessUntil ? <Fact label="Family can sign in until">{shortDate(s.accessUntil)}</Fact> : null}
                   <Fact label="Mother tongue">{s.motherTongue}</Fact>
                   <Fact label="Religion">{s.religion}</Fact>
                   <Fact label="Nationality">{s.nationality}</Fact>
@@ -249,6 +264,35 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
         {tab === "consent" ? <ConsentPanel studentId={id} svc={new ConsentService(ctx)} canWrite={canWrite} guardians={guardians.map((g) => ({ value: g.id, label: g.name }))} /> : null}
       </div>
     </>
+  );
+}
+
+/** What is still open when a child leaves. Each belongs to someone else (the accountant, the librarian, transport): leaving never waits for it. */
+function StillOpen({ items, studentId, fees, library, transport }: { items: OpenItems; studentId: string; fees: boolean; library: boolean; transport: boolean }) {
+  const lines: ReactNode[] = [];
+  if (items.money.unpaidBills) lines.push(<li key="bills">{items.money.unpaidBills} unpaid {items.money.unpaidBills === 1 ? "bill" : "bills"}, {paise(items.money.unpaidPaise)} due. The accountant collects or waives {items.money.unpaidBills === 1 ? "it" : "them"}. {fees ? <NoteLink href={items.feesHref}>Open their fees</NoteLink> : null}</li>);
+  if (items.books) lines.push(<li key="books">{items.books} {items.books === 1 ? "book" : "books"} still out. The librarian takes {items.books === 1 ? "it" : "them"} back. {library ? <NoteLink href={`/app/library/members/student/${studentId}`}>Open their library record</NoteLink> : null}</li>);
+  if (items.bus) lines.push(<li key="bus">Bus stop {items.bus.stop} on {items.bus.route}. Transport ends it. {transport ? <NoteLink href="/app/transport/routes">Open routes</NoteLink> : null}</li>);
+  return (
+    <div role="status" className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]">
+      <p className="font-medium text-[var(--ds-on-surface)]">{lines.length ? "Still open. Leaving does not wait for these." : "Nothing is open: no unpaid bills, no books out, no bus stop."}</p>
+      {lines.length ? <ul className="mt-1 list-disc space-y-1 pl-5">{lines}</ul> : null}
+    </div>
+  );
+}
+
+/** The money of a child who will not come: it stays, and the accountant decides on any refund. */
+function MoneyNote({ items, fees }: { items: OpenItems; fees: boolean }) {
+  const { money } = items;
+  const has = money.bills + money.receipts > 0 || money.depositPaise !== 0;
+  return (
+    <div role="status" className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]">
+      <p className="font-medium text-[var(--ds-on-surface)]">{has
+        ? `${money.bills} ${money.bills === 1 ? "bill" : "bills"}, ${money.receipts} ${money.receipts === 1 ? "receipt" : "receipts"} and a deposit of ${paise(money.depositPaise)}.`
+        : "No bills, receipts or deposits yet."}</p>
+      {has ? <p className="mt-1">They stay as they are. Nothing is refunded here: the accountant cancels a bill or refunds a deposit from the fees page.</p> : null}
+      {fees && has ? <NoteLink href={items.feesHref}>Open their fees</NoteLink> : null}
+    </div>
   );
 }
 

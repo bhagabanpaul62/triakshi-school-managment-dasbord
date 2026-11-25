@@ -151,7 +151,7 @@ describe("a student who left: the Ctx keeps only fees, exams, home, notification
   const host = () => `${c.slug}.localhost`;
   const setStudent = (status: string, leftOn: string | null) => withSchool(c.id, async (tx) => {
     await tx.execute(sql`delete from students where user_id = ${c.users.student}`);
-    if (status) await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on) values (gen_random_uuid(), ${c.id}, 'ADM-1', 'Kid', ${c.users.student}, ${status}, ${leftOn}::date)`);
+    if (status) await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, access_until) values (gen_random_uuid(), ${c.id}, 'ADM-1', 'Kid', ${c.users.student}, ${status}, ${leftOn}::date, ${leftOn}::date + 90)`);
   });
   const sign = (role: string) => new SchoolAuth(c.id).login(`${role}-${c.slug}`, "password123", { ip: `phase-${role}` }).then((r) => r.token);
 
@@ -183,6 +183,15 @@ describe("a student who left: the Ctx keeps only fees, exams, home, notification
     expect(plain.leftUntil).toBeUndefined();
     await setStudent("active", null);
     expect((await bearerCtx(req(host(), await sign("student")))).features.has("announcements")).toBe(true);
+  });
+
+  it("access_until decides: a back-dated leaver keeps the login, an ended one is closed whatever left_on says", async () => {
+    await setStudent("left", ist(10));
+    const token = await sign("student");
+    await withSchool(c.id, (tx) => tx.execute(sql`update students set left_on = ${ist(400)}::date, access_until = ${ist(-3)}::date where user_id = ${c.users.student}`));
+    expect((await bearerCtx(req(host(), token))).leftUntil).toBe(ist(-3));
+    await withSchool(c.id, (tx) => tx.execute(sql`update students set left_on = ${ist(10)}::date, access_until = ${ist(1)}::date where user_id = ${c.users.student}`));
+    await expect(bearerCtx(req(host(), token))).rejects.toMatchObject({ code: "unauthenticated" });
   });
 
   it("staff, with or without a custom role, keep every module, and a parent still cannot sign in", async () => {

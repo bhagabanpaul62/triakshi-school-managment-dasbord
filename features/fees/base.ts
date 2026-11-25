@@ -1,6 +1,6 @@
 import { WITHDREW_BEFORE_JOINING } from "@smw/feature-students/constants";
 import { randomBytes } from "node:crypto";
-import { and, asc, desc, eq, inArray, isNull, ne, sql, sum, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, or, sql, sum, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { todayIST } from "@smw/feature-kit/money";
@@ -14,7 +14,7 @@ import { TemplateService } from "@smw/feature-finance/templates/service";
 import type { DocumentKind } from "@smw/feature-finance/templates/config";
 import { finApprovals, finJournals, finTemplates } from "@smw/feature-finance/schema";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
-import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
+import { guardians, studentEnrollments, studentGuardians, students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
 import { allocatePlan, openOf, type CalcInvoice } from "./calc";
 import { feeAdvances, feeAllocations, feeDueParts, feeHeads, feeInvoiceLines, feeInvoices } from "./schema";
@@ -94,10 +94,20 @@ export abstract class FeesBase extends MoneyService<Perm> {
     return NotificationWriter.insert(tx, this.ctx.schoolId, [...logins.values()].map((userId) => ({ userId, topic, title, body, href, subject, privateBody: true })));
   }
 
-  /** The year a new bill for this student belongs to: the joining year while they are joining, else the current year. */
+  /**
+   * The year a new bill for this student belongs to: the year they join while joining; for a child who started early
+   * in a year later than the school's current one (joins_year_id or an enrolment there), that year; else the current year.
+   */
   protected async billYearOf(tx: Tx, studentId: string) {
     const [s] = await tx.select({ status: students.status, joinsYearId: students.joinsYearId }).from(students).where(eq(students.id, studentId));
-    return s?.status === "joining" && s.joinsYearId ? this.yearOr(tx, s.joinsYearId) : this.currentYear(tx);
+    if (s?.status === "joining" && s.joinsYearId) return this.yearOr(tx, s.joinsYearId);
+    const current = await this.currentYear(tx);
+    if (!s || s.status === "left" || s.status === "alumni") return current;
+    const own = await tx.select({ y: academicYears }).from(academicYears)
+      .leftJoin(studentEnrollments, and(eq(studentEnrollments.yearId, academicYears.id), eq(studentEnrollments.studentId, studentId)))
+      .where(and(gt(academicYears.startsOn, current.startsOn), or(s.joinsYearId ? eq(academicYears.id, s.joinsYearId) : undefined, isNotNull(studentEnrollments.id))))
+      .orderBy(asc(academicYears.startsOn)).limit(1);
+    return own[0]?.y ?? current;
   }
 
   protected async currentYear(tx: Tx) {

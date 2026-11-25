@@ -1,4 +1,6 @@
 ALTER TABLE "students" ADD COLUMN "left_reason" text;--> statement-breakpoint
+ALTER TABLE "students" ADD COLUMN "left_note" text;--> statement-breakpoint
+ALTER TABLE "students" ADD COLUMN "access_until" date;--> statement-breakpoint
 ALTER TABLE "students" ADD COLUMN "pen" text;--> statement-breakpoint
 ALTER TABLE "students" ADD COLUMN "joins_on" date;--> statement-breakpoint
 ALTER TABLE "students" ADD COLUMN "joins_year_id" uuid;--> statement-breakpoint
@@ -11,4 +13,6 @@ CREATE INDEX "students_user" ON "students" USING btree ("school_id","user_id");-
 UPDATE "student_enrollments" e SET "outcome" = CASE s."status" WHEN 'alumni' THEN 'graduated' ELSE 'left' END
 FROM "students" s, "academic_years" y
 WHERE s."id" = e."student_id" AND y."id" = e."year_id" AND s."status" IN ('left', 'alumni') AND e."outcome" = 'studying'
-  AND (s."left_on" IS NULL OR y."starts_on" <= s."left_on");
+  AND (s."left_on" IS NULL OR y."starts_on" <= s."left_on");--> statement-breakpoint
+-- Families of students who had already left keep dues, results and papers for 90 days from today.
+UPDATE "students" SET "access_until" = (now() at time zone 'Asia/Kolkata')::date + 90 WHERE "status" IN ('left', 'alumni');

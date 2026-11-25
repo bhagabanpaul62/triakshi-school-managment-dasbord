@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { accessOf, addDays, istDay, LEFT_ACCESS_DAYS, leftAccessUntil, longDate, mayHear, startsMessage, type StudentPhase } from "./phase";
+import { accessOf, addDays, istDay, LEFT_ACCESS_DAYS, accessUntilFor, longDate, mayHear, startsMessage, type StudentPhase } from "./phase";
 
-const left = (leftOn: string | null, status: StudentPhase["status"] = "left"): StudentPhase => ({ status, leftOn, joinsOn: null });
+// access_until is stored: 90 days after the later of the day it was set and the last day (features/students writes it).
+const left = (leftOn: string | null, status: StudentPhase["status"] = "left"): StudentPhase => ({ status, leftOn, joinsOn: null, accessUntil: leftOn ? addDays(leftOn, 90) : null });
 // 2027-03-01 12:00 IST
 const noon = (day: string) => new Date(`${day}T12:00:00+05:30`);
 
@@ -13,7 +14,8 @@ describe("accessOf", () => {
   });
   it("a left or alumni student is limited until 90 days after the last day, in IST", () => {
     expect(LEFT_ACCESS_DAYS).toBe(90);
-    expect(leftAccessUntil("2026-12-01")).toBe("2027-03-01");
+    expect(accessUntilFor("2026-12-01", noon("2026-11-01"))).toBe("2027-03-01");
+    expect(accessUntilFor("2026-11-01", noon("2026-12-01"))).toBe("2027-03-01"); // a late entry counts from today
     expect(accessOf(left("2026-12-01"), noon("2026-12-02"))).toEqual({ kind: "left", until: "2027-03-01" });
     expect(accessOf(left("2026-12-01", "alumni"), noon("2027-03-01"))).toEqual({ kind: "left", until: "2027-03-01" });
     expect(accessOf(left("2026-12-01"), noon("2027-03-02")).kind).toBe("closed");
@@ -23,6 +25,12 @@ describe("accessOf", () => {
     expect(accessOf(left("2026-12-01"), new Date("2027-03-01T23:59:00+05:30")).kind).toBe("left");
     expect(accessOf(left("2026-12-01"), new Date("2027-03-02T00:01:00+05:30")).kind).toBe("closed");
     expect(istDay(new Date("2027-03-01T18:31:00Z"))).toBe("2027-03-02");
+  });
+  it("reads access_until, not left_on + 90: a back-dated leaver keeps the days from the day it was recorded", () => {
+    const late: StudentPhase = { status: "left", leftOn: "2026-06-01", joinsOn: null, accessUntil: "2027-03-01" };
+    expect(accessOf(late, noon("2027-03-01"))).toEqual({ kind: "left", until: "2027-03-01" });
+    expect(accessOf(late, noon("2027-03-02")).kind).toBe("closed");
+    expect(accessOf({ ...late, accessUntil: null }, noon("2026-06-02")).kind).toBe("closed"); // a date but no access_until
   });
   it("no last day is closed", () => {
     expect(accessOf(left(null)).kind).toBe("closed");

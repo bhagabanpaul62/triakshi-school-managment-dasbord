@@ -1,4 +1,4 @@
-import { and, count, eq, max } from "drizzle-orm";
+import { and, count, eq, max, sql } from "drizzle-orm";
 import { schools, type Tx } from "@smw/db";
 import { ValidationError } from "@smw/feature-kit";
 import { academicYears, sections } from "@smw/feature-academics/schema";
@@ -41,4 +41,18 @@ export async function currentYearSection(tx: Tx, id: string) {
   const [current] = await tx.select({ id: academicYears.id }).from(academicYears).where(eq(academicYears.isCurrent, true)).limit(1);
   if (current && s.yearId !== current.id) throw new ValidationError({ sectionId: "Choose a section of the current academic year" });
   return s;
+}
+
+/**
+ * One lock order for everything that counts the plan or hands out a roll number: the school, then the section, then the student.
+ * Take the school lock before reading the plan count. "No key update" is enough to queue the callers and does not stop other writes
+ * that only reference the school.
+ */
+export async function lockSchool(tx: Tx, schoolId: string) {
+  await tx.select({ id: schools.id }).from(schools).where(eq(schools.id, schoolId)).for("no key update");
+}
+
+/** Take the section lock (after the school lock) before reading a roll number of that section. Held until the transaction ends. */
+export async function lockSections(tx: Tx, ...ids: (string | null | undefined)[]) {
+  for (const id of [...new Set(ids.filter((x): x is string => !!x))].sort()) await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`section|${id}`}, 0))`);
 }

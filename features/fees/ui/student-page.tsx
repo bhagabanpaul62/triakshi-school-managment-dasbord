@@ -18,6 +18,7 @@ import { addPromise, resumeReminders, settleUpLeaving, stopReminders, withdrawCo
 import { ConcessionForm } from "./concession-form";
 import { FeesLookup } from "./lookups";
 import { WITHDREW, studentTag, type ApprovalInfo } from "../base";
+import { withdrewStep } from "./logic";
 import { SettlementBuilder, type SettlementPlan } from "./settlement-builder";
 import { StudentDocs } from "./student-docs";
 import { Notice, PillLink, Tabs, can, one, type Search } from "./shared";
@@ -87,7 +88,8 @@ export default async function StudentFeesPage({ params, searchParams }: { params
 
       {waitingSettlement ? <div className="mt-4"><Notice tone="info" action={canApprove(ctx) ? { href: "/app/finance/approvals", label: "Open approvals" } : undefined}>A settlement for this student is waiting. {waiting(waitingSettlement.approval)}. Reminders and late fees follow the new dates once it is approved.</Notice></div> : null}
       {broken ? <div className="mt-4"><Notice tone="danger" action={concede && openBills.length ? undefined : undefined}>Promised to pay by {shortDate(broken.promisedOn)} and still owes. {collect ? "Collect the fee, or note a new promise." : ""}</Notice></div> : null}
-      {left && owed > 0 ? <div className="mt-4"><Notice>{student.leftReason === WITHDREW ? "This child withdrew before joining" : "This student has left"} and still owes {paise(owed)}.{student.leftReason === WITHDREW ? " Settle up or refund it." : " A transfer certificate warns until it is paid or settled."}</Notice></div> : null}
+      {student.status === "left" && student.leftReason === WITHDREW ? (() => { const step = withdrewStep({ openBills: openBills.length, openPaise: owed, advancePaise: balance.advancePaise, depositPaise: balance.depositPaise }); return step ? <div className="mt-4"><Notice action={{ href: `${base}?tab=${step.tab}`, label: step.tab === "bills" ? "Open the bills" : "Open advance and deposit" }}>This child withdrew before joining. {step.text}</Notice></div> : null; })()
+        : left && owed > 0 ? <div className="mt-4"><Notice>This student has left and still owes {paise(owed)}. A transfer certificate warns until it is paid or settled.</Notice></div> : null}
 
       <div className="mt-6"><Tabs label="Student fee sections" tabs={TABS.map(([t, l]) => [t, l] as const)} current={tab} href={(t) => `${base}${t === "overview" ? "" : `?tab=${t}`}`} /></div>
 

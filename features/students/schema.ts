@@ -44,6 +44,10 @@ export const students = pgTable("students", {
   /** The last day attended. */
   leftOn: date("left_on"),
   leftReason: text("left_reason"),
+  /** The office's own words about why. Blanked by erasure. */
+  leftNote: text("left_note"),
+  /** The last day the family of a left student can sign in (90 days from the day it was marked, or from the last day if later). Null = closed. */
+  accessUntil: date("access_until"),
   /** Permanent Education Number (UDISE+). */
   pen: text("pen"),
   /** Only while joining: the first day, its year, and the section planned for it (sectionId stays empty until the day). */

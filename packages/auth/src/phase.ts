@@ -9,7 +9,8 @@ import { sql, type Tx } from "@smw/db";
 export const LEFT_ACCESS_DAYS = 90;
 export const LOGIN_CLOSED_MESSAGE = "This login was closed because the student left the school. Ask the school office.";
 
-export interface StudentPhase { status: "joining" | "active" | "alumni" | "left"; leftOn: string | null; joinsOn: string | null }
+/** `accessUntil` is students.access_until: the last day (inclusive, IST) a left or alumni login works; null = closed. */
+export interface StudentPhase { status: "joining" | "active" | "alumni" | "left"; leftOn: string | null; joinsOn: string | null; accessUntil?: string | null }
 
 export type Access =
   | { kind: "full" }
@@ -21,15 +22,15 @@ const IST_MS = 330 * 60_000;
 export const istDay = (now: Date) => new Date(now.getTime() + IST_MS).toISOString().slice(0, 10);
 export const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-/** The last day a left student's login works, or null when no last day is recorded (closed). */
-export const leftAccessUntil = (leftOn: string | null) => (leftOn ? addDays(leftOn, LEFT_ACCESS_DAYS) : null);
+/** The value features/students writes to students.access_until: LEFT_ACCESS_DAYS after the later of today and the last day attended. */
+export const accessUntilFor = (lastDay: string, now = new Date()) => { const t = istDay(now); return addDays(lastDay > t ? lastDay : t, LEFT_ACCESS_DAYS); };
 
-/** No phase (staff, parent, a student with no student row) = full. Left or alumni = limited until the 90th day, then closed; no date = closed. */
+/** No phase (staff, parent, a student with no student row) = full. Left or alumni = limited until access_until (inclusive), then closed; no date = closed. */
 export function accessOf(phase: StudentPhase | null | undefined, now = new Date()): Access {
   if (!phase) return { kind: "full" };
   if (phase.status === "joining") return { kind: "joining", joinsOn: phase.joinsOn };
   if (phase.status === "active") return { kind: "full" };
-  const until = leftAccessUntil(phase.leftOn);
+  const until = phase.accessUntil ?? null;
   return until && istDay(now) <= until ? { kind: "left", until } : { kind: "closed" };
 }
 
@@ -51,10 +52,10 @@ export async function studentPhaseOf(tx: Tx, schoolId: string, userId: string): 
     if (!has[0]?.ok) return null;
     hasStudents = true;
   }
-  const cols = sql`s.status, to_char(s.left_on, 'YYYY-MM-DD') as left_on, to_char(s.joins_on, 'YYYY-MM-DD') as joins_on`;
+  const cols = sql`s.status, to_char(s.left_on, 'YYYY-MM-DD') as left_on, to_char(s.joins_on, 'YYYY-MM-DD') as joins_on, to_char(s.access_until, 'YYYY-MM-DD') as access_until`;
   const rows = await tx.execute(sql`select ${cols} from students s where s.school_id = ${schoolId} and s.user_id = ${userId} limit 1`);
   const r = rows[0];
-  return r ? { status: r.status as StudentPhase["status"], leftOn: (r.left_on as string | null) ?? null, joinsOn: (r.joins_on as string | null) ?? null } : null;
+  return r ? { status: r.status as StudentPhase["status"], leftOn: (r.left_on as string | null) ?? null, joinsOn: (r.joins_on as string | null) ?? null, accessUntil: (r.access_until as string | null) ?? null } : null;
 }
 
 /** Topics a left student's family may still be told about: fees, results and account security. Nothing else, and nothing once closed. */
@@ -74,8 +75,8 @@ export async function leftPhases(tx: Tx, schoolIds: string[], userIds: string[])
     hasStudents = true;
   }
   const list = (xs: string[]) => sql.join(xs.map((x) => sql`${x}::uuid`), sql`, `);
-  const rows = await tx.execute(sql`select user_id::text as user_id, status, to_char(left_on, 'YYYY-MM-DD') as left_on from students
+  const rows = await tx.execute(sql`select user_id::text as user_id, status, to_char(left_on, 'YYYY-MM-DD') as left_on, to_char(access_until, 'YYYY-MM-DD') as access_until from students
     where school_id in (${list(schoolIds)}) and status in ('left', 'alumni') and user_id in (${list(userIds)})`);
-  for (const r of rows) out.set(r.user_id as string, { status: r.status as StudentPhase["status"], leftOn: (r.left_on as string | null) ?? null, joinsOn: null });
+  for (const r of rows) out.set(r.user_id as string, { status: r.status as StudentPhase["status"], leftOn: (r.left_on as string | null) ?? null, joinsOn: null, accessUntil: (r.access_until as string | null) ?? null });
   return out;
 }

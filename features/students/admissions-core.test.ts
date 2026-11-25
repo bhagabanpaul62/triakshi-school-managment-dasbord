@@ -48,6 +48,8 @@ const enrol = (id: string, s = a) => withSchool(s.id, (tx) => tx.select().from(s
 const active = async (s = a) => (await svc(s).capacity()).active;
 const tomorrow = () => addDays(today(), 1);
 const joiner = (name: string, extra: Record<string, unknown> = {}) => svc().create({ name, sectionId: s5next, ...extra });
+/** The joining day has come: a later year cannot be given a past day, so the day is moved back in the table the way time would. */
+const due = async (id: string, back = 1, s = a) => { await withSchool(s.id, (tx) => tx.update(students).set({ joinsOn: addDays(today(), -back), admissionDate: addDays(today(), -back) }).where(eq(students.id, id))); return id; };
 
 describe("A1 and A2: starting later", () => {
   it("A1: a child can be admitted into next year's section and is joining, not active", async () => {
@@ -117,7 +119,8 @@ describe("join day", () => {
   });
 
   it("works for next year's child before the school switches the current year", async () => {
-    const s = await joiner("Early Next Year", { joinsOn: addDays(today(), -1) });
+    const s = await joiner("Early Next Year");
+    await due(s.id);
     const r = await life().joinDue();
     expect(r.joined).toBeGreaterThanOrEqual(1);
     expect(await row(s.id)).toMatchObject({ status: "active", sectionId: s5next, classId: c5 });
@@ -125,7 +128,8 @@ describe("join day", () => {
   });
 
   it("waits with a reason when no section is planned, and tells the admins once even after two nights", async () => {
-    const s = await svc().create({ name: "Needs Section", classId: c4, joinsYearId: yearNext, joinsOn: addDays(today(), -2) });
+    const s = await svc().create({ name: "Needs Section", classId: c4, joinsYearId: yearNext });
+    await due(s.id, 2);
     const r1 = await life().joinDue(), r2 = await life().joinDue();
     expect(r1.waiting).toBeGreaterThanOrEqual(1);
     expect(r2.waiting).toBeGreaterThanOrEqual(1);
@@ -135,7 +139,8 @@ describe("join day", () => {
     expect(told[0]!.count).toBe(1);
     await expect(life().startNow(s.id)).rejects.toThrow(/no planned section/);
     // Planning a section lets the next run start them.
-    await life().setJoiningDay(s.id, { joinsOn: today(), joinsSectionId: s4next });
+    await life().setJoiningDay(s.id, { joinsOn: "2027-04-01", joinsSectionId: s4next });
+    await due(s.id, 2);
     expect((await life().joinDue()).joined).toBeGreaterThanOrEqual(1);
     expect(await row(s.id)).toMatchObject({ status: "active", sectionId: s4next });
   });
@@ -145,7 +150,8 @@ describe("join day", () => {
     const ids = await setup(c);
     await withConsole((tx) => tx.update(schools).set({ studentCap: 1 }).where(eq(schools.id, c.id)));
     await svc(c).create({ name: "Only Seat", sectionId: ids.s4A });
-    const j = await svc(c).create({ name: "No Room", sectionId: ids.s5next, joinsOn: addDays(today(), -1) });
+    const j = await svc(c).create({ name: "No Room", sectionId: ids.s5next });
+    await due(j.id, 1, c);
     expect((await life(c).joinDue()).waiting).toBe(1);
     expect((await row(j.id, c)).status).toBe("joining");
     await expect(life(c).startNow(j.id)).rejects.toThrow(/plan allows 1/);
@@ -154,18 +160,17 @@ describe("join day", () => {
   });
 
   it("one child that fails does not stop the others", async () => {
-    const x = await joiner("Fails Tonight", { joinsOn: addDays(today(), -1) });
-    const y = await joiner("Starts Tonight", { joinsOn: addDays(today(), -1) });
+    const x = await due(( await joiner("Fails Tonight")).id), y = await due((await joiner("Starts Tonight")).id);
     const real = (LifecycleService.prototype as unknown as { joinOne: (...p: unknown[]) => Promise<unknown> }).joinOne;
     const spy = vi.spyOn(LifecycleService.prototype as unknown as { joinOne: typeof real }, "joinOne").mockImplementation(async function (this: unknown, id: unknown, ...rest: unknown[]) {
-      if (id === x.id) throw new Error("boom");
+      if (id === x) throw new Error("boom");
       return real.call(this, id, ...rest);
     });
     const r = await life().joinDue();
     spy.mockRestore();
     expect(r.failed).toBe(1);
-    expect((await row(y.id)).status).toBe("active");
-    expect((await row(x.id)).status).toBe("joining");
+    expect((await row(y)).status).toBe("active");
+    expect((await row(x)).status).toBe("joining");
   });
 
   it("start now, change the day, and withdraw before joining", async () => {
@@ -212,7 +217,7 @@ describe("A3 and A4: leaving", () => {
     await expect(life().markLeft(s.id, { reason: "other" })).rejects.toMatchObject({ fieldErrors: { note: expect.any(String) } });
     await expect(life().markLeft(s.id, {})).rejects.toMatchObject({ fieldErrors: { reason: expect.any(String) } });
     await life().markLeft(s.id, { reason: "other", note: "Moved abroad" });
-    expect(await row(s.id)).toMatchObject({ leftOn: today(), leftReason: "other: Moved abroad" });
+    expect(await row(s.id)).toMatchObject({ leftOn: today(), leftReason: "other", leftNote: "Moved abroad" });
     await expect(life().markLeft(s.id, { reason: "fees" })).rejects.toThrow(/already left/);
   });
 
@@ -357,7 +362,8 @@ describe("import", () => {
 
 describe("isolation and permission", () => {
   it("school B cannot start, withdraw, leave or bring back A's student, and its job does not touch A", async () => {
-    const j = await joiner("Isolated Joiner", { joinsOn: addDays(today(), -1) });
+    const j = await joiner("Isolated Joiner");
+    await due(j.id);
     for (const call of [() => life(b).startNow(j.id), () => life(b).withdraw(j.id, { reason: "no way" }), () => life(b).markLeft(j.id, { reason: "fees" }), () => life(b).bringBack(j.id, { sectionId: s4A })]) {
       await expect(call()).rejects.toBeTruthy();
     }

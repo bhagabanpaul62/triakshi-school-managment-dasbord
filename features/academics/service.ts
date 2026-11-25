@@ -93,7 +93,8 @@ export class AcademicYearService extends AcademicsCrud<typeof academicYears> {
     const n = (table: string, where = by("year_id", y.id)) => countIn(tx, table, where);
     const counts = await Promise.all([n("exams"), n("fee_invoices"), n("fee_receipts", sql`date between ${y.startsOn}::date and ${y.endsOn}::date`), n("student_enrollments"), n("student_attendance", ofYear), n("assignments", ofYear), n("timetable_slots", ofYear), n("fee_payments")]);
     const total = (...i: number[]) => i.reduce((t, k) => t + counts[k]!, 0);
-    return [["exams", total(0)], ["fee records", total(1, 2, 7)], ["student enrolments", total(3)], ["attendance, assignment or timetable records", total(4, 5, 6)]];
+    const planned = await countIn(tx, "students", sql`status = 'joining' and joins_year_id = ${y.id}`);
+    return [["exams", total(0)], ["fee records", total(1, 2, 7)], ["student enrolments", total(3)], ["attendance, assignment or timetable records", total(4, 5, 6)], ["children are planned to join this year", planned]];
   }
 
   /** Make one year current; every other year stops being current. */
@@ -274,7 +275,9 @@ export class SectionService extends AcademicsCrud<typeof sections> {
   /** Students and their attendance, assignments and timetable slots hang off a section. */
   protected async usage(tx: Tx, s: Section): Promise<[string, number][]> {
     const n = (table: string) => countIn(tx, table, by("section_id", s.id));
-    return [["students", await n("students")], ["attendance records", await n("student_attendance")], ["assignments", await n("assignments")], ["timetable slots", await n("timetable_slots")]];
+    // A child who has not started has no section yet; the plan (joins_section_id) is what a delete would strip.
+    const planned = await countIn(tx, "students", sql`status = 'joining' and joins_section_id = ${s.id}`);
+    return [["students", await n("students")], ["children are planned to join this section", planned], ["attendance records", await n("student_attendance")], ["assignments", await n("assignments")], ["timetable slots", await n("timetable_slots")]];
   }
 
   /** Sections of a class in a year (default: the current one) with the class teacher's name. */

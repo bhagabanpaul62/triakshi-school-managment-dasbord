@@ -7,11 +7,12 @@ import { services } from "@smw/integrations";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import studentsFeature from "./feature";
 import { StudentAccess, type Perm } from "./access";
-import { capacityOf, currentYearSection, nextRollIn, type StudentCapacity } from "./capacity";
+import { capacityOf, currentYearSection, lockSchool, lockSections, nextRollIn, type StudentCapacity } from "./capacity";
+import { hasTable } from "./guarded";
 import { studentInput, studentUpdateInput, type StudentInput } from "./inputs";
 import { ParentAccounts, type GuardianDetails } from "./parent-accounts";
-import { GENDERS, guardianConsents, guardians, studentDocuments, studentEnrollments, studentGuardians, students, STUDENT_STATUSES } from "./schema";
-import { addDays, ageOn, classAgeWarning, firstPassword, leftReasonText, normalizePhone, sectionLabel, today } from "./util";
+import { GENDERS, guardianConsents, guardians, studentDocuments, studentEnrollments, studentGuardians, students, STUDENT_STATUSES, WITHDREW_BEFORE_JOINING } from "./schema";
+import { ageOn, classAgeWarning, firstPassword, leftReasonText, normalizePhone, planDay, sectionLabel, today } from "./util";
 
 export type { StudentCapacity };
 export type Student = typeof students.$inferSelect;
@@ -99,7 +100,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
     return this.read("read", async (tx) => {
       const row = await super.findOrThrow(tx, id);
       const allowed = await this.access.sensitiveSections(tx);
-      if (allowed && !(row.sectionId && allowed.has(row.sectionId))) throw new ForbiddenError();
+      if (allowed && !(row.status === "active" && row.sectionId && allowed.has(row.sectionId))) throw new ForbiddenError();
       return { medicalNotes: row.medicalNotes, emergencyName: row.emergencyName, emergencyPhone: row.emergencyPhone };
     });
   }
@@ -171,6 +172,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
         className: place?.className ?? klass?.name ?? null,
         age: ageOn(student.dob),
         leftReason: leftReasonText(student.leftReason),
+        leftNote: student.leftNote,
         joining: student.status === "joining"
           ? { on: student.joinsOn, yearName: joinYear?.name ?? null, plannedSection: planned ? sectionLabel(planned.className, planned.section) : null }
           : null,
@@ -203,7 +205,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
         sections: rows.map((r) => ({ id: r.id, classId: r.classId, label: sectionLabel(r.className, r.name) })),
         joining: {
           classes: allClasses,
-          years: years.map((y) => ({ id: y.id, name: y.name, isCurrent: y.isCurrent, startsOn: y.startsOn })),
+          years: years.map((y) => ({ id: y.id, name: y.name, isCurrent: y.isCurrent, startsOn: y.startsOn, endsOn: y.endsOn })),
           sections: later.map((s) => ({ id: s.id, yearId: s.yearId, classId: s.classId, label: `${sectionLabel(s.className, s.name)} (${years.find((y) => y.id === s.yearId)?.name})` })),
           notice: next.length === 0 ? "There is no next academic year yet, so a child cannot be placed in it."
             : gap.length ? `${gap.join(" and ")} ${gap.length > 1 ? "have" : "has"} no sections yet, so a child cannot be given a planned section.` : null,
@@ -281,22 +283,26 @@ export class StudentService extends CrudService<typeof students, Perm> {
     const sec = d.sectionId ? await this.findSection(tx, d.sectionId, "sectionId") : null;
     const plan = d.joinsSectionId ? await this.findSection(tx, d.joinsSectionId, "joinsSectionId") : null;
     const pickedYear = d.joinsYearId ?? plan?.yearId ?? (sec && current && sec.yearId !== current.id ? sec.yearId : undefined);
-    const joining = (!!d.joinsOn && d.joinsOn > todayIso) || (!!pickedYear && pickedYear !== current?.id);
-    if (!joining) {
+    const ordinary = async () => {
       const section = sec ?? plan;
       return { joining: false as const, section, classId: section?.classId ?? await this.classOrThrow(tx, d.classId), year: null, joinsOn: null };
-    }
+    };
+    if (!d.joinsOn && !pickedYear) return ordinary();
     const yearId = pickedYear ?? current?.id;
     const [year] = yearId ? await tx.select().from(academicYears).where(eq(academicYears.id, yearId)).limit(1) : [];
     if (!year) throw new ValidationError({ joinsYearId: yearId ? "Choose a year that exists" : "Choose the academic year they join" });
     if (current && !year.isCurrent && year.startsOn < current.startsOn) throw new ValidationError({ joinsYearId: "Choose the current year or a later one" });
+    // The day must be inside its year; today or earlier is an ordinary admission only in the current year.
+    const when = planDay(year, year.isCurrent, d.joinsOn, todayIso);
+    if (when.error) throw new ValidationError({ joinsOn: when.error });
+    if (!when.joining) return ordinary();
     if (sec && !plan && sec.yearId !== year.id) throw new ValidationError({ sectionId: `This section is not in ${year.name}. Choose the planned section in the joining part.` });
     if (plan && plan.yearId !== year.id) throw new ValidationError({ joinsSectionId: `This section is not in ${year.name}` });
     const planned = plan ?? sec;
     if (planned && d.classId && planned.classId !== d.classId) throw new ValidationError({ joinsSectionId: "This section belongs to another class" });
     const classId = planned?.classId ?? await this.classOrThrow(tx, d.classId, "Choose the class they will join");
     if (!classId) throw new ValidationError({ classId: "Choose the class they will join" });
-    return { joining: true as const, section: planned, classId, year, joinsOn: d.joinsOn ?? (year.startsOn > todayIso ? year.startsOn : addDays(todayIso, 1)) };
+    return { joining: true as const, section: planned, classId, year, joinsOn: when.day! };
   }
 
   protected async beforeCreate(tx: Tx, input: Record<string, unknown>) {
@@ -305,11 +311,14 @@ export class StudentService extends CrudService<typeof students, Perm> {
     this.checkBirth(d.dob, place.joinsOn ?? d.admissionDate ?? today());
     // A child who has not started yet is not counted against the plan: the limit is checked on their day.
     if (!place.joining) {
+      // One lock order everywhere: the school (before the plan count), then the section (before a roll number).
+      await lockSchool(tx, this.ctx.schoolId);
+      if (place.section) await lockSections(tx, place.section.id);
       const cap = await this.capacityIn(tx);
       if (cap.active + 1 > cap.hardLimit) throw new LimitError(`Your plan allows ${cap.cap} students and admissions stop at ${cap.hardLimit}. Upgrade the plan to admit more.`);
     }
     const id = uuidv7();
-    await this.refuseDuplicate(tx, { id, name: d.name, dob: d.dob, allow: d.allowDuplicate });
+    await this.refuseDuplicate(tx, { id, name: d.name, dob: d.dob, allow: d.allowDuplicate, phones: this.guardiansOf(d).map((g) => g.phone) });
     const admissionNo = d.admissionNo ?? await this.nextAdmissionNo(tx);
     const [taken] = await tx.select({ id: students.id }).from(students).where(eq(students.admissionNo, admissionNo)).limit(1);
     if (taken) throw new ConflictError(`Admission number ${admissionNo} is already used.`);
@@ -333,7 +342,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
       }),
       id, admissionNo, name: d.name, dob: d.dob, gender: d.gender, bloodGroup: d.bloodGroup, address: d.address, apaarId: d.apaarId, pen: d.pen, rteQuota: d.rteQuota ?? false, category: d.category,
       classId: place.classId, sectionId: section?.id, rollNo: section ? (d.rollNo ?? await nextRollIn(tx, section.id)) : undefined,
-      admissionDate: d.admissionDate ?? today(), status: place.joining ? "joining" : "active", userId: login!.id,
+      admissionDate: place.joining ? place.joinsOn : d.admissionDate ?? today(), status: place.joining ? "joining" : "active", userId: login!.id,
       ...(place.joining ? { joinsOn: place.joinsOn, joinsYearId: place.year.id, joinsSectionId: place.section?.id } : {}),
     };
   }
@@ -360,26 +369,32 @@ export class StudentService extends CrudService<typeof students, Perm> {
     if (age < MIN_AGE || age > MAX_AGE) throw new ValidationError({ dob: `A child must be ${MIN_AGE} to ${MAX_AGE} years old when they join. Check the birth date.` });
   }
 
-  /** Joining, active or left students with this name (case and spaces ignored) and birth date, apart from `exceptId`. Takes a lock per child so two admissions at once cannot both pass. */
-  async findDuplicate(tx: Tx, name: string, dob: string, exceptId?: string): Promise<DuplicateOf | undefined> {
+  /**
+   * Joining, active or left students with this name (case and spaces ignored) and birth date, apart from `exceptId`. With no birth date the
+   * name and a guardian phone are matched instead. One lock per school makes two admissions at once (or an import and an admission) wait for each other.
+   */
+  async findDuplicate(tx: Tx, name: string, dob: string | null | undefined, exceptId?: string, phones: string[] = []): Promise<DuplicateOf | undefined> {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${this.ctx.schoolId}|duplicates`}, 0))`);
     const norm = name.toLowerCase().replace(/\s+/g, "");
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${this.ctx.schoolId}|${norm}|${dob}`}, 0))`);
-    const [dup] = await tx.select({ id: students.id, name: students.name, admissionNo: students.admissionNo, status: students.status }).from(students)
-      .where(and(eq(students.dob, dob), inArray(students.status, ["joining", "active", "left"]), sql`lower(regexp_replace(${students.name}, '\\s+', '', 'g')) = ${norm}`, exceptId ? ne(students.id, exceptId) : undefined))
-      .orderBy(asc(students.createdAt)).limit(1);
-    return dup;
+    const same = and(inArray(students.status, ["joining", "active", "left"]), sql`lower(regexp_replace(${students.name}, '\\s+', '', 'g')) = ${norm}`, exceptId ? ne(students.id, exceptId) : undefined);
+    const cols = { id: students.id, name: students.name, admissionNo: students.admissionNo, status: students.status };
+    if (dob) return (await tx.select(cols).from(students).where(and(eq(students.dob, dob), same)).orderBy(asc(students.createdAt)).limit(1))[0];
+    const numbers = phones.map(normalizePhone).filter(Boolean);
+    if (!numbers.length) return undefined;
+    const [hit] = await tx.select(cols).from(students).innerJoin(studentGuardians, eq(studentGuardians.studentId, students.id)).innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId))
+      .where(and(inArray(guardians.phone, numbers), same)).orderBy(asc(students.createdAt)).limit(1);
+    return hit;
   }
 
   /** Refuse a second record of the same child, naming the first, unless the office ticked "different child" (that is written to the audit log). */
-  protected async refuseDuplicate(tx: Tx, c: { id: string; name: string; dob: string | undefined | null; allow?: boolean; exceptId?: string }) {
-    if (!c.dob) return;
-    const dup = await this.findDuplicate(tx, c.name, c.dob, c.exceptId);
+  protected async refuseDuplicate(tx: Tx, c: { id: string; name: string; dob: string | undefined | null; allow?: boolean; exceptId?: string; phones?: string[] }) {
+    const dup = await this.findDuplicate(tx, c.name, c.dob, c.exceptId, c.phones);
     if (!dup) return;
     if (c.allow) {
-      await this.audit(tx, { action: "allow_duplicate", entity: "Student", entityId: c.id, summary: `${c.name} was saved although ${dup.name} (${dup.admissionNo}) has the same name and birth date` });
+      await this.audit(tx, { action: "allow_duplicate", entity: "Student", entityId: c.id, summary: `${c.name} was saved although ${dup.name} (${dup.admissionNo}) has the same name and ${c.dob ? "birth date" : "guardian phone"}` });
       return;
     }
-    const message = `${dup.name} (${dup.admissionNo}) ${dup.status === "left" ? "left the school and" : "is already in the school and"} has the same name and birth date. If this is a different child, tick "This is a different child".`;
+    const message = `${dup.name} (${dup.admissionNo}) ${dup.status === "left" ? "left the school and" : "is already in the school and"} has the same name and ${c.dob ? "birth date" : "guardian phone"}. If this is a different child, tick "This is a different child".`;
     throw new ValidationError({ allowDuplicate: message, _open: `/app/students/${dup.id}` }, message);
   }
 
@@ -421,8 +436,8 @@ export class StudentService extends CrudService<typeof students, Perm> {
     const sectionId = data.sectionId as string | undefined;
     const planned = data.joinsSectionId as string | undefined;
     if (existing.status === "joining") {
-      // Placed on their day, not by an edit: the section field means the planned one.
-      delete next.sectionId; delete next.rollNo;
+      // Placed on their day, not by an edit: the section field means the planned one. Their admission date is their joining day.
+      delete next.sectionId; delete next.rollNo; delete next.admissionDate;
       if (planned && planned !== existing.joinsSectionId) {
         const section = await this.findSection(tx, planned, "joinsSectionId");
         if (section.yearId !== existing.joinsYearId) throw new ValidationError({ joinsSectionId: "Choose a section of the year they join" });
@@ -434,6 +449,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
       if (sectionId && sectionId !== existing.sectionId) {
         if (existing.status !== "active") throw new ValidationError({ sectionId: "Use Bring back to place a student who left" });
         const section = await this.sectionOrThrow(tx, sectionId);
+        await lockSections(tx, section.id);
         next.classId = section.classId;
         next.rollNo = (data.rollNo as number | undefined) ?? await nextRollIn(tx, section.id);
         await tx.update(studentEnrollments).set({ classId: section.classId, sectionId: section.id, rollNo: next.rollNo as number })
@@ -489,7 +505,7 @@ export class StudentService extends CrudService<typeof students, Perm> {
         refusal: s.status === "active" || s.status === "joining" ? "A student who is studying here, or about to join, cannot be erased. Mark the student as left first (withdraw them if they have not started)." : null,
         blank: [
           set("Phone numbers", s.phone ?? s.altPhone), set("Home address", s.address), set("Photo", s.photoKey), set("Medical notes", s.medicalNotes),
-          set("Emergency contact", s.emergencyName ?? s.emergencyPhone), set("Blood group", s.bloodGroup), set("APAAR ID", s.apaarId), set("PEN", s.pen), set("Reason for leaving", s.leftReason),
+          set("Emergency contact", s.emergencyName ?? s.emergencyPhone), set("Blood group", s.bloodGroup), set("APAAR ID", s.apaarId), set("PEN", s.pen), set("Reason for leaving", s.leftReason === WITHDREW_BEFORE_JOINING ? null : s.leftReason), set("Words about why they left", s.leftNote),
           set("Student login (turned off, its email and phone removed)", s.userId), { label: "Phone push and calendar links of those logins", filled: logins.length > 0 },
           { label: `Website enquiry contact details (${enquiries.length} ${enquiries.length === 1 ? "enquiry" : "enquiries"})`, filled: enquiries.length > 0 },
           { label: `Phone numbers and addresses written in the audit log (${scrub} ${scrub === 1 ? "entry" : "entries"}); the entries stay, those values read "(erased)"`, filled: scrub > 0 },
@@ -512,7 +528,9 @@ export class StudentService extends CrudService<typeof students, Perm> {
       if (!s) throw new NotFoundError("Student");
       if (s.status === "active" || s.status === "joining") throw new ConflictError("A student who is studying here, or about to join, cannot be erased. Mark the student as left first.");
       photo = s.photoKey;
-      await tx.update(students).set({ phone: null, altPhone: null, address: null, photoKey: null, medicalNotes: null, emergencyName: null, emergencyPhone: null, bloodGroup: null, apaarId: null, pen: null, leftReason: null }).where(eq(students.id, id));
+      await tx.update(students).set({ phone: null, altPhone: null, address: null, photoKey: null, medicalNotes: null, emergencyName: null, emergencyPhone: null, bloodGroup: null, apaarId: null, pen: null, leftNote: null,
+        // "Withdrew before joining" says no one, and fees reads it: it stays. Every other reason goes.
+        leftReason: s.leftReason === WITHDREW_BEFORE_JOINING ? s.leftReason : null }).where(eq(students.id, id));
       const blankGuardians = (await this.eraseGuardians(tx, id)).filter((g) => !g.otherActive);
       if (blankGuardians.length) await tx.update(guardians).set({ phone: null, email: null, occupation: null }).where(inArray(guardians.id, blankGuardians.map((g) => g.id)));
       const logins = [s.userId, ...blankGuardians.map((g) => g.userId)].filter((x): x is string => !!x);
@@ -521,30 +539,25 @@ export class StudentService extends CrudService<typeof students, Perm> {
         await Promise.all(logins.map((u) => tx.update(users).set({ status: "disabled", email: null, phone: null, loginId: `erased-${u}`, passwordHash: null }).where(eq(users.id, u))));
         await tx.delete(sessions).where(inArray(sessions.userId, logins));
         for (const table of ["push_subscriptions", "calendar_feeds"]) {
-          if (await this.hasTable(tx, table)) await tx.execute(sql`delete from ${sql.identifier(table)} where user_id in (${sql.join(logins.map((u) => sql`${u}::uuid`), sql`, `)})`);
+          if (await hasTable(tx, table)) await tx.execute(sql`delete from ${sql.identifier(table)} where user_id in (${sql.join(logins.map((u) => sql`${u}::uuid`), sql`, `)})`);
         }
       }
       const enquiries = await this.linkedEnquiries(tx, id);
       if (enquiries.length) {
         const list = sql.join(enquiries.map((e) => sql`${e}::uuid`), sql`, `);
         await tx.execute(sql`update enquiries set parent_name = '(erased)', phone = '', phone_key = '', alt_phone = null, email = null, address = null, message = null, notes = null where id in (${list})`);
-        if (await this.hasTable(tx, "enquiry_events")) await tx.execute(sql`update enquiry_events set body = null where enquiry_id in (${list})`);
+        if (await hasTable(tx, "enquiry_events")) await tx.execute(sql`update enquiry_events set body = null where enquiry_id in (${list})`);
       }
       const scrubbed = await this.scrubAudit(tx, [id, ...blankGuardians.map((g) => g.id), ...logins, ...enquiries]);
-      return { blanked: ["phone numbers", "address", "photo", "medical notes", "emergency contact", "blood group", "APAAR ID", "PEN", "reason for leaving", ...(s.userId ? ["login"] : []), ...(enquiries.length ? ["enquiry contact"] : []), ...(scrubbed ? ["contact values in the audit log"] : [])], guardians: blankGuardians.length, name: s.name, scrubbed };
+      return { blanked: ["phone numbers", "address", "photo", "medical notes", "emergency contact", "blood group", "APAAR ID", "PEN", ...(s.leftReason === WITHDREW_BEFORE_JOINING ? [] : ["reason for leaving"]), "words about why they left", ...(s.userId ? ["login"] : []), ...(enquiries.length ? ["enquiry contact"] : []), ...(scrubbed ? ["contact values in the audit log"] : [])], guardians: blankGuardians.length, name: s.name, scrubbed };
     }, (r) => ({ action: "erase", entity: "Student", entityId: id, summary: `Erased optional data of ${r.name}`, meta: { reason: why, blanked: r.blanked, guardiansBlanked: r.guardians, auditEntriesScrubbed: r.scrubbed } }));
     if (photo) await services().storage.delete(photo).catch(() => undefined);
     return { blanked: out.blanked, guardians: out.guardians };
   }
 
-  private async hasTable(tx: Tx, name: string) {
-    const [r] = await tx.execute<{ t: string | null }>(sql`select to_regclass(${`public.${name}`})::text as t`);
-    return !!r?.t;
-  }
-
   /** Website enquiries that became this student. The table exists only when the website module was ever on. */
   private async linkedEnquiries(tx: Tx, studentId: string): Promise<string[]> {
-    if (!(await this.hasTable(tx, "enquiries"))) return [];
+    if (!(await hasTable(tx, "enquiries"))) return [];
     return (await tx.execute<{ id: string }>(sql`select id from enquiries where converted_student_id = ${studentId}`)).map((r) => r.id);
   }
 

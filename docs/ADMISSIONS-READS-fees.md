@@ -70,6 +70,14 @@ Wave 0, admissions core. Every read of `students` in these folders, with the ver
 | features/library/reminders.ts:23 | Logins for overdue notices | Excluded by design: a left student with a book out is still told; joining has no loans. |
 | features/finance/services/dashboard-extras.ts:83 | Active student count for cost per student | Excluded by design: status = active already; joining children are not at school yet. |
 
+## Rules added in the review pass
+
+- **New in the year they join, whatever the status.** `kindFor` says "new" when `joins_year_id` is the year (or status is joining); `sinceOf` counts the join rule from `joins_on`, else `admission_date`. `kindCols` (in `plans.ts`) is the one set of columns every pool selects (plan billing, resolve, concessions estimate, plan override, opt-ins, late rule). The same child before and after the day gets the same plan, months and amounts, and is "existing" the year after.
+- **Own year for early starters.** `billYearOf` (manual, group, bounce, opening bills): joining -> joining year; a child at school with `joins_year_id` or an enrolment in a year later than the school's current one -> that year; else the current year.
+- **Withdrew before joining.** Money owed or held stays visible: the dues report row and its `due` total, the student's account, `outstanding`. Leaves out: overdue and ageing (rows, totals, home and dashboard), dues by class, the month's and year's billed figures, the chase list. The report totals carry `neverStarted` (the part of `due` that belongs to such children). The student fees page shows one next step (`withdrewStep`): bills to cancel or credit first, then deposit or advance to give back through Settle up and refund.
+
+- **Seats.** A left student keeps the stop row but takes no seat (every count reads active riders). `assertRiderFits(tx, studentId)` in `features/transport/service.ts` re-checks capacity when a child is counted again (brought back); it throws `LimitError` when the vehicle is full.
+
 ## Other places that changed for the same reason (not in the list)
 
 - `features/fees/plan-billing.ts`: a year with no published plan still lists the joining children of that year, with "Joins on <date>".

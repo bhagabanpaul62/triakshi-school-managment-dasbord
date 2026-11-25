@@ -3,9 +3,11 @@ import type { Tx } from "@smw/db";
 import { ValidationError } from "@smw/feature-kit";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { StudentRecordService } from "./access";
+import { lockSchool, lockSections } from "./capacity";
+import { closeRecord } from "./leave";
 import { promoteInput } from "./inputs";
 import { studentEnrollments, students } from "./schema";
-import { leftReasonCode, sectionLabel, today } from "./util";
+import { sectionLabel, today } from "./util";
 
 interface SectionInfo { id: string; classId: string; yearId: string; name: string; className: string; grade: number; yearName: string; yearStart: string }
 
@@ -93,8 +95,10 @@ export class PromotionService extends StudentRecordService {
         : null;
       if (d.retainedIds.length && !retainTo) throw new ValidationError({ retainSectionId: "Choose where students who repeat the year go" });
 
+      // One lock order: the school, then the sections (roll numbers are handed out in the targets).
+      await lockSchool(tx, this.ctx.schoolId);
+      await lockSections(tx, from.id, target?.id, retainTo?.id);
       const tally = { promoted: 0, retained: 0, left: 0, graduated: 0 };
-      const leftReason = leftReasonCode(d.leftReason);
       const nextRoll = new Map<string, number>();
       const rollIn = async (sectionId: string) => {
         if (!nextRoll.has(sectionId)) {
@@ -112,11 +116,11 @@ export class PromotionService extends StudentRecordService {
       for (const { id } of people) {
         if (d.leftIds.includes(id)) {
           await closeOld(id, "left");
-          await tx.update(students).set({ status: "left", leftOn: today(), leftReason }).where(eq(students.id, id));
+          await closeRecord(tx, id, "left", today(), d.leftReason);
           tally.left++;
         } else if (graduating && !d.retainedIds.includes(id)) {
           await closeOld(id, "graduated");
-          await tx.update(students).set({ status: "alumni", leftOn: today(), leftReason: leftReasonCode("completed") }).where(eq(students.id, id));
+          await closeRecord(tx, id, "graduated", today(), "completed");
           tally.graduated++;
         } else {
           const retained = d.retainedIds.includes(id);

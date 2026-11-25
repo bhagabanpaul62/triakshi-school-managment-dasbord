@@ -10,7 +10,7 @@ import { ChangeService } from "./changes";
 import { PlanBilling } from "./plan-billing";
 import { concessionInput, concessionTypeInput } from "./inputs";
 import { NoteService } from "./notes";
-import { PlanService } from "./plans";
+import { kindCols, PlanService } from "./plans";
 import { feeConcessionTypes, feeConcessionUses, feeConcessions, feeHeads, feeInvoiceLines, feeInvoices, feePlanDues, feePlanLines } from "./schema";
 
 export { NoteService } from "./notes";
@@ -54,7 +54,7 @@ export class ConcessionService extends FeesBase {
 
   /** What a concession is worth over the year, for the approval limit: the plan's dues (or the bills so far) for the head. */
   private async estimateIn(tx: Tx, c: { studentId: string; yearId: string; headId: string | null; mode: "percent" | "amount"; value: number; per: "bill" | "year" }) {
-    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status }).from(students).where(eq(students.id, c.studentId));
+    const [s] = await tx.select({ id: students.id, classId: students.classId, ...kindCols }).from(students).where(eq(students.id, c.studentId));
     const plan = s ? await new PlanService(this.ctx).resolve(tx, s, c.yearId) : null;
     const dues = plan ? await tx.select({ key: feePlanDues.dueKey, amount: feePlanDues.amountPaise }).from(feePlanDues).innerJoin(feePlanLines, eq(feePlanLines.id, feePlanDues.lineId)).where(and(eq(feePlanLines.planId, plan.id), eq(feePlanLines.optional, false), c.headId ? eq(feePlanLines.headId, c.headId) : undefined)) : [];
     // No plan covers the student: the bills already issued for the year say what the discount is worth.
@@ -185,7 +185,7 @@ export class ConcessionService extends FeesBase {
       };
       // Brothers and sisters: everyone after the eldest admitted.
       const sib = await tx.execute<{ id: string; name: string; rank: number }>(sql`
-        select s.id, s.name, row_number() over (partition by fam.root order by (s.status = 'joining'), s.admission_date nulls last, s.created_at, s.id) as rank
+        select s.id, s.name, row_number() over (partition by fam.root order by coalesce(s.joins_year_id = ${year.id}, false), s.admission_date nulls last, s.created_at, s.id) as rank
         from students s join (select sg.student_id, min(sg2.student_id::text) as root from student_guardians sg join student_guardians sg2 on sg2.guardian_id = sg.guardian_id group by sg.student_id) fam on fam.student_id = s.id
         where s.status = 'active' or (s.status = 'joining' and s.joins_year_id = ${year.id})`);
       for (const r of sib) if (Number(r.rank) > 1) make("sibling", r, "Brother or sister at the school", { mode: "percent", value: 1000, headId: null });

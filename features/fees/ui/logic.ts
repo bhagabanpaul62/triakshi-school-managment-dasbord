@@ -238,3 +238,15 @@ export function remindSummary(r: { sent: unknown[]; skipped: { reason: string }[
   const why = Object.entries(r.skipped.reduce<Record<string, number>>((m, x) => ({ ...m, [x.reason]: (m[x.reason] ?? 0) + 1 }), {})).map(([k, n]) => `${n} ${SKIP_WORDS[k] ?? k}`);
   return `${r.sent.length} reminder${r.sent.length === 1 ? "" : "s"} sent${why.length ? `. Skipped: ${why.join(", ")}` : ""}`;
 }
+
+// ---------- a child who withdrew before joining ----------
+
+/**
+ * The one next step on the fees page of a child who withdrew before joining: first the bills (cancel them, or credit
+ * what was paid), then any money held (a deposit or an advance) is given back through Settle up and refund. Null when nothing is left.
+ */
+export function withdrewStep(o: { openBills: number; openPaise: number; advancePaise: number; depositPaise: number }): { text: string; tab: "bills" | "advance" } | null {
+  if (o.openBills > 0) return { text: `${o.openBills} open bill${o.openBills === 1 ? "" : "s"} (${rupees(o.openPaise)}) were made for a year this child never started. Cancel them, or credit them if they were part paid.`, tab: "bills" };
+  const held = o.advancePaise + o.depositPaise;
+  return held > 0 ? { text: `${rupees(held)} is held for this child (${[o.depositPaise ? `deposit ${rupees(o.depositPaise)}` : "", o.advancePaise ? `advance ${rupees(o.advancePaise)}` : ""].filter(Boolean).join(", ")}). Give it back with Settle up and refund.`, tab: "advance" } : null;
+}

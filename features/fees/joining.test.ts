@@ -1,12 +1,13 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { closeDb, withSchool } from "@smw/db";
 import { NotFoundError } from "@smw/feature-kit";
 import { addDays } from "@smw/feature-kit/money";
 import { createTestSchool } from "@smw/feature-kit/testing";
 import { academicYears } from "@smw/feature-academics/schema";
-import { studentGuardians, students } from "@smw/feature-students/schema";
+import { studentEnrollments, studentGuardians, students } from "@smw/feature-students/schema";
 import { ConcessionService } from "./concessions";
+import { kindFor } from "./plans";
 import { DeskService } from "./desk";
 import { DuesService } from "./dues";
 import { InvoiceService } from "./invoices";
@@ -129,6 +130,60 @@ describe("a child who is joining", () => {
     expect(sent.skipped[0]).toMatchObject({ studentId: joiner.id, detail: expect.stringMatching(/Withdrew before joining/) });
     expect((await new DuesService(as()).worstOverdue(50)).some((r) => r.id === joiner.id)).toBe(false);
     await withSchool(fx.school.id, (tx) => tx.update(students).set({ status: "joining", leftReason: null }).where(eq(students.id, joiner.id)));
+  });
+
+  it("stays a new admission of that year after the first day: same plan, months and amounts before and after Start now, existing the year after", async () => {
+    const next = Number(y2Start.slice(0, 4));
+    const kid = await make({ admissionNo: "JN4", name: "Stay New", status: "joining", joinsOn: `${next}-06-10`, joinsYearId: y2, admissionDate: addDays(TODAY, -3) });
+    const view = async () => (await new InvoiceService(as()).previewBulk({ yearId: y2, studentIds: [kid.id] })).rows.map((r) => [r.label, r.grossPaise, r.dueOn]);
+    const before = await view();
+    expect(before.map((r) => [r[0], r[1]])).toEqual([["Month B", 150_000], ["Month C", 150_000]]);
+    // The day comes: active, admission date = the first day (or the real first day when started early), the joining columns stay.
+    for (const admissionDate of [`${next}-06-10`, addDays(TODAY, -1)]) {
+      await withSchool(fx.school.id, (tx) => tx.update(students).set({ status: "active", admissionDate }).where(eq(students.id, kid.id)));
+      expect(await view()).toEqual(before);
+    }
+    // The following year they are an existing student.
+    expect(kindFor({ status: "active", admissionDate: `${next}-06-10`, joinsYearId: y2 }, { id: y3, startsOn: `${next + 1}-04-01`, endsOn: `${next + 2}-03-31` })).toBe("existing");
+    expect(kindFor({ status: "active", admissionDate: `${next}-06-10`, joinsYearId: y2 }, { id: y2, startsOn: y2Start, endsOn: `${next + 1}-03-31` })).toBe("new");
+  });
+
+  it("who started early in a year after the current one: a manual bill and a group charge use that year (bounce and opening bills share billYearOf)", async () => {
+    const early = await make({ admissionNo: "JN5", name: "Early Bird", status: "active", joinsOn: addDays(TODAY, 1), joinsYearId: y2, admissionDate: TODAY });
+    await withSchool(fx.school.id, (tx) => tx.insert(studentEnrollments).values({ schoolId: fx.school.id, studentId: early.id, yearId: y2, classId: fx.classId, outcome: "studying" } as never));
+    const svc = new InvoiceService(as());
+    const id = await svc.saveDraft({ studentId: early.id, label: "Early uniform", dueDate: addDays(TODAY, 5), lines: [{ label: "Uniform", kind: "fee", amountPaise: 20_000 }] });
+    expect((await bills(fx, early.id)).find((b) => b.id === id)?.yearId).toBe(y2);
+    const [ok] = await svc.chargeMany({ studentIds: [early.id], label: "Books", dueDate: addDays(TODAY, 5), lines: [{ label: "Books", kind: "fee", amountPaise: 10_000 }] });
+    expect((await bills(fx, early.id)).find((b) => b.id === ok)?.yearId).toBe(y2);
+    // An ordinary active student still bills in the current year.
+    const [plain] = await svc.chargeMany({ studentIds: [fx.students.riya], label: "Books", dueDate: addDays(TODAY, 5), lines: [{ label: "Books", kind: "fee", amountPaise: 10_000 }] });
+    expect((await bills(fx, fx.students.riya)).find((b) => b.id === plain)?.yearId).not.toBe(y2);
+  });
+
+  it("who withdrew before joining: owed money stays in the totals, but is not chased, aged, or counted in a class or a month", async () => {
+    const kid = await make({ admissionNo: "JN6", name: "Never Came", status: "joining", joinsOn: `${y2Start.slice(0, 4)}-06-10`, joinsYearId: y2 });
+    const issued = await new InvoiceService(as()).issueBulk({ yearId: y2, studentIds: [kid.id] });
+    expect(issued.issued).toBe(2);
+    await withSchool(fx.school.id, (tx) => tx.execute(sql`update fee_invoices set due_date = ${addDays(TODAY, -45)}::date where student_id = ${kid.id}`));
+    const d = new DuesService(as());
+    const num = async () => ({ row: (await d.report({ q: "Never Came" })).rows[0]!, sum: await d.summary(), cls: (await d.dueByClass()).reduce((a, c) => a + c.duePaise, 0), report: (await d.report({ pageSize: 100 })).totals });
+    const before = await num();
+    expect(before.row.overdue).toBe(300_000);
+    await withSchool(fx.school.id, (tx) => tx.update(students).set({ status: "left", leftReason: "withdrew before joining", leftOn: null }).where(eq(students.id, kid.id)));
+    const after = await num();
+    expect(after.row).toMatchObject({ due: 300_000, overdue: 0, status: "due", neverStarted: true, ageing: { notDue: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90p: 0 } });
+    expect(after.sum.outstanding).toBe(before.sum.outstanding); // owed money stays visible
+    expect(before.sum.overdueAmount - after.sum.overdueAmount).toBe(300_000);
+    expect(before.sum.overdueCount - after.sum.overdueCount).toBe(1);
+    expect(before.sum.billedThisYear - after.sum.billedThisYear).toBe(300_000);
+    expect(before.cls - after.cls).toBe(300_000);
+    expect(after.report.due).toBe(before.report.due);
+    expect(after.report.neverStarted - before.report.neverStarted).toBe(300_000);
+    expect(before.report.ageing.d31_60 - after.report.ageing.d31_60).toBe(300_000);
+    const ov = await d.overview();
+    expect(ov.chase.some((r) => r.id === kid.id)).toBe(false);
+    await withSchool(fx.school.id, (tx) => tx.update(students).set({ status: "joining", leftReason: null }).where(eq(students.id, kid.id)));
   });
 
   it("is isolated to its school", async () => {

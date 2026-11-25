@@ -122,7 +122,7 @@ describe("handlers, two schools", () => {
     const ist = (daysAgo: number) => new Date(Date.now() + 330 * 60_000 - daysAgo * 86_400_000).toISOString().slice(0, 10);
     const setRow = (status: string, leftOn: string | null, joinsOn: string | null = null) => withSchool(a.id, async (tx) => {
       await tx.execute(sql`delete from students where user_id = ${a.users.student}`);
-      await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, joins_on) values (gen_random_uuid(), ${a.id}, 'ADM-LV', 'Kid', ${a.users.student}, ${status}, ${leftOn}::date, ${joinsOn}::date)`);
+      await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, access_until, joins_on) values (gen_random_uuid(), ${a.id}, 'ADM-LV', 'Kid', ${a.users.student}, ${status}, ${leftOn}::date, ${leftOn}::date + 90, ${joinsOn}::date)`);
     });
     const signIn = (password = "password123") => call(R("auth/login"), "POST", `${a.slug}.localhost`, undefined, { body: { identifier: `student-${a.slug}`, password } });
 
@@ -134,10 +134,11 @@ describe("handlers, two schools", () => {
       expect(me.json.features).toEqual(["notifications"]);
       expect(me.json.leftUntil).toBe(new Date(Date.parse(`${ist(10)}T00:00:00Z`) + 90 * 86_400_000).toISOString().slice(0, 10));
       expect((await call(R("notifications"), "GET", `${a.slug}.localhost`, tok)).status).toBe(200);
-      for (const p of ["announcements", "conversations", "requests", "meetings", "calendar"]) {
+      // The calendar joins many modules, so it answers with what is left: nothing.
+      expect((await call(R("calendar"), "GET", `${a.slug}.localhost`, tok)).json.items).toEqual([]);
+      for (const p of ["announcements", "conversations", "requests", "meetings"]) {
         const r = await call(R(p), "GET", `${a.slug}.localhost`, tok);
-        expect([403, 200], `${p} ${JSON.stringify(r.json)}`).toContain(r.status);
-        if (r.status === 200) expect(JSON.stringify(r.json), `${p} must hold nothing`).toMatch(/"(rows|items)":\[\]/);
+        expect(r.status, `${p} ${JSON.stringify(r.json)}`).toBe(403);
       }
       expect((await call(R("announcements"), "GET", `${a.slug}.localhost`, tok)).status).toBe(403);
     });

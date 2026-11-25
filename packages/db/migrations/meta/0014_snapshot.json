@@ -1,5 +1,5 @@
 {
-  "id": "31df99eb-0c61-4836-907b-dc4da41dd1e0",
+  "id": "9ca81090-dfa0-4b96-81db-df418737ddaf",
   "prevId": "5ddeaeee-6a49-4c20-9b0c-e0b5e8a2e021",
   "version": "7",
   "dialect": "postgresql",
@@ -33396,6 +33396,18 @@
         "left_reason": {
           "name": "left_reason",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "left_note": {
+          "name": "left_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_until": {
+          "name": "access_until",
+          "type": "date",
           "primaryKey": false,
           "notNull": false
         },

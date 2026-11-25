@@ -23,10 +23,12 @@ beforeAll(async () => {
 afterAll(closeDb);
 
 const day = (offset: number) => new Date(NOW.getTime() + offset * 86_400_000).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-async function setStudent(s: TestSchool, status: string, leftOn: string | null) {
+/** `until` is students.access_until; left out = the last day + 90, as features/students writes it. */
+async function setStudent(s: TestSchool, status: string, leftOn: string | null, until?: string | null) {
   await withConsole(async (tx) => {
     await tx.execute(sql`delete from students where user_id = ${s.users.student}`);
-    if (status) await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on) values (gen_random_uuid(), ${s.id}, ${`A${crypto.randomUUID().slice(0, 8)}`}, 'Kid', ${s.users.student}, ${status}, ${leftOn}::date)`);
+    const au = until !== undefined ? until : leftOn ? sql`${leftOn}::date + 90` : null;
+    if (status) await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, access_until) values (gen_random_uuid(), ${s.id}, ${`A${crypto.randomUUID().slice(0, 8)}`}, 'Kid', ${s.users.student}, ${status}, ${leftOn}::date, ${au})`);
   });
 }
 beforeEach(async () => {
@@ -52,6 +54,13 @@ describe("the writer", () => {
     expect(await put(a, a.users.student, "fees.due")).toBe(0);
     await setStudent(a, "alumni", null);
     expect(await put(a, a.users.student, "account.security")).toBe(0);
+  });
+
+  it("access_until decides, not the last day: a back-dated leaver is still told, an ended one is not", async () => {
+    await setStudent(a, "left", day(-200), day(30));
+    expect(await put(a, a.users.student, "fees.due")).toBe(1);
+    await setStudent(a, "left", day(-10), day(-1));
+    expect(await put(a, a.users.student, "fees.due")).toBe(0);
   });
 
   it("an active student, a student with no student row and staff hear everything", async () => {

@@ -7,6 +7,7 @@ import { cellKey } from "@smw/feature-timetable/bell";
 import { periods, substitutions, timetableSlots, ttBlockOptions, ttBlockSlots } from "@smw/feature-timetable/schema";
 import type { Tx } from "@smw/db";
 import { loadSettings, queueAlerts } from "./alerts";
+import { onRollBetween } from "./roll";
 import { MIN_PERIODS_FOR_ALERT } from "./constants";
 import { markPeriodInput } from "./inputs";
 import type { SubjectReport } from "./register-export";
@@ -201,7 +202,7 @@ export class PeriodAttendanceService extends StudentAttendanceService {
       const label = await this.sectionLabel(tx, sectionId);
       const [people, marks] = await Promise.all([
         tx.select({ studentId: students.id, name: students.name, rollNo: students.rollNo }).from(students)
-          .where(and(eq(students.sectionId, sectionId), eq(students.status, "active"))).orderBy(asc(students.rollNo), asc(students.name)),
+          .where(and(eq(students.sectionId, sectionId), onRollBetween(from, to))).orderBy(asc(students.rollNo), asc(students.name)),
         tx.select({ studentId: periodAttendance.studentId, subjectId: periodAttendance.subjectId, subject: subjects.name, status: periodAttendance.status, n: count() })
           .from(periodAttendance).innerJoin(subjects, eq(subjects.id, periodAttendance.subjectId))
           .where(and(eq(periodAttendance.sectionId, sectionId), between(periodAttendance.date, from, to)))

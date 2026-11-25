@@ -24,7 +24,8 @@ export async function startStudentNow(fd: FormData) {
   return serviceAction(LifecycleService, (s) => s.startNow(id(fd)), "The student has started");
 }
 export async function changeJoiningDay(fd: FormData) {
-  return serviceAction(LifecycleService, (s) => s.setJoiningDay(id(fd), formToObject(fd)), "Joining day changed");
+  const r = await serviceAction(LifecycleService, (s) => s.setJoiningDay(id(fd), formToObject(fd)), "Joining day changed");
+  return r.ok && r.data.billsNote ? { ...r, message: `Joining day changed. ${r.data.billsNote}.` } : r;
 }
 export async function withdrawStudent(fd: FormData) {
   return serviceAction(LifecycleService, (s) => s.withdraw(id(fd), formToObject(fd)), "Marked as not joining");
@@ -33,7 +34,10 @@ export async function markStudentLeft(fd: FormData) {
   return serviceAction(LifecycleService, (s) => s.markLeft(id(fd), formToObject(fd)), "Marked as left");
 }
 export async function bringStudentBack(fd: FormData) {
-  return serviceAction(LifecycleService, (s) => s.bringBack(id(fd), formToObject(fd)), "Brought back");
+  const r = await serviceAction(LifecycleService, (s) => s.bringBack(id(fd), formToObject(fd)), "Brought back");
+  if (!r.ok) return r;
+  const base = r.data.joining ? "Brought back. They join on their day" : "Brought back";
+  return { ...r, message: [base, ...r.data.warnings].join(". ") };
 }
 export async function resetStudentLogin(fd: FormData) {
   return serviceAction(CredentialService, (s) => s.resetLogin(id(fd)), "Login reset to the first password");

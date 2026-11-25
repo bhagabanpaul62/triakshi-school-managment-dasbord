@@ -2,13 +2,14 @@ import { eq, inArray } from "drizzle-orm";
 import Papa from "papaparse";
 import { parseSheet, SheetError } from "@smw/integrations";
 import type { Tx } from "@smw/db";
-import { ValidationError, type Ctx } from "@smw/feature-kit";
+import { LimitError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { StudentService } from "./student-service";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { StudentRecordService } from "./access";
+import { lockSchool } from "./capacity";
 import { studentInput, type StudentInput } from "./inputs";
 import { students } from "./schema";
-import { sectionLabel, today } from "./util";
+import { normalizePhone, planDay, sectionLabel, today } from "./util";
 
 /** Column names of the CSV, in template order. */
 export const IMPORT_COLUMNS = ["admission_no", "name", "dob", "gender", "class", "section", "guardian_name", "guardian_phone", "guardian_relation",
@@ -69,9 +70,14 @@ export class ImportService extends StudentRecordService {
   /** All-or-nothing: any problem row stops the whole import before anything is written. */
   async commit(file: ImportFile) {
     return this.write("write", async (tx) => {
+      // One lock for the whole import, taken before anything is counted or read: the plan count, the roll numbers and the duplicate check cannot change under it.
+      await lockSchool(tx, this.ctx.schoolId);
       const rows = await this.analyse(tx, file);
       const failed = rows.filter((r) => r.errors.length);
       if (failed.length) throw new ValidationError({ file: `${failed.length} of ${rows.length} rows have problems. Run the check, fix the file and try again.` });
+      // The same sentence the check shows: a file that passes the check is not refused later for something the check did not say.
+      const limit = await this.admissions.roomWithin(tx, rows.filter((r) => !r.joining).length);
+      if (limit) throw new LimitError(limit);
       const classIds = new Set<string>();
       for (const r of rows) { const st = await this.admissions.admitWithin(tx, r.input!); if (st.classId) classIds.add(st.classId); }
       // Where to print the login slips: one entry per class that received students.
@@ -118,6 +124,9 @@ export class ImportService extends StudentRecordService {
       if (!yearName && !year) errors.push("class/section: Set the current academic year first");
       else if (yearName && !year) errors.push(`joins_year: ${yearName} is not an academic year of this school`);
       else if (year && current && !year.isCurrent && year.startsOn < current.startsOn) errors.push(`joins_year: ${year.name} is in the past`);
+      // The day must be inside its year, the same rule as the admission form.
+      const when = year && joinsOn ? planDay(year, year.isCurrent, joinsOn, todayIso) : year && yearName ? planDay(year, year.isCurrent, undefined, todayIso) : null;
+      if (when?.error) errors.push(`joins_on: ${when.error}`);
       const key = (c: string, s: string) => `${year?.id}|${c.toLowerCase()}|${s.toLowerCase()}`;
       const place = className && sectionName && year ? places.get(key(className, sectionName)) ?? places.get(key(`class ${className}`, sectionName)) : undefined;
       const klass = className ? classByName.get(className.toLowerCase()) ?? classByName.get(`class ${className.toLowerCase()}`) : undefined;
@@ -147,18 +156,26 @@ export class ImportService extends StudentRecordService {
 
       // The same rules as the admission form: a sensible age, and the same child is not entered twice unless allow_duplicate says yes.
       if (check.success && candidate.dob) {
-        try { this.admissions.checkBirth(candidate.dob, joinsOn ?? (year && joiningRow && year.startsOn > todayIso ? year.startsOn : todayIso)); }
+        try { this.admissions.checkBirth(candidate.dob, when?.day ?? todayIso); }
         catch (err) { if (err instanceof ValidationError) errors.push(`dob: ${err.fieldErrors?.dob}`); else throw err; }
-        if (!candidate.allowDuplicate && candidate.name) {
-          const who = `${candidate.name.toLowerCase().replace(/\s+/g, "")}|${candidate.dob}`;
-          const dup = await this.admissions.findDuplicate(tx, candidate.name, candidate.dob);
-          if (dup) errors.push(`name: ${dup.name} (${dup.admissionNo}) already has this name and birth date. Write yes in allow_duplicate if it is a different child`);
-          else if (people.has(who)) errors.push(`name: same name and birth date as line ${people.get(who)}. Write yes in allow_duplicate if it is a different child`);
-          if (!people.has(who)) people.set(who, parsed.lines[i]!);
+      }
+      if (check.success && candidate.name) {
+        // With no birth date the name and a guardian phone are matched. Every row goes in the file map, also one that allows a duplicate:
+        // the next row is checked against it, because that is what the commit will find.
+        const phones = [candidate.guardianPhone, candidate.guardian2Phone].filter((p): p is string => !!p).map(normalizePhone);
+        const norm = candidate.name.toLowerCase().replace(/\s+/g, "");
+        const keys = candidate.dob ? [`${norm}|${candidate.dob}`] : phones.map((p) => `${norm}|phone:${p}`);
+        if (!candidate.allowDuplicate && keys.length) {
+          const dup = await this.admissions.findDuplicate(tx, candidate.name, candidate.dob, undefined, phones);
+          const same = candidate.dob ? "birth date" : "guardian phone";
+          const earlier = keys.map((k) => people.get(k)).find((l) => l !== undefined);
+          if (dup) errors.push(`name: ${dup.name} (${dup.admissionNo}) already has this name and ${same}. Write yes in allow_duplicate if it is a different child`);
+          else if (earlier !== undefined) errors.push(`name: same name and ${same} as line ${earlier}. Write yes in allow_duplicate if it is a different child`);
         }
+        for (const k of keys) if (!people.has(k)) people.set(k, parsed.lines[i]!);
       }
 
-      const joining = joiningRow && (!!joinsOn && joinsOn > todayIso || (!!year && !year.isCurrent));
+      const joining = !!when?.joining;
       out.push({
         line: parsed.lines[i]!, admissionNo: candidate.admissionNo ?? null, name: candidate.name ?? null,
         classSection: joiningRow ? `${place?.label ?? className ?? ""} (joins ${joinsOn ?? year?.startsOn ?? "later"}${year && !year.isCurrent ? `, ${year.name}` : ""})` : place?.label ?? null,

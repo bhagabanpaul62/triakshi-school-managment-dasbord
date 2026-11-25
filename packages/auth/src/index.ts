@@ -12,7 +12,7 @@ import {
   withConsole, withSchool, type SchoolRole, type StaffRole, type Tx,
 } from "@smw/db";
 
-export { accessOf, istDay, addDays, leftAccessUntil, longDate, startsMessage, LEFT_ACCESS_DAYS, LOGIN_CLOSED_MESSAGE, mayHear, leftPhases, LEFT_TOPIC, type Access, type StudentPhase } from "./phase";
+export { accessOf, istDay, addDays, accessUntilFor, longDate, startsMessage, LEFT_ACCESS_DAYS, LOGIN_CLOSED_MESSAGE, mayHear, leftPhases, LEFT_TOPIC, type Access, type StudentPhase } from "./phase";
 
 export const SESSION_DAYS = 30;
 export const SUPPORT_SESSION_MINUTES = 30;
@@ -210,6 +210,7 @@ export class SchoolAuth {
         known = user?.id;
         const ok = await Passwords.verify(user?.passwordHash || await fakeHash(), password);
         if (!user || !ok || user.role === "parent") { loginIpFailLimiter.take(ipKey); throw new LoginError("invalid"); }
+        loginLimiter.reset(`acct:${this.schoolId}:${id}`); // the password is right: a closed or joining login must say so, never "Too many attempts"
         await this.refuseIfNotOpen(tx, user);
         if (user.status !== "active") throw new LoginError("disabled");
         loginLimiter.reset(`acct:${this.schoolId}:${id}`);

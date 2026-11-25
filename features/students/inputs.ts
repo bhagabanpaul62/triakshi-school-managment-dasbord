@@ -89,9 +89,13 @@ const REASON_NOTE = { message: "Write a few words about the reason", path: ["not
 /** Mark as left: the last day attended (blank is today), and why. */
 export const leaveInput = z.object({ lastDay: f.optDate(), reason: reasonCode, note: f.optText(300) })
   .refine((v) => v.reason !== "other" || !!v.note, REASON_NOTE);
-/** Bring back: the class and section of the current year. */
-export const bringBackInput = z.object({ sectionId: f.id("Choose a class and section") });
-export const joiningDayInput = z.object({ joinsOn: f.date("Pick the joining day"), joinsSectionId: f.optId() });
+/**
+ * Bring back: into a section of the current year (`sectionId`), or for a later day and year (`joinsOn`, `joinsYearId`, the planned
+ * `joinsSectionId` or else a `classId`), which makes the child joining again.
+ */
+export const bringBackInput = z.object({ sectionId: f.optId(), joinsOn: f.optDate(), joinsYearId: f.optId(), joinsSectionId: f.optId(), classId: f.optId() });
+/** Change the joining day: the day, and optionally the year, the planned section and (with no section) the class. A key left out keeps the old value. */
+export const joiningDayInput = z.object({ joinsOn: f.date("Pick the joining day"), joinsYearId: f.optId(), joinsSectionId: f.optId(), classId: f.optId() });
 export const withdrawInput = z.object({ reason: f.text(3, 300, "Write why") });
 
 /** What a student may change about themselves. Unknown keys are dropped by zod, so name, DOB and class can never ride along. */

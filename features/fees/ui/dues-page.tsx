@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listQueryFrom } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { Money } from "@smw/ui/finance/Money";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { buttonVariants } from "@smw/ui/ui/button";
 import type { Column, FilterDef } from "@smw/ui/shell/DataTable";
@@ -46,7 +47,7 @@ export default async function DuesPage({ searchParams }: { searchParams: Search 
       <SectionNav ctx={ctx} current="/app/fees/dues" />
       <div className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
         <Panel title="What is open"><KeyTotals items={[{ label: "Open in all", paise: data.totals.due, strong: true }, { label: "Overdue", paise: data.totals.overdue, tone: data.totals.overdue ? "danger" : undefined }]} /></Panel>
-        <Panel title="By how late"><AgeingBar buckets={ageingBuckets(data.totals.ageing)} label="Open amount by how late it is" /></Panel>
+        <Panel title="By how late"><AgeingBar buckets={ageingBuckets(data.totals.ageing)} label="Open amount by how late it is" />{data.totals.neverStarted ? <p className="mt-2 text-xs text-[var(--ds-on-surface-muted)]"><Money paise={data.totals.neverStarted} /> of the open amount belongs to children who withdrew before joining. It is not counted as late.</p> : null}</Panel>
       </div>
       {age ? <Notice tone="info" action={{ href: tabHref(overdue ? "1" : ""), label: "Show every age" }}>Showing students with something open that is {age.label.toLowerCase()}. The download has the same list.</Notice> : null}
       <Tabs label="Dues" tabs={[["", "Everyone with dues"], ["1", "Overdue only"]]} current={overdue ? "1" : ""} href={tabHref} />

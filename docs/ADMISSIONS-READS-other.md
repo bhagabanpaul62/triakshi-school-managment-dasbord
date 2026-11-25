@@ -12,17 +12,17 @@ Enrolment rows: the only read of `student_enrollments` in these folders is `acad
 |---|---|---|
 | attendance/eligibility.ts:44 | board-class eligibility counts per student | by design: `active` filter, a live list |
 | attendance/eligibility.ts:78 | condone a shortfall for a student | fixed: now active only (a left or joining child could be condoned) |
-| attendance/period-service.ts:203 | subject report roster | by design: active filter |
+| attendance/period-service.ts:203 | subject report roster (a range report) | fixed: `onRollBetween(from, to)`, same rule as the register |
 | attendance/leave-service.ts:44 | the children a login can apply leave for | fixed: active only |
 | attendance/leave-service.ts:126, 181 | name and section on a leave request, request list | by design: paper, a left child's old request still shows |
 | attendance/leave-service.ts:336, 342 | who may decide a request, days to mark | by design: the request was made while at school; days are marked from the request dates |
-| attendance/service.ts:136 | section progress, strength | by design: active filter |
-| attendance/service.ts:156 | day sheet | by design: active filter |
+| attendance/service.ts:136 | section progress, strength | fixed: `onRollOn(date)`. A past day counts a child who left on or after it; today's count never does |
+| attendance/service.ts:156 | day sheet | fixed: `onRollOn(date)`. A past day lists a child who left on or after it, with "Left 10 Nov"; today's sheet is at school only |
 | attendance/service.ts:180 | check the ids sent to "mark" are in the section | fixed: active only (a left child with a kept section could be marked) |
-| attendance/service.ts:201 | month register people | by design: active filter |
-| attendance/service.ts:204 | month register marks (join by section) | by design: only people listed by line 201 are shown, the extra rows are dropped |
+| attendance/service.ts:201 | month register people | fixed: `onRollBetween(first day, last day)`: at school, or left/graduated with the last day on or after the month's first day, or with a mark in the month |
+| attendance/service.ts:204 | month register marks (join by section) | fixed: a left child's marks show up to their last day only; PDF and CSV carry the same rows and a "Left 10 Nov" note |
 | attendance/service.ts:237, 245, 260, 286 | one student's own view, summary, month, recent absences | by design: paper; a left child's staff view of old marks opens. Attendance is not in the left-student access list, so the family login cannot reach it |
-| attendance/service.ts:314 | defaulters | by design: active filter |
+| attendance/service.ts:314 | defaulters | by design: active filter. A live "who to chase now" list, not a month summary |
 | attendance/service.ts:335 | today's school total | by design: active filter |
 | attendance/alerts.ts:30 | queue an absence alert | by design: only called with marked ids, which are active (line 180) |
 | attendance/alerts.ts:49 | send a queued alert after the grace window | fixed: a child who left inside the grace window gets no alert |
@@ -41,8 +41,8 @@ Enrolment rows: the only read of `student_enrollments` in these folders is `acad
 |---|---|---|
 | academics/service.ts:24 | section strength (`students`) | by design: active filter |
 | academics/service.ts:32 | planned joiners per section (`joins_section_id`) | new: shown as "32 + 3 joining" in the classes list, the class page and its stat cards; never added to the strength |
-| academics/service.ts:94 | year delete guard counts `student_enrollments` of that year | by design: names the year |
-| academics/service.ts: `SectionService.usage` | section delete guard counts students by `section_id` | by design: a left child keeps the section, so a section with history is not deletable. A joining child has no section |
+| academics/service.ts:94 | year delete guard counts `student_enrollments` of that year | by design: names the year. Also counts children planned to join the year (`joins_year_id`) |
+| academics/service.ts: `SectionService.usage` | section delete guard counts students by `section_id` | fixed: also counts joining children by `joins_section_id` ("3 children are planned to join this section"), because the delete would strip their plan. A left child keeps the section, so a section with history is not deletable |
 | academics/exports.ts:32 | classes export, student count | by design: active filter |
 | academics/electives.ts:14 `studentRow` | one student by id | by design: used for history (`subjectsForStudent`) and by `activeStudent` below |
 | academics/electives.ts:20 `activeStudent` | live changes (electives, groups, houses) | new: one place that refuses a joining, left or alumni child |
@@ -165,5 +165,5 @@ Enrolment rows: the only read of `student_enrollments` in these folders is `acad
 ## Doubtful, for the orchestrator
 
 - Enquiry sibling hint and student search now include `joining`. The contract says joining is read by nothing else than the student list, record page, fees and the admission desk; I read the enquiry desk as part of the admission desk. If not, revert the two `status in ('active', 'joining')` in `website/enquiry-reads.ts`.
-- A leave request decided after the child left still marks attendance days (`attendance/leave-service.ts:342`), including days after `left_on`. Left alone: the request was legitimate when made.
+- A leave request decided after the child left marks attendance days up to `left_on` only (checked in `leave-service.ts:342`, test in `attendance/admissions-reads.test.ts`).
 - Homework grading and comments for a left child's old submission (`assignments/service.ts:146`) are still allowed. The mark is a paper, not a live list.

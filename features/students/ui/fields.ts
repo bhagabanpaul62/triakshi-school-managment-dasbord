@@ -73,7 +73,8 @@ export function studentFields(sections: Option[], mode: "admit" | "edit", joinin
         { name: "sectionId", label: "Class and section", type: "select", required: true, options: sections, section: "Class" } satisfies Field,
         { name: "rollNo", label: "Roll number", type: "number", min: 1, section: "Class" } satisfies Field,
       ]),
-    { name: "admissionDate", label: "Admission date", type: "date", section: "Class" },
+    // A child who has not started has no admission date of their own: it is their joining day.
+    ...(editJoining ? [] : [{ name: "admissionDate", label: "Admission date", type: "date", section: "Class" } satisfies Field]),
     ...myContactFields.map((x) => ({ ...x, section: x.name === "medicalNotes" ? "Medical" : "Contact and emergency" })),
   ];
 }
@@ -115,22 +116,50 @@ export function consentFields(guardians: Option[]): Field[] {
   ];
 }
 
-export const leaveFields = (): Field[] => [
-  { name: "lastDay", label: "Last day at school", type: "date", max: today(), min: addDays(today(), -365), hint: "Today, or a day in the past up to a year ago. Blank means today." },
+/** `signIn` is the live sentence under the last day: until when the family can still sign in. */
+export const leaveFields = (signIn?: string): Field[] => [
+  { name: "lastDay", label: "Last day at school", type: "date", max: today(), min: addDays(today(), -365), hint: signIn ?? "Today, or a day in the past up to a year ago. Blank means today." },
   { name: "reason", label: "Reason", type: "select", required: true, options: LEAVE_REASON_OPTIONS },
   { name: "note", label: "In a few words", type: "textarea", hint: "Needed if the reason is Other. It is kept on the record.", wide: true },
 ];
 
 export const withdrawFields: Field[] = [{ name: "reason", label: "Why they are not coming", type: "textarea", required: true, wide: true }];
 
-export const joiningDayFields = (sections: Option[]): Field[] => [
-  { name: "joinsOn", label: "Joining day", type: "date", required: true, min: today() },
-  { name: "joinsSectionId", label: "Planned section", type: "select", options: sections, hint: "They start in this section on their day." },
-];
+/** Everything the dialogs of a child who starts later need, as plain data. */
+export interface JoiningChoices {
+  years: { id: string; name: string; startsOn: string; endsOn: string; isCurrent: boolean }[];
+  classes: Option[];
+  sections: { id: string; yearId: string; classId: string; label: string }[];
+}
 
-export const bringBackFields = (sections: Option[]): Field[] => [
-  { name: "sectionId", label: "Class and section", type: "select", required: true, options: sections, hint: "A section of this year. They get the next roll number there.", wide: true },
-];
+/**
+ * Change the joining day: the day (today or the stored day, whichever is later), the year, the planned section of that year, and the class when no section is chosen.
+ * With bills already made, the year and the class are fixed (`locked`), and only sections of the same class are offered, so nothing here can end in a refusal.
+ */
+export function joiningDayFields(c: JoiningChoices, o: { yearId: string; classId: string | null; locked: boolean }): Field[] {
+  const year = c.years.find((y) => y.id === o.yearId);
+  const here = c.sections.filter((x) => x.yearId === o.yearId && (!o.locked || x.classId === o.classId));
+  return [
+    { name: "joinsOn", label: "Joining day", type: "date", required: true, min: year && year.startsOn > today() ? year.startsOn : today(), max: year?.endsOn, hint: year ? `A day in ${year.name}.` : undefined },
+    ...(o.locked ? [] : [{ name: "joinsYearId", label: "Academic year", type: "select", required: true, options: c.years.map((y) => ({ value: y.id, label: y.isCurrent ? `${y.name} (this year)` : y.name })) } satisfies Field]),
+    { name: "joinsSectionId", label: "Planned section", type: "select", options: here.map((x) => ({ value: x.id, label: x.label })), hint: "They start in this section on their day. The class follows the section." },
+    ...(o.locked ? [] : [{ name: "classId", label: "Class", type: "select", options: c.classes, hint: "Used only when no section is chosen yet." } satisfies Field]),
+  ];
+}
+
+/** Bring back: into a section of this year, or for a later day and year (they become joining again). */
+export function bringBackFields(mode: "now" | "later", sections: Option[], c: JoiningChoices, yearId: string): Field[] {
+  const modeField: Field = { name: "mode", label: "Bring them back", type: "select", required: true, wide: true, options: [{ value: "now", label: "Into this year, starting now" }, { value: "later", label: "For a later day and year" }] };
+  if (mode === "now") return [modeField, { name: "sectionId", label: "Class and section", type: "select", required: true, options: sections, hint: "A section of this year. They get the next roll number there.", wide: true }];
+  const year = c.years.find((y) => y.id === yearId);
+  return [
+    modeField,
+    { name: "joinsYearId", label: "Academic year", type: "select", required: true, options: c.years.map((y) => ({ value: y.id, label: y.isCurrent ? `${y.name} (this year)` : y.name })) },
+    { name: "joinsOn", label: "Joining day", type: "date", required: true, min: year && year.startsOn > addDays(today(), 1) ? year.startsOn : addDays(today(), 1), max: year?.endsOn, hint: year ? `A day in ${year.name}.` : undefined },
+    { name: "joinsSectionId", label: "Planned section", type: "select", options: c.sections.filter((x) => x.yearId === yearId).map((x) => ({ value: x.id, label: x.label })), hint: "They start in this section on their day. The class follows the section." },
+    { name: "classId", label: "Class", type: "select", options: c.classes, hint: "Used only when no section is chosen yet." },
+  ];
+}
 
 export function promoteFields(opts: { graduating: boolean; promoteTargets: Option[]; retainTargets: Option[]; students: Option[] }): Field[] {
   return [

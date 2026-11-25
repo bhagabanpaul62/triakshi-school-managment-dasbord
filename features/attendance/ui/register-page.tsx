@@ -117,7 +117,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
                       <tbody>
                         {register.rows.map((r) => (
                           <tr key={r.studentId} className="hover:bg-white/[0.03]">
-                            <th scope="row" className="sticky left-0 max-w-[14rem] truncate bg-[var(--ds-surface-container-low)] py-1.5 pr-4 text-left font-normal text-[var(--ds-on-surface)]">{r.name}</th>
+                            <th scope="row" className="sticky left-0 max-w-[14rem] truncate bg-[var(--ds-surface-container-low)] py-1.5 pr-4 text-left font-normal text-[var(--ds-on-surface)]">{r.name}{r.leftNote ? <span className="ml-2 text-xs text-[var(--ds-on-surface-muted)]">{r.leftNote}</span> : null}</th>
                             {register.days.map((d) => {
                               const s = r.marks[d.date];
                               return (

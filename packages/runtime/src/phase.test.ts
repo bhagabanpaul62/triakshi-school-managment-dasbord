@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { allows, FeatureOffError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { featuresFor, leftMayOpen, leftUntilOf, LEFT_FEATURES } from "./phase";
 
 const ALL = new Set(["students", "attendance", "fees", "exams", "home", "notifications", "settings", "messages", "announcements", "library", "website"]);
-const left = { status: "left" as const, leftOn: "2026-12-01", joinsOn: null };
+const left = { status: "left" as const, leftOn: "2026-12-01", joinsOn: null, accessUntil: "2027-03-01" };
 const NOW = new Date("2026-12-20T10:00:00+05:30");
 
 describe("featuresFor", () => {
@@ -31,5 +32,24 @@ describe("leftMayOpen", () => {
   it("opens home, dues and receipts, results, notifications and the profile; refuses the rest", () => {
     for (const p of ["/app", "/app/fees", "/app/fees/receipts/abc", "/app/results", "/app/results/x/y", "/app/notifications/preferences", "/app/profile", "/app/profile/data", "/app/not-available"]) expect(leftMayOpen(p), p).toBe(true);
     for (const p of ["/app/messages", "/app/announcements/1", "/app/attendance", "/app/events", "/app/library", "/app/feesx", "/app/students", "/app/settings"]) expect(leftMayOpen(p), p).toBe(false);
+  });
+});
+
+describe("a left student's Ctx when the page gate has no path (proxy dropped the header)", () => {
+  // requireCtx only redirects when it HAS a path; with none the page renders, so the services must still refuse.
+  class Probe extends SchoolService<"read"> {
+    protected readonly feature = { key: "students", permissions: { read: ["admin", "student"] } } as never;
+    list() { return this.read("read", async () => "rows"); }
+  }
+  const ctx = (): Ctx => ({ schoolId: "s", userId: "u", role: "student", name: "K", features: featuresFor(ALL, left, NOW), leftUntil: leftUntilOf(left, NOW), readOnly: false });
+
+  it("services of a lost module refuse, and the cut is on the Ctx not the path", () => {
+    const c = ctx();
+    expect(c.leftUntil).toBe("2027-03-01");
+    expect(allows(c, { key: "students", permissions: { read: ["student"] } }, "read")).toBe(false);
+    expect(() => new Probe(c).list()).toThrow(FeatureOffError);
+  });
+  it("a kept module still works", () => {
+    expect(allows(ctx(), { key: "fees", permissions: { read: ["student"] } }, "read")).toBe(true);
   });
 });

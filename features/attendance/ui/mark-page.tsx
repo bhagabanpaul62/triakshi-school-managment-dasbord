@@ -128,7 +128,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
             {clamped ? <span className="text-xs text-[var(--ds-on-surface-muted)]">Future days cannot be marked, so we opened today.</span> : null}
           </p>
           <AttendanceGrid key={`${sectionId}-${date}`} noun="students" idKey="studentId" statuses={ATTENDANCE_STATUSES}
-            rows={sheet.rows.map((r) => ({ id: r.studentId, name: r.name, meta: r.rollNo ? `Roll ${r.rollNo}` : r.admissionNo, status: r.status }))}
+            rows={sheet.rows.map((r) => ({ id: r.studentId, name: r.name, meta: [r.rollNo ? `Roll ${r.rollNo}` : r.admissionNo, r.leftNote].filter(Boolean).join(" · "), status: r.status }))}
             hidden={{ sectionId, date }} action={markStudentAttendance}
             canMark={svc.can("mark") && !sheet.holiday}
             notice={sheet.holiday ? `${sheet.holiday} is a holiday, so nobody can be marked.` : !svc.can("mark") ? "You can view this sheet but not change it." : dayNote} />

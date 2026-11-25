@@ -13,7 +13,7 @@ import { invoiceData } from "./documents";
 import { NoteService } from "./notes";
 import { OpeningImport } from "./opening";
 import { PlanBilling } from "./plan-billing";
-import { PlanService } from "./plans";
+import { kindCols, PlanService } from "./plans";
 import { feeAllocations, feeConcessionUses, feeDueParts, feeInvoiceChanges, feeInvoiceLines, feeInvoices, feeNotes, feePlans, feeReceipts } from "./schema";
 
 type LineIn = { headId?: string | null; kind: "fee" | "deposit" | "opening" | "bounce"; label: string; amountPaise: number; concessionPaise?: number };
@@ -135,7 +135,7 @@ export class InvoiceService extends FeesBase {
 
   /** The late fee rule of the plan a student is billed on (the school's usual), or null when they have no plan or the plan has none. */
   private async planRule(tx: Tx, studentId: string, yearId: string): Promise<InvoiceFull["lateRule"]> {
-    const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, status: students.status }).from(students).where(eq(students.id, studentId));
+    const [s] = await tx.select({ id: students.id, classId: students.classId, ...kindCols }).from(students).where(eq(students.id, studentId));
     if (!s) throw new NotFoundError("Student");
     const pick = await new PlanService(this.ctx).resolve(tx, s, yearId);
     return pick ? (await tx.select({ r: feePlans.lateRule }).from(feePlans).where(eq(feePlans.id, pick.id)))[0]?.r ?? null : null;

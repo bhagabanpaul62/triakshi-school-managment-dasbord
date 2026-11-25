@@ -1,11 +1,11 @@
-import { eq, schools, withConsole } from "@smw/db";
+import { inArray, schools, withConsole } from "@smw/db";
 import { systemCtx } from "@smw/feature-kit";
 import { LifecycleService } from "./lifecycle-service";
 
 /** Daily 00:10 IST (the schedule is in apps/worker/src/registry.ts): every child whose joining day has come becomes an active student. */
 export default {
   "students.join-due": async () => {
-    const ids = (await withConsole((tx) => tx.select({ id: schools.id }).from(schools).where(eq(schools.status, "active")))).map((s) => s.id);
+    const ids = (await withConsole((tx) => tx.select({ id: schools.id }).from(schools).where(inArray(schools.status, ["trial", "active", "past_due"])))).map((s) => s.id);
     let failed = 0;
     for (const id of ids) {
       try {

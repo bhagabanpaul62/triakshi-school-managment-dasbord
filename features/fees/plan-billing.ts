@@ -4,7 +4,7 @@ import { monthStart } from "@smw/feature-kit/money";
 import { studentEnrollments, students } from "@smw/feature-students/schema";
 import { FeesBase, WITHDREW, dayLabel, type Snapshot } from "./base";
 import { concessionsDetailed, yearShare, type Conc } from "./calc";
-import { kindFor, pickPlan, type PublishedPlan } from "./plans";
+import { kindCols, kindFor, pickPlan, sinceOf, type PublishedPlan } from "./plans";
 import { feeConcessionUses, feeConcessions, feeHeads, feeInvoices, feeOptIns, feePlanClasses, feePlanDues, feePlanLines, feePlans, feeStudentPlans } from "./schema";
 
 export interface BillOptions { yearId?: string; classIds?: string[]; dueKeys?: string[]; studentIds?: string[]; /** Only dues whose bill date has come. */ billedBy?: string }
@@ -49,7 +49,7 @@ export class PlanBilling extends FeesBase {
 
     // The class of the year (the enrolment), else the class now.
     const classOf = sql<string | null>`coalesce(${studentEnrollments.classId}, ${students.classId})`;
-    const pool = await tx.select({ id: students.id, name: students.name, admissionNo: students.admissionNo, classId: classOf, admissionDate: students.admissionDate, status: students.status, leftOn: students.leftOn, leftReason: students.leftReason, joinsOn: students.joinsOn })
+    const pool = await tx.select({ id: students.id, name: students.name, admissionNo: students.admissionNo, classId: classOf, ...kindCols, leftOn: students.leftOn, leftReason: students.leftReason })
       .from(students).leftJoin(studentEnrollments, and(eq(studentEnrollments.studentId, students.id), eq(studentEnrollments.yearId, year.id)))
       .where(and(o.studentIds ? inArray(students.id, o.studentIds) : undefined, o.classIds ? inArray(classOf, o.classIds) : undefined,
         // A joining child is billed for the year they join and never for another.
@@ -73,7 +73,7 @@ export class PlanBilling extends FeesBase {
       const flag = (reason: BillException["reason"], detail: string, href: string, fix: string) => { if (!exceptions.some((e) => e.studentId === s.id && e.reason === reason)) exceptions.push({ studentId: s.id, studentName: s.name, admissionNo: s.admissionNo, reason, detail, href, fix }); };
       // Never started: nothing ran for them, so nothing new is billed or chased.
       if (s.status === "left" && s.leftReason === WITHDREW) { skipped.left++; continue; }
-      const joining = s.status === "joining", since = joining ? s.joinsOn : s.admissionDate, joinsNote = joining && s.joinsOn ? `Joins on ${dayLabel(s.joinsOn)}. ` : "";
+      const joining = s.status === "joining", since = sinceOf(s), joinsNote = joining && s.joinsOn ? `Joins on ${dayLabel(s.joinsOn)}. ` : "";
       const pick = pickPlan(published, { classId: s.classId, admission: kindFor(s, year), overrideRoot: overrides.find((x) => x.studentId === s.id)?.rootId });
       if (!pick || !s.classId) { skipped.noPlan++; flag("no_plan", `${joinsNote}${s.classId ? "No published plan covers this class" : "The student has no class"}`, s.classId ? "/app/fees/plans" : `/app/students/${s.id}`, s.classId ? "Add the class to a plan" : "Set the class"); continue; }
       const plan = planById.get(pick.id)!, classId = s.classId;

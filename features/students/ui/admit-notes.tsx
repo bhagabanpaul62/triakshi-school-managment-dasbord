@@ -15,10 +15,10 @@ export function ageHint(fd: FormData, info: AgeInfo): string | null {
   return klass && text("dob") ? classAgeWarning(text("dob"), klass.grade, klass.name, joinsOn > today() ? joinsOn : today()) : null;
 }
 
-/** "Open their record" when the refusal names a child who is already in the school. */
+/** "Open their record" when a refusal names a child who is already in the school, "Open their fees" when it is about their bills. */
 export function OpenRecord({ href }: { href?: string }) {
-  if (!href || !/^\/app\/students\/[0-9a-f-]+$/.test(href)) return null;
-  return <Link href={href} className="text-sm underline underline-offset-4">Open their record</Link>;
+  const label = href && /^\/app\/students\/[0-9a-f-]+$/.test(href) ? "Open their record" : href && /^\/app\/fees\/students\/[0-9a-f-]+$/.test(href) ? "Open their fees" : null;
+  return label && href ? <Link href={href} className="inline-flex min-h-11 items-center text-sm underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">{label}</Link> : null;
 }
 
 export function Hint({ text }: { text: string | null }) {
