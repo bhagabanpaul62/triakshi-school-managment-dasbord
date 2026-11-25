@@ -72,7 +72,7 @@ describe("handlers, two schools", () => {
     const headers: Record<string, string> = { ...(tok ? { authorization: `Bearer ${tok}` } : {}), "content-type": "application/json" };
     const req = new Request(`http://${host}/api/v1/x${o.query ?? ""}`, { method, headers, ...(o.body !== undefined ? { body: typeof o.body === "string" ? o.body : JSON.stringify(o.body) } : {}) });
     const res = await mod[method]!(req, { params: Promise.resolve({ id: o.id ?? "" }) });
-    return { status: res.status, json: (await res.json()) as Record<string, any> };
+    return { status: res.status, json: await res.json() };
   };
   const R = (p: string) => join(ROOT, p, "route.ts");
   const nobody = "3f2b8c1e-9d4a-4b6e-8a1c-5d7e9f0a1b2c";

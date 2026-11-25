@@ -16,3 +16,15 @@ export async function isNamed(tx: Tx, threadId: string, userId: string): Promise
   const [r] = [...(await tx.execute(sql`select exists (select 1 from message_reports where thread_id = ${threadId}::uuid and ${userId}::uuid = any(about_user_ids)) as named`))] as { named: boolean }[];
   return !!r?.named;
 }
+
+/** Everyone named in any report about this conversation. The audit log carries them so its screen can hide the entry from them. */
+export async function namedIn(tx: Tx, threadId: string): Promise<string[]> {
+  const rows = [...(await tx.execute(sql`select distinct unnest(about_user_ids)::text as id from message_reports where thread_id = ${threadId}::uuid`))] as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
+/** Is a report about this conversation still open (new or being looked at)? */
+export async function hasOpenReport(tx: Tx, threadId: string): Promise<boolean> {
+  const [r] = [...(await tx.execute(sql`select exists (select 1 from message_reports where thread_id = ${threadId}::uuid and state in ('new', 'reviewing')) as open`))] as { open: boolean }[];
+  return !!r?.open;
+}

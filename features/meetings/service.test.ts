@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb, eq, sql, withSchool } from "@smw/db";
+import { closeDb, eq, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { notifications } from "@smw/feature-notifications/schema";
@@ -18,7 +18,7 @@ const hours = (h: number) => new Date(Date.now() + h * 3_600_000);
 const everyoneInA = () => ({ include: [{ type: "section" as const, id: ids.sectionA }], exclude: [] });
 const admin = () => new MeetingService(a.as.admin);
 /** Each meeting gets its own day: a teacher cannot be in two windows at once. */
-const draft = (over: Record<string, unknown> = {}) => (DAY = istDay(new Date(Date.now() + nextDay++ * IST_DAY)), true) && admin().saveDraft(null, { title: "Term 1 PTM", audience: everyoneInA(), slotMinutes: "10", perFamily: "4", opensAt: hours(-1), closesAt: hours(48), ...over });
+const draft = (over: Record<string, unknown> = {}) => { DAY = istDay(new Date(Date.now() + nextDay++ * IST_DAY)); return admin().saveDraft(null, { title: "Term 1 PTM", audience: everyoneInA(), slotMinutes: "10", perFamily: "4", opensAt: hours(-1), closesAt: hours(48), ...over }); };
 const win = (teacherIds: string[], over: Record<string, unknown> = {}) => ({ teacherIds, day: DAY, from: "10:00", to: "12:00", place: "Room 5", ...over });
 const as = (ctx: Ctx, over: Partial<Ctx> = {}): Ctx => ({ ...ctx, ...over });
 const slotsOf = (meetingId: string, teacherId: string) => withSchool(a.id, (tx) => tx.select().from(meetingSlots).where(eq(meetingSlots.meetingId, meetingId)).orderBy(meetingSlots.startsAt)).then((r) => r.filter((s) => s.teacherId === teacherId));
@@ -330,11 +330,13 @@ describe("the day", () => {
     const t1 = new DayService(a.as.teacher);
     const v = await t1.day(m.id);
     expect(v.rows.map((r) => r.studentName)).toEqual(["Aarav Sharma", "Kabir Singh"]);
-    expect(v.nextSlotId).toBe(s[0]!.id);
-    await expect(t1.mark(s[0]!.id, { visit: "came" })).rejects.toThrow(/not started/);
+    expect(v).toMatchObject({ date: DAY, dates: [DAY], isToday: false, nextSlotId: null });
+    expect(v.rows.every((r) => !r.canMark)).toBe(true);
+    await expect(t1.mark(s[0]!.id, { visit: "came" })).rejects.toThrow(/Opens on/);
     const Running = at(atIst(DAY, "10:05"));
     const live = new Running(a.as.teacher);
     expect((await live.day(m.id)).rows[0]!.isNow).toBe(true);
+    expect((await live.day(m.id)).nextSlotId).toBe(s[0]!.id);
     await live.mark(s[0]!.id, { visit: "came" });
     await live.mark(s[2]!.id, { visit: "missed" });
     const after = await live.day(m.id);
@@ -388,11 +390,46 @@ describe("the day", () => {
     const { m } = await running();
     const Now = at(atIst(DAY, "11:10"));
     const t1 = new Now(a.as.teacher);
-    const w = await t1.walkIn(m.id, { studentId: ids.meera });
+    const w = await t1.walkIn(m.id, { studentId: ids.riya });
     const row = (await t1.day(m.id)).rows.find((r) => r.slotId === w.slotId)!;
-    expect(row).toMatchObject({ walkIn: true, visit: "came", studentName: "Meera Iyer" });
-    await expect(t1.walkIn(m.id, { studentId: ids.meera })).rejects.toBeInstanceOf(ConflictError);
+    expect(row).toMatchObject({ walkIn: true, visit: "came", studentName: "Riya Sharma" });
+    await expect(t1.walkIn(m.id, { studentId: ids.riya })).rejects.toBeInstanceOf(ConflictError);
+    // Meera is in section B: not invited and not T1's child
+    await expect(t1.walkIn(m.id, { studentId: ids.meera })).rejects.toThrow(/not on this meeting's list/);
+    expect((await t1.walkInChoices(m.id)).map((k) => k.name)).not.toContain("Meera Iyer");
     await expect(new (at(atIst(istDay(new Date(Date.now() + 40 * IST_DAY)), "11:00")))(a.as.teacher).walkIn(m.id, { studentId: ids.kabir })).rejects.toThrow(/no meeting time/);
+  });
+
+  it("a teacher with several days gets one day's list at a time, today first, and can pick another", async () => {
+    const m = await draft({ title: "Two days" });
+    const first = DAY, second = istDay(new Date(Date.now() + nextDay++ * IST_DAY));
+    await admin().addWindows(m.id, win([ids.t1]));
+    await admin().addWindows(m.id, win([ids.t1], { day: second, place: "Room 9" }));
+    await admin().open(m.id);
+    const one = await freeOf(m.id, ids.t1);
+    await new BookingService(a.as.student).book(m.id, { slotId: one[0]!.id });
+    await new BookingService(ids.ctx.kabir).book(m.id, { slotId: one.find((x) => istDay(x.startsAt) === second)!.id });
+    const t1 = new DayService(a.as.teacher);
+    const v = await t1.day(m.id);
+    expect(v).toMatchObject({ date: first, dates: [first, second], place: "Room 5" });
+    expect(v.rows.map((r) => r.studentName)).toEqual(["Aarav Sharma"]);
+    const v2 = await t1.day(m.id, undefined, second);
+    expect(v2).toMatchObject({ date: second, place: "Room 9" });
+    expect(v2.rows.map((r) => r.studentName)).toEqual(["Kabir Singh"]);
+    const onFirst = new (at(atIst(first, "09:00")))(a.as.teacher);
+    expect((await onFirst.day(m.id))).toMatchObject({ date: first, isToday: true });
+    expect((await onFirst.day(m.id, undefined, second)).nextSlotId).toBeNull();
+    await expect(onFirst.mark(v2.rows[0]!.slotId, { visit: "came" })).rejects.toThrow(/Opens on/);
+    await onFirst.mark(v.rows[0]!.slotId, { visit: "came" }); // the slot's own day, before its time: allowed
+  });
+
+  it("the family page never claims every teacher when some teachers have no time in the meeting", async () => {
+    const m = await openMeeting({ title: "Only T1" }, [ids.t1]);
+    const s = await freeOf(m.id, ids.t1);
+    await new BookingService(a.as.student).book(m.id, { slotId: s[0]!.id });
+    const kid = (await new BookingService(a.as.student).forFamily(m.id)).kids[0]!;
+    expect(kid.teachers.every((t) => t.booked)).toBe(true);
+    expect(kid.notInMeeting).toEqual(["Teacher T2"]);
   });
 
   it("the not-came list and csv, and the printed sheets", async () => {

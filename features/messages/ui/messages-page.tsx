@@ -86,7 +86,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
       <PageHeader eyebrow="Communication" title="Messages" description={staff ? "Private conversations with families and colleagues. The school can review a conversation for safety." : "Private conversations with your child's teachers and the school office."}
         actions={<>
           {staff ? <Link href="/app/messages/families" className={PILL_BTN}>Message families</Link> : null}
-          <Link href="/app/messages/hours" className={PILL_BTN}>My hours</Link>
+          {staff ? <Link href="/app/messages/hours" className={PILL_BTN}>My hours</Link> : null}
           {rules.canStart ? <Link href="/app/messages/new" className={PRIMARY_BTN}>New message</Link> : null}
         </>} />
       {rules.why ? <p className="mb-3 rounded-2xl bg-white/[0.04] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]" role="status">{rules.why}</p> : null}
@@ -94,16 +94,16 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
         <Panel className={cn("min-h-0", open || missing ? "hidden lg:flex" : "flex")} bodyClassName="flex min-h-0 flex-1 flex-col gap-3">
           <SavedViews label="Inbox views" basePath="/app/messages" param="view" active={view ?? "all"} params={{ q: query.q, student: query.studentId, thread: thread ?? undefined }}
             views={[{ key: "all", label: "Inbox" }, { key: "unread", label: "Unread", count: inbox.unread }, { key: "archived", label: "Archived" }]} />
-          <form action="/app/messages" className="flex gap-2" role="search">
+          <form action="/app/messages" className="flex flex-col gap-2" role="search">
             {view !== "all" ? <input type="hidden" name="view" value={view} /> : null}
-            <input type="search" name="q" defaultValue={query.q} placeholder="Search your messages" aria-label="Search your messages" className={cn(INPUT, "min-w-0 flex-1")} />
+            <input type="search" name="q" defaultValue={query.q} placeholder="Search messages" aria-label="Search your messages" enterKeyHint="search" className={cn(INPUT, "w-full")} />
             {kids.length ? (
-              <select name="student" defaultValue={query.studentId ?? ""} aria-label="Filter by student" className={cn(INPUT, "w-36")}>
+              <select name="student" defaultValue={query.studentId ?? ""} aria-label="Filter by student" className={cn(INPUT, "w-full")}>
                 <option value="">All students</option>
                 {kids.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
               </select>
             ) : null}
-            <button type="submit" className={PILL_BTN}>Search</button>
+            <button type="submit" className="sr-only">Search</button>
           </form>
           <div className="custom-scrollbar -mx-2 min-h-0 flex-1 overflow-y-auto px-1">
             {inbox.rows.length ? (

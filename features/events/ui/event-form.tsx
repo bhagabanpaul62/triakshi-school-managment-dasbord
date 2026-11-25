@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Modal, ModalField, ModalFooter, ModalSection } from "@smw/ui/kit/Modal";
 import { FilesField } from "@smw/ui/comm/FilesField";
+import { MarkdownEditor } from "@smw/ui/comm/MarkdownEditor";
 import type { FileItem } from "@smw/ui/comm/FileList";
 import { INPUT, keepValues } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
@@ -89,7 +90,7 @@ export function EventForm({ mode, eventId, isDraft, options, initial, labels, fi
           {field("type", "Kind of event", <select id={id("type")} name="type" value={type} onChange={(e) => setType(e.target.value as EventType)} className={INPUT}>{Object.entries(EVENT_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>, { hint: "The colour on the calendar comes from this." })}
           {type === "trip" ? field("consentHref", "Consent notice (optional)", <input id={id("consentHref")} name="consentHref" defaultValue={initial.consentHref} placeholder="/app/announcements/..." className={INPUT} />, { hint: "Paste the link of the notice that asks families for consent." }) : null}
         </div>
-        {field("description", "Details", <textarea id={id("description")} name="description" defaultValue={initial.description} rows={4} maxLength={4000} className={cn(INPUT, "h-auto py-2")} />, { hint: "Plain words. **bold**, lists and links work." })}
+        <MarkdownEditor name="description" label="Details" defaultValue={initial.description} maxLength={4000} rows={6} error={err("description")} />
       </ModalSection>
 
       <ModalSection title="When">

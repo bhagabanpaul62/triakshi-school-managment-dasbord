@@ -3,9 +3,9 @@ import { IconChevronLeft } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { commState } from "@smw/ui/comm/states";
 import { TONE, type Tone } from "@smw/ui/tone";
-import { NOTICE_STATES, type NoticeState, type NoticeType } from "../constants";
+import { NOTICE_STATES, type NoticeState } from "../constants";
 
-export const TYPE_LABEL: Record<NoticeType, string> = { notice: "Notice", circular: "Circular", urgent: "Urgent alert" };
+export { TYPE_LABEL } from "../constants";
 /** The notice states as the shared state map names them (a notice "waiting" is "pending_approval" there). */
 export const STATE_KEY: Record<NoticeState, string> = { draft: "draft", waiting: "pending_approval", scheduled: "scheduled", sending: "sending", published: "published", expired: "expired", withdrawn: "withdrawn" };
 export const STATE_LABEL = Object.fromEntries(NOTICE_STATES.map((s) => [s, s === "sending" ? "Sending" : commState("notice", STATE_KEY[s]).label])) as Record<NoticeState, string>;

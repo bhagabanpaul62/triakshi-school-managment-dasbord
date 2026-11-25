@@ -29,9 +29,10 @@ export class ResponseService extends NoticeBase {
       if (mine.length > 1 && !d.recipientId) this.fieldError("recipientId", "Choose the child you are answering for");
       const who = d.recipientId ? mine.find((m) => m.id === d.recipientId) : mine[0];
       if (!who) throw new NotFoundError("Notice");
-      const [n] = await tx.select().from(announcements).where(eq(announcements.id, d.noticeId));
+      // Shared lock: a withdraw (which takes the row for update) waits for this answer, or this answer sees the withdrawal.
+      const [n] = await tx.select().from(announcements).where(eq(announcements.id, d.noticeId)).for("share");
       if (!n) throw new NotFoundError("Notice");
-      if (n.state !== "published") throw new ConflictError(n.state === "withdrawn" ? "The school withdrew this notice, so it cannot be answered." : "This notice is closed, so it cannot be answered.");
+      if (n.state !== "published" || (n.expiresAt && n.expiresAt <= new Date())) throw new ConflictError(n.state === "withdrawn" ? "The school withdrew this notice, so it cannot be answered." : "This notice is closed, so it cannot be answered.");
       if (n.dueAt && n.dueAt.getTime() < Date.now()) throw new ConflictError("The last date has passed, so answers are locked.");
       const answer = await this.withFiles(n, d.answer, files, who.id);
       const changed = await this.save(tx, who, answer, { byName: d.byName, byRelation: d.byRelation, onPaper: false, fileKey: null, recordedBy: null });
@@ -52,8 +53,9 @@ export class ResponseService extends NoticeBase {
       if (!["published", "expired"].includes(n.state)) throw new ConflictError("This notice is not open for answers.");
       const [who] = await tx.select().from(announcementRecipients).where(and(eq(announcementRecipients.id, d.recipientId), eq(announcementRecipients.announcementId, n.id), isNull(announcementRecipients.removedAt)));
       if (!who) throw new NotFoundError("Person");
-      const answer = await this.withFiles(n, d.answer, {}, who.id);
       const fileKey = slip ? await storeFile(this.ctx.schoolId, who.id, slip, IMAGE_OR_PDF) : null;
+      // On paper there is one picture, the slip: it answers every file question.
+      const answer = await this.withFiles(n, d.answer, {}, who.id, fileKey);
       const changed = await this.save(tx, who, answer, { byName: d.byName, byRelation: d.byRelation, onPaper: true, fileKey, recordedBy: this.ctx.userId });
       await this.closeIfAnswered(tx, n.id, who.userId);
       await this.audit(tx, { action: "respond", entity: "Notice", entityId: n.id, summary: `Wrote down a paper answer for ${who.name}` });
@@ -62,12 +64,12 @@ export class ResponseService extends NoticeBase {
   }
 
   /** Validate the answer; file questions take their uploads and keep only the storage key. */
-  private async withFiles(n: Notice, answer: Answer, files: Record<string, UploadedFile>, owner: string): Promise<Answer> {
+  private async withFiles(n: Notice, answer: Answer, files: Record<string, UploadedFile>, owner: string, slipKey: string | null = null): Promise<Answer> {
     if (n.response.kind !== "form" || answer.kind !== "form") return checkAnswer(n.response, answer);
     const values = { ...answer.values };
     for (const q of n.response.questions) {
       const f = files[q.id];
-      if (q.kind === "file") values[q.id] = f ? await storeFile(this.ctx.schoolId, owner, f, IMAGE_OR_PDF) : "";
+      if (q.kind === "file") values[q.id] = f ? await storeFile(this.ctx.schoolId, owner, f, IMAGE_OR_PDF) : slipKey ?? "";
     }
     return checkAnswer(n.response, { kind: "form", values });
   }

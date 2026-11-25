@@ -4,6 +4,7 @@
 import { sql, withSchool, type Tx } from "@smw/db";
 import type { Ctx } from "@smw/feature-kit";
 import { concerns, type HolidayRow } from "@smw/feature-attendance/holidays";
+import { teacherSections } from "@smw/feature-notifications/audience";
 import { addDays, allDaySpan, istDay, parseIst } from "@smw/feature-events/dates";
 import { LAYERS, type CalendarItem, type LayerKey } from "@smw/feature-events/constants";
 import { EventService } from "@smw/feature-events/service";
@@ -11,7 +12,9 @@ import { EventService } from "@smw/feature-events/service";
 const rowsOf = async <T>(tx: Tx, q: ReturnType<typeof sql>) => [...(await tx.execute(q))] as T[];
 const day = (ymd: string) => allDaySpan(parseIst(ymd)!);
 
-interface Me { kids: { id: string; classId: string | null; sectionId: string | null; name: string }[] }
+interface Me { kids: { id: string; classId: string | null; sectionId: string | null; name: string }[]; /** A teacher's own sections (this year): what their homework, exam and special-day layers are cut to. */ mine: string[] }
+
+const ids = (list: string[]) => sql.join(list.map((i) => sql`${i}::uuid`), sql`, `);
 
 /** The layers this person may see: the module is on, and the layer is meant for their role. */
 export function layersFor(ctx: Ctx): LayerKey[] {
@@ -28,9 +31,13 @@ export function layersFor(ctx: Ctx): LayerKey[] {
   });
 }
 
+/** What shows when nobody picked layers: the office does not get every homework of every class unless it asks. */
+export const defaultLayers = (ctx: Ctx): LayerKey[] => layersFor(ctx).filter((l) => l !== "homework" || ctx.role === "teacher" || ctx.role === "student");
+
 async function me(tx: Tx, ctx: Ctx): Promise<Me> {
-  if (ctx.role !== "student") return { kids: [] };
-  return { kids: await rowsOf(tx, sql`select id::text, class_id::text as "classId", section_id::text as "sectionId", name from students where user_id = ${ctx.userId}::uuid and status = 'active'`) };
+  if (ctx.role === "teacher") return { kids: [], mine: await teacherSections(tx, ctx.userId) };
+  if (ctx.role !== "student") return { kids: [], mine: [] };
+  return { kids: await rowsOf(tx, sql`select id::text, class_id::text as "classId", section_id::text as "sectionId", name from students where user_id = ${ctx.userId}::uuid and status = 'active'`), mine: [] };
 }
 
 async function holidays(tx: Tx, ctx: Ctx, m: Me, from: string, to: string, onlyAll = false): Promise<CalendarItem[]> {
@@ -58,7 +65,9 @@ async function holidays(tx: Tx, ctx: Ctx, m: Me, from: string, to: string, onlyA
 async function exams(tx: Tx, ctx: Ctx, m: Me, from: string, to: string): Promise<CalendarItem[]> {
   const classes = m.kids.map((k) => k.classId).filter((c): c is string => !!c);
   if (ctx.role === "student" && !classes.length) return [];
-  const mine = ctx.role === "student" ? sql`and exists (select 1 from exam_papers p where p.exam_id = e.id and p.class_id = any(${sql.param(classes)}::uuid[]))` : sql``;
+  if (ctx.role === "teacher" && !m.mine.length) return [];
+  const mine = ctx.role === "student" ? sql`and exists (select 1 from exam_papers p where p.exam_id = e.id and p.class_id = any(${sql.param(classes)}::uuid[]))`
+    : ctx.role === "teacher" ? sql`and exists (select 1 from exam_papers p join sections s on s.class_id = p.class_id where p.exam_id = e.id and s.id in (${ids(m.mine)}))` : sql``;
   const rows = await rowsOf<{ id: string; name: string; from: string; to: string }>(tx, sql`select e.id::text, e.name, e.starts_on::text as "from", e.ends_on::text as "to" from exams e
     where e.status <> 'draft' and e.starts_on < ${to}::date and e.ends_on >= ${from}::date ${mine} order by e.starts_on`);
   return rows.map((r) => ({ id: r.id, layer: "exams" as const, title: r.name, startsAt: day(r.from).startsAt.toISOString(), endsAt: day(r.to).endsAt.toISOString(), allDay: true, href: "/app/exams" }));
@@ -67,14 +76,19 @@ async function exams(tx: Tx, ctx: Ctx, m: Me, from: string, to: string): Promise
 async function homework(tx: Tx, ctx: Ctx, m: Me, a: Date, b: Date): Promise<CalendarItem[]> {
   const sections = m.kids.map((k) => k.sectionId).filter((s): s is string => !!s);
   if (ctx.role === "student" && !sections.length) return [];
-  // A family sees its children's sections; a teacher the ones they set; the office all.
-  const who = ctx.role === "student" ? sql`and a.section_id = any(${sql.param(sections)}::uuid[])` : ctx.role === "teacher" ? sql`and a.created_by = ${ctx.userId}::uuid` : sql``;
-  const rows = await rowsOf<{ id: string; title: string; at: Date; subject: string }>(tx, sql`select a.id::text, a.title, a.due_at as at, s.name as subject from assignments a join subjects s on s.id = a.subject_id
+  if (ctx.role === "teacher" && !m.mine.length) return [];
+  // A family sees its children's sections; a teacher the sections they teach; the office all, each item naming its class and section.
+  const who = ctx.role === "student" ? sql`and a.section_id = any(${sql.param(sections)}::uuid[])` : ctx.role === "teacher" ? sql`and a.section_id in (${ids(m.mine)})` : sql``;
+  const rows = await rowsOf<{ id: string; title: string; at: Date; subject: string; label: string }>(tx, sql`select a.id::text, a.title, a.due_at as at, s.name as subject, c.name || '-' || sec.name as label
+    from assignments a join subjects s on s.id = a.subject_id join sections sec on sec.id = a.section_id join classes c on c.id = sec.class_id
     where a.status = 'published' and a.due_at >= ${a.toISOString()}::timestamptz and a.due_at < ${b.toISOString()}::timestamptz ${who} order by a.due_at limit 500`);
-  return rows.map((r) => ({ id: r.id, layer: "homework" as const, title: `Due: ${r.title}`, startsAt: new Date(r.at).toISOString(), endsAt: null, allDay: false, href: "/app/assignments", meta: r.subject }));
+  const staff = ctx.role !== "student";
+  return rows.map((r) => ({ id: r.id, layer: "homework" as const, title: staff ? `Due: ${r.title} (${r.label})` : `Due: ${r.title}`, startsAt: new Date(r.at).toISOString(), endsAt: null, allDay: false, href: "/app/assignments", meta: r.subject }));
 }
 
-async function special(tx: Tx, from: string, to: string): Promise<CalendarItem[]> {
+async function special(tx: Tx, ctx: Ctx, m: Me, from: string, to: string): Promise<CalendarItem[]> {
+  // A special day changes the bell schedule for the whole school; a teacher with no section has nothing it can change.
+  if (ctx.role === "teacher" && !m.mine.length) return [];
   const rows = await rowsOf<{ id: string; label: string; date: string }>(tx, sql`select id::text, label, date::text as date from tt_day_overrides where date >= ${from}::date and date < ${to}::date order by date`);
   return rows.map((r) => ({ id: r.id, layer: "timetable" as const, title: r.label, startsAt: day(r.date).startsAt.toISOString(), endsAt: day(r.date).endsAt.toISOString(), allDay: true, href: "/app/timetable" }));
 }
@@ -97,20 +111,40 @@ async function fees(tx: Tx, m: Me, from: string, to: string): Promise<CalendarIt
 }
 
 /** Holidays that close the whole school, for the public feed: nothing aimed at one class or at staff. */
-export const publicHolidays = (schoolId: string, from: Date, to: Date) => withSchool(schoolId, (tx) => holidays(tx, { role: "admin" } as Ctx, { kids: [] }, istDay(from), istDay(to), true));
+export const publicHolidays = (schoolId: string, from: Date, to: Date) => withSchool(schoolId, (tx) => holidays(tx, { role: "admin" } as Ctx, { kids: [], mine: [] }, istDay(from), istDay(to), true));
 
 const eventItem = (e: Awaited<ReturnType<EventService["range"]>>[number]): CalendarItem => ({
   id: e.id, layer: "events", title: e.title, startsAt: e.startsAt.toISOString(), endsAt: e.endsAt?.toISOString() ?? null, allDay: e.allDay, href: `/app/events/${e.id}`,
   cancelled: e.state === "cancelled", type: e.type, meta: e.state === "draft" ? "Draft" : e.location ?? undefined,
 });
 
+const MANY = 3;
+const SUMMARY: Partial<Record<LayerKey, (n: number) => string>> = { homework: (n) => `${n} homework due`, meetings: (n) => `${n} meetings` };
+
+/** More than a few items of one kind on one day become one line with a link, so a busy day stays readable. */
+function collapse(items: CalendarItem[]): CalendarItem[] {
+  const groups = new Map<string, CalendarItem[]>();
+  for (const i of items) if (SUMMARY[i.layer]) groups.set(`${i.layer}:${istDay(new Date(i.startsAt))}`, [...(groups.get(`${i.layer}:${istDay(new Date(i.startsAt))}`) ?? []), i]);
+  const many = new Set([...groups].filter(([, g]) => g.length > MANY).map(([k]) => k));
+  const out: CalendarItem[] = [];
+  for (const i of items) {
+    const key = `${i.layer}:${istDay(new Date(i.startsAt))}`;
+    if (!many.has(key)) out.push(i);
+    else if (groups.get(key)![0] === i) {
+      const g = groups.get(key)!;
+      out.push({ id: key, layer: i.layer, title: SUMMARY[i.layer]!(g.length), startsAt: i.startsAt, endsAt: null, allDay: true, href: i.layer === "homework" ? "/app/assignments" : i.href });
+    }
+  }
+  return out;
+}
+
 /**
- * Everything on the calendar between `from` and `to` (an instant range, end open), for the layers asked for (default: all this person may see).
+ * Everything on the calendar between `from` and `to` (an instant range, end open), for the layers asked for (default: what this person may see, minus the office's homework layer).
  * Layers the person may not see are ignored, never an error. Each item says where it opens; only events can be edited.
  */
 export async function calendarItems(ctx: Ctx, from: Date, to: Date, want?: LayerKey[], o: { drafts?: boolean } = {}): Promise<CalendarItem[]> {
-  const allowed = new Set(layersFor(ctx));
-  const on = (l: LayerKey) => allowed.has(l) && (!want || want.includes(l));
+  const allowed = new Set(layersFor(ctx)), asked = new Set(want ?? defaultLayers(ctx));
+  const on = (l: LayerKey) => allowed.has(l) && asked.has(l);
   const [fromDay, toDay] = [istDay(from), istDay(to)];
   const [evts, rest] = await Promise.all([
     on("events") ? new EventService(ctx).range(from, to, o) : [],
@@ -120,12 +154,12 @@ export async function calendarItems(ctx: Ctx, from: Date, to: Date, want?: Layer
         on("holidays") ? holidays(tx, ctx, kids, fromDay, toDay) : [],
         on("exams") ? exams(tx, ctx, kids, fromDay, toDay) : [],
         on("homework") ? homework(tx, ctx, kids, from, to) : [],
-        on("timetable") ? special(tx, fromDay, toDay) : [],
+        on("timetable") ? special(tx, ctx, kids, fromDay, toDay) : [],
         on("meetings") ? meetings(tx, ctx, kids, from, to) : [],
         on("fees") ? fees(tx, kids, fromDay, toDay) : [],
       ]);
       return parts.flat();
     }),
   ]);
-  return [...evts.map(eventItem), ...rest].sort((x, y) => x.startsAt.localeCompare(y.startsAt) || x.title.localeCompare(y.title));
+  return [...evts.map(eventItem), ...collapse(rest.sort((x, y) => x.startsAt.localeCompare(y.startsAt)))].sort((x, y) => x.startsAt.localeCompare(y.startsAt) || x.title.localeCompare(y.title));
 }

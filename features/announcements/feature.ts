@@ -12,6 +12,7 @@ export default defineFeature({
     publish: ["admin", "accountant", "teacher"],
     approve: ["admin"],
     urgent: ["admin"],
+    whole: ["admin"],
     manage: ["admin"],
   },
   menu: [{ label: "Notices", href: "/app/announcements", icon: "megaphone", permission: "read", group: "communication", order: 10 }],

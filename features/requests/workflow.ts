@@ -23,7 +23,7 @@ export abstract class RequestWorkflow extends RequestReads {
   /** Load the request this person may see, run `fn`, audit it. */
   protected async act<T>(id: string, summary: string, fn: Run<T>): Promise<T> {
     this.authorize("use", "write");
-    return this.write("use", async (tx) => fn(tx, await this.load(tx, id)), () => ({ action: "update", entity: "Request", entityId: id, summary }));
+    return this.write("use", async (tx) => fn(tx, await this.load(tx, id, true)), () => ({ action: "update", entity: "Request", entityId: id, summary }));
   }
 
   private handled(tx: Tx, r: Req, ...people: (string | null)[]) {
@@ -51,12 +51,12 @@ export abstract class RequestWorkflow extends RequestReads {
   async claim(id: string) {
     return this.act(id, "Took a request", async (tx, { v, r }) => {
       this.staffOnly(v);
-      if (r.ownerId) throw new ConflictError("Someone already has this request.");
+      if (r.ownerId) throw new ConflictError(r.ownerId === this.ctx.userId ? "You already have this request." : `${(await this.person(tx, r.ownerId))?.name ?? "Someone else"} already has this request.`);
       const state = this.go(r, "assign");
       await this.joinThread(tx, r);
       await this.patch(tx, r.id, { ownerId: this.ctx.userId, state });
       await this.log(tx, r.id, "claimed", `Taken by ${this.ctx.name}`);
-      await this.handled(tx, r, this.ctx.userId);
+      await this.closeStaffWork(tx, r);
     });
   }
 
@@ -83,7 +83,7 @@ export abstract class RequestWorkflow extends RequestReads {
       await this.joinThread(tx, r, to);
       await this.patch(tx, r.id, { ownerId: to.userId, state });
       await this.log(tx, r.id, "assigned", `Given to ${to.name}`);
-      await this.handled(tx, r, r.ownerId);
+      await this.closeStaffWork(tx, r);
       await this.tellStaff(tx, r, [to.userId], `Request ${r.number} is yours`, `${cat.name}. Open it to answer.`);
     });
   }
@@ -102,7 +102,7 @@ export abstract class RequestWorkflow extends RequestReads {
       if (route.ownerId) { const p = await this.person(tx, route.ownerId); if (p) await this.joinThread(tx, r, p); }
       await this.patch(tx, r.id, { categoryId: to.id, ownerId: route.ownerId, ownerRole: route.ownerRole, level: 0, dueAt: dueFor(now, to.targetDays), pausedAt: r.pausedAt ? now : null, state: r.state === "new" || r.state === "assigned" ? (route.ownerId ? "assigned" : "new") : r.state });
       await this.log(tx, r.id, "category", `Moved from ${cat.name} to ${to.name}`);
-      await this.handled(tx, r, r.ownerId);
+      await this.closeStaffWork(tx, r);
       await this.tellStaff(tx, r, route.notify, `Request ${r.number} moved to you`, `${to.name}. Open it to answer.`);
     });
   }
@@ -300,7 +300,7 @@ export abstract class RequestWorkflow extends RequestReads {
     return this.act(d.id, "Joined two requests", async (tx, { v, r }) => {
       this.staffOnly(v);
       if (d.intoId === r.id) throw new ValidationError({ intoId: "Choose a different request" });
-      const keep = await this.load(tx, d.intoId).catch(() => null);
+      const keep = await this.load(tx, d.intoId, true).catch(() => null);
       if (!keep) throw new ValidationError({ intoId: "Choose a request you can see" });
       if (!r.studentId || keep.r.studentId !== r.studentId) throw new ValidationError({ intoId: "Only requests about the same child can be joined" });
       if (keep.r.mergedIntoId || !isOpen(keep.r.state)) throw new ValidationError({ intoId: "Choose a request that is still open" });
@@ -319,14 +319,14 @@ export abstract class RequestWorkflow extends RequestReads {
   async clock(now = new Date()): Promise<{ escalated: number; closed: number }> {
     return this.write("manage", async (tx) => {
       const late = await tx.select({ r: requests, cat: requestCategories }).from(requests).innerJoin(requestCategories, eq(requestCategories.id, requests.categoryId))
-        .where(and(inArray(requests.state, [...OPEN_STATES]), isNull(requests.pausedAt), lt(requests.dueAt, now))).orderBy(asc(requests.dueAt));
+        .where(and(inArray(requests.state, [...OPEN_STATES]), isNull(requests.pausedAt), lt(requests.dueAt, now))).orderBy(asc(requests.dueAt)).for("update", { of: requests, skipLocked: true });
       let escalated = 0;
       for (const { r, cat } of late) {
         if (!cat.escalation[r.level]) continue;
         await this.moveUp(tx, r, cat);
         escalated++;
       }
-      const settled = await tx.select().from(requests).where(and(eq(requests.state, "resolved"), lt(requests.resolvedAt, addDays(now, -CLOSE_AFTER_DAYS))));
+      const settled = await tx.select().from(requests).where(and(eq(requests.state, "resolved"), lt(requests.resolvedAt, addDays(now, -CLOSE_AFTER_DAYS)))).for("update", { skipLocked: true });
       for (const r of settled) {
         if (autoCloseAt(r.resolvedAt!) > now) continue;
         await this.closeRow(tx, r, "Closed by itself");

@@ -231,8 +231,9 @@ describe("AuditService", () => {
   });
 });
 
+const asJson = async (url: string) => JSON.parse(Buffer.from(await storage.get(url.replace("memory://", ""))).toString());
+
 describe("ExportService", () => {
-  const asJson = async (url: string) => JSON.parse(Buffer.from(await storage.get(url.replace("memory://", ""))).toString());
 
   it("exports the whole school as JSON without secrets or other schools' rows, and logs it", async () => {
     const svc = new ExportService(a.as.admin);
@@ -409,5 +410,75 @@ describe("ExportService", () => {
     await expect(new SchoolProfileService({ ...a.as.admin, readOnly: true }).update({ name: "Nope School", timezone: "Asia/Kolkata", academicYearStartMonth: 4 })).rejects.toThrow(/read-only/);
     const [row] = await withSchool(a.id, (tx) => tx.select({ n: schools.name }).from(schools).where(eq(schools.id, a.id)));
     expect(row!.n).toBe("Audit Test School");
+  });
+});
+
+describe("things written about the person who asks", () => {
+  it("the audit list hides entries of messages and requests that name the viewer, and shows the rest", async () => {
+    await withSchool(a.id, async (tx) => {
+      await tx.execute(sql`insert into audit_logs (id, school_id, module, action, summary, meta) values
+        (${uuidv7()}, ${a.id}, 'messages', 'report', 'ABOUT-ME report opened', ${JSON.stringify({ aboutUserIds: [a.users.admin] })}::jsonb),
+        (${uuidv7()}, ${a.id}, 'requests', 'complaint', 'ABOUT-ME complaint', ${JSON.stringify({ aboutUserIds: [a.users.teacher, a.users.admin] })}::jsonb),
+        (${uuidv7()}, ${a.id}, 'messages', 'report', 'ABOUT-OTHER report opened', ${JSON.stringify({ aboutUserIds: [a.users.teacher] })}::jsonb)`);
+    });
+    const rows = await new AuditService(a.as.admin).list({ q: "ABOUT-", pageSize: 50 });
+    expect(rows.rows.map((r) => r.summary)).toEqual(["ABOUT-OTHER report opened"]);
+    expect(rows.total).toBe(1);
+  });
+
+  describe("exports", () => {
+    const [s1, th1, th2, m1, m2, cat, rq, rq2, meeting, win] = Array.from({ length: 10 }, () => uuidv7());
+    beforeAll(async () => {
+      await withSchool(a.id, async (tx) => {
+        await tx.execute(sql`insert into students (id, school_id, admission_no, name) values (${s1}, ${a.id}, 'AM-1', 'About Kid')`);
+        await tx.execute(sql`insert into message_threads (id, school_id, kind, subject, student_id) values (${th1}, ${a.id}, 'student', 'Ordinary talk', ${s1}), (${th2}, ${a.id}, 'student', 'Talk naming the admin', ${s1})`);
+        await tx.execute(sql`insert into messages (id, school_id, thread_id, sender_name, body, internal) values (${m1}, ${a.id}, ${th1}, 'Teacher', 'ordinary-body', false), (${m2}, ${a.id}, ${th2}, 'Teacher', 'about-admin-body', false)`);
+        await tx.execute(sql`insert into message_reports (id, school_id, thread_id, category, note, reporter_name, about_user_ids) values
+          (${uuidv7()}, ${a.id}, ${th2}, 'conduct', 'report-naming-admin', 'Teacher', ${`{${a.users.admin}}`}::uuid[]),
+          (${uuidv7()}, ${a.id}, ${th1}, 'conduct', 'report-naming-teacher', 'Teacher', ${`{${a.users.teacher}}`}::uuid[])`);
+        await tx.execute(sql`insert into message_reviews (id, school_id, thread_id, reviewer_id, reviewer_name, reason) values (${uuidv7()}, ${a.id}, ${th2}, ${a.users.teacher}, 'Lead', 'review-of-admin-thread')`);
+        await tx.execute(sql`insert into request_categories (id, school_id, name) values (${cat}, ${a.id}, 'Complaints')`);
+        await tx.execute(sql`insert into message_threads (id, school_id, kind, subject, student_id) values (${rq}, ${a.id}, 'request', 'Complaint about admin', ${s1}), (${rq2}, ${a.id}, 'request', 'Ordinary request', ${s1})`);
+        await tx.execute(sql`insert into requests (id, school_id, thread_id, number, category_id, student_id, raised_by_name, owner_role, due_at, about_user_ids) values
+          (${uuidv7()}, ${a.id}, ${rq}, 'REQ/AM1', ${cat}, ${s1}, 'Family', 'admin', now(), ${`{${a.users.admin}}`}::uuid[]),
+          (${uuidv7()}, ${a.id}, ${rq2}, 'REQ/AM2', ${cat}, ${s1}, 'Family', 'admin', now(), '{}')`);
+        await tx.execute(sql`insert into notifications (id, school_id, user_id, topic, title, body, private_body) values
+          (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'message.new', 'New message', 'dm-body-secret', false),
+          (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'homework.new', 'Marks', 'private-flag-secret', true),
+          (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'notice.published', 'Sports day', 'public-body-ok', false)`);
+        await tx.execute(sql`insert into meeting_days (id, school_id, title, audience, opens_at, closes_at) values (${meeting}, ${a.id}, 'PTM', '{"include":[{"type":"everyone"}],"exclude":[]}'::jsonb, now(), now() + interval '1 day')`);
+        await tx.execute(sql`insert into meeting_windows (id, school_id, meeting_id, teacher_id, day, starts_at, ends_at) values (${win}, ${a.id}, ${meeting}, ${a.users.teacher}, current_date, now(), now() + interval '1 hour')`);
+        await tx.execute(sql`insert into meeting_slots (id, school_id, meeting_id, window_id, teacher_id, starts_at, ends_at, student_id, private_note) values (${uuidv7()}, ${a.id}, ${meeting}, ${win}, ${a.users.teacher}, now(), now() + interval '10 minutes', ${s1}, 'staff-only-slot-note')`);
+      });
+    });
+    const svc = () => new ExportService({ ...a.as.admin, features: new Set(["settings", "messages"]) });
+
+    it("a plain school file drops private notification words and the staff note on meeting slots", async () => {
+      const file = await asJson((await new ExportService(a.as.admin).exportSchool()).url);
+      const text = JSON.stringify(file);
+      for (const gone of ["dm-body-secret", "private-flag-secret", "staff-only-slot-note"]) expect(text).not.toContain(gone);
+      expect(text).toContain("public-body-ok");
+      expect(file.tables.notifications.find((n: { topic: string }) => n.topic === "message.new")).toMatchObject({ title: "New message", body: null });
+      expect(file.tables.meeting_slots[0]).not.toHaveProperty("private_note");
+    });
+
+    it("with the tick the staff note is kept, but nothing written about the exporter is", async () => {
+      const file = await asJson((await svc().exportSchool({ includePrivate: true, reason: "Court order 15/2026" })).url);
+      const text = JSON.stringify(file);
+      expect(text).toContain("staff-only-slot-note");
+      expect(text).toContain("dm-body-secret");
+      expect(text).toContain("ordinary-body");
+      for (const gone of ["about-admin-body", "Talk naming the admin", "report-naming-admin", "review-of-admin-thread", "Complaint about admin", "REQ/AM1"]) expect(text).not.toContain(gone);
+      expect(text).toContain("report-naming-teacher");
+      expect(text).toContain("REQ/AM2");
+    });
+
+    it("a student's file leaves out the same", async () => {
+      const text = JSON.stringify(await asJson((await new ExportService(a.as.admin).exportStudent({ studentId: s1 })).url));
+      expect(text).toContain("ordinary-body");
+      expect(text).toContain("REQ/AM2");
+      expect(text).not.toContain("staff-only-slot-note");
+      for (const gone of ["about-admin-body", "Talk naming the admin", "Complaint about admin", "REQ/AM1"]) expect(text).not.toContain(gone);
+    });
   });
 });

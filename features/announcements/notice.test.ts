@@ -8,7 +8,7 @@ import { AnnouncementService, CircularService, FeedService, NoticeService, Repor
 import { build, type Fx } from "./fixtures";
 import { expireNotices, lateJoiners, publishDue, responseReminders } from "./jobs";
 import { publishNow } from "./quick";
-import { announcementRecipients, announcementResponses, announcementVersions, announcements } from "./schema";
+import { announcementRecipients, announcementVersions, announcements } from "./schema";
 
 let fx: Fx, other: Fx;
 const A = () => fx.school.as;
@@ -19,7 +19,6 @@ const rec = (id: string) => withSchool(fx.school.id, (tx) => tx.select().from(an
 const row = async (id: string) => (await withSchool(fx.school.id, (tx) => tx.select().from(announcements).where(eq(announcements.id, id))))[0]!;
 const sql_ = (q: ReturnType<typeof sql>) => withSchool(fx.school.id, (tx) => tx.execute(q));
 const pastDue = (id: string) => sql_(sql`update announcements set due_at = now() - interval '2 days' where id = ${id}::uuid`);
-const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 beforeAll(async () => {
   useServices({ storage: new MemoryStorage() });
@@ -228,32 +227,35 @@ class SettingsHelper {
 }
 
 describe("circular numbers (11)", () => {
-  it("20 parallel publishes get numbers 1 to 20 with no gap and no repeat; a withdrawn number stays in the register", async () => {
+  it("20 parallel sends get numbers 1 to 20 with no gap and no repeat, given when the undo window ends; a withdrawn number stays in the register", async () => {
     const admin = new NoticeService(A().admin);
     const ids = await Promise.all(Array.from({ length: 20 }, (_, i) => admin.saveDraft({ type: "circular", title: `Circular ${i}`, body: "Please note.", audience: section(fx.ids.s5a!) }).then((d) => d.id)));
     const sent = await Promise.all(ids.map((id) => admin.publish(id)));
-    const numbers = sent.map((s) => s.number!).sort();
+    expect(sent.map((s) => s.number)).toEqual(Array(20).fill(null));
+    await sql_(sql`update announcements set send_at = now() - interval '1 second' where state = 'sending'`);
+    await Promise.all(ids.map((id) => fanOut(fx.school.id, id)));
+    const numbers = (await Promise.all(ids.map(async (id) => (await row(id)).number!))).sort();
     expect(new Set(numbers).size).toBe(20);
     expect(numbers).toEqual(Array.from({ length: 20 }, (_, i) => `CIR/2026-27/${String(i + 1).padStart(3, "0")}`));
-    await sql_(sql`update announcements set send_at = now() - interval '1 second' where state = 'sending'`);
-    await publishDue(new Date());
     await admin.withdraw(ids[3]!, "Sent by mistake");
     const reg = await new CircularService(A().admin).register();
     expect(reg.session).toBe("2026-27");
     expect(reg.rows).toHaveLength(20);
-    expect(reg.rows.filter((r) => r.state === "withdrawn").map((r) => r.number)).toEqual([sent[3]!.number]);
+    expect(reg.rows.filter((r) => r.state === "withdrawn").map((r) => r.number)).toEqual([(await row(ids[3]!)).number]);
     const pdf = await new CircularService(A().admin).registerPdf();
     expect(Buffer.from(pdf.bytes.slice(0, 4)).toString()).toBe("%PDF");
     await expect(new CircularService(A().teacher).register()).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("an undone circular keeps its number for when it is sent again", async () => {
+  it("7: an undone circular never used a number, so the next one takes the next number with no gap", async () => {
     const admin = new NoticeService(A().admin);
     const { id } = await admin.saveDraft({ type: "circular", title: "Undo circular", body: "x", audience: section(fx.ids.s5a!) });
-    const first = await admin.publish(id);
+    await admin.publish(id);
     await admin.undo(id);
-    const again = await admin.publish(id);
-    expect(again.number).toBe(first.number);
+    expect((await row(id)).number).toBeNull();
+    const before = (await new CircularService(A().admin).register()).rows.length;
+    const next = await publishNow(A().admin, { type: "circular", title: "Right after", body: "x", audience: section(fx.ids.s5a!) });
+    expect(next.number).toBe(`CIR/2026-27/${String(before + 1).padStart(3, "0")}`);
   });
 
   it("the circular PDF is made, and its QR token finds exactly the circular, with its standing and no text", async () => {
@@ -263,18 +265,18 @@ describe("circular numbers (11)", () => {
     expect(pdf.fileName).toBe(`circular-${number!.replace(/\//g, "-")}.pdf`);
     await expect(new CircularService(A().admin).pdf((await publishNow(A().admin, { title: "Plain", body: "x", audience: ALL })).id)).rejects.toBeInstanceOf(ConflictError);
     const { verifyToken } = await import("./verify");
-    const found = await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)));
+    const found = await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)!));
     expect(found).toMatchObject({ number, ok: true, status: "Genuine", studentName: null, title: "Uniform change", text: null });
     expect(found).not.toHaveProperty("amountPaise");
     expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, "0".repeat(32)))).toBeNull();
     const web = await publishNow(A().admin, { type: "circular", title: "On the website", body: "Open to all", audience: ALL, website: true });
-    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, web.id)))).toMatchObject({ text: "Open to all" });
+    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, web.id)!))).toMatchObject({ text: "Open to all" });
     await new NoticeService(A().admin).withdraw(web.id, "Wrong circular");
-    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, web.id)))).toMatchObject({ ok: false, status: "Withdrawn by the school", text: null });
+    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, web.id)!))).toMatchObject({ ok: false, status: "Withdrawn by the school", text: null });
     await new NoticeService(A().admin).withdraw(id, "Wrong circular");
-    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)))).toMatchObject({ ok: false, status: "Withdrawn by the school" });
+    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)!))).toMatchObject({ ok: false, status: "Withdrawn by the school" });
     // another school's lookup never finds it
-    expect(await withSchool(other.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)))).toBeNull();
+    expect(await withSchool(other.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)!))).toBeNull();
   });
 });
 
@@ -296,7 +298,9 @@ describe("correct and withdraw (4, 5)", () => {
     const ann = await notes(fx.school.users.student);
     expect(ann.filter((n) => n.subjectId === id)).toHaveLength(annBell);
     expect(ann.find((n) => n.subjectId === id)).toMatchObject({ doneAt: expect.anything(), readAt: expect.anything() });
-    expect(ann.some((n) => n.title === "No longer for you: Reading week (5B)")).toBe(true);
+    expect(ann.some((n) => n.title === "This notice is no longer for you" && !n.body)).toBe(true);
+    // nothing of the new wording reaches the people who lost it
+    expect(ann.filter((n) => [n.title, n.body ?? ""].some((t) => t.includes("5B") || t.includes("Bring")))).toHaveLength(0);
     await expect(feedOf(fx.school.users.student).open(id)).rejects.toBeInstanceOf(NotFoundError);
     expect((await feedOf(fx.school.users.student).feed()).rows.some((r) => r.noticeId === id)).toBe(false);
     const view = await admin.get(id);

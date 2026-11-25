@@ -9,7 +9,8 @@ import { ActionButton } from "@smw/ui/shell/ActionButton";
 import type { Tone } from "@smw/ui/tone";
 import { DayService, type DayRow, type DayView } from "../service";
 import type { VisitState } from "../constants";
-import { clock, dayLong, when } from "../format";
+import { clock, dayLong, dayOf, when } from "../format";
+import { atIst } from "../rules";
 import { addWalkIn, markVisit, saveNotes } from "./actions";
 import { BackLink, FollowUp, LinkButton, Notice } from "./shared";
 
@@ -38,11 +39,11 @@ function Row({ r, v, next, followUp }: { r: DayRow; v: DayView; next: boolean; f
         </div>
       ) : null}
       <div className="mt-3 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
-        {(Object.keys(VISIT) as VisitState[]).map((k) => (
+        {r.canMark ? (Object.keys(VISIT) as VisitState[]).map((k) => (
           <ActionButton key={k} variant={r.visit === k ? "default" : next && k === "came" ? "default" : "secondary"} label={`${VISIT[k].label}: ${r.studentName}`} action={markVisit} values={{ slotId: r.slotId, visit: r.visit === k ? "" : k }}>
             <span className="inline-flex min-h-8 items-center">{k === "came" ? "Came" : k === "late" ? "Late" : "Missed"}</span>
           </ActionButton>
-        ))}
+        )) : <p className="col-span-3 self-center text-sm text-[var(--ds-on-surface-muted)]">Opens on {dayOf(r.startsAt)}</p>}
         <FormModal title={`Notes: ${r.studentName}`} icon="clock" fields={fields} values={{ privateNote: r.privateNote ?? "", sharedRemark: r.sharedRemark ?? "" }} action={saveNotes} hidden={{ slotId: r.slotId }} trigger={{ label: "Notes", variant: "ghost" }} submitLabel="Save notes" />
         {r.endsAt <= v.now ? <FollowUp show={followUp} studentId={r.studentId} meetingId={v.meeting.id} title={v.meeting.title} /> : null}
       </div>
@@ -56,33 +57,36 @@ export default async function DayPage({ params, searchParams }: { params: Promis
   if (ctx.role === "student" || ctx.role === "parent") notFound();
   const svc = new DayService(ctx);
   const followUp = ctx.features.has("requests");
-  const teacher = Array.isArray(sp.teacher) ? sp.teacher[0] : sp.teacher;
+  const one = (k: string) => { const x = sp[k]; return Array.isArray(x) ? x[0] : x; };
+  const teacher = one("teacher"), asked = one("date");
   let v: DayView;
-  try { v = await svc.day(id, teacher); }
+  try { v = await svc.day(id, teacher, asked); }
   catch (e) {
     if (e instanceof NotFoundError) notFound();
     if (e instanceof ConflictError || e instanceof ForbiddenError) return <><BackLink href={`/app/meetings`}>All meetings</BackLink><Notice tone="warning">{e.message}</Notice></>;
     throw e;
   }
-  const [choices, notCame] = await Promise.all([svc.walkInChoices(id), svc.notCame(id)]);
+  const [choices, notCame] = await Promise.all([svc.walkInChoices(id, teacher), svc.notCame(id)]);
   const mine = notCame.filter((r) => r.teacherName === v.teacher.name);
-  const running = v.meeting.state === "open" || v.meeting.state === "closed";
+  const running = (v.meeting.state === "open" || v.meeting.state === "closed") && v.isToday;
   const c = v.counts;
+  const link = (over: { teacher?: string; date?: string }) => `?${new URLSearchParams({ ...(teacher ? { teacher } : {}), date: v.date, ...over })}`;
   return (
     <>
       <BackLink href={svc.canManage ? `/app/meetings/${id}` : "/app/meetings"}>{v.meeting.title}</BackLink>
-      <PageHeader eyebrow={`${v.teacher.name}${v.place ? ` · ${v.place}` : ""}`} title="My meeting day" description={`${dayLong(v.now)}. ${c.booked} booked, ${c.came + c.late} came, ${c.unmarked} not marked, ${v.free} free times left.`}
+      <PageHeader eyebrow={`${v.teacher.name}${v.place ? ` · ${v.place}` : ""}`} title={`My meeting day: ${dayLong(atIst(v.date, "12:00"))}`} description={`${c.booked} booked, ${c.came + c.late} came, ${c.unmarked} not marked, ${v.free} free times left.`}
         actions={<>
           {running ? <FormModal title="Add a walk-in" icon="clock" trigger={{ label: "Add a walk-in" }} fields={[{ name: "studentId", label: "Child", type: "select", required: true, options: choices.map((k) => ({ value: k.id, label: `${k.name}${k.label ? ` (${k.label})` : ""}` })), wide: true }]}
             action={addWalkIn} hidden={{ meetingId: id, ...(teacher ? { teacherId: teacher } : {}) }} submitLabel="Add and mark as came" summary="Takes the next ten minutes of your time" /> : null}
-          <LinkButton href={`/api/meetings/${id}/sheet${teacher ? `?teacher=${teacher}` : ""}`}>Print my list</LinkButton>
+          <LinkButton href={`/api/meetings/${id}/sheet${link({})}`}>Print my list</LinkButton>
         </>} />
       {v.teachers.length > 1 ? <nav aria-label="Teachers" className="mb-3 flex flex-wrap gap-2">{v.teachers.map((t) => <LinkButton key={t.id} href={`/app/meetings/${id}/day?teacher=${t.id}`} primary={t.id === v.teacher.id}>{t.name}</LinkButton>)}</nav> : null}
+      {v.dates.length > 1 ? <nav aria-label="Days" className="mb-3 flex flex-wrap gap-2">{v.dates.map((d) => <LinkButton key={d} href={`/app/meetings/${id}/day${link({ date: d })}`} primary={d === v.date}>{dayOf(atIst(d, "12:00"))}</LinkButton>)}</nav> : null}
       {v.privateNotesHidden ? <Notice>This is a support session: private notes are hidden and cannot be written.</Notice> : null}
       {v.rows.length === 0 ? (
         <Panel title="Nobody has booked yet"><Notice>{v.free ? `${v.free} free times are waiting. Families book from their meetings page.` : "No free times left either. Ask the school office to widen your time."}{svc.canManage ? " You can book for a family from the meeting page." : ""}</Notice></Panel>
       ) : (
-        <ol className="mt-3 flex flex-col gap-3" aria-label="Today's list">{v.rows.map((r) => <Row key={r.slotId} r={r} v={v} next={r.slotId === v.nextSlotId} followUp={followUp} />)}</ol>
+        <ol className="mt-3 flex flex-col gap-3" aria-label="List for the day">{v.rows.map((r) => <Row key={r.slotId} r={r} v={v} next={r.slotId === v.nextSlotId} followUp={followUp} />)}</ol>
       )}
       {mine.length ? (
         <div className="mt-3"><Panel title={`Did not come or not marked (${mine.length})`} action={<LinkButton href={`/api/meetings/${id}/not-came`} download>Download list</LinkButton>}>

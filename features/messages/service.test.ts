@@ -414,7 +414,10 @@ describe("sending: client id, quiet hours, away, files, removal (M6, M8, M9, M17
     await expect(svc(w.own).remove(late.id)).rejects.toMatchObject({ message: expect.stringContaining("10 minutes") });
     const held = await svc(w.own).send(id, "reported soon");
     await svc(w.a.as.student).report({ threadId: id, category: "other", note: "Looks wrong to me." });
-    await expect(svc(w.own).remove(held.id)).rejects.toMatchObject({ message: expect.stringContaining("under review") });
+    // the person named is told nothing about a report; the reporter is told why
+    await expect(svc(w.own).remove(held.id)).rejects.toMatchObject({ message: "This message cannot be removed now." });
+    const mine = await svc(w.a.as.student).send(id, "my own words");
+    await expect(svc(w.a.as.student).remove(mine.id)).rejects.toMatchObject({ message: expect.stringContaining("under review") });
     // and the database agrees
     await expect(sql_((tx) => tx.update(messages).set({ removedAt: new Date() }).where(eq(messages.id, held.id)))).rejects.toThrow();
   });

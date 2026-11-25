@@ -209,7 +209,7 @@ describe("settings:manage is not a way to become admin", () => {
 
 describe("communication grants", () => {
   const COMM: Catalogue = [
-    { key: "announcements", name: "Notices", permissions: { read: ["admin", "teacher", "student"], draft: ["admin", "teacher"], publish: ["admin", "teacher"], approve: ["admin"], urgent: ["admin"], manage: ["admin"] } },
+    { key: "announcements", name: "Notices", permissions: { read: ["admin", "teacher", "student"], draft: ["admin", "teacher"], publish: ["admin", "teacher"], approve: ["admin"], urgent: ["admin"], whole: ["admin"], manage: ["admin"] } },
     { key: "messages", name: "Messages", permissions: { use: ["admin", "teacher", "student"], all: ["admin", "accountant"], safeguard: ["admin"], manage: ["admin"] } },
     { key: "notifications", name: "Notifications", permissions: { read: ["admin", "teacher", "student"], manage: ["admin"], delivery: ["admin"] } },
     { key: "requests", name: "Requests", permissions: { use: ["admin", "student"], office: ["admin", "accountant"], manage: ["admin"] } },
@@ -227,6 +227,7 @@ describe("communication grants", () => {
     expect(BASELINE_GRANTS).toEqual(expect.arrayContaining(["announcements:read", "events:read", "requests:use"]));
     const label = (f: string, p: string) => matrixFor(COMM, all).find((m) => m.key === f)!.permissions.find((x) => x.key === p)!.label;
     expect(label("announcements", "approve")).toBe("Approve notices");
+    expect(label("announcements", "whole")).toBe("Publish to the whole school without approval");
     expect(permissionLabel("approve")).toBe("Approve requests");
     expect(label("announcements", "draft")).toBe("Write drafts");
     expect(label("messages", "safeguard")).toBe("Review reported conversations");

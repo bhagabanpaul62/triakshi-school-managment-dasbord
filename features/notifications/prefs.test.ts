@@ -1,16 +1,16 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { closeDb, withSchool } from "@smw/db";
-import { NotFoundError, ValidationError } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import notificationsFeature from "./feature";
-import { PreferenceService } from "./prefs";
+import { PreferenceService, tokenKeyFor } from "./prefs";
 import { commSettings, notificationPrefs, pushSubscriptions } from "./schema";
 
 let a: TestSchool, b: TestSchool;
 beforeAll(async () => {
   await registerFeatures([notificationsFeature]);
-  ({ a, b } = await createSchoolPair(["notifications"], "p"));
+  ({ a, b } = await createSchoolPair(["notifications"], "pf"));
 });
 afterAll(closeDb);
 beforeEach(async () => { for (const s of [a, b]) await withSchool(s.id, async (tx) => { await tx.delete(pushSubscriptions); await tx.delete(notificationPrefs); await tx.delete(commSettings); }); });
@@ -60,21 +60,41 @@ describe("PreferenceService", () => {
 
   it("lists, adds and removes only my devices", async () => {
     const p = prefs(a, "student");
-    await p.subscribe("https://push.example/abc", "k1", "a1", "Phone");
-    await p.subscribe("https://push.example/abc", "k2", "a2", "Phone");
-    await prefs(a, "teacher").subscribe("https://push.example/other", "k", "a");
+    await p.subscribe("https://fcm.googleapis.com/fcm/send/abc", "k1", "a1", "Phone");
+    await p.subscribe("https://fcm.googleapis.com/fcm/send/abc", "k2", "a2", "Phone");
+    await prefs(a, "teacher").subscribe("https://updates.push.services.mozilla.com/wpush/v2/other", "k", "a");
     const mine = await p.devices();
     expect(mine).toHaveLength(1);
     await expect(prefs(a, "teacher").removeDevice(mine[0]!.id)).rejects.toBeInstanceOf(NotFoundError);
     await p.removeDevice(mine[0]!.id);
     expect(await p.devices()).toHaveLength(0);
-    await expect(p.subscribe("http://insecure.example/x", "k", "a")).rejects.toBeInstanceOf(ValidationError);
+    await expect(p.subscribe("http://fcm.googleapis.com/x", "k", "a")).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("accepts only the browsers' own push hosts, over https", async () => {
+    const p = prefs(a, "student");
+    for (const ok of ["https://fcm.googleapis.com/fcm/send/x", "https://updates.push.services.mozilla.com/x", "https://web.push.apple.com/x", "https://wns2-par02p.notify.windows.com/x", "https://a.push.services.mozilla.com/x"])
+      await expect(p.subscribe(ok, "k", "a")).resolves.not.toThrow();
+    for (const bad of ["https://push.example/x", "https://evil.com/fcm.googleapis.com", "https://fcm.googleapis.com.evil.com/x", "https://notapple.com/x", "https://169.254.169.254/x", "https://user:pw@fcm.googleapis.com/x", "https://xfcm.googleapis.com/x"])
+      await expect(p.subscribe(bad, "k", "a")).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("a support session sees the settings but changes nothing and registers no device", async () => {
+    const support = new PreferenceService({ ...a.as.student, supportStaffId: crypto.randomUUID() });
+    expect((await support.mine()).groups.notices.own).toBe(false);
+    await expect(support.saveGroup({ group: "notices", push: false, email: "off" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(support.saveDigest(8)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(support.subscribe("https://fcm.googleapis.com/fcm/send/s", "k", "a")).rejects.toBeInstanceOf(ForbiddenError);
+    const readOnly = new PreferenceService({ ...a.as.student, supportStaffId: crypto.randomUUID(), readOnly: true });
+    await expect(readOnly.setAway("2026-12-01")).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await prefs(a, "student").devices()).toHaveLength(0);
+    expect(await withSchool(a.id, (tx) => tx.select().from(notificationPrefs))).toHaveLength(0);
   });
 
   it("unsubscribes only the person the link belongs to, without a sign-in", async () => {
     const url = await withSchool(a.id, (tx) => PreferenceService.unsubscribeUrlFor(tx, a.id, a.slug, a.users.student, "notices"));
     await withSchool(a.id, (tx) => PreferenceService.unsubscribeUrlFor(tx, a.id, a.slug, a.users.teacher));
-    const token = new URL(url).searchParams.get("t")!;
+    const token = new URL(url!).searchParams.get("t")!;
     expect(token).toHaveLength(43);
     // the same link is built again for a later email and still works
     expect(await withSchool(a.id, (tx) => PreferenceService.unsubscribeUrlFor(tx, a.id, a.slug, a.users.student))).toContain(token);
@@ -92,5 +112,13 @@ describe("PreferenceService", () => {
     expect(m.groups.fees.email).toBe("off");
     expect(m.groups.account.email).toBe("instant");
     expect((await withSchool(a.id, (tx) => tx.select().from(notificationPrefs).where(eq(notificationPrefs.userId, a.users.teacher))))[0]!.groups).toEqual({});
+  });
+});
+
+describe("unsubscribe links without a secret", () => {
+  it("are never signed with a fixed key in production", () => {
+    expect(tokenKeyFor(undefined, false)).toBeNull();
+    expect(tokenKeyFor(undefined, true)).toBe("local-only-data-key");
+    expect(tokenKeyFor("x".repeat(32), false)).toBe("x".repeat(32));
   });
 });

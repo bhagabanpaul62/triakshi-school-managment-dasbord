@@ -1,10 +1,11 @@
 // What every request service shares: the visibility rule, one place for the timeline, notifications and the conversation.
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
 import { allows, ConflictError, ForbiddenError, NotFoundError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { addMember, postMessage, postSystem, removeStored, storeFiles, type Message, type UploadedFile } from "@smw/feature-messages/core";
 import { threadMembers } from "@smw/feature-messages/schema";
+import { notifications } from "@smw/feature-notifications/schema";
 import { NotificationWriter, type NotificationRow } from "@smw/feature-notifications/writer";
 import { students } from "@smw/feature-students/schema";
 import { viewerOf, scope, type Viewer } from "./access";
@@ -29,11 +30,12 @@ export abstract class RequestBase extends SchoolService<Perm> {
     super.authorize(permission === "use" && allows(this.ctx, this.feature, "office") ? "office" : permission, mode);
   }
 
-  /** The request, only if this person may see it; anything else is "not found". */
-  protected async load(tx: Tx, id: string): Promise<{ v: Viewer; r: Req; cat: Category }> {
+  /** The request, only if this person may see it; anything else is "not found". A writer passes `lock`, so two people acting at once take turns and the second sees what the first did. */
+  protected async load(tx: Tx, id: string, lock = false): Promise<{ v: Viewer; r: Req; cat: Category }> {
     if (!z.uuid().safeParse(id).success) throw new NotFoundError("Request");
     const v = await viewerOf(tx, this.ctx);
-    const [r] = await tx.select().from(requests).where(and(eq(requests.id, id), scope(tx, v)));
+    const find = tx.select().from(requests).where(and(eq(requests.id, id), scope(tx, v)));
+    const [r] = lock ? await find.for("update", { of: requests }) : await find;
     if (!r) throw new NotFoundError("Request");
     const [cat] = await tx.select().from(requestCategories).where(eq(requestCategories.id, r.categoryId));
     return { v, r, cat: cat! };
@@ -73,6 +75,13 @@ export abstract class RequestBase extends SchoolService<Perm> {
     await NotificationWriter.insert(tx, this.ctx.schoolId, to.map((userId): NotificationRow => ({
       userId, topic: "request.work", title, body, href: hrefOf(r), subject: { type: "request", id: r.id }, groupKey: `request:${r.id}:work`, action: true, privateBody: true,
     })));
+  }
+
+  /** Somebody has the request now: staff who were told it needed them no longer have to act. The family's own action rows stay. */
+  protected async closeStaffWork(tx: Tx, r: Pick<Req, "id">) {
+    const open = await tx.selectDistinct({ userId: notifications.userId }).from(notifications)
+      .where(and(eq(notifications.subjectType, "request"), eq(notifications.subjectId, r.id), eq(notifications.topic, "request.work"), eq(notifications.action, true), isNull(notifications.doneAt)));
+    await Promise.all(open.map((o) => NotificationWriter.done(tx, this.ctx.schoolId, { type: "request", id: r.id }, o.userId)));
   }
 
   /** Tell the family. `action` when they have something to do (answer, say if it is solved). */

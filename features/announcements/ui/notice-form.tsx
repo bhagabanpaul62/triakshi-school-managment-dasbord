@@ -171,7 +171,6 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
       if (!inflight.current && (rev.current !== savedRev.current || wantFiles) && Date.now() >= nextTry.current) void flush();
     }, 3000);
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flush, readOnly, correcting, attachments]);
 
   // Leaving warns only when something is not saved.

@@ -15,7 +15,7 @@ const LABELS: Record<string, string> = {
 };
 /** Words that differ by module ("approve" means notices here, money requests in finance). Checked before LABELS. */
 const FEATURE_LABELS: Record<string, string> = {
-  "announcements:approve": "Approve notices", "announcements:manage": "Manage templates, categories and any notice",
+  "announcements:approve": "Approve notices", "announcements:manage": "Manage templates, categories and any notice", "announcements:whole": "Publish to the whole school without approval",
   "meetings:use": "Run parent-teacher meetings", "messages:manage": "Manage message settings and limits",
   "notifications:manage": "Change communication settings", "requests:office": "Work the office inbox", "requests:manage": "Manage request categories and reports",
 };

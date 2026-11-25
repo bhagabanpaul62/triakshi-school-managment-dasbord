@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { financialYear, nextSequence, type Tx } from "@smw/db";
-import { describeAudience } from "@smw/feature-notifications/audience";
+import { describeAudience, expandGroups } from "@smw/feature-notifications/audience";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { UNDO_SECONDS } from "./constants";
 import { isWebsiteOnly, type Notice } from "./content";
@@ -20,20 +20,28 @@ export async function labelOf(tx: Tx, c: Pick<Notice, "audience" | "website">): 
 }
 
 /**
- * Move a notice into "sending". A circular gets its number here, in the same transaction as the state, so a number is never lost
- * or given twice. A notice that was undone keeps the number it already has. `immediate` skips the undo wait (urgent, send now).
+ * Move a notice into "sending". Saved groups are written out as their rules now, so a group edited later changes nothing.
+ * The circular number is not given here: it is given when the undo window ends (see `giveNumber`), so an undone circular uses none.
  */
-export async function startSending(tx: Tx, schoolId: string, n: Notice, o: { immediate: boolean; now?: Date }): Promise<Notice> {
+export async function startSending(tx: Tx, n: Notice, o: { immediate: boolean; now?: Date }): Promise<Notice> {
   const now = o.now ?? new Date();
-  let number = n.number;
-  if (n.type === "circular" && !number) {
-    const settings = await loadCommSettings(tx);
-    const seq = await nextSequence(tx, schoolId, `circular:${await sessionName(tx)}`);
-    number = settings.circularFormat.replace("{session}", await sessionName(tx)).replace("{n}", String(seq).padStart(3, "0"));
-  }
   const [row] = await tx.update(announcements).set({
-    state: "sending", number, publishedAt: now, sendAt: o.immediate ? now : new Date(now.getTime() + UNDO_SECONDS * 1000),
-    audienceLabel: await labelOf(tx, n), verifyHash: number ? verifyHash(verifyToken(schoolId, n.id)) : n.verifyHash, updatedAt: now,
+    state: "sending", publishedAt: now, sendAt: o.immediate ? now : new Date(now.getTime() + UNDO_SECONDS * 1000),
+    audience: await expandGroups(tx, n.audience), audienceLabel: await labelOf(tx, n), updatedAt: now,
   }).where(eq(announcements.id, n.id)).returning();
+  return row!;
+}
+
+/**
+ * A circular's number, given in the same transaction that sends it out, so a number is never lost, skipped or given twice.
+ * Returns the notice as it stands after.
+ */
+export async function giveNumber(tx: Tx, schoolId: string, n: Notice): Promise<Notice> {
+  if (n.type !== "circular" || n.number) return n;
+  const session = await sessionName(tx);
+  const seq = await nextSequence(tx, schoolId, `circular:${session}`);
+  const number = (await loadCommSettings(tx)).circularFormat.replace("{session}", session).replace("{n}", String(seq).padStart(3, "0"));
+  const token = verifyToken(schoolId, n.id);
+  const [row] = await tx.update(announcements).set({ number, verifyHash: token ? verifyHash(token) : null }).where(eq(announcements.id, n.id)).returning();
   return row!;
 }

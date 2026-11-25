@@ -61,11 +61,12 @@ export class CategoryService extends SchoolService<Perm> {
     });
   }
 
-  /** Every category, with how many requests each has. */
+  /** Every category, with how many requests each has. A support session may set categories up but never counts requests: `used` is null for it. */
   async list() {
+    const support = !!this.ctx.supportStaffId;
     return this.seeded("manage", async (tx) => {
       const rows = await tx.select({ c: requestCategories, used: sql<number>`(select count(*)::int from requests r where r.category_id = ${requestCategories.id})` }).from(requestCategories).orderBy(asc(requestCategories.sort), asc(requestCategories.name));
-      return rows.map((r) => ({ ...r.c, used: Number(r.used) }));
+      return rows.map((r) => ({ ...r.c, used: support ? null : Number(r.used) }));
     });
   }
 

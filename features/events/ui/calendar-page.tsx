@@ -12,7 +12,7 @@ import { PILL, PRIMARY } from "./styles";
 export interface CalendarPageProps {
   items: CalendarItem[]; view: CalendarView; anchor: string; today: string;
   /** Layers this person may see, and the ones switched on. */
-  layers: LayerKey[]; chosen: LayerKey[];
+  layers: LayerKey[]; chosen: LayerKey[]; /** What shows when nobody picked: the address stays short while it holds. */ defaults: LayerKey[];
   canAdd: boolean; holidays: "add" | "view" | null;
   phone: { active: boolean; lastUsed: string | null };
 }
@@ -28,13 +28,14 @@ const step = (view: CalendarView, anchor: string, n: 1 | -1) =>
   view === "month" ? `${shiftMonth(anchor.slice(0, 7), n)}-01` : view === "year" ? `${Number(anchor.slice(0, 4)) + n}-01-01` : view === "week" ? addDays(weekStart(anchor), 7 * n) : addDays(anchor, AGENDA_DAYS * n);
 
 /** The calendar: agenda (the default, from today), month, week and year planner. The view, the day and the layers live in the address. */
-export function CalendarPage({ items, view, anchor, today, layers, chosen, canAdd, holidays, phone }: CalendarPageProps) {
+export function CalendarPage({ items, view, anchor, today, layers, chosen, defaults, canAdd, holidays, phone }: CalendarPageProps) {
+  const isDefault = (l: LayerKey[]) => l.length === defaults.length && defaults.every((x) => l.includes(x));
   const url: UrlFor = (o) => {
     const p = new URLSearchParams();
     const v = o.view ?? view, d = o.date ?? anchor;
     if (v !== "agenda") p.set("view", v);
     if (d !== today) p.set("date", d);
-    if (chosen.length !== layers.length) p.set("layers", chosen.join(","));
+    if (!isDefault(chosen)) p.set("layers", chosen.join(",") || "none");
     const q = p.toString();
     return q ? `/app/events?${q}` : "/app/events";
   };
@@ -43,7 +44,7 @@ export function CalendarPage({ items, view, anchor, today, layers, chosen, canAd
     const p = new URLSearchParams();
     if (view !== "agenda") p.set("view", view);
     if (anchor !== today) p.set("date", anchor);
-    if (next.length !== layers.length) p.set("layers", next.join(",") || "none");
+    if (!isDefault(next)) p.set("layers", next.join(",") || "none");
     return p.toString() ? `/app/events?${p}` : "/app/events";
   };
   const add = canAdd ? <Link href="/app/events/new" className={PRIMARY}><IconPlus className="h-4 w-4" aria-hidden />Add event</Link> : null;
@@ -66,17 +67,17 @@ export function CalendarPage({ items, view, anchor, today, layers, chosen, canAd
           <Link href={url({ date: today })} className={PILL}>Today</Link>
           <Link href={url({ date: step(view, anchor, 1) })} aria-label="Later" className={PILL}>Next</Link>
           <h2 className="px-2 text-lg font-medium text-[var(--ds-on-surface)]" aria-live="polite">{title(view, anchor)}</h2>
-          <nav aria-label="Calendar view" className="ml-auto flex gap-1 rounded-full bg-white/[0.05] p-1">
+          <nav aria-label="Calendar view" className="flex w-full gap-1 rounded-full bg-white/[0.05] p-1 sm:ml-auto sm:w-auto">
             {VIEWS.map((v) => (
               <Link key={v.key} href={url({ view: v.key, date: v.key === "agenda" ? today : anchor })} aria-current={v.key === view ? "page" : undefined}
-                className={cn("inline-flex min-h-9 items-center rounded-full px-4 text-sm", v.key === view ? "bg-[var(--ds-primary)] font-medium text-[var(--ds-on-primary)]" : "text-[var(--ds-on-surface-variant)] hover:bg-white/[0.08]")}>{v.label}</Link>
+                className={cn("inline-flex min-h-9 flex-1 items-center justify-center rounded-full px-4 text-sm sm:flex-none", v.key === view ? "bg-[var(--ds-primary)] font-medium text-[var(--ds-on-primary)]" : "text-[var(--ds-on-surface-variant)] hover:bg-white/[0.08]")}>{v.label}</Link>
             ))}
           </nav>
         </div>
         {layers.length > 1 ? (
-          <nav aria-label="Layers" className="flex flex-wrap gap-1.5">
+          <nav aria-label="Layers" className="-mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
             {layers.map((l) => (
-              <Link key={l} href={toggle(l)} aria-current={chosen.includes(l) ? "true" : undefined} className={cn("inline-flex min-h-9 items-center rounded-full px-3 text-xs font-medium", chosen.includes(l) ? "bg-white/[0.14] text-[var(--ds-on-surface)]" : "bg-white/[0.04] text-[var(--ds-on-surface-muted)] hover:bg-white/[0.08]")}>{LAYERS[l]}</Link>
+              <Link key={l} href={toggle(l)} aria-current={chosen.includes(l) ? "true" : undefined} className={cn("inline-flex min-h-9 shrink-0 items-center whitespace-nowrap rounded-full px-3 text-xs font-medium", chosen.includes(l) ? "bg-white/[0.14] text-[var(--ds-on-surface)]" : "bg-white/[0.04] text-[var(--ds-on-surface-muted)] hover:bg-white/[0.08]")}>{LAYERS[l]}</Link>
             ))}
           </nav>
         ) : null}

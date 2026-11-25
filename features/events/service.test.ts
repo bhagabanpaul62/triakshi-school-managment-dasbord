@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDb, withSchool } from "@smw/db";
-import { ConflictError, ForbiddenError, NotFoundError } from "@smw/feature-kit";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import notificationsFeature from "@smw/feature-notifications/feature";
-import { notifications } from "@smw/feature-notifications/schema";
+import { commGroups, notifications } from "@smw/feature-notifications/schema";
 import { attendanceHolidays } from "@smw/feature-attendance/schema";
 import { addDays, istDay, toInputValue, viewRange } from "./dates";
 import eventsFeature from "./feature";
@@ -103,6 +103,58 @@ describe("who sees what", () => {
     expect(keys).toEqual(["Ann", "Bob", "Nolo"]);
     expect((await family(fx.cyUser).upcoming(100)).map((e) => e.title)).toContain("For everyone");
     expect(everyone.audienceLabel.length).toBeGreaterThan(0);
+  });
+});
+
+describe("saved groups", () => {
+  const group = async (name: string, sectionId: string) => (await withSchool(a.id, (tx) => tx.insert(commGroups).values({ schoolId: a.id, name, audience: { include: [{ type: "section", id: sectionId }], exclude: [] }, shared: true, createdBy: a.users.admin }).returning()))[0]!;
+  const retarget = (id: string, sectionId: string) => withSchool(a.id, (tx) => tx.update(commGroups).set({ audience: { include: [{ type: "section", id: sectionId }], exclude: [] } }).where(eq(commGroups.id, id)));
+
+  it("a group is copied into the event when it is added, edited or published: editing the group later changes nobody", async () => {
+    const g = await group("Own section", fx.own);
+    const viaGroup = json([{ type: "group", id: g.id }]);
+    const e = await admin().create(make({ title: "Via group", audience: viaGroup }));
+    expect(JSON.stringify(e.audience)).not.toContain("group");
+    expect((await people(e.id)).map((p) => p.name).sort()).toEqual(["Ann", "Bob", "Nolo"]);
+    await retarget(g.id, fx.other);
+    await withSchool(a.id, (tx) => lateJoiners(tx, a.id)); // the nightly job reads the stored audience, not the group
+    expect((await people(e.id)).map((p) => p.name).sort()).toEqual(["Ann", "Bob", "Nolo"]);
+    // saving the event again with the group takes the group as it is now
+    const again = await admin().update(e.id, make({ title: "Via group", audience: viaGroup }));
+    expect(again.audience.include).toEqual([{ type: "section", id: fx.other }]);
+    expect((await people(e.id)).map((p) => p.name)).toEqual(["Cy"]);
+    // a draft keeps what it was given, and publishing does not re-read the group
+    const d = await admin().create(make({ title: "Draft via group", audience: json([{ type: "group", id: g.id }]), draft: "true" }));
+    await retarget(g.id, fx.own);
+    await admin().publish(d.id);
+    expect((await people(d.id)).map((p) => p.name)).toEqual(["Cy"]);
+  });
+});
+
+describe("files", () => {
+  const bytes = (...xs: (number | string)[]) => Uint8Array.from(xs.flatMap((x) => (typeof x === "number" ? [x] : [...x].map((c) => c.charCodeAt(0)))));
+  const file = (name: string, type: string, body: Uint8Array) => ({ name, type, size: body.length, bytes: body });
+
+  it("the bytes decide what a file is: a page or a picture dressed as a PDF is refused", async () => {
+    const e = await admin().create(make({ audience: OWN() }));
+    await expect(admin().attach(e.id, [file("fees.pdf", "application/pdf", bytes("<html><script>alert(1)</script></html>"))])).rejects.toBeInstanceOf(ValidationError);
+    await expect(admin().attach(e.id, [file("fees.pdf", "application/pdf", bytes(0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10))])).rejects.toBeInstanceOf(ValidationError);
+    expect(await admin().files(e.id)).toHaveLength(0);
+    expect(await admin().attach(e.id, [file("fees.pdf", "application/pdf", bytes("%PDF-1.7\n%done\n"))])).toBe(1);
+  });
+
+  it("is served with its stored type and a disposition: PDFs open, a sheet downloads; only people who may see the event get it", async () => {
+    const e = await admin().create(make({ audience: OWN() }));
+    await admin().attach(e.id, [file("Fees list.pdf", "application/pdf", bytes("%PDF-1.7\n")), file("names.csv", "text/csv", bytes("name,class\nAnn,5A\n"))]);
+    const all = await admin().files(e.id);
+    const [pdf, csv] = [all.find((f) => f.fileName.endsWith(".pdf")), all.find((f) => f.fileName.endsWith(".csv"))];
+    const got = await family().fileContent(pdf!.id);
+    expect(got).toMatchObject({ type: "application/pdf" });
+    expect(got.disposition).toMatch(/^inline; filename="Fees list.pdf"/);
+    expect(Buffer.from(got.bytes).toString()).toContain("%PDF");
+    expect((await family().fileContent(csv!.id)).disposition).toMatch(/^attachment; filename="names.csv"/);
+    await expect(family(fx.cyUser).fileContent(pdf!.id)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(new EventService({ ...a.as.admin, supportStaffId: "00000000-0000-4000-8000-000000000009" }).fileContent(pdf!.id)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { IconChevronLeft } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronLeft } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { TONE, type Tone } from "@smw/ui/tone";
 import type { MeetingState } from "../constants";
@@ -12,6 +12,16 @@ const BUTTON = "inline-flex min-h-10 items-center justify-center gap-2 rounded-f
 export function LinkButton({ href, children, primary = false, download = false }: { href: string; children: ReactNode; primary?: boolean; download?: boolean }) {
   const cls = `${BUTTON} ${primary ? "bg-[var(--ds-primary)] text-[var(--ds-on-primary)]" : "bg-white/[0.07] text-[var(--ds-on-surface)] hover:bg-white/[0.12]"}`;
   return download || href.startsWith("/api/") ? <a href={href} className={cls} {...(download ? { download: true } : { target: "_blank", rel: "noreferrer" })}>{children}</a> : <Link href={href} className={cls}>{children}</Link>;
+}
+
+/** The quiet actions of a page header, folded behind one button so the header has a single main step. */
+export function MoreMenu({ children }: { children: ReactNode }) {
+  return (
+    <details className="relative">
+      <summary className={`${BUTTON} cursor-pointer list-none bg-white/[0.07] text-[var(--ds-on-surface)] hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden`}>More<IconChevronDown className="h-4 w-4" aria-hidden /></summary>
+      <div className="absolute right-0 z-20 mt-2 flex min-w-56 flex-col items-stretch gap-1 rounded-2xl bg-[var(--ds-surface-container-high)] p-1.5 shadow-lg [&_a]:justify-start [&_button]:justify-start">{children}</div>
+    </details>
+  );
 }
 
 export function BackLink({ href, children }: { href: string; children: ReactNode }) {

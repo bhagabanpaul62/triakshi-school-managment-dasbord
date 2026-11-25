@@ -17,6 +17,9 @@ type Person = typeof eventPeople.$inferSelect;
 
 export interface RsvpCounts { invited: number; going: number; waiting: number; maybe: number; no: number; noReply: number; seats: number; guests: number; checkedIn: number }
 
+/** People who still count: a staff member, or a student who is still at the school. A left student holds no seat. */
+const present = sql`(student_id is null or exists (select 1 from students s where s.id = event_people.student_id and s.status = 'active'))`;
+
 export async function rsvpCounts(tx: Tx, eventId: string): Promise<RsvpCounts> {
   const [r] = [...(await tx.execute(sql`select count(*)::int as invited,
     count(*) filter (where answer = 'yes' and waiting_since is null)::int as going,
@@ -24,14 +27,14 @@ export async function rsvpCounts(tx: Tx, eventId: string): Promise<RsvpCounts> {
     count(*) filter (where answer = 'maybe')::int as maybe, count(*) filter (where answer = 'no')::int as no, count(*) filter (where answer is null)::int as "noReply",
     coalesce(sum(1 + guests) filter (where answer = 'yes' and waiting_since is null), 0)::int as seats,
     coalesce(sum(guests) filter (where answer in ('yes', 'maybe')), 0)::int as guests, count(*) filter (where checked_in_at is not null)::int as "checkedIn"
-    from event_people where event_id = ${eventId}::uuid`))] as unknown as RsvpCounts[];
+    from event_people where event_id = ${eventId}::uuid and ${present}`))] as unknown as RsvpCounts[];
   return r!;
 }
 
 /** Waiting people move up, oldest first, as long as their whole party fits. They are told. */
 export async function promoteWaiting(tx: Tx, schoolId: string, e: Pick<EventRow, "id" | "title" | "rsvp" | "startsAt" | "endsAt" | "allDay" | "location">, actorId: string): Promise<number> {
   if (!e.rsvp.on) return 0;
-  const waiting = await tx.select().from(eventPeople).where(and(eq(eventPeople.eventId, e.id), eq(eventPeople.answer, "yes"), isNotNull(eventPeople.waitingSince))).orderBy(asc(eventPeople.waitingSince), asc(eventPeople.id));
+  const waiting = await tx.select().from(eventPeople).where(and(eq(eventPeople.eventId, e.id), eq(eventPeople.answer, "yes"), isNotNull(eventPeople.waitingSince), present)).orderBy(asc(eventPeople.waitingSince), asc(eventPeople.id));
   if (!waiting.length) return 0;
   let free = e.rsvp.capacity === undefined ? Infinity : e.rsvp.capacity - (await rsvpCounts(tx, e.id)).seats;
   const moved = waiting.filter((w) => { const need = 1 + w.guests; if (need > free) return false; free -= need; return true; });
@@ -74,6 +77,7 @@ export class RsvpService extends SchoolService<Perm> {
     const spec: RsvpSpec = e.rsvp;
     if (!spec.on) throw new ConflictError("This event does not ask for answers.");
     if (e.state === "cancelled") throw new ConflictError("This event is cancelled.");
+    if (p.studentId && !(await tx.execute(sql`select 1 from students where id = ${p.studentId}::uuid and status = 'active'`)).length) throw new ConflictError(`${p.name} is no longer at the school, so this cannot be answered.`);
     if ((e.endsAt ?? e.startsAt) < new Date()) throw new ConflictError("This event is over.");
     const guests = input.answer === "no" ? 0 : input.guests;
     if (guests > (spec.guests ?? 0)) throw new ValidationError({ guests: spec.guests ? `You can bring up to ${spec.guests} guests.` : "Guests are not invited to this event." });

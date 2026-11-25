@@ -12,7 +12,7 @@ function appUrl(href) {
 }
 
 self.addEventListener("push", (event) => {
-  let d = {};
+  let d;
   try { d = event.data ? event.data.json() : {}; } catch (e) { d = {}; }
   const tag = typeof d.tag === "string" && d.tag ? d.tag : undefined;
   event.waitUntil(self.registration.showNotification(typeof d.title === "string" && d.title ? d.title : "New notification", {

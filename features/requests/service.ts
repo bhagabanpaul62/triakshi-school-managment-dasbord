@@ -6,7 +6,7 @@ import { sections, sectionTeachers } from "@smw/feature-academics/schema";
 import { createThread, type UploadedFile } from "@smw/feature-messages/core";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { students } from "@smw/feature-students/schema";
-import { viewerOf } from "./access";
+import { taughtSections, viewerOf } from "./access";
 import { ensureCategories } from "./categories";
 import { dueFor } from "./clock";
 import type { RequestField } from "./constants";
@@ -34,8 +34,7 @@ function cleanValues(fields: RequestField[], given: Record<string, string>): Rec
 }
 
 /** The students this teacher teaches: their own sections, as class teacher or subject teacher. */
-const taughtBy = (tx: Tx, userId: string): SQL => inArray(students.sectionId, tx.select({ id: sections.id }).from(sections)
-  .where(or(eq(sections.classTeacherId, userId), inArray(sections.id, tx.select({ id: sectionTeachers.sectionId }).from(sectionTeachers).where(eq(sectionTeachers.teacherId, userId))))));
+const taughtBy = (tx: Tx, userId: string): SQL => inArray(students.sectionId, taughtSections(tx, userId));
 
 export class RequestService extends RequestWorkflow {
   /** The school's request number: "REQ/2026-27/0007" by the school's format, gap-free per session. */

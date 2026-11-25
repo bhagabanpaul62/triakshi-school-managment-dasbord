@@ -37,8 +37,16 @@ export const awayInput = z.object({
   until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date").nullable(),
   text: z.string().trim().max(200, "Keep it under 200 characters").optional(),
 });
+/** Only the browsers' own push services: an endpoint is a URL the server will call, so it must never point anywhere else. */
+const PUSH_HOSTS = ["fcm.googleapis.com", "updates.push.services.mozilla.com", "push.services.mozilla.com", "push.apple.com", "notify.windows.com"];
+export const pushEndpointOk = (u: string) => {
+  try {
+    const url = new URL(u);
+    return url.protocol === "https:" && !url.username && !url.password && PUSH_HOSTS.some((h) => url.hostname === h || url.hostname.endsWith(`.${h}`));
+  } catch { return false; }
+};
 export const subscribeInput = z.object({
-  endpoint: z.url().max(1000).refine((u) => u.startsWith("https://"), "Push needs a secure address"),
+  endpoint: z.url().max(1000).refine(pushEndpointOk, "This is not a browser push address"),
   p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100), device: z.string().trim().max(80).optional(),
 });
 

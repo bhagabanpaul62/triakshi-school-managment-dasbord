@@ -127,6 +127,24 @@ describe("the owner's side", () => {
     expect((await rsvp(s.users.admin, "admin").csv(e.id)).text).toContain("'=HYPERLINK(1)");
   });
 
+  it("a family whose child has left cannot answer, nor can the office answer for them, and their seat is freed", async () => {
+    const e = await make({ capacity: 2 });
+    const [first, second, third] = [logins[50]!, logins[51]!, logins[52]!];
+    expect(await rsvp(first).answer(e.id, { answer: "yes" })).toBe("going");
+    expect(await rsvp(second).answer(e.id, { answer: "yes" })).toBe("going");
+    expect(await rsvp(third).answer(e.id, { answer: "yes" })).toBe("waiting");
+    await withSchool(s.id, (tx) => tx.update(students).set({ status: "left" }).where(eq(students.userId, first)));
+    await expect(rsvp(first).answer(e.id, { answer: "no" })).rejects.toThrow(/no longer at the school/);
+    const key = (await rows(e.id)).find((p) => p.userId === first)!.personKey;
+    await expect(rsvp(s.users.admin, "admin").answerFor(e.id, key, { answer: "yes" })).rejects.toBeInstanceOf(ConflictError);
+    // the leaver's seat no longer counts: the family that waited is promoted on the next change
+    const counts = (await rsvp(s.users.admin, "admin").list(e.id)).counts;
+    expect(counts).toMatchObject({ seats: 1, going: 1, waiting: 1 });
+    await admin().update(e.id, { title: "Annual day", startsAt: when(), audience: JSON.stringify({ include: [{ type: "families" }], exclude: [] }), rsvpOn: "true", capacity: "2" });
+    expect((await stat(e.id)).waiting).toHaveLength(0);
+    await withSchool(s.id, (tx) => tx.update(students).set({ status: "active" }).where(eq(students.userId, first)));
+  });
+
   it("nothing crosses schools", async () => {
     const e = await make({});
     await expect(new RsvpService(asUser(other, other.users.admin, "admin")).list(e.id)).rejects.toBeInstanceOf(NotFoundError);

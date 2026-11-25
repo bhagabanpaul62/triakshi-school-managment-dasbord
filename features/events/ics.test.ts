@@ -15,7 +15,7 @@ describe("iCalendar text", () => {
       "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Triakshi//School calendar//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:School", "X-WR-TIMEZONE:Asia/Kolkata",
       "REFRESH-INTERVAL;VALUE=DURATION:PT12H", "X-PUBLISHED-TTL:PT12H",
       "BEGIN:VEVENT", "UID:e1@school.test", "DTSTAMP:20261120T060000Z", "DTSTART:20261121T033000Z", "DTEND:20261121T073000Z", "SUMMARY:Parents evening",
-      "DESCRIPTION:Bring the card\;\\nsee you", "LOCATION:Main hall\\, Block A", "URL:https://s.test/app/events/e1", "SEQUENCE:2", "STATUS:CONFIRMED", "TRANSP:OPAQUE", "END:VEVENT",
+      "DESCRIPTION:Bring the card;\\nsee you", "LOCATION:Main hall\\, Block A", "URL:https://s.test/app/events/e1", "SEQUENCE:2", "STATUS:CONFIRMED", "TRANSP:OPAQUE", "END:VEVENT",
       "END:VCALENDAR", "",
     ].join("\r\n"));
   });
@@ -58,7 +58,7 @@ describe("iCalendar text", () => {
   });
 
   it("text is escaped: backslash, semicolon, comma and line breaks", () => {
-    expect(escapeText("a\\b;c,d\r\ne\nf")).toBe("a\\\\b\;c\\,d\\ne\\nf");
+    expect(escapeText("a\\b;c,d\r\ne\nf")).toBe("a\\\\b;c\\,d\\ne\\nf");
   });
 
   it("timestamps are plain UTC", () => expect(icsStamp(new Date("2026-01-02T03:04:05.678Z"))).toBe("20260102T030405Z"));

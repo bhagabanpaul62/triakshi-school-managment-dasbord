@@ -8,7 +8,7 @@ import { REMOVE_MINUTES, PAGE_SIZE, type ReportCategory, type ReportState, type 
 import { Starters, type Contact, type StudentContact } from "./contact-rules";
 import {
   activeRestriction, addMember, canOpenThread, createThread, isFamily, istToday, loadThread, markThreadRead, noSupport, postMessage, postSystem, removeStored, requireMember,
-  signedLink, openThread, storeFiles, unreadByThread, type Message, type StoredFile, type ThreadData, type UploadedFile,
+  reportedBy, readStored, signedLink, openThread, storeFiles, unreadByThread, type Message, type StoredBytes, type StoredFile, type ThreadData, type UploadedFile,
 } from "./core";
 import { conversationPdf } from "./conversation-pdf";
 import messagesFeature from "./feature";
@@ -104,12 +104,13 @@ export class MessageService extends SchoolService<Perm> {
     const ids = page.map((p) => p.t.id);
     if (!ids.length) return [];
     const studentIds = [...new Set(page.map((p) => p.t.studentId).filter((s): s is string => !!s))];
-    const [people, last, kids] = await Promise.all([
+    const [people, last, kids, reported] = await Promise.all([
       tx.select({ threadId: threadMembers.threadId, id: threadMembers.userId, name: threadMembers.name, role: threadMembers.role }).from(threadMembers)
         .where(and(inArray(threadMembers.threadId, ids), eq(threadMembers.state, "active"), ne(threadMembers.userId, this.ctx.userId))).orderBy(asc(threadMembers.name)),
       tx.selectDistinctOn([messages.threadId], { threadId: messages.threadId, body: messages.body, senderId: messages.senderId, senderName: messages.senderName, removed: messages.removedAt, kind: messages.kind })
         .from(messages).where(and(inArray(messages.threadId, ids), this.family ? eq(messages.internal, false) : undefined)).orderBy(messages.threadId, desc(messages.createdAt)),
       studentIds.length ? tx.select({ id: students.id, name: students.name }).from(students).where(inArray(students.id, studentIds)) : Promise.resolve([] as { id: string; name: string }[]),
+      reportedBy(tx, this.ctx.userId, ids),
     ]);
     return page.map(({ t, m }) => {
       const l = last.find((x) => x.threadId === t.id);
@@ -117,7 +118,7 @@ export class MessageService extends SchoolService<Perm> {
         id: t.id, subject: t.subject, kind: t.kind, state: t.state, studentName: kids.find((k) => k.id === t.studentId)?.name ?? null, lastMessageAt: t.lastMessageAt,
         people: people.filter((p) => p.threadId === t.id).map(({ id, name, role }) => ({ id, name, role })), unread: unread.get(t.id) ?? 0,
         preview: l ? (l.removed ? "Message removed" : l.body) : "", lastSenderName: l ? (l.kind === "system" ? null : l.senderId === this.ctx.userId ? "You" : l.senderName) : null,
-        pinned: m.pinned, muted: m.muted, archived: m.archived, held: !!t.heldAt,
+        pinned: m.pinned, muted: m.muted, archived: m.archived, held: !!t.heldAt && reported.has(t.id),
       };
     });
   }
@@ -219,7 +220,7 @@ export class MessageService extends SchoolService<Perm> {
       const rules = new Starters(this.ctx, settings);
       let kind: "student" | "staff" = "staff";
       let studentId: string | undefined;
-      let members: { userId: string }[] = [];
+      let members: { userId: string }[];
       if (this.family) {
         if (!settings.familiesMayStart) throw new ForbiddenError("The school has turned off new conversations from families. Please contact the school office.");
         const kids = await rules.children(tx);
@@ -244,7 +245,7 @@ export class MessageService extends SchoolService<Perm> {
       try { await postMessage(tx, this.ctx, { threadId: thread.id, body: data.body, clientId: data.clientId, files: stored }); }
       catch (e) { await removeStored(stored.map((s) => s.fileKey)); throw e; }
       return { id: thread.id };
-    }, (r) => ({ action: "start", entity: "Conversation", entityId: r.id, summary: `Started conversation "${data.subject}"` }));
+    }, (r) => ({ action: "start", entity: "Conversation", entityId: r.id, summary: "Started a conversation" }));
   }
 
   private async allowed(tx: Tx, rules: Starters, ids: string[], studentId?: string) {
@@ -313,7 +314,8 @@ export class MessageService extends SchoolService<Perm> {
       await requireMember(tx, this.ctx, m.m.threadId);
       if (m.m.senderId !== this.ctx.userId || m.m.kind !== "text") throw new ForbiddenError("You can remove only your own messages.");
       if (m.m.removedAt) return;
-      if (m.held) throw new ForbiddenError("This conversation is under review, so nothing in it can be removed.");
+      // Only the person who reported is told why; anyone else, the person named included, learns nothing about a report.
+      if (m.held) throw new ForbiddenError((await reportedBy(tx, this.ctx.userId, [m.m.threadId])).size ? "This conversation is under review, so nothing in it can be removed." : "This message cannot be removed now.");
       if (Date.now() - m.m.createdAt.getTime() > REMOVE_MINUTES * 60_000) throw new ForbiddenError(`A message can be removed within ${REMOVE_MINUTES} minutes of sending it.`);
       await tx.update(messages).set({ removedAt: new Date(), removedBy: this.ctx.userId }).where(eq(messages.id, messageId));
     });
@@ -329,6 +331,7 @@ export class MessageService extends SchoolService<Perm> {
   async report(input: unknown): Promise<{ id: string; told: number }> {
     this.authorize("use", "write");
     const data = this.parse(reportInput, input);
+    let named: string[] = [];
     return this.write("use", async (tx) => {
       const { thread, member } = await requireMember(tx, this.ctx, data.threadId);
       let about: string[] = [];
@@ -345,7 +348,7 @@ export class MessageService extends SchoolService<Perm> {
         if (!p) throw new ValidationError({ aboutUserId: "Choose someone in this conversation" });
         about.push(data.aboutUserId);
       }
-      about = [...new Set(about.filter((a) => a !== this.ctx.userId))];
+      about = named = [...new Set(about.filter((a) => a !== this.ctx.userId))];
       const [row] = await tx.insert(messageReports).values({
         schoolId: this.ctx.schoolId, threadId: thread.id, messageId: data.messageId ?? null, category: data.category, note: data.note,
         reportedBy: this.ctx.userId, reporterName: member.name, aboutUserIds: about,
@@ -357,7 +360,7 @@ export class MessageService extends SchoolService<Perm> {
         subject: { type: "report", id: row!.id }, action: true, privateBody: true,
       })));
       return { id: row!.id, told: leads.length };
-    }, (r) => ({ action: "report", entity: "Conversation", entityId: data.threadId, summary: `Reported a concern (${r.told} lead${r.told === 1 ? "" : "s"} told)` }));
+    }, (r) => ({ action: "report", entity: "Conversation", entityId: data.threadId, summary: `Reported a concern (${r.told} lead${r.told === 1 ? "" : "s"} told)`, meta: { aboutUserIds: named } }));
   }
 
   /** Concerns I reported, with where each stands. */
@@ -398,24 +401,33 @@ export class MessageService extends SchoolService<Perm> {
 
   // ---------- files and export ----------
 
-  /** A 60 second link to one file, only for a member (or a reviewer with an open, logged review). Anyone else, and any other school, gets "not found". */
+  /** The file, only for a member (or a reviewer with an open, logged review). Anyone else, and any other school, gets "not found". */
+  private async openable(tx: Tx, fileId: string): Promise<{ key: string; name: string; type: string }> {
+    const [f] = await tx.select({ f: messageFiles, threadId: messages.threadId, internal: messages.internal, removed: messages.removedAt }).from(messageFiles)
+      .innerJoin(messages, eq(messages.id, messageFiles.messageId)).where(eq(messageFiles.id, fileId));
+    if (!f || !(await canOpenThread(tx, this.ctx, f.threadId))) throw new NotFoundError("File");
+    let member = true;
+    try { await requireMember(tx, this.ctx, f.threadId); } catch { member = false; }
+    if (member && ((this.family && f.internal) || f.removed)) throw new NotFoundError("File");
+    return { key: f.f.fileKey, name: f.f.fileName, type: f.f.contentType };
+  }
+
+  /** A 60 second link to one file, for callers that hand the link on (the mobile API). */
   async fileLink(fileId: string): Promise<{ url: string; name: string }> {
-    return this.read("use", async (tx) => {
-      const [f] = await tx.select({ f: messageFiles, threadId: messages.threadId, internal: messages.internal, removed: messages.removedAt }).from(messageFiles)
-        .innerJoin(messages, eq(messages.id, messageFiles.messageId)).where(eq(messageFiles.id, fileId));
-      if (!f || !(await canOpenThread(tx, this.ctx, f.threadId))) throw new NotFoundError("File");
-      let member = true;
-      try { await requireMember(tx, this.ctx, f.threadId); } catch { member = false; }
-      if (member && ((this.family && f.internal) || f.removed)) throw new NotFoundError("File");
-      return { url: await signedLink(f.f.fileKey, LINK_SECONDS), name: f.f.fileName };
-    });
+    return this.read("use", async (tx) => { const f = await this.openable(tx, fileId); return { url: await signedLink(f.key, LINK_SECONDS), name: f.name }; });
+  }
+
+  /** The file itself, for the module's own route, which sets the download headers. */
+  async file(fileId: string): Promise<StoredBytes> {
+    return this.read("use", async (tx) => { const f = await this.openable(tx, fileId); return { bytes: await readStored(f.key), name: f.name, type: f.type }; });
   }
 
   /** My own copy of a conversation I am in. */
   async exportPdf(threadId: string): Promise<{ name: string; bytes: Uint8Array }> {
     return this.read("use", async (tx) => {
       const data = await loadThread(tx, threadId, this.ctx, { limit: 5000 });
-      if (data.thread.held && (await isNamed(tx, threadId, this.ctx.userId))) throw new ForbiddenError("This conversation is under review, so it cannot be exported.");
+      const [raw] = await tx.select({ heldAt: messageThreads.heldAt }).from(messageThreads).where(eq(messageThreads.id, data.thread.id));
+      if (raw?.heldAt && (await isNamed(tx, threadId, this.ctx.userId))) throw new ForbiddenError("This conversation cannot be exported now.");
       const [school] = [...(await tx.execute(sql`select name from schools limit 1`))] as { name: string }[];
       return { name: `conversation-${threadId.slice(0, 8)}.pdf`, bytes: await conversationPdf(data, { school: school?.name ?? "School", exportedBy: this.ctx.name }) };
     });

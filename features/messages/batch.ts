@@ -5,7 +5,9 @@ import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx
 import { audienceField, type Audience } from "@smw/feature-notifications/audience-rules";
 import { audienceOptions, audiencePreview, describeAudience, resolveAudience, type AudienceOptions, type AudiencePreview } from "@smw/feature-notifications/audience";
 import { AudiencePolicy } from "@smw/feature-notifications/policy";
+import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { MAX_FAMILIES } from "./constants";
+import { Starters } from "./contact-rules";
 import { createThread, isFamily, noSupport, postMessage } from "./core";
 import messagesFeature from "./feature";
 import { batchInput } from "./inputs";
@@ -33,21 +35,37 @@ export class BatchService extends SchoolService<Perm> {
   /** What the picker offers this person (their sections first). */
   async options(): Promise<AudienceOptions> { return this.read("use", (tx) => audienceOptions(tx, this.ctx)); }
 
-  /** Reach is checked once, in AudiencePolicy, like notices and events. Messages have no approval step, so "needs approval" is a plain refusal. */
-  private async reach(tx: Tx, audience: Audience) {
-    if (this.can("all") && this.ctx.role === "teacher") return;
-    if ((await AudiencePolicy.reach(tx, this.ctx, audience, { feature: messagesFeature, permission: "use" })) === "approval") {
+  /**
+   * Who may send to this list. The office (messages:all or manage) may write to any family. A teacher may write only to families they could start a
+   * conversation with one by one: the audience must be their own (AudiencePolicy, messages have no approval step) and every student it resolves
+   * to must pass the same Starters rule as `start`, so a rule such as "class teacher only" cannot be dodged by picking a subject or a saved group.
+   */
+  private async resolve(tx: Tx, audience: Audience) {
+    const office = this.can("all") || this.can("manage");
+    if (!office && this.ctx.role !== "teacher") throw new ForbiddenError();
+    if (!office && (await AudiencePolicy.reach(tx, this.ctx, audience, { feature: messagesFeature, permission: "use" })) === "approval") {
       throw new ForbiddenError("You can message the families of your own classes and subjects. Ask the school office to send this one.");
     }
+    const reached = await resolveAudience(tx, audience);
+    const people = new Map<string, { userId: string | null; name: string }>();
+    for (const r of reached) if (r.studentId && !people.has(r.studentId)) people.set(r.studentId, { userId: r.userId, name: r.name });
+    if (!office) {
+      const rules = new Starters(this.ctx, await loadCommSettings(tx));
+      if ((await rules.outside(tx, [...people.keys()])).length) {
+        throw new ForbiddenError(this.ctx.role === "teacher" && (await loadCommSettings(tx)).teacherMessages === "class_teacher"
+          ? "You can message the families of the class you are class teacher of. Ask the school office to send this one."
+          : "You can message the families of students you teach. Ask the school office to send this one.");
+      }
+    }
+    return people;
   }
 
   /** How many families would get their own conversation, and who cannot be reached. */
   async preview(input: unknown): Promise<BatchPreview> {
     const audience = this.parse(audienceField, input);
     return this.read("use", async (tx) => {
-      await this.reach(tx, audience);
+      const people = [...(await this.resolve(tx, audience)).values()];
       const p = await audiencePreview(tx, audience);
-      const people = (await resolveAudience(tx, audience)).filter((r) => r.studentId);
       return { families: people.filter((r) => r.userId).length, withoutLogin: people.filter((r) => !r.userId).length, text: await describeAudience(tx, audience), sample: p.sample, unreachable: p.unreachable };
     });
   }
@@ -62,9 +80,7 @@ export class BatchService extends SchoolService<Perm> {
         from messages m join message_threads t on t.id = m.thread_id where m.sender_id = ${this.ctx.userId}::uuid and m.client_id like ${`${data.clientId}:%`} and t.batch_id is not null limit 1`))] as { id: string; n: number }[];
       if (dup) return { batchId: dup.id, threads: dup.n, withoutLogin: 0 };
 
-      await this.reach(tx, data.audience);
-      const people = new Map<string, { userId: string | null; name: string }>();
-      for (const r of await resolveAudience(tx, data.audience)) if (r.studentId && !people.has(r.studentId)) people.set(r.studentId, { userId: r.userId, name: r.name });
+      const people = await this.resolve(tx, data.audience);
       const families = [...people].filter(([, p]) => p.userId);
       if (!families.length) throw new ValidationError({ audience: "No family in this list has a login, so none can receive a message." });
       if (families.length > MAX_FAMILIES) throw new ValidationError({ audience: `That is ${families.length} families. Send to at most ${MAX_FAMILIES} at a time.` });
@@ -75,7 +91,7 @@ export class BatchService extends SchoolService<Perm> {
         await postMessage(tx, this.ctx, { threadId: thread.id, body: data.body, clientId: `${data.clientId}:${studentId}`, skipLimit: true });
       }
       return { batchId: batch!.id, threads: families.length, withoutLogin: people.size - families.length };
-    }, (r) => ({ action: "send", entity: "Message families", entityId: r.batchId, summary: `Sent "${data.subject}" to ${r.threads} families` }));
+    }, (r) => ({ action: "send", entity: "Message families", entityId: r.batchId, summary: `Sent a message to ${r.threads} families` }));
   }
 
   private mayOpen(createdBy: string | null) { return createdBy === this.ctx.userId || this.can("all") || this.can("manage"); }

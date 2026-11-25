@@ -26,8 +26,9 @@ const cell = (v: string | number | null | undefined) => {
   const s = v == null ? "" : String(v);
   return `"${(/^[=+\-@\t\r]/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`;
 };
-const sentFor = (noticeId: string) => sql`exists (select 1 from notifications n join comm_deliveries d on d.notification_id = n.id
-  where n.subject_type = 'notice' and n.subject_id = ${noticeId} and n.user_id = ${announcementRecipients.userId} and d.state = 'sent')`;
+/** People we know a push or email reached. One uncorrelated set, built once and hashed, so the report stays linear in the recipients. */
+const sentTo = (noticeId: string) => sql`coalesce(${announcementRecipients.userId} in (select n.user_id from notifications n join comm_deliveries d on d.notification_id = n.id
+  where n.subject_type = 'notice' and n.subject_id = ${noticeId} and d.state = 'sent'), false)`;
 const NO_ONE = "00000000-0000-0000-0000-000000000000";
 const SENT_STATES = ["sending", "published", "expired", "withdrawn"];
 
@@ -41,11 +42,13 @@ export class ReportService extends NoticeBase {
     this.staffOnly();
     const n = await this.find(tx, id);
     this.own(n);
+    // "Reached" joins 12,000 notifications to their deliveries once; right after a send the planner has no statistics yet and picks a nested loop, which is quadratic.
+    await tx.execute(sql`set local enable_nestloop = off`);
     if (!SENT_STATES.includes(n.state)) throw new ConflictError("This notice has not been sent yet, so there is no report.");
     return n;
   }
 
-  private reached(noticeId: string) { return sql<boolean>`(${announcementRecipients.seenAt} is not null or ${sentFor(noticeId)})`; }
+  private reached(noticeId: string) { return sql<boolean>`(${announcementRecipients.seenAt} is not null or ${sentTo(noticeId)})`; }
   private live(noticeId: string) { return and(eq(announcementRecipients.announcementId, noticeId), isNull(announcementRecipients.removedAt)); }
 
   async funnel(id: string): Promise<Funnel> {
@@ -222,6 +225,6 @@ export async function remindUnanswered(tx: Tx, schoolId: string, n: Notice, now 
   const due = await tx.update(announcementRecipients).set({ nudgedAt: now }).where(and(unanswered, or(isNull(announcementRecipients.nudgedAt), lt(announcementRecipients.nudgedAt, gap))))
     .returning({ userId: announcementRecipients.userId });
   const [again] = await tx.select({ n: count() }).from(announcementRecipients).where(and(unanswered, gte(announcementRecipients.nudgedAt, gap)));
-  const sent = await tell(tx, schoolId, n, due.flatMap((d) => (d.userId ? [d.userId] : [])), "remind");
+  const sent = await tell(tx, schoolId, n, due.flatMap((d) => (d.userId ? [d.userId] : [])), n.dueAt && n.dueAt <= now ? "late" : "remind", { now });
   return { sent, alreadyToday: Math.max(0, Number(again?.n ?? 0) - due.length) };
 }

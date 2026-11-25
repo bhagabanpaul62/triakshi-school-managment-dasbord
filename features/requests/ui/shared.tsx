@@ -3,6 +3,7 @@ import Link from "next/link";
 import { allows, type Ctx } from "@smw/feature-kit";
 import { buttonVariants } from "@smw/ui/ui/button";
 import { cn } from "@smw/ui/utils";
+import { ageWords } from "../clock";
 import type { RequestState } from "../constants";
 import requestsFeature from "../feature";
 
@@ -13,12 +14,11 @@ export const can = (ctx: Ctx, perm: keyof typeof requestsFeature.permissions) =>
 export const canWriteFor = (ctx: Ctx) => can(ctx, "office") || ctx.role === "teacher";
 export const isFamilyRole = (ctx: Ctx) => ctx.role === "student" || ctx.role === "parent";
 
-/** The way between the request screens: only the ones this person may open. */
+/** The way between the request screens: only the ones this person may open. The "New request" and "Ask the school" buttons are on the page itself, so they are not tabs. */
 export function SectionNav({ ctx, current }: { ctx: Ctx; current: string }) {
   const family = isFamilyRole(ctx);
   const items = [
     { href: "/app/requests", label: family ? "My requests" : "Queue", show: true },
-    { href: "/app/requests/new", label: family ? "Ask the school" : "New request", show: family || canWriteFor(ctx) },
     { href: "/app/requests/report", label: "Report", show: can(ctx, "manage") },
     { href: "/app/requests/settings", label: "Categories", show: can(ctx, "manage") },
   ].filter((i) => i.show);
@@ -67,3 +67,6 @@ export function dueWords(r: { dueAt: Date; paused: boolean; overdue: boolean; st
   if (r.overdue) return `${Math.max(1, -days)} ${Math.max(1, -days) === 1 ? "day" : "days"} late`;
   return days <= 0 ? "Due today" : `Due in ${days} ${days === 1 ? "day" : "days"}`;
 }
+
+/** The queue's last column: when it is due and how long it has existed, "2 days late, 5 days old". */
+export const dueWithAge = (r: Parameters<typeof dueWords>[0] & { ageDays: number }) => [dueWords(r), r.ageDays < 1 ? "opened today" : `${ageWords(r.ageDays)} old`].filter(Boolean).join(", ");

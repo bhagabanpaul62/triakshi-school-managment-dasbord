@@ -1,7 +1,8 @@
 // The public face of the module. Other features and the app import from here.
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { SchoolService, toPage, listQuerySchema, type Ctx, type ListQuery, type Page } from "@smw/feature-kit";
-import { markdownToText } from "@smw/ui/markdown";
+import { notExpired } from "./base";
+import { plain } from "./content";
 import announcementsFeature from "./feature";
 import { FeedService } from "./feed-service";
 import { announcementCategories, announcements } from "./schema";
@@ -12,7 +13,7 @@ export interface Announcement { id: string; type: NoticeType; number: string | n
 
 type Row = { n: typeof announcements.$inferSelect; cat: string | null };
 const shape = ({ n, cat }: Row): Announcement => ({
-  id: n.id, type: n.type, number: n.number, title: n.title, body: n.body, excerpt: markdownToText(n.body, 160), publishedAt: n.publishedAt,
+  id: n.id, type: n.type, number: n.number, title: n.title, body: n.body, excerpt: plain(n, 160), publishedAt: n.publishedAt,
   pinned: !!n.pinnedUntil && n.pinnedUntil.getTime() > Date.now(), categoryName: cat,
 });
 
@@ -34,13 +35,13 @@ export class AnnouncementService extends SchoolService<keyof typeof announcement
   }
 
   /** Latest for dashboards: pinned first. */
-  async latest(limit = 5): Promise<Announcement[]> { return (await this.sentToMe(limit, 0, undefined, ["published"])).rows; }
+  async latest(limit = 5): Promise<Announcement[]> { return (await this.sentToMe(limit, 0, undefined, ["published"], true)).rows; }
 
-  private sentToMe(limit: number, offset: number, search?: string, states = ["published", "expired"]) {
+  private sentToMe(limit: number, offset: number, search?: string, states = ["published", "expired"], live = false) {
     return this.read("read", async (tx) => {
       const mine = sql`exists (select 1 from announcement_recipients r where r.announcement_id = ${announcements.id} and r.user_id = ${this.ctx.userId}::uuid and r.removed_at is null)`;
       const scope = this.can("manage") ? undefined : this.ctx.role === "student" ? mine : sql`(${mine} or ${announcements.createdBy} = ${this.ctx.userId}::uuid)`;
-      const where = and(inArray(announcements.state, states as (typeof announcements.$inferSelect.state)[]), scope, search ? sql`(${announcements.title} ilike ${`%${search}%`} or ${announcements.body} ilike ${`%${search}%`})` : undefined);
+      const where = and(inArray(announcements.state, states as (typeof announcements.$inferSelect.state)[]), live ? notExpired : undefined, scope, search ? sql`(${announcements.title} ilike ${`%${search}%`} or ${announcements.body} ilike ${`%${search}%`})` : undefined);
       const pinned = sql`(${announcements.pinnedUntil} is not null and ${announcements.pinnedUntil} > now())`;
       const [rows, [t]] = await Promise.all([
         tx.select({ n: announcements, cat: announcementCategories.name }).from(announcements).leftJoin(announcementCategories, eq(announcementCategories.id, announcements.categoryId))
@@ -55,7 +56,7 @@ export class AnnouncementService extends SchoolService<keyof typeof announcement
   async publicNews(limit = 6): Promise<Announcement[]> {
     return this.read("read", async (tx) => {
       const rows = await tx.select({ n: announcements, cat: announcementCategories.name }).from(announcements).leftJoin(announcementCategories, eq(announcementCategories.id, announcements.categoryId))
-        .where(and(eq(announcements.state, "published"), publicOnly, sql`(${announcements.expiresAt} is null or ${announcements.expiresAt} > now())`))
+        .where(and(eq(announcements.state, "published"), publicOnly, notExpired))
         .orderBy(desc(sql`(${announcements.pinnedUntil} is not null and ${announcements.pinnedUntil} > now())`), desc(announcements.publishedAt)).limit(limit);
       return rows.map(shape);
     });

@@ -38,7 +38,16 @@ export function AudiencePicker({ name, value, onChange, options, allow, labels =
   const [open, setOpen] = useState(false);
   const [showSkipped, setShowSkipped] = useState(false);
   const ok = (t: RuleType) => !allow || allow.includes(t);
-  const set = (a: Audience) => { setInner(a); onChange?.(a); };
+  // An empty choice is only an error once the person has chosen something or tried to send.
+  const [touched, setTouched] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const form = root.current?.closest("form");
+    const mark = () => setTouched(true);
+    form?.addEventListener("submit", mark, true);
+    return () => form?.removeEventListener("submit", mark, true);
+  }, []);
+  const set = (a: Audience) => { setTouched(true); setInner(a); onChange?.(a); };
 
   const entries = useMemo<Entry[]>(() => {
     const out: Entry[] = [];
@@ -81,14 +90,14 @@ export function AudiencePicker({ name, value, onChange, options, allow, labels =
   const drop = (side: "include" | "exclude", r: AudienceRule) => set({ ...audience, [side]: audience[side].filter((x) => keyOf(x) !== keyOf(r)) });
 
   // Live count: waits for a pause in clicking, drops answers that arrive late.
-  const [state, setState] = useState<{ kind: "loading" } | { kind: "error"; message: string } | { kind: "ok"; p: AudiencePreview & { text: string } }>({ kind: "loading" });
+  const [state, setState] = useState<{ kind: "loading" } | { kind: "empty" } | { kind: "error"; message: string } | { kind: "ok"; p: AudiencePreview & { text: string } }>({ kind: "loading" });
   const [retry, setRetry] = useState(0);
   const seq = useRef(0);
   const json = JSON.stringify(audience);
   useEffect(() => {
     const mineSeq = ++seq.current;
     setState({ kind: "loading" });
-    if (!audience.include.length) { setState({ kind: "error", message: "Choose who it is for." }); return; }
+    if (!audience.include.length) { setState({ kind: "empty" }); return; }
     const t = setTimeout(async () => {
       const fd = new FormData();
       fd.set("audience", json);
@@ -116,7 +125,7 @@ export function AudiencePicker({ name, value, onChange, options, allow, labels =
   );
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div ref={root} className="flex min-w-0 flex-col gap-3">
       <input type="hidden" name={name} value={json} />
       <div role="group" aria-label="Quick choices" className="flex flex-wrap gap-2">
         {quick.map((q) => {
@@ -155,6 +164,7 @@ export function AudiencePicker({ name, value, onChange, options, allow, labels =
 
       <div aria-live="polite" className="text-sm text-[var(--ds-on-surface)]">
         {state.kind === "loading" ? <span className="text-[var(--ds-on-surface-muted)]">Counting people</span> : null}
+        {state.kind === "empty" ? <span className={touched ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-muted)]"} role={touched ? "alert" : undefined}>Choose who it is for.</span> : null}
         {state.kind === "error" ? (
           <span className="text-[var(--ds-color-danger-400)]">{state.message}{" "}
             {audience.include.length ? <button type="button" onClick={() => setRetry((n) => n + 1)} className={cn("rounded-full underline", FOCUS)}>Try again</button> : null}

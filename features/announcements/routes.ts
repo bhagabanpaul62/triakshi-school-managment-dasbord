@@ -27,7 +27,7 @@ export const registerRoute = (req: Request, p: Params) => serve(async (c, _q, u)
 /** /api/notices/[id]/report.csv */
 export const reportCsvRoute = (req: Request, p: Params) => serve(async (c, q) => {
   const f = await new ReportService(c).csv(q.id!);
-  return new Response(`﻿${f.csv}`, { headers: headers("text/csv; charset=utf-8", f.fileName, "attachment") });
+  return new Response(`\uFEFF${f.csv}`, { headers: headers("text/csv; charset=utf-8", f.fileName, "attachment") });
 }, req, p);
 /** /api/notices/[id]/sign-sheet */
 export const signSheetRoute = (req: Request, p: Params) => serve(async (c, q) => pdf(await new ReportService(c).signSheetPdf(q.id!)), req, p);

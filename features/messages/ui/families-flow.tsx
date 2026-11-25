@@ -27,6 +27,8 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
   const [body, setBody] = useState("");
   const [preview, setPreview] = useState<BatchPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The picker says "Choose who it is for" in red whenever the list is empty; before the person has touched it, that is a form shouting at someone who has not started.
+  const [touched, setTouched] = useState(false);
   const [clientId] = useState(newId);
   const [pending, run] = useTransition();
 
@@ -58,7 +60,9 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
         {step === 0 ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-[var(--ds-on-surface-variant)]">Choose a section, a subject group or chosen students. Each family gets its own private conversation; families never see each other.</p>
-            <AudiencePicker name="audience" value={audience} onChange={setAudience} options={options} allow={[...RULES]} />
+            <div className={cn(!touched && !audience.include.length && "[&_[aria-live=polite]]:hidden")}>
+              <AudiencePicker name="audience" value={audience} onChange={(a) => { setTouched(true); setAudience(a); }} options={options} allow={[...RULES]} />
+            </div>
           </div>
         ) : null}
         {step === 1 ? (

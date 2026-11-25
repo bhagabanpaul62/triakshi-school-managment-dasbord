@@ -4,7 +4,7 @@ import type { Tx } from "@smw/db";
 import { NotFoundError } from "@smw/feature-kit";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { markdownToText } from "@smw/ui/markdown";
-import { NoticeBase } from "./base";
+import { NoticeBase, notExpired } from "./base";
 import type { Answer, NoticeType, ResponseSpec } from "./constants";
 import { subjectOf } from "./fan-out";
 import { NoticeFileService } from "./files";
@@ -36,7 +36,7 @@ export interface FeedNotice {
 }
 
 const kindOf = announcements.response;
-const needsAnswer = sql`(${announcements.state} = 'published' and ${kindOf}->>'kind' <> 'none' and ${announcementResponses.id} is null and (${announcements.dueAt} is null or ${announcements.dueAt} > now()))`;
+const needsAnswer = sql`(${announcements.state} = 'published' and ${notExpired} and ${kindOf}->>'kind' <> 'none' and ${announcementResponses.id} is null and (${announcements.dueAt} is null or ${announcements.dueAt} > now()))`;
 const pinned = sql`(${announcements.pinnedUntil} is not null and ${announcements.pinnedUntil} > now())`;
 const fresh = sql`${announcements.withdrawnAt} > now() - interval '14 days'`;
 
@@ -46,8 +46,8 @@ export class FeedService extends NoticeBase {
     const q = this.parse(feedInput, query);
     return this.read("read", async (tx) => {
       const tab = q.tab === "inbox"
-        ? or(eq(announcements.state, "published"), and(eq(announcements.state, "withdrawn"), fresh))
-        : or(eq(announcements.state, "expired"), and(eq(announcements.state, "withdrawn"), sql`not ${fresh}`));
+        ? or(and(eq(announcements.state, "published"), notExpired), and(eq(announcements.state, "withdrawn"), fresh))
+        : or(eq(announcements.state, "expired"), and(eq(announcements.state, "published"), sql`not ${notExpired}`), and(eq(announcements.state, "withdrawn"), sql`not ${fresh}`));
       const where = and(eq(announcementRecipients.userId, this.ctx.userId), isNull(announcementRecipients.removedAt), tab,
         q.category ? eq(announcements.categoryId, q.category) : undefined, q.q ? or(ilike(announcements.title, `%${q.q}%`), ilike(announcements.body, `%${q.q}%`)) : undefined);
       const base = () => tx.select({
@@ -78,14 +78,14 @@ export class FeedService extends NoticeBase {
 
   private async unreadIn(tx: Tx) {
     const [r] = await tx.select({ n: count() }).from(announcementRecipients).innerJoin(announcements, eq(announcements.id, announcementRecipients.announcementId))
-      .where(and(eq(announcementRecipients.userId, this.ctx.userId), isNull(announcementRecipients.removedAt), isNull(announcementRecipients.seenAt), eq(announcements.state, "published")));
+      .where(and(eq(announcementRecipients.userId, this.ctx.userId), isNull(announcementRecipients.removedAt), isNull(announcementRecipients.seenAt), eq(announcements.state, "published"), notExpired));
     return Number(r?.n ?? 0);
   }
 
   /** Urgent alerts sent to me that I have not opened: the red banner in the panel stays until each is opened. */
   urgentUnopened(): Promise<{ id: string; title: string }[]> {
     return this.read("read", (tx) => tx.select({ id: announcements.id, title: announcements.title }).from(announcementRecipients).innerJoin(announcements, eq(announcements.id, announcementRecipients.announcementId))
-      .where(and(eq(announcementRecipients.userId, this.ctx.userId), isNull(announcementRecipients.removedAt), isNull(announcementRecipients.seenAt), eq(announcements.state, "published"), eq(announcements.type, "urgent")))
+      .where(and(eq(announcementRecipients.userId, this.ctx.userId), isNull(announcementRecipients.removedAt), isNull(announcementRecipients.seenAt), eq(announcements.state, "published"), notExpired, eq(announcements.type, "urgent")))
       .orderBy(desc(announcements.publishedAt)).limit(3));
   }
 
@@ -117,7 +117,7 @@ export class FeedService extends NoticeBase {
       const main = { lang: null as string | null, title: n.title, body: n.body };
       const wanted = o.lang !== undefined ? o.lang : ([...pref][0] as { language: string | null } | undefined)?.language ?? null;
       const useSecond = !!second && wanted === second.lang;
-      const closed = n.state !== "published";
+      const closed = n.state !== "published" || (!!n.expiresAt && n.expiresAt <= new Date());
       const locked = !!n.dueAt && n.dueAt.getTime() < Date.now();
       const byId = new Map(answers.map((a) => [a.recipientId, a]));
       return {

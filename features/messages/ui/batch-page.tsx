@@ -26,8 +26,20 @@ export default async function BatchPage({ params }: { params: Promise<{ id: stri
         </div>
         <p className="mt-2 text-xs text-[var(--ds-on-surface-muted)]">{waiting ? `${waiting} ${waiting === 1 ? "family has" : "families have"} not opened it yet.` : "Every family has opened it."} Seen marks wait while a family is in quiet hours.</p>
       </Panel>
-      <div className="mt-3 overflow-x-auto rounded-3xl bg-[var(--ds-surface-container-low)] p-2">
-        <table className="w-full min-w-[28rem] text-left text-sm">
+      {/* On a phone each family is a card: a 28 rem table would push the page 48 px past a 375 px screen. */}
+      <ul className="mt-3 flex flex-col gap-2 sm:hidden" aria-label="Families and where each conversation stands">
+        {b.rows.map((r) => (
+          <li key={r.threadId} className="rounded-2xl bg-white/[0.04] p-3">
+            <div className="flex items-start justify-between gap-3">
+              <span className="min-w-0"><span className="block truncate text-sm">{r.student}</span><span className="block truncate text-xs text-[var(--ds-on-surface-muted)]">{r.label}</span></span>
+              <Link href={`/app/messages?thread=${r.threadId}`} className="shrink-0 text-sm underline">Open</Link>
+            </div>
+            <p className="mt-2 text-xs text-[var(--ds-on-surface-variant)]">{r.seen ? "Seen" : "Not seen yet"} · {r.replied ? "Replied" : "No reply"}</p>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 hidden overflow-x-auto rounded-3xl bg-[var(--ds-surface-container-low)] p-2 sm:block">
+        <table className="w-full text-left text-sm">
           <caption className="sr-only">Families and where each conversation stands</caption>
           <thead className="text-xs text-[var(--ds-on-surface-muted)]"><tr><th className="px-3 py-2 font-normal">Student</th><th className="px-3 py-2 font-normal">Class</th><th className="px-3 py-2 font-normal">Seen</th><th className="px-3 py-2 font-normal">Replied</th><th className="px-3 py-2"><span className="sr-only">Open</span></th></tr></thead>
           <tbody>
@@ -40,8 +52,8 @@ export default async function BatchPage({ params }: { params: Promise<{ id: stri
             ))}
           </tbody>
         </table>
-        {!b.rows.length ? <p className="p-6 text-center text-sm text-[var(--ds-on-surface-muted)]">No conversations in this send.</p> : null}
       </div>
+      {!b.rows.length ? <p className="mt-3 rounded-3xl bg-[var(--ds-surface-container-low)] p-6 text-center text-sm text-[var(--ds-on-surface-muted)]">No conversations in this send.</p> : null}
       <p className="mt-3 text-xs text-[var(--ds-on-surface-muted)]">Sent {relative(b.createdAt)}.</p>
     </>
   );

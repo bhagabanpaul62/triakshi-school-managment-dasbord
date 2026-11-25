@@ -18,9 +18,9 @@ async function tablesPresent(tx: Tx): Promise<Has> {
   return Object.fromEntries(found.map((f) => [f.t, f.ok])) as Has;
 }
 
-interface Gate { has: Has; groups: Map<string, Audience> }
+interface Gate { has: Has }
 
-function rulePred(r: AudienceRule, g: Gate, depth: number): SQL {
+function rulePred(r: AudienceRule, g: Gate): SQL {
   const { has } = g;
   switch (r.type) {
     case "everyone": return sql`true`;
@@ -33,11 +33,7 @@ function rulePred(r: AudienceRule, g: Gate, depth: number): SQL {
     case "house": return has.student_houses ? sql`exists (select 1 from student_houses x where x.student_id = p.student_id and x.house_id = ${r.id}::uuid)` : NO;
     case "route": return has.student_transport ? sql`exists (select 1 from student_transport x where x.student_id = p.student_id and x.route_id = ${r.id}::uuid)` : NO;
     case "stop": return has.student_transport ? sql`exists (select 1 from student_transport x where x.student_id = p.student_id and x.stop_id = ${r.id}::uuid)` : NO;
-    case "group": {
-      // One level only: a group inside a group reaches nobody, so a loop can never run.
-      const inner = g.groups.get(r.id);
-      return depth === 0 && inner ? audiencePred(inner, g, 1) : NO;
-    }
+    case "group": return NO; // expandGroups already replaced every group; one left over is unknown or nested and reaches nobody
     case "subject": {
       // A compulsory class subject counts for the whole class; an elective only for students it was chosen for.
       const own = [
@@ -61,8 +57,8 @@ function rulePred(r: AudienceRule, g: Gate, depth: number): SQL {
   }
 }
 
-function audiencePred(a: Audience, g: Gate, depth: number): SQL {
-  const any = (rules: AudienceRule[]) => rules.length ? sql`(${sql.join(rules.map((r) => rulePred(r, g, depth)), sql` or `)})` : NO;
+function audiencePred(a: Audience, g: Gate): SQL {
+  const any = (rules: AudienceRule[]) => rules.length ? sql`(${sql.join(rules.map((r) => rulePred(r, g)), sql` or `)})` : NO;
   return sql`(${any(a.include)} and not ${any(a.exclude)})`;
 }
 
@@ -83,15 +79,32 @@ const PEOPLE = sql`
     where u.status = 'active' and u.role not in ('student', 'parent')
   )`;
 
+/**
+ * Replace every saved-group rule by the group's own rules (one level: a group inside a group is dropped, so a loop cannot run).
+ * A group in include adds its include rules and its excludes; a group in exclude removes what the group includes.
+ * Everything that resolves, counts or checks an audience works on the expanded one.
+ */
+export async function expandGroups(tx: Tx, audience: Audience): Promise<Audience> {
+  const wanted = [...new Set(audience.include.concat(audience.exclude).flatMap((r) => (r.type === "group" ? [r.id] : [])))];
+  if (!wanted.length) return audience;
+  const [t] = await rows<{ ok: boolean }>(tx, sql`select to_regclass('comm_groups') is not null as ok`);
+  const groups = new Map<string, Audience>();
+  if (t?.ok) for (const g of await rows<{ id: string; audience: Audience }>(tx, sql`select id, audience from comm_groups where id in (${ids(wanted)})`)) groups.set(g.id, g.audience);
+  const plain = (rs: AudienceRule[]) => rs.filter((r) => r.type !== "group");
+  const include: AudienceRule[] = [], exclude: AudienceRule[] = plain(audience.exclude);
+  for (const r of audience.include) {
+    if (r.type !== "group") { include.push(r); continue; }
+    const g = groups.get(r.id);
+    if (g) { include.push(...plain(g.include)); exclude.push(...plain(g.exclude)); }
+  }
+  for (const r of audience.exclude) if (r.type === "group") exclude.push(...plain(groups.get(r.id)?.include ?? []));
+  return { include, exclude };
+}
+
 /** The people CTE plus the WHERE for this audience: `with ${head} select ... from people p where ${where}`. */
 async function plan(tx: Tx, audience: Audience) {
   const has = await tablesPresent(tx);
-  const wanted = audience.include.concat(audience.exclude).flatMap((r) => (r.type === "group" ? [r.id] : []));
-  const groups = new Map<string, Audience>();
-  if (wanted.length && has.comm_groups) {
-    for (const g of await rows<{ id: string; audience: Audience }>(tx, sql`select id, audience from comm_groups where id in (${ids(wanted)})`)) groups.set(g.id, g.audience);
-  }
-  return { head: sql`with ${PEOPLE}`, where: audiencePred(audience, { has, groups }, 0) };
+  return { head: sql`with ${PEOPLE}`, where: audiencePred(await expandGroups(tx, audience), { has }) };
 }
 
 interface Row { student_id: string | null; user_id: string | null; name: string; label: string; section_id: string | null; why: string | null }
@@ -231,13 +244,19 @@ export async function audienceOptions(tx: Tx, ctx: Ctx): Promise<AudienceOptions
 export interface PersonHit { type: "student" | "person"; id: string; label: string; meta: string }
 type Perm = keyof typeof notificationsFeature.permissions;
 
+/** Who may look people up: the students:read holders (grants, else the base roles listed by the students feature). */
+const canReadStudents = (ctx: Ctx) => (ctx.grants ? ctx.grants.has("students:read") : ctx.role === "admin" || ctx.role === "teacher" || ctx.role === "accountant");
+/** Grants that let a person write to an audience, spelled out because notifications imports no other feature. */
+const PREVIEW_GRANTS = ["announcements:draft", "events:write", "messages:use", "meetings:manage"] as const;
+const canPreview = (ctx: Ctx) => (ctx.grants ? PREVIEW_GRANTS.some((g) => ctx.grants!.has(g)) : ctx.role === "admin" || ctx.role === "teacher" || ctx.role === "accountant");
+
 /** Live count and people search for the picker. Families have the read permission too, so they are refused here. */
 export class AudienceService extends SchoolService<Perm> {
   protected feature = notificationsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
-  private async staffRead<T>(fn: (tx: Tx) => Promise<T>) {
-    if (this.ctx.role === "student" || this.ctx.role === "parent") throw new ForbiddenError();
+  private async staffRead<T>(fn: (tx: Tx) => Promise<T>, allowed = canPreview(this.ctx)) {
+    if (this.ctx.role === "student" || this.ctx.role === "parent" || !allowed) throw new ForbiddenError();
     return this.read("read", fn);
   }
 
@@ -245,14 +264,21 @@ export class AudienceService extends SchoolService<Perm> {
 
   async preview(input: unknown): Promise<AudiencePreview & { text: string }> {
     const audience = this.parse(audienceField, input);
-    if (audience.include.concat(audience.exclude).some((r) => r.type === "fee_overdue") && !canTargetFeeOverdue(this.ctx)) throw new ForbiddenError("Only the fees team can pick families with dues.");
-    return this.staffRead(async (tx) => ({ ...(await audiencePreview(tx, audience)), text: await describeAudience(tx, audience) }));
+    return this.staffRead(async (tx) => {
+      // A saved group can hide a dues rule, so look at the expanded audience.
+      const expanded = await expandGroups(tx, audience);
+      if (expanded.include.concat(expanded.exclude).some((r) => r.type === "fee_overdue") && !canTargetFeeOverdue(this.ctx)) throw new ForbiddenError("Only the fees team can pick families with dues.");
+      const p = await audiencePreview(tx, audience);
+      // Names of people who cannot be reached are student records: only those who may read students see them.
+      return { ...p, unreachable: canReadStudents(this.ctx) ? p.unreachable : [], text: await describeAudience(tx, audience) };
+    });
   }
 
   /** Students by name or admission number, staff by name. At least two letters. */
   async people(q: unknown): Promise<PersonHit[]> {
+    const allowed = canReadStudents(this.ctx);
     const text = String(q ?? "").trim().slice(0, 60);
-    if (text.length < 2) return this.staffRead(async () => []);
+    if (text.length < 2) return this.staffRead(async () => [], allowed);
     const like = `%${text.replace(/[\\%_]/g, "\\$&")}%`;
     return this.staffRead(async (tx) => {
       const kids = await rows<{ id: string; name: string; adm: string; label: string | null }>(tx, sql`select s.id::text, s.name, s.admission_no as adm, ${classLabel(sql`c.name`)} || coalesce(' ' || sec.name, '') as label
@@ -264,6 +290,6 @@ export class AudienceService extends SchoolService<Perm> {
         ...kids.map((k) => ({ type: "student" as const, id: k.id, label: k.name, meta: [k.label, k.adm].filter(Boolean).join(" · ") })),
         ...staff.map((s) => ({ type: "person" as const, id: s.id, label: s.name, meta: s.label })),
       ];
-    });
+    }, allowed);
   }
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { NotFoundError, type Ctx } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
@@ -15,7 +16,7 @@ import { addWindows, cancelMeeting, closeMeeting, deleteMeeting, duplicateMeetin
 import { FamilyPage } from "./family-page";
 import { MeetingForm } from "./meeting-form";
 import { WindowEditor } from "./window-editor";
-import { BackLink, FollowUp, LinkButton, Notice, STATE_LABEL, STATE_TONE } from "./shared";
+import { BackLink, FollowUp, LinkButton, MoreMenu, Notice, STATE_LABEL } from "./shared";
 
 export const metadata = { title: "Meeting" };
 type Query = Record<string, string | string[] | undefined>;
@@ -133,21 +134,27 @@ async function Overview({ ctx, d }: { ctx: Ctx; d: MeetingDetail }) {
   const notCame = m.state === "open" || m.state === "closed" || m.state === "done" ? await new DayService(ctx).notCame(m.id) : [];
   const options = manage && editable ? await new AudienceService(ctx).options() : null;
   const form = { id: m.id, title: m.title, note: m.note, audience: m.audience, slotMinutes: m.slotMinutes, perFamily: m.perFamily, opensAt: m.opensAt, closesAt: m.closesAt, locked: true };
-  const copy = <FormModal title="Copy to a new date" icon="clock" trigger={{ label: "Copy to a new date", variant: m.state === "cancelled" ? "default" : "ghost" }} fields={[{ name: "date", label: "Date of the first teacher time", type: "date", required: true }, { name: "title", label: "New name", wide: true }]} action={duplicateMeeting} hidden={{ id: m.id }} submitLabel="Make a copy" redirectTo="/app/meetings" />;
+  const running = m.state === "open" || m.state === "closed";
+  // One main step by state; the rest sit in "More". Each piece is made for either place.
+  const steps: Record<string, ((main: boolean) => ReactNode) | null> = {
+    list: mine ? (main) => <LinkButton href={`/app/meetings/${m.id}/day`} primary={main}>Open my list</LinkButton> : null,
+    book: manage && m.state === "open" ? (main) => <LinkButton href={`/app/meetings/${m.id}?book`} primary={main}>Book for a family</LinkButton> : null,
+    reopen: manage && m.state === "closed" ? (main) => <FormModal title="Reopen booking" icon="clock" trigger={{ label: "Reopen booking", variant: main ? "default" : "ghost", plus: false }} fields={[{ name: "closesAt", label: "New closing time", type: "datetime-local", hint: "Leave empty to keep it. Needed if the old time has passed." }]} values={{ closesAt: toIstInput(new Date(Math.max(m.closesAt.getTime(), Date.now() + 2 * 86_400_000))) }} action={reopenMeeting} hidden={{ id: m.id }} submitLabel="Reopen" /> : null,
+    close: manage && m.state === "open" ? () => <ActionButton variant="ghost" label="Close booking" action={closeMeeting} values={{ id: m.id }} confirm={{ title: "Close booking?", body: "Families can no longer book or change times. The school office still can. You can reopen it.", confirmLabel: "Close booking" }}>Close booking</ActionButton> : null,
+    cancel: manage && running ? () => <FormModal title="Cancel this meeting" icon="clock" trigger={{ label: "Cancel meeting", variant: "ghost", plus: false }} fields={[{ name: "reason", label: "Why", type: "textarea", required: true, hint: "Families who booked read this." }]} action={cancelMeeting} hidden={{ id: m.id }} submitLabel="Cancel the meeting" summary={`${d.booked} booked families and their teachers are told`} /> : null,
+    copy: manage && m.state !== "draft" ? (main) => <FormModal title="Copy to a new date" icon="clock" trigger={{ label: "Copy to a new date", variant: main ? "default" : "ghost" }} fields={[{ name: "date", label: "Date of the first teacher time", type: "date", required: true }, { name: "title", label: "New name", wide: true }]} action={duplicateMeeting} hidden={{ id: m.id }} submitLabel="Make a copy" redirectTo="/app/meetings" /> : null,
+    edit: options ? () => <MeetingForm options={options} meeting={form} /> : null,
+  };
+  const main = mine && running ? "list" : steps.book ? "book" : steps.reopen ? "reopen" : m.state === "cancelled" ? "copy" : null;
+  const more = Object.entries(steps).filter(([k, make]) => make && k !== main).map(([k, make]) => <div key={k}>{make!(false)}</div>);
   const days = d.windows.length ? `${dayOf(d.windows[0]!.startsAt)}${dayOf(d.windows.at(-1)!.startsAt) !== dayOf(d.windows[0]!.startsAt) ? ` to ${dayOf(d.windows.at(-1)!.startsAt)}` : ""}` : "No times";
   return (
     <>
       <BackLink href="/app/meetings">All meetings</BackLink>
       <PageHeader eyebrow={`${STATE_LABEL[m.state]} · ${days}`} title={m.title} description={manage ? `${d.audienceText}. Booking ${m.state === "open" ? `closes ${when(m.closesAt)}` : `ran ${when(m.opensAt)} to ${when(m.closesAt)}`}.` : "Your times in this meeting."}
         actions={<>
-          {mine ? <LinkButton href={`/app/meetings/${m.id}/day`} primary={m.state === "open" || m.state === "closed"}>Open my list</LinkButton> : null}
-          {manage && m.state === "open" ? <LinkButton href={`/app/meetings/${m.id}?book`} primary={!mine}>Book for a family</LinkButton> : null}
-          {manage && m.state === "closed" ? <FormModal title="Reopen booking" icon="clock" trigger={{ label: "Reopen booking", variant: "default", plus: false }} fields={[{ name: "closesAt", label: "New closing time", type: "datetime-local", hint: "Leave empty to keep it. Needed if the old time has passed." }]} values={{ closesAt: toIstInput(new Date(Math.max(m.closesAt.getTime(), Date.now() + 2 * 86_400_000))) }} action={reopenMeeting} hidden={{ id: m.id }} submitLabel="Reopen" /> : null}
-          {manage && (m.state === "open") ? <ActionButton variant="ghost" label="Close booking" action={closeMeeting} values={{ id: m.id }} confirm={{ title: "Close booking?", body: "Families can no longer book or change times. The school office still can. You can reopen it.", confirmLabel: "Close booking" }}>Close booking</ActionButton> : null}
-          {manage && (m.state === "open" || m.state === "closed") ? <FormModal title="Cancel this meeting" icon="clock" trigger={{ label: "Cancel meeting", variant: "ghost", plus: false }} fields={[{ name: "reason", label: "Why", type: "textarea", required: true, hint: "Families who booked read this." }]} action={cancelMeeting} hidden={{ id: m.id }} submitLabel="Cancel the meeting" summary={`${d.booked} booked families and their teachers are told`} /> : null}
-          {manage && m.state !== "draft" && m.state !== "cancelled" ? copy : null}
-          {manage && m.state === "cancelled" ? copy : null}
-          {options ? <MeetingForm options={options} meeting={form} /> : null}
+          {main ? steps[main]!(true) : null}
+          {more.length ? <MoreMenu>{more}</MoreMenu> : null}
         </>} />
       {m.state === "cancelled" ? <Notice tone="danger">Cancelled{m.cancelReason ? `: ${m.cancelReason}` : "."} Families who had a time were told. Copy it to a new date to run it again.</Notice> : null}
       <div className="mt-3" />

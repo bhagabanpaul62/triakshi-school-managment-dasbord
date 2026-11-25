@@ -13,7 +13,7 @@ import { workingDayReport, nationalDaysIn, type BandReport } from "./holidays";
 import { checkSheet, copyProposals, datesOf, shiftYear, type CopyProposal, type ImportReport } from "./holiday-import";
 import { holidayBatchInput, holidayInput, type HolidayData } from "./holiday-inputs";
 import { attendanceHolidays, periodAttendance, staffAttendance, studentAttendance } from "./schema";
-import { dayLabel, isSunday, todayIST } from "./stats";
+import { addDays, dayLabel, isSunday, todayIST } from "./stats";
 
 type Perm = keyof typeof attendanceFeature.permissions;
 type Row = typeof attendanceHolidays.$inferSelect;
@@ -227,8 +227,10 @@ export class HolidayService extends SchoolService<Perm> {
     const userIds = [...new Set((await resolveAudience(tx, audience)).flatMap((r) => (r.userId ? [r.userId] : [])))];
     const when = data.to === data.from ? dayLabel(data.from) : `${dayLabel(data.from)} to ${dayLabel(data.to)}`;
     const working = data.kind === "working";
+    // An emergency, or any closure that starts today or tomorrow, cannot wait for a digest or for morning: it goes out at once.
+    const urgent = !working && (data.kind === "emergency" || data.from <= addDays(todayIST(), 1));
     await NotificationWriter.insert(tx, this.ctx.schoolId, userIds.map((userId) => ({
-      userId, topic: "holiday.declared" as const, title: working ? `${data.name}: school is open` : `${data.name}: ${data.appliesTo === "all" ? "school is closed" : data.appliesTo === "students" ? "no school for students" : "no school for some classes"}`,
+      userId, topic: urgent ? "urgent.alert" as const : "holiday.declared" as const, urgent, title: working ? `${data.name}: school is open` : `${data.name}: ${data.appliesTo === "all" ? "school is closed" : data.appliesTo === "students" ? "no school for students" : "no school for some classes"}`,
       body: `${HOLIDAY_KINDS[data.kind]}, ${when}.${data.note ? ` ${data.note}` : ""}`, href: "/app/events", subject: { type: "holiday", id: spanId },
     })));
   }
@@ -279,82 +281,4 @@ export class HolidayService extends SchoolService<Perm> {
     }, (m) => ({ action: "import", entity: "Holiday", summary: `Imported ${m.length} holidays from a spreadsheet`, meta: { count: m.length } }));
     return { imported: made.length, days: made.reduce((n, m) => n + m.dates.length, 0) };
   }
-}
-
-// ---------- moving the calendar's old holiday events here (the migration step, PRD section 11 item 4) ----------
-
-export interface MoveAdd { schoolId: string; eventId: string; name: string; date: string; appliesTo: "all" | "students" }
-export interface MoveSkip { date: string; name: string; why: string }
-export interface HolidayMovePlan { add: MoveAdd[]; skip: MoveSkip[]; already: number }
-
-/** Who an old event was for: the old column held a word, the new one holds an audience. Staff-only is not a school closure. */
-export function moveScope(audience: unknown): "all" | "students" | "staff" {
-  const types = typeof audience === "string" ? [audience.replace(/"/g, "")] : Array.isArray((audience as { include?: unknown[] } | null)?.include) ? (audience as { include: { type: string }[] }).include.map((r) => r.type) : [];
-  if (types.length && types.every((t) => t === "staff")) return "staff";
-  if (types.length && types.every((t) => ["students", "parents", "families"].includes(t))) return "students";
-  return "all";
-}
-
-const rowsOf = async <T>(tx: Tx, query: ReturnType<typeof sql>) => [...(await tx.execute(query))] as T[];
-
-export interface MoveEvent { id: string; schoolId: string; title: string; first: string; last: string | null; audience: unknown }
-
-/**
- * What the move does with each event day (pure). Future days are added. A past day (or today) is added only when nobody marked it,
- * no approved leave covers it and no approved or paid pay run holds its month; the rest are listed for the admin.
- * Days that are already holidays are left alone and counted.
- */
-export function planMove(i: { events: MoveEvent[]; existing: ReadonlySet<string>; marked: ReadonlySet<string>; leave: { from: string; to: string }[]; payMonths: ReadonlySet<string>; today: string }): HolidayMovePlan {
-  const plan: HolidayMovePlan = { add: [], skip: [], already: 0 };
-  for (const e of i.events) {
-    const scope = moveScope(e.audience);
-    for (const date of datesOf(e.first, e.last && e.last > e.first ? e.last : e.first)) {
-      if (i.existing.has(date)) { plan.already++; continue; }
-      const why = scope === "staff" ? "It was for staff only, so it is not a school closure."
-        : date > i.today ? null
-          : i.marked.has(date) ? "Attendance was already marked on this day."
-            : i.leave.some((l) => l.from <= date && date <= l.to) ? "Approved leave covers this day."
-              : i.payMonths.has(date.slice(0, 7)) ? "Pay for this month is already approved or paid."
-                : null;
-      if (why) plan.skip.push({ date, name: e.title, why });
-      else plan.add.push({ schoolId: e.schoolId, eventId: e.id, name: e.title, date, appliesTo: scope === "students" ? "students" : "all" });
-    }
-  }
-  return plan;
-}
-
-/** Reads the old holiday events by raw SQL, so it works whether or not the events table still has `is_holiday`; nothing is written. */
-export async function planHolidayMove(tx: Tx): Promise<HolidayMovePlan> {
-  const [have] = await rowsOf<{ events: string | null; col: string | null }>(tx, sql`select to_regclass('events') as events,
-    (select column_name from information_schema.columns where table_schema = current_schema() and table_name = 'events' and column_name = 'is_holiday') as col`);
-  if (!have?.events || !have.col) return { add: [], skip: [], already: 0 };
-  const cancelled = (await rowsOf(tx, sql`select 1 from information_schema.columns where table_schema = current_schema() and table_name = 'events' and column_name = 'cancelled_at'`)).length
-    ? sql`and cancelled_at is null` : sql``;
-  const today = todayIST();
-  const [events, existing, marked, leave, pay] = await Promise.all([
-    rowsOf<{ id: string; school_id: string; title: string; first: string; last: string | null; audience: unknown }>(tx, sql`
-      select id, school_id, title, to_char(starts_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as first,
-        to_char(ends_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as last, audience
-      from events where is_holiday ${cancelled} order by starts_at`),
-    tx.select({ date: attendanceHolidays.date }).from(attendanceHolidays),
-    Promise.all([studentAttendance, staffAttendance, periodAttendance].map((t) => tx.select({ date: t.date }).from(t).where(lte(t.date, today)))),
-    rowsOf<{ from: string; to: string }>(tx, sql`select from_date::text as "from", to_date::text as "to" from leave_requests where status = 'approved'`),
-    rowsOf<{ t: string | null }>(tx, sql`select to_regclass('pay_runs') as t`),
-  ]);
-  const payMonths = pay[0]?.t ? (await rowsOf<{ month: string }>(tx, sql`select to_char(month, 'YYYY-MM') as month from pay_runs where kind = 'monthly' and status in ('approved', 'paid')`)).map((r) => r.month) : [];
-  return planMove({
-    events: events.map((e) => ({ id: e.id, schoolId: e.school_id, title: e.title, first: e.first, last: e.last, audience: e.audience })),
-    existing: new Set(existing.map((r) => r.date)), marked: new Set(marked.flat().map((r) => r.date)), leave, payMonths: new Set(payMonths), today,
-  });
-}
-
-/** Write the plan: one span per event. Safe to run twice (a day that is already a holiday is left as it is). Returns the rows added. */
-export async function applyHolidayMove(tx: Tx, plan: HolidayMovePlan): Promise<number> {
-  const spans = new Map<string, string>();
-  const rows = plan.add.map((a) => {
-    if (!spans.has(a.eventId)) spans.set(a.eventId, randomUUID());
-    return { schoolId: a.schoolId, date: a.date, name: a.name.slice(0, 80), kind: "other" as const, appliesTo: a.appliesTo, spanId: spans.get(a.eventId)!, note: "Moved from the calendar" };
-  });
-  if (!rows.length) return 0;
-  return (await tx.insert(attendanceHolidays).values(rows).onConflictDoNothing().returning({ id: attendanceHolidays.id })).length;
 }

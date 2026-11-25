@@ -6,14 +6,12 @@ import { StatCard } from "@smw/ui/kit/StatCard";
 import { Panel } from "@smw/ui/kit/Panel";
 import { buttonVariants } from "@smw/ui/ui/button";
 import { EmptyLine } from "@smw/ui/finance/States";
+import { hoursWords } from "../clock";
 import { REQUEST_STATE_WORDS, type RequestState } from "../constants";
 import { ReportService } from "../report";
 import { NoAccess, SectionNav, can, one, type Search } from "./shared";
 
 export const metadata = { title: "Request report" };
-
-/** 5.5 hours -> "5.5 hours", 40 -> "1.7 days": the report speaks in whichever fits. */
-const span = (h: number | null) => (h === null ? "No data yet" : h < 48 ? `${Math.round(h * 10) / 10} hours` : `${Math.round((h / 24) * 10) / 10} days`);
 
 export default async function ReportPage({ searchParams }: { searchParams: Search }) {
   const ctx = await requireCtx();
@@ -39,8 +37,8 @@ export default async function ReportPage({ searchParams }: { searchParams: Searc
           <KpiRow>
             <StatCard label="Requests" value={String(r.total)} meta={`${r.open} still open`} href="/app/requests?view=all" />
             <StatCard label="Overdue now" value={String(r.overdue)} meta="Past the target days" href="/app/requests?view=overdue" />
-            <StatCard label="Time to first answer" value={span(r.medianFirstAnswerHours)} meta="Median" />
-            <StatCard label="Time to resolve" value={span(r.medianResolveHours)} meta={`Median. ${r.reopened} opened again`} />
+            <StatCard label="Time to first answer" value={hoursWords(r.medianFirstAnswerHours)} meta="Median" />
+            <StatCard label="Time to resolve" value={hoursWords(r.medianResolveHours)} meta={`Median. ${r.reopened} opened again`} />
           </KpiRow>
           <div className="grid gap-3 lg:grid-cols-2">
             <Panel title="By category">

@@ -7,8 +7,8 @@ import { academicYears, classes, classSubjects, houses, sections, sectionTeacher
 import { routes, routeStops, studentTransport } from "../transport/schema";
 import { students } from "../students/schema";
 import notificationsFeature from "./feature";
-import { CommGroupService } from "./audience-groups";
-import { AudienceService, audienceMatches, audienceOptions, audiencePreview, describeAudience, resolveAudience } from "./audience";
+import { CommGroupService, groupRefusal } from "./audience-groups";
+import { AudienceService, audienceMatches, audienceOptions, audiencePreview, describeAudience, expandGroups, resolveAudience } from "./audience";
 import type { Audience, AudienceRule } from "./audience-rules";
 import { commGroups } from "./schema";
 
@@ -187,7 +187,8 @@ describe("saved groups", () => {
       expect(await names(tx, aud([{ type: "group", id: g!.id }]))).toEqual(["Ann"]);
       // the loop group points at itself: the inner group rule reaches nobody, the student rule still works
       expect(await names(tx, aud([{ type: "group", id: loop!.id }]))).toEqual(["Bob"]);
-      expect(await names(tx, aud([{ type: "families" }], [{ type: "group", id: g!.id }]))).toEqual(["Bob", "Cy", "Dee", "Eve", "Nolo"]);
+      // a group in the exclude list removes everyone its own include rules name
+      expect(await names(tx, aud([{ type: "families" }], [{ type: "group", id: g!.id }]))).toEqual(["Bob", "Dee", "Eve", "Nolo"]);
     });
   });
 });
@@ -278,5 +279,63 @@ describe("speed", () => {
       console.info(`12,000 people: resolve + preview in ${Math.round(ms)} ms`);
       expect(ms).toBeLessThan(2000);
     });
+  });
+});
+
+describe("groups never widen what a person may see or send", () => {
+  it("expandGroups replaces a group by its own rules, one level, include and exclude", async () => {
+    await inA(async (tx) => {
+      const [inner, outer] = await tx.insert(commGroups).values([
+        { schoolId: a.id, name: "Inner", audience: aud([{ type: "house", id: f.red! }], [{ type: "section", id: f.s5b! }]) },
+        { schoolId: a.id, name: "Outer", audience: aud([{ type: "student", id: f.bob! }]) },
+      ]).returning();
+      await tx.execute(sql`update comm_groups set audience = ${JSON.stringify(aud([{ type: "group", id: inner!.id }, { type: "student", id: f.bob! }]))}::jsonb where id = ${outer!.id}::uuid`);
+      expect(await expandGroups(tx, aud([{ type: "group", id: inner!.id }], [{ type: "class", id: f.c6! }]))).toEqual(aud([{ type: "house", id: f.red! }], [{ type: "class", id: f.c6! }, { type: "section", id: f.s5b! }]));
+      // a group inside a group is dropped
+      expect((await expandGroups(tx, aud([{ type: "group", id: outer!.id }]))).include).toEqual([{ type: "student", id: f.bob! }]);
+      expect(await expandGroups(tx, aud([{ type: "group", id: crypto.randomUUID() }, { type: "families" }]))).toEqual(aud([{ type: "families" }]));
+      expect(await expandGroups(tx, aud([{ type: "families" }]))).toEqual(aud([{ type: "families" }]));
+    });
+  });
+
+  it("a teacher can neither save a group with dues, nor read dues names through one, nor save a school-wide group", async () => {
+    const dues = aud([{ type: "fee_overdue", days: 30 }]);
+    await expect(new CommGroupService(a.as.teacher).create({ name: "Dues T", audience: dues })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new CommGroupService(a.as.teacher).create({ name: "All T", audience: aud([{ type: "everyone" }]) })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new CommGroupService(a.as.teacher).create({ name: "Staff T", audience: aud([{ type: "role", id: "accountant" }]) })).rejects.toBeInstanceOf(ForbiddenError);
+    const ok = await new CommGroupService(a.as.teacher).create({ name: "Own T", audience: aud([{ type: "section", id: f.s5a! }]) });
+    await expect(new CommGroupService(a.as.teacher).update(ok.id, { audience: dues })).rejects.toBeInstanceOf(ForbiddenError);
+    const shared = await new CommGroupService(a.as.accountant).create({ name: "Dues shared", audience: dues, shared: "0" });
+    await new CommGroupService(a.as.admin).create({ name: "Dues admin", audience: dues });
+    await withSchool(a.id, (tx) => tx.update(commGroups).set({ shared: true }).where(sql`id = ${shared.id}::uuid`));
+    // the shared group is visible to the teacher, but a preview through it is refused
+    await expect(new AudienceService(a.as.teacher).preview({ include: [{ type: "group", id: shared.id }] })).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await new AudienceService(a.as.accountant).preview({ include: [{ type: "group", id: shared.id }] })).families).toBe(1);
+  });
+
+  it("groupRefusal is pure: dues need fees access, school-wide and staff lists are not a teacher's", () => {
+    const t = { role: "teacher" as const }, acc = { role: "accountant" as const };
+    expect(groupRefusal(t, aud([{ type: "fee_overdue", days: 1 }]))).toMatch(/fees team/);
+    expect(groupRefusal(acc, aud([{ type: "fee_overdue", days: 1 }]))).toBeNull();
+    expect(groupRefusal(t, aud([{ type: "section", id: f.s5a! }], [{ type: "everyone" }]))).toMatch(/office/);
+    expect(groupRefusal({ ...t, grants: new Set(["announcements:whole"]) }, aud([{ type: "everyone" }]))).toBeNull();
+    expect(groupRefusal({ role: "admin" }, aud([{ type: "everyone" }]))).toBeNull();
+  });
+});
+
+describe("who may look people up", () => {
+  const custom = (grants: string[]) => ({ ...a.as.accountant, role: "staff" as const, grants: new Set(["notifications:read", ...grants]) });
+  it("people needs students:read; the unreachable list is for those who hold it", async () => {
+    await expect(new AudienceService(custom(["announcements:draft"])).people("An")).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await new AudienceService(custom(["announcements:draft", "students:read"])).people("An")).map((h) => h.label)).toContain("Ann");
+    expect((await new AudienceService(a.as.accountant).people("An")).length).toBeGreaterThan(0);
+  });
+
+  it("the preview needs a writing grant, and names of unreachable people only go to holders of students:read", async () => {
+    const au = { include: [{ type: "section" as const, id: f.s5b! }] };
+    await expect(new AudienceService(custom(["fees:read"])).preview(au)).rejects.toBeInstanceOf(ForbiddenError);
+    for (const g of ["announcements:draft", "events:write", "messages:use", "meetings:manage"]) expect((await new AudienceService(custom([g])).preview(au)).families).toBe(2);
+    expect((await new AudienceService(custom(["announcements:draft"])).preview(au)).unreachable).toEqual([]);
+    expect((await new AudienceService(custom(["announcements:draft", "students:read"])).preview(au)).unreachable.map((u) => u.name)).toContain("Dee");
   });
 });

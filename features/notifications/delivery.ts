@@ -4,6 +4,7 @@ import { schools, users, withConsole, withSchool, type Tx } from "@smw/db";
 import { SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { emailHtml, escapeHtml, pushConfigured, services, type Mail } from "@smw/integrations";
 import { todayIST, addDays } from "@smw/feature-kit/money";
+import { chunks } from "./constants";
 import notificationsFeature from "./feature";
 import { isAddressRefusal, suppress, suppressedAmong, unsuppress } from "./email-health";
 import { PreferenceService } from "./prefs";
@@ -22,16 +23,20 @@ const BACKOFF_MIN = [1, 5, 15, 60, 240];
 const PUSH_GAP_MS = 5 * 60_000;
 export const NO_BUDGET = "Email limit for today is used up. It will go tomorrow.";
 const GENERIC_PUSH = "Open the app to read";
+/** Said instead of an unsubscribe link when the server cannot sign one. */
+export const SETTINGS_LINE = "To change which emails you get, open Settings in the app.";
 
 // ---------- time and budget ----------
 
 /** 06:00 IST on the next IST day. */
 export const tomorrowMorning = (now: Date) => new Date(`${addDays(todayIST(now), 1)}T06:00:00+05:30`);
 
-/** Share of the daily limit that notifications may use; the rest is kept for codes and passwords. */
-const NOTIFY_SHARE = 0.8;
-/** One school may use at most this part of that share, unless the mail is urgent (priority 1 or 2). */
+/** Urgent and safety mail (priority 1 and 2) may use the whole daily limit except the last tenth, which stays for codes and passwords. */
+const URGENT_SHARE = 0.9;
+/** Everything else may use this much of the limit, and one school at most half of that, so one busy school cannot starve the others. */
+const NORMAL_SHARE = 0.6;
 const SCHOOL_SHARE = 0.5;
+export const mailCap = (priority: number) => Math.floor(env().MAIL_DAILY_LIMIT * (priority <= 2 ? URGENT_SHARE : NORMAL_SHARE));
 
 /**
  * Take one email from today's budget, or say no. The check and the count happen under one lock, so two drains never
@@ -39,7 +44,7 @@ const SCHOOL_SHARE = 0.5;
  */
 export async function reserveMail(schoolId: string, priority: number, now: Date): Promise<boolean> {
   const day = todayIST(now);
-  const cap = Math.floor(env().MAIL_DAILY_LIMIT * NOTIFY_SHARE);
+  const cap = mailCap(priority);
   return withConsole(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('smw-mail-budget'))`);
     const rows = await tx.select({ schoolId: mailUsage.schoolId, n: mailUsage.count }).from(mailUsage).where(eq(mailUsage.day, day));
@@ -68,7 +73,9 @@ export const failedTry = (row: Delivery, err: unknown, now: Date): Patch => {
     : { state: "failed", tries, reason: `Gave up after ${tries} tries: ${why}` };
 };
 
-export const apply = (ids: string[], p: Patch) => withConsole((tx) => tx.update(commDeliveries).set({ state: "pending", ...p }).where(inArray(commDeliveries.id, ids)));
+export const apply = (ids: string[], p: Patch) => withConsole(async (tx) => {
+  for (const part of chunks(ids)) await tx.update(commDeliveries).set({ state: "pending", ...p }).where(inArray(commDeliveries.id, part));
+});
 
 // ---------- loading what a batch needs ----------
 
@@ -85,13 +92,14 @@ export async function load(rows: Delivery[]): Promise<Batch> {
   const uids = [...new Set(rows.map((r) => r.userId))];
   const nids = [...new Set(rows.flatMap((r) => (r.notificationId ? [r.notificationId] : [])))];
   const sids = [...new Set(rows.map((r) => r.schoolId))];
+  const many = <T>(ids: string[], q: (part: string[]) => Promise<T[]>) => Promise.all(chunks(ids).map(q)).then((r) => r.flat());
   return withConsole(async (tx) => {
     const [notes, people, prefs, sch, subs] = await Promise.all([
-      nids.length ? tx.select().from(notifications).where(inArray(notifications.id, nids)) : [],
-      tx.select({ id: users.id, name: users.name, email: users.email, emailVerifiedAt: users.emailVerifiedAt, status: users.status }).from(users).where(inArray(users.id, uids)),
-      tx.select().from(notificationPrefs).where(inArray(notificationPrefs.userId, uids)),
-      tx.select({ id: schools.id, name: schools.name, slug: schools.slug }).from(schools).where(inArray(schools.id, sids)),
-      rows.some((r) => r.channel === "push") ? tx.select().from(pushSubscriptions).where(inArray(pushSubscriptions.userId, uids)) : [],
+      many(nids, (p) => tx.select().from(notifications).where(inArray(notifications.id, p))),
+      many(uids, (p) => tx.select({ id: users.id, name: users.name, email: users.email, emailVerifiedAt: users.emailVerifiedAt, status: users.status }).from(users).where(inArray(users.id, p))),
+      many(uids, (p) => tx.select().from(notificationPrefs).where(inArray(notificationPrefs.userId, p))),
+      many(sids, (p) => tx.select({ id: schools.id, name: schools.name, slug: schools.slug }).from(schools).where(inArray(schools.id, p))),
+      rows.some((r) => r.channel === "push") ? many(uids, (p) => tx.select().from(pushSubscriptions).where(inArray(pushSubscriptions.userId, p))) : [],
     ]);
     const subMap = new Map<string, typeof subs>();
     for (const s of subs) subMap.set(`${s.schoolId}:${s.userId}`, [...(subMap.get(`${s.schoolId}:${s.userId}`) ?? []), s]);
@@ -117,8 +125,9 @@ async function guardianEmail(tx: Tx, schoolId: string, userId: string): Promise<
 
 // ---------- the drain ----------
 
-export interface DeliverOptions { schoolId?: string; /** Only priority 1 and 2: runs even in quiet hours. */ urgentOnly?: boolean; now?: Date; /** Rows to handle in this run. */ limit?: number }
+export interface DeliverOptions { schoolId?: string; /** Only priority 1 and 2: runs even in quiet hours. */ urgentOnly?: boolean; now?: Date; /** Rows to handle in this run (default: all that are due). */ limit?: number; /** Stop starting new batches after this long (default 50 s). */ maxMs?: number }
 export interface DeliverResult { sent: number; skipped: number; deferred: number; retried: number; failed: number }
+const MAX_MS = 50_000;
 
 /** Take up to 200 due rows by priority and hide them from other drains while we send. */
 async function claim(now: Date, o: DeliverOptions, take: number): Promise<Delivery[]> {
@@ -140,11 +149,16 @@ export async function deliverDue(o: DeliverOptions = {}): Promise<DeliverResult>
   const now = o.now ?? new Date();
   const out: DeliverResult = { sent: 0, skipped: 0, deferred: 0, retried: 0, failed: 0 };
   const cache: SettingsCache = new Map();
-  for (let left = o.limit ?? 2000; left > 0;) {
-    const rows = await claim(now, o, Math.min(BATCH, left));
-    if (!rows.length) break;
-    left -= rows.length;
-    await new Drain(now, out, await load(rows), cache).run(rows);
+  const stopAt = Date.now() + (o.maxMs ?? MAX_MS);
+  let left = o.limit ?? Infinity;
+  // Urgent and safety first, so a long queue of ordinary mail never holds them back; then batches until the time is spent.
+  for (const urgentOnly of o.urgentOnly ? [true] : [true, false]) {
+    while (left > 0 && Date.now() < stopAt) {
+      const rows = await claim(now, { ...o, urgentOnly }, Math.min(BATCH, left));
+      if (!rows.length) break;
+      left -= rows.length;
+      await new Drain(now, out, await load(rows), cache).run(rows);
+    }
   }
   return out;
 }
@@ -162,13 +176,19 @@ class Drain {
     else this.out.deferred += n;
   }
 
+  /** Once something went out, saving the result is best effort: failing here must never release the row for a second send. */
+  private async settle(row: Delivery, p: Patch) {
+    if (p.state !== "sent") return this.done([row.id], p);
+    await this.done([row.id], p).catch((err) => { this.out.sent++; console.error("delivery sent but not saved", row.id, err); });
+  }
+
   async run(rows: Delivery[]) {
     const mails: Plan[] = [];
     for (const row of rows) {
       try {
         const early = await this.gate(row);
         if (early) await this.done([row.id], early);
-        else if (row.channel === "push") await this.done([row.id], await this.push(row));
+        else if (row.channel === "push") await this.settle(row, await this.push(row));
         else { const p = await this.plan(row); if ("patch" in p) await this.done([row.id], p.patch); else mails.push(p); }
       } catch (err) {
         await this.done([row.id], failedTry(row, err, this.now)).catch(() => {});
@@ -209,11 +229,12 @@ class Drain {
     const ok: string[] = [], gone: string[] = [];
     let error: unknown;
     for (const s of subs) {
-      try { (await services().push.send(s, payload, opts)) === "ok" ? ok.push(s.id) : gone.push(s.id); } catch (e) { error = e; }
+      try { if ((await services().push.send(s, payload, opts)) === "ok") ok.push(s.id); else gone.push(s.id); } catch (e) { error = e; }
     }
-    if (gone.length) await withConsole((tx) => tx.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, gone)));
+    const tidy = (e: unknown) => console.error("push housekeeping failed", e);
+    if (gone.length) await withConsole((tx) => tx.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, gone))).catch(tidy);
     if (ok.length) {
-      await withConsole((tx) => tx.update(pushSubscriptions).set({ lastOkAt: this.now }).where(inArray(pushSubscriptions.id, ok)));
+      await withConsole((tx) => tx.update(pushSubscriptions).set({ lastOkAt: this.now }).where(inArray(pushSubscriptions.id, ok))).catch(tidy);
       return { state: "sent", tries: row.tries + 1, sentAt: this.now, reason: null };
     }
     if (error) return failedTry(row, error, this.now);
@@ -239,18 +260,20 @@ class Drain {
         if (!(await reserveMail(schoolId, priority, this.now))) { await this.done(ids, { state: "pending", nextAt: tomorrowMorning(this.now), reason: NO_BUDGET }); continue; }
         const school = this.b.schools.get(schoolId)!;
         const mustTell = topicOf(first.note.topic).mustTell;
-        const headers = mustTell ? undefined : unsubscribeHeaders(await withConsole((tx) => PreferenceService.unsubscribeUrlFor(tx, schoolId, school.slug, first.row.userId)));
+        const unsub = mustTell ? null : await withConsole((tx) => PreferenceService.unsubscribeUrlFor(tx, schoolId, school.slug, first.row.userId));
         try {
-          await services().email.send({ to: first.address, ...compose(school, g), headers });
-          await Promise.all(g.map((p) => apply([p.row.id], { state: "sent", address: first.address, tries: p.row.tries + 1, sentAt: this.now, reason: null })));
-          this.out.sent += ids.length;
+          await services().email.send({ to: first.address, ...compose(school, g, !mustTell && !unsub), headers: unsub ? unsubscribeHeaders(unsub) : undefined });
         } catch (err) {
           await releaseMail(schoolId, this.now);
           if (isAddressRefusal(err)) {
             await withConsole((tx) => suppress(tx, schoolId, first.address, "bounced"));
             await this.done(ids, { state: "bounced", address: first.address, reason: "The mailbox refused the mail. Correct the address to start again." });
           } else await Promise.all(g.map((p) => this.done([p.row.id], failedTry(p.row, err, this.now))));
+          continue;
         }
+        // Sent. From here nothing may release or resend it: marking it sent is best effort.
+        this.out.sent += ids.length;
+        await Promise.all(g.map((p) => apply([p.row.id], { state: "sent", address: first.address, tries: p.row.tries + 1, sentAt: this.now, reason: null }))).catch((e) => console.error("mail sent but not saved", ids, e));
       } catch (err) {
         await Promise.all(g.map((p) => this.done([p.row.id], failedTry(p.row, err, this.now)).catch(() => {})));
       }
@@ -273,7 +296,7 @@ export async function emailTarget(person: Person, note: Notification, row: Deliv
 interface Plan extends EmailTarget { row: Delivery; note: Notification; person: Person }
 
 /** One mail for one or more rows with the same address, words and link (brothers and sisters). */
-function compose(school: { name: string; slug: string }, g: Plan[]): Pick<Mail, "subject" | "text" | "html"> {
+function compose(school: { name: string; slug: string }, g: Plan[], noUnsubscribe: boolean): Pick<Mail, "subject" | "text" | "html"> {
   const { note, limited } = g[0]!;
   const names = [...new Set(g.map((p) => p.person.name))];
   const url = schoolUrl(school.slug, note.href ?? "/app/notifications");
@@ -283,8 +306,8 @@ function compose(school: { name: string; slug: string }, g: Plan[]): Pick<Mail, 
   const title = limited ? `New: ${topicOf(note.topic).label}` : note.title;
   return {
     subject,
-    text: [forLine, title, body, `Open it: ${url}`].filter(Boolean).join("\n\n"),
-    html: emailHtml(escapeHtml(title), `${forLine ? `<p style="color:#666">${escapeHtml(forLine)}</p>` : ""}${body ? `<p>${escapeHtml(body).replace(/\n/g, "<br>")}</p>` : ""}`, { label: limited ? "Sign in to read" : "Open", url }),
+    text: [forLine, title, body, `Open it: ${url}`, noUnsubscribe ? SETTINGS_LINE : ""].filter(Boolean).join("\n\n"),
+    html: emailHtml(escapeHtml(title), `${forLine ? `<p style="color:#666">${escapeHtml(forLine)}</p>` : ""}${body ? `<p>${escapeHtml(body).replace(/\n/g, "<br>")}</p>` : ""}${noUnsubscribe ? `<p style="font-size:12px">${SETTINGS_LINE}</p>` : ""}`, { label: limited ? "Sign in to read" : "Open", url }),
   };
 }
 
@@ -307,7 +330,7 @@ export class DeliveryService extends SchoolService<Perm> {
   async summary(): Promise<DeliverySummary> {
     const since = new Date(Date.now() - 7 * 86_400_000);
     const day = todayIST();
-    const limit = env().MAIL_DAILY_LIMIT, forNotices = Math.floor(limit * NOTIFY_SHARE);
+    const limit = env().MAIL_DAILY_LIMIT, forNotices = mailCap(4);
     const used = await this.read("delivery", async (tx) => {
       const [byChannel, problems, [waiting], [failed], [mine]] = await Promise.all([
         tx.select({ channel: commDeliveries.channel, state: commDeliveries.state, n: count() }).from(commDeliveries).where(gt(commDeliveries.createdAt, since)).groupBy(commDeliveries.channel, commDeliveries.state),
@@ -356,7 +379,7 @@ export class PushTestService extends SchoolService<Perm> {
     const gone: string[] = [];
     let ok = 0;
     for (const s of subs) {
-      try { (await services().push.send(s, { title: "Test notification", body: "Notifications work on this device.", href: "/app/notifications", tag: "test" }, { ttl: 300, urgency: "normal" })) === "ok" ? ok++ : gone.push(s.id); } catch { /* counted as not delivered */ }
+      try { if ((await services().push.send(s, { title: "Test notification", body: "Notifications work on this device.", href: "/app/notifications", tag: "test" }, { ttl: 300, urgency: "normal" })) === "ok") ok++; else gone.push(s.id); } catch { /* counted as not delivered */ }
     }
     if (gone.length) await withSchool(this.ctx.schoolId, (tx) => tx.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, gone)));
     if (!ok) throw new ValidationError({ push: "The test did not arrive. Turn notifications off and on again on this device." });

@@ -26,42 +26,54 @@ export function RsvpBar({ eventId, answer, waiting, guests, maxGuests, closedRea
   const router = useRouter();
   const [shown, setShown] = useState({ answer, waiting, guests });
   const [pending, start] = useTransition();
+  const [changing, setChanging] = useState(false);
 
   const send = (next: RsvpAnswer, g: number) => {
     const before = shown;
+    setChanging(false);
     setShown({ answer: next, waiting: next === "yes" ? before.waiting : false, guests: next === "no" ? 0 : g });
     start(async () => {
       const fd = new FormData();
       fd.set("id", eventId); fd.set("answer", next); fd.set("guests", String(next === "no" ? 0 : g));
       const r = await answerEvent(fd);
-      if (!r.ok) { setShown(before); toast(r.error, "danger"); return; }
+      if (!r.ok) { setShown(before); setChanging(true); toast(r.error, "danger"); return; }
       setShown({ answer: next, waiting: r.data === "waiting", guests: next === "no" ? 0 : g });
       if (r.data === "waiting") toast("The event is full. You are on the waiting list.");
       router.refresh();
     });
   };
 
+  const answered = shown.answer !== null && !changing;
   return (
     <section aria-labelledby="rsvp-h" className="flex flex-col gap-3 rounded-3xl bg-[var(--ds-surface-container-low)] p-6">
-      <h2 id="rsvp-h" className="text-[15px] font-medium text-[var(--ds-on-surface)]">Will you come?</h2>
+      <h2 id="rsvp-h" className="text-[15px] font-medium text-[var(--ds-on-surface)]">{answered ? "Your answer" : "Will you come?"}</h2>
       {closedReason ? <p className="text-sm text-[var(--ds-on-surface-variant)]">{closedReason}</p> : null}
-      <div role="group" aria-label="Your answer" className="grid gap-2 sm:grid-cols-3">
-        {CHOICES.map((c) => (
-          <button key={c.value} type="button" aria-pressed={shown.answer === c.value} disabled={pending || !!closedReason} onClick={() => send(c.value, shown.guests)}
-            className={cn("min-h-12 rounded-full px-4 text-sm font-medium transition-colors disabled:opacity-60", FOCUS, shown.answer === c.value ? "bg-[var(--ds-primary)] text-[var(--ds-on-primary)]" : "bg-white/[0.07] text-[var(--ds-on-surface)] hover:bg-white/[0.12]")}>
-            {c.label}
-          </button>
-        ))}
-      </div>
-      {maxGuests > 0 && shown.answer && shown.answer !== "no" ? (
-        <label className="flex items-center gap-3 text-sm text-[var(--ds-on-surface-variant)]">
-          Guests with you
-          <select value={shown.guests} disabled={pending || !!closedReason} onChange={(e) => send(shown.answer!, Number(e.target.value))} className={cn(INPUT, "w-24")}>
-            {Array.from({ length: maxGuests + 1 }, (_, n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </label>
-      ) : null}
-      <p role="status" className="text-sm text-[var(--ds-on-surface)]">{say(shown.answer, shown.waiting, shown.guests)}</p>
+      {answered ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p role="status" className="text-lg font-medium text-[var(--ds-on-surface)]">{say(shown.answer, shown.waiting, shown.guests)}</p>
+          {closedReason ? null : <button type="button" disabled={pending} onClick={() => setChanging(true)} className={cn("min-h-11 rounded-full bg-white/[0.07] px-5 text-sm font-medium text-[var(--ds-on-surface)] hover:bg-white/[0.12] disabled:opacity-60", FOCUS)}>Change</button>}
+        </div>
+      ) : (
+        <>
+          <div role="group" aria-label="Your answer" className="grid gap-2 sm:grid-cols-3">
+            {CHOICES.map((c) => (
+              <button key={c.value} type="button" aria-pressed={shown.answer === c.value} disabled={pending || !!closedReason} onClick={() => send(c.value, shown.guests)}
+                className={cn("min-h-12 rounded-full px-4 text-sm font-medium transition-colors disabled:opacity-60", FOCUS, shown.answer === c.value ? "bg-[var(--ds-primary)] text-[var(--ds-on-primary)]" : "text-[var(--ds-on-surface-variant)] ring-1 ring-inset ring-white/10 hover:bg-white/[0.07]")}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+          {maxGuests > 0 && shown.answer && shown.answer !== "no" ? (
+            <label className="flex items-center gap-3 text-sm text-[var(--ds-on-surface-variant)]">
+              Guests with you
+              <select value={shown.guests} disabled={pending || !!closedReason} onChange={(e) => send(shown.answer!, Number(e.target.value))} className={cn(INPUT, "w-24")}>
+                {Array.from({ length: maxGuests + 1 }, (_, n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+          ) : null}
+          {changing ? <button type="button" onClick={() => setChanging(false)} className={cn("self-start text-sm text-[var(--ds-on-surface-variant)] underline", FOCUS)}>Keep my answer</button> : <p role="status" className="text-sm text-[var(--ds-on-surface-variant)]">{say(shown.answer, shown.waiting, shown.guests)}</p>}
+        </>
+      )}
     </section>
   );
 }

@@ -107,7 +107,7 @@ export function CommSettingsForm({ initial }: { initial: CommSettings }) {
         <Row title="A teacher may message" hint="Families of the students they teach, or only their own class.">
           <SegmentedControl size="sm" label="Who a teacher may message" options={[{ value: "taught", label: "Students taught" }, { value: "class_teacher", label: "Own class only" }]} value={s.teacherMessages} onChange={(v) => set({ teacherMessages: v as CommSettings["teacherMessages"] })} />
         </Row>
-        <Row title="Show staff who has seen a notice"><Switch on={s.showStaffSeen} label="Show staff who has seen a notice" onChange={(v) => set({ showStaffSeen: v })} /></Row>
+        <Row title="Show families when staff have seen their message"><Switch on={s.showStaffSeen} label="Show families when staff have seen their message" onChange={(v) => set({ showStaffSeen: v })} /></Row>
       </Panel>
 
       <Panel title="Numbers and names">

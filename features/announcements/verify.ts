@@ -1,8 +1,8 @@
 // The public "this circular is genuine" check. Follows features/fees/verify.ts: the app merges every module's lookups.
 import { createHash, createHmac } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { env } from "@smw/config";
 import type { Tx } from "@smw/db";
+import { tokenKey } from "@smw/feature-notifications/prefs";
 import { publicAudience } from "./content";
 import { announcements } from "./schema";
 
@@ -12,8 +12,11 @@ type VerifyLookup = (tx: Tx, token: string) => Promise<VerifyFound | null>;
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 /** Derived, not stored: a reprint of the PDF carries the same QR. Only its hash is kept in the database. */
-export const verifyToken = (schoolId: string, noticeId: string) =>
-  createHmac("sha256", env().DATA_KEY ?? "local-only-data-key").update(`circular:${schoolId}:${noticeId}`).digest("hex").slice(0, 32);
+/** Null when the server has no key: a circular then goes out without a QR, never with one made from a key everyone knows. */
+export const verifyToken = (schoolId: string, noticeId: string): string | null => {
+  const key = tokenKey();
+  return key ? createHmac("sha256", key).update(`circular:${schoolId}:${noticeId}`).digest("hex").slice(0, 32) : null;
+};
 export const verifyHash = (token: string) => sha(token);
 
 const istDay = (d: Date) => new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);

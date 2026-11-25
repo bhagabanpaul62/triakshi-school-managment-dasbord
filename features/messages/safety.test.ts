@@ -102,7 +102,7 @@ describe("concerns (M10, acceptance 18)", () => {
 
   it("held: nothing can be removed, the named person cannot export, retention keeps it", async () => {
     const r = await reported("Concern five");
-    await expect(svc(w.own).exportPdf(r.thread)).rejects.toMatchObject({ message: expect.stringContaining("under review") });
+    await expect(svc(w.own).exportPdf(r.thread)).rejects.toMatchObject({ message: "This conversation cannot be exported now." });
     await expect(svc(w.a.as.student).exportPdf(r.thread)).resolves.toBeDefined(); // the reporter keeps their own copy
     await expect(svc(w.own).remove(r.msg)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(sql_((tx) => tx.delete(messageThreads).where(eq(messageThreads.id, r.thread)))).rejects.toThrow(); // reports restrict the delete
@@ -121,15 +121,22 @@ describe("review with a reason (M11, acceptance 19)", () => {
     const logs = await sql_((tx) => tx.select().from(messageReviews).where(eq(messageReviews.threadId, r.thread)));
     expect(logs).toEqual([expect.objectContaining({ reviewerId: w.a.as.admin.userId, reviewerName: w.a.as.admin.name, reason: "Report: pressure to pay for classes", action: "opened", reportId: r.report })]);
     expect((await guard(w.a.as.admin).viewing(r.thread))?.thread.id).toBe(r.thread);
-    // the report moved to "reviewing"; both sides were told, in the conversation and the bell
+    // the report moved to "reviewing". While it is open nothing in the conversation or the bell hints at it: the standing banner tells both sides in general.
     expect((await guard(w.a.as.admin).report(r.report)).state).toBe("reviewing");
     const view = await svc(w.a.as.student).thread(r.thread);
-    expect(view.messages.at(-1)).toMatchObject({ kind: "system", body: expect.stringContaining("school reviewed") });
-    for (const u of [w.own, w.a.as.student]) expect(await sql_((tx) => tx.select().from(notifications).where(and(eq(notifications.userId, u.userId), eq(notifications.title, "The school reviewed a conversation you are in"))))).toHaveLength(1);
-    // opening again in the same window is logged again but does not tell them again
+    expect(view.messages.some((m) => m.kind === "system")).toBe(false);
+    expect(view.reviewBanner).toBe(true);
+    const told = (u: Ctx) => sql_((tx) => tx.select().from(notifications).where(and(eq(notifications.userId, u.userId), eq(notifications.title, "The school reviewed a conversation you are in"))));
+    for (const u of [w.own, w.a.as.student]) expect(await told(u)).toHaveLength(0);
     await guard(w.a.as.admin).open({ threadId: r.thread, reason: "Second look at the files" });
     expect(await sql_((tx) => tx.select().from(messageReviews).where(eq(messageReviews.threadId, r.thread)))).toHaveLength(2);
-    expect(await sql_((tx) => tx.select().from(notifications).where(and(eq(notifications.userId, w.own.userId), eq(notifications.title, "The school reviewed a conversation you are in"))))).toHaveLength(1);
+    // once the report is closed, a review that is not tied to an open report is told once, in the conversation and the bell, without saying who reported
+    await guard(w.a.as.admin).handle({ reportId: r.report, state: "no_action", outcome: "Fine" });
+    await guard(lead2).open({ threadId: r.thread, reason: "Routine check of this conversation" });
+    await guard(lead2).open({ threadId: r.thread, reason: "Same window, no second notice" });
+    const after = await svc(w.a.as.student).thread(r.thread);
+    expect(after.messages.filter((m) => m.kind === "system")).toEqual([expect.objectContaining({ body: "The school reviewed this conversation to check it is safe." })]);
+    for (const u of [w.own, w.a.as.student]) expect(await told(u)).toHaveLength(1);
   });
 
   it("a named lead gets 'not found' for the conversation and does not see the review in the log", async () => {
@@ -246,10 +253,13 @@ describe("seed", () => {
     };
     await seed(school.a.as.admin, state);
     const admin = (await new MessageService(school.a.as.admin).inbox()).rows.map((r) => r.subject);
-    expect(admin).toEqual(expect.arrayContaining(["Term 2 syllabus review", "Fee installment", "Parent-teacher meeting on Saturday", "Library book return", "Extra tuition"]));
+    expect(admin).toEqual(expect.arrayContaining(["Term 2 syllabus review", "Fee installment", "Parent-teacher meeting on Saturday", "Library book return"]));
     const closed = (await new MessageService(school.a.as.admin).inbox()).rows.find((r) => r.subject === "Library book return")!;
     expect(closed.state).toBe("closed");
     expect((await new SafeguardService(school.a.as.admin).queue()).rows.some((r) => r.subject === "Extra tuition")).toBe(true);
+    // the reported conversation has the teacher and the family only: the admin reviews it without being a member
+    const members = await withSchool(school.a.id, (tx) => tx.execute(sql`select m.role from thread_members m join message_threads t on t.id = m.thread_id where t.subject = 'Extra tuition' order by m.role`));
+    expect([...members].map((m) => (m as { role: string }).role)).toEqual(["student", "teacher"]);
     expect((await new SafeguardService(school.a.as.admin).log()).length).toBe(1);
   });
 });

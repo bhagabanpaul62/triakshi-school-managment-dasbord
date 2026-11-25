@@ -1,7 +1,7 @@
 // The queue as a spreadsheet: the same list, the same visibility, the same filters as the screen. Families get none.
 import { AppError, ForbiddenError, listQueryFrom } from "@smw/feature-kit";
 import { actionCtx } from "@smw/runtime";
-import { isFamily } from "@smw/feature-messages/core";
+import { fileResponse, isFamily } from "@smw/feature-messages/core";
 import { REQUEST_STATE_WORDS } from "./constants";
 import { RequestService, type RequestRow } from "./service";
 
@@ -27,7 +27,7 @@ export async function requestsCsv(req: Request): Promise<Response> {
     const query = listQueryFrom(Object.fromEntries(new URL(req.url).searchParams));
     const line = (cells: unknown[]) => `${cells.map(csvCell).join(",")}\r\n`;
     let page = await svc.list({ ...query, page: 1, pageSize: 100 }), n = 1;
-    let out = `﻿${line(COLUMNS.map((c) => c.label))}`;
+    let out = `\uFEFF${line(COLUMNS.map((c) => c.label))}`;
     for (;;) {
       out += page.rows.map((r) => line(COLUMNS.map((c) => c.value(r)))).join("");
       if (n >= page.pageCount) break;
@@ -40,11 +40,10 @@ export async function requestsCsv(req: Request): Promise<Response> {
   }
 }
 
-/** A 60-second link to one file of a request, only if this person may see it. */
+/** One file of a request, sent from here (no-store, with its download headers), only if this person may see it. */
 export async function requestFile(_req: Request, p: { id: string; fileId: string }): Promise<Response> {
   try {
-    const url = await new RequestService(await actionCtx()).fileLink(p.id, p.fileId);
-    return Response.redirect(url, 302);
+    return fileResponse(await new RequestService(await actionCtx()).file(p.id, p.fileId));
   } catch (err) {
     if (err instanceof AppError) return Response.json({ error: err.message }, { status: err.status });
     throw err;

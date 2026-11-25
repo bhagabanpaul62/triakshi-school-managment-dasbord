@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray, sql } from "drizzle-orm";
 import { closeDb, users, withConsole, withSchool } from "@smw/db";
 import { ForbiddenError } from "@smw/feature-kit";
@@ -7,6 +7,8 @@ import { MemoryEmailSender, MemoryPushSender, useServices, type Mail } from "@sm
 import notificationsFeature from "./feature";
 import { deliverDue, DeliveryService, NO_BUDGET, PushTestService } from "./delivery";
 import { runDigest } from "./digest";
+import { PreferenceService } from "./prefs";
+import { NotificationWriter } from "./writer";
 import { mailWebhook } from "./email-health";
 import { commDeliveries, commSettings, emailSuppressions, mailUsage, notificationPrefs, notifications, pushSubscriptions } from "./schema";
 
@@ -15,9 +17,17 @@ process.env.MAIL_WEBHOOK_SECRET = "s3cret";
 process.env.VAPID_PUBLIC_KEY = "pub";
 process.env.VAPID_PRIVATE_KEY = "priv";
 
+// `db.failNext` makes the next console queries fail: used right after a mail or push went out, to see that nothing is sent twice.
+const db = vi.hoisted(() => ({ failNext: 0 }));
+vi.mock("@smw/db", async (orig) => {
+  const m = await orig<typeof import("@smw/db")>();
+  return { ...m, withConsole: ((fn: never) => (db.failNext-- > 0 ? Promise.reject(new Error("db down")) : m.withConsole(fn))) as typeof m.withConsole };
+});
+
 class Flaky extends MemoryEmailSender {
   fail: (m: Mail) => unknown = () => null;
-  async send(m: Mail) { const e = this.fail(m); if (e) throw e; await super.send(m); }
+  after: (() => void) | null = null;
+  async send(m: Mail) { const e = this.fail(m); if (e) throw e; await super.send(m); this.after?.(); }
 }
 const mail = new Flaky();
 const push = new MemoryPushSender();
@@ -35,6 +45,7 @@ beforeAll(async () => {
 });
 afterAll(closeDb);
 beforeEach(async () => {
+  db.failNext = 0; mail.after = null;
   mail.sent.length = 0; push.sent.length = 0; push.gone.clear(); push.failing.clear(); mail.fail = () => null;
   await withConsole(async (tx) => {
     const ids = [a.id, b.id];
@@ -82,28 +93,33 @@ describe("deliverDue: email", () => {
   it("keeps to the daily limit, defers once to 06:00 tomorrow, and lets urgent mail past a school's share", async () => {
     const rows = [];
     for (let i = 0; i < 6; i++) rows.push(await put(a, a.users.admin, { title: `N${i}` }));
-    expect(await run(a)).toMatchObject({ sent: 4, deferred: 2 });
+    // 60% of 10 is 6 for ordinary mail, and one school may use half of that
+    expect(await run(a)).toMatchObject({ sent: 3, deferred: 3 });
     const left = (await Promise.all(rows.map((r) => row(a, r.id)))).filter((r) => r.state === "pending");
-    expect(left).toHaveLength(2);
+    expect(left).toHaveLength(3);
     expect(left[0]).toMatchObject({ reason: NO_BUDGET, tries: 0 });
     expect(left[0]!.nextAt.toISOString()).toBe("2026-11-26T00:30:00.000Z");
     await put(a, a.users.admin, { priority: 2, title: "Urgent" });
     expect(await run(a)).toMatchObject({ sent: 1, deferred: 0 });
     expect(await run(a)).toMatchObject({ sent: 0 });
-    expect(mail.sent).toHaveLength(5);
-    expect(await run(a, new Date("2026-11-26T07:00:00+05:30"))).toMatchObject({ sent: 2 });
-    expect(await used(a, "2026-11-26")).toBe(2);
+    expect(mail.sent).toHaveLength(4);
+    expect(await run(a, new Date("2026-11-26T07:00:00+05:30"))).toMatchObject({ sent: 3 });
+    expect(await used(a, "2026-11-26")).toBe(3);
     expect((await row(a, left[0]!.id)).reason).toBeNull();
   });
 
-  it("shares the limit between schools: 80% of 10, so eight in all", async () => {
-    for (let i = 0; i < 4; i++) { await put(a, a.users.admin, { title: `A${i}` }); await put(b, b.users.admin, { title: `B${i}` }); }
+  it("one busy school cannot starve another: ordinary mail is 60% of the limit, half of that per school", async () => {
+    for (let i = 0; i < 8; i++) await put(a, a.users.admin, { title: `A${i}` });
+    await put(b, b.users.admin, { title: "B0" });
     await run(a); await run(b);
-    expect(mail.sent).toHaveLength(8);
-    const late = await put(a, a.users.teacher, { priority: 1, title: "Late" });
-    await run(a);
-    expect(mail.sent).toHaveLength(8);
-    expect((await row(a, late.id)).reason).toBe(NO_BUDGET);
+    expect(mail.sent.filter((m) => m.to.includes(`@${a.slug}.`))).toHaveLength(3);
+    expect(mail.sent.filter((m) => m.to.includes(`@${b.slug}.`))).toHaveLength(1);
+  });
+
+  it("urgent and safety mail may use the whole limit except the tenth kept for codes", async () => {
+    for (let i = 0; i < 12; i++) await put(i % 2 ? a : b, (i % 2 ? a : b).users.admin, { priority: i % 2 ? 1 : 2, title: `U${i}` });
+    await run(a); await run(b);
+    expect(mail.sent).toHaveLength(9);
   });
 
   it("waits out quiet hours except for urgent and safety, and obeys a person's own hours", async () => {
@@ -337,11 +353,32 @@ describe("runDigest", () => {
     await withSchool(a.id, (tx) => tx.insert(notificationPrefs).values({ schoolId: a.id, userId: a.users.teacher, digestHour: 8 }));
     await put(a, a.users.teacher, digest());
     await put(a, a.users.student, digest());
-    expect(await runDigest({ hour: 18, now: DAY, schoolId: a.id })).toMatchObject({ mails: 1 });
-    expect(mail.sent[0]!.to).toBe(`student@${a.slug}.test`);
-    const [x, y] = await Promise.all([runDigest({ hour: 8, now: DAY, schoolId: a.id }), runDigest({ hour: 8, now: DAY, schoolId: a.id })]);
+    expect(await runDigest({ hour: 8, now: DAY, schoolId: a.id })).toMatchObject({ mails: 1 });
+    expect(mail.sent[0]!.to).toBe(`teacher@${a.slug}.test`);
+    const [x, y] = await Promise.all([runDigest({ hour: 18, now: DAY, schoolId: a.id }), runDigest({ hour: 18, now: DAY, schoolId: a.id })]);
     expect(x.mails + y.mails).toBe(1);
     expect(mail.sent).toHaveLength(2);
+  });
+
+  it("a late run still sends to people whose hour passed today and who got nothing yet; not a second one after they did", async () => {
+    await withSchool(a.id, (tx) => tx.insert(notificationPrefs).values({ schoolId: a.id, userId: a.users.teacher, digestHour: 8 }));
+    await put(a, a.users.teacher, digest({ title: "Missed" }));
+    expect(await runDigest({ hour: 18, now: DAY, schoolId: a.id })).toMatchObject({ mails: 1 });
+    await put(a, a.users.teacher, digest({ title: "After" }));
+    expect(await runDigest({ hour: 18, now: DAY, schoolId: a.id })).toMatchObject({ mails: 0 });
+    expect(await runDigest({ hour: 8, now: new Date("2026-11-26T08:05:00+05:30"), schoolId: a.id })).toMatchObject({ mails: 1 });
+  });
+
+  it("takes more than 2000 rows in rounds until none is left", async () => {
+    const people = Object.values(a.users).slice(0, 2);
+    await withSchool(a.id, async (tx) => {
+      const [n] = await tx.insert(notifications).values({ schoolId: a.id, userId: people[0]!, topic: "work.update", title: "Many" }).returning();
+      const rows = Array.from({ length: 2100 }, (_, i) => ({ schoolId: a.id, sourceKey: `bulk:${i}`, notificationId: n!.id, userId: people[0]!, channel: "email" as const, mode: "digest" as const, priority: 4, nextAt: due }));
+      for (let i = 0; i < rows.length; i += 500) await tx.insert(commDeliveries).values(rows.slice(i, i + 500));
+    });
+    const r = await runDigest({ hour: 18, now: DAY, schoolId: a.id });
+    expect(r.notifications + r.skipped).toBe(2100);
+    expect(await withSchool(a.id, (tx) => tx.select().from(commDeliveries).where(eq(commDeliveries.state, "pending")))).toHaveLength(0);
   });
 
   it("shows at most 15 lines a group", async () => {
@@ -358,8 +395,78 @@ describe("runDigest", () => {
     expect(await row(a, r.id)).toMatchObject({ state: "pending", tries: 1 });
     expect(await used(a)).toBe(0);
     mail.fail = () => null;
-    expect(await runDigest({ hour: 18, now: DAY, schoolId: a.id })).toMatchObject({ mails: 1 });
+    expect(await runDigest({ hour: 18, now: new Date(DAY.getTime() + 60_000), schoolId: a.id })).toMatchObject({ mails: 1 });
     expect(await used(a)).toBe(1);
+  });
+});
+
+describe("after a mail or push went out", () => {
+  it("a failure saving the result never releases the row or gives the mail unit back", async () => {
+    const r = await put(a, a.users.admin, { title: "Once" });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mail.after = () => { db.failNext = 1; };
+    try { expect(await run(a)).toMatchObject({ sent: 1, retried: 0, failed: 0 }); } finally { db.failNext = 0; mail.after = null; spy.mockRestore(); }
+    expect(mail.sent).toHaveLength(1);
+    expect(await used(a)).toBe(1);
+    expect(await row(a, r.id)).toMatchObject({ state: "pending", tries: 0 });
+    expect(await run(a)).toMatchObject({ sent: 0 });
+    expect(mail.sent).toHaveLength(1);
+  });
+
+  it("the same holds for a digest and for a push", async () => {
+    const d = await put(a, a.users.admin, { mode: "digest", title: "Digest once" });
+    const p = await put(a, a.users.teacher, { channel: "push", title: "Push once" });
+    await subscribe(a, a.users.teacher);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const realSend = push.send.bind(push);
+    push.send = async (...args) => { const r = await realSend(...args); db.failNext = 2; return r; };
+    mail.after = () => { db.failNext = 1; };
+    try {
+      expect(await runDigest({ hour: 18, now: DAY, schoolId: a.id })).toMatchObject({ mails: 1, failed: 0 });
+      db.failNext = 0; mail.after = null;
+      expect(await run(a)).toMatchObject({ sent: 1, retried: 0 });
+    } finally { db.failNext = 0; mail.after = null; push.send = realSend; spy.mockRestore(); }
+    expect(mail.sent).toHaveLength(1);
+    expect(push.sent).toHaveLength(1);
+    expect((await row(a, d.id)).tries).toBe(0);
+    expect((await row(a, p.id)).tries).toBe(0);
+  });
+
+  it("stops starting new batches once the time is spent", async () => {
+    await put(a, a.users.admin);
+    expect(await deliverDue({ schoolId: a.id, now: DAY, maxMs: 0 })).toMatchObject({ sent: 0 });
+    expect(await run(a)).toMatchObject({ sent: 1 });
+  });
+});
+
+describe("urgent rows and links", () => {
+  it("an urgent row of any topic goes out at once, even in quiet hours; the same row not urgent waits", async () => {
+    await withSchool(a.id, (tx) => NotificationWriter.insert(tx, a.id, [
+      { userId: a.users.admin, topic: "holiday.declared", title: "School closed tomorrow", urgent: true },
+      { userId: a.users.teacher, topic: "homework.new", title: "Homework" },
+    ]));
+    const rows = await withSchool(a.id, (tx) => tx.select().from(commDeliveries).where(eq(commDeliveries.channel, "email")));
+    expect(rows.find((r) => r.userId === a.users.admin)).toMatchObject({ priority: 1, mode: "instant" });
+    expect(rows.find((r) => r.userId === a.users.teacher)).toMatchObject({ priority: 4, mode: "digest" });
+    await withSchool(a.id, (tx) => tx.update(commDeliveries).set({ nextAt: due }));
+    expect(await run(a, NIGHT)).toMatchObject({ sent: 1 });
+    expect(mail.sent[0]!.subject).toContain("School closed tomorrow");
+  });
+
+  it("without a signing secret the mail has no unsubscribe link and says to open settings", async () => {
+    const spy = vi.spyOn(PreferenceService, "unsubscribeUrlFor").mockResolvedValue(null);
+    try {
+      await put(a, a.users.admin, { title: "Plain" });
+      await put(a, a.users.teacher, { mode: "digest", title: "Plain digest" });
+      await run(a);
+      await runDigest({ hour: 18, now: DAY, schoolId: a.id });
+    } finally { spy.mockRestore(); }
+    expect(mail.sent).toHaveLength(2);
+    for (const m of mail.sent) {
+      expect(m.headers).toBeUndefined();
+      expect(m.text).toContain("open Settings in the app");
+      expect(m.text).not.toContain("unsubscribe");
+    }
   });
 });
 
@@ -396,8 +503,8 @@ describe("mail webhook and the delivery screen", () => {
     expect(s.byChannel).toEqual(expect.arrayContaining([{ channel: "email", state: "failed", n: 1 }, { channel: "email", state: "sent", n: 1 }]));
     expect(s.problems[0]).toMatchObject({ state: "failed", n: 1 });
     expect(s.problems[0]!.reason).toContain("smtp down");
-    expect(s.quota).toMatchObject({ limit: 10, forNotices: 8 });
-    expect(s.quota.left).toBeLessThanOrEqual(7);
+    expect(s.quota).toMatchObject({ limit: 10, forNotices: 6 });
+    expect(s.quota.left).toBeLessThanOrEqual(5);
     expect(await svc.retry([r.id])).toBe(1);
     expect(await row(a, r.id)).toMatchObject({ state: "pending", tries: 0 });
     expect((await new DeliveryService(b.as.admin).summary()).byChannel).toEqual([]);

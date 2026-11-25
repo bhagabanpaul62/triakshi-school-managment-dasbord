@@ -6,6 +6,7 @@ import { pulseCounts } from "@/lib/pulse-sources";
 import { logout } from "@/lib/auth-actions";
 import { NotificationBellServer } from "@smw/feature-notifications/ui/bell-server";
 import { AwaitingApproval } from "@smw/feature-setup/ui/awaiting-approval";
+import { UrgentBanner } from "@smw/feature-announcements/ui/urgent-banner";
 import { redirect } from "next/navigation";
 import { Button } from "@smw/ui/ui/button";
 
@@ -33,7 +34,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     <>
       <style dangerouslySetInnerHTML={{ __html: panelCss(school.theme) }} />
       <AppShell brand={{ name: school.name, logoUrl: school.logoUrl, homeHref: "/app" }} groups={buildMenu(ctx, { "/app/messages": counts.messages, "/app/requests": counts.requests, "/app/announcements": counts.notices })}
-        user={{ name: ctx.name, meta: ROLE_LABEL[ctx.role] }} logout={logout} banner={banner}
+        user={{ name: ctx.name, meta: ROLE_LABEL[ctx.role] }} logout={logout} banner={<>{banner}<UrgentBanner /></>}
         topbar={ctx.features.has("notifications") ? <NotificationBellServer messages={counts.messages} requests={counts.requests} /> : null}>
         {children}
       </AppShell>

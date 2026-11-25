@@ -4,7 +4,7 @@ import { TONE } from "@smw/ui/tone";
 import { cn } from "@smw/ui/utils";
 import { AGENDA_DAYS, addDays, daysOf, shiftMonth, weekStart, type CalendarView } from "../dates";
 import { LAYERS, LAYER_TONE, TYPE_TONE, type CalendarItem } from "../constants";
-import { MUTED, PILL } from "./styles";
+import { LINK, MUTED, PILL } from "./styles";
 
 export type UrlFor = (o: Record<string, string | undefined>) => string;
 const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]";
@@ -51,7 +51,7 @@ export function Agenda({ items, anchor, today, url, empty }: { items: CalendarIt
   const keys = [...days.keys()].filter((d) => d >= anchor && d < addDays(anchor, AGENDA_DAYS)).sort();
   return (
     <div className="flex flex-col gap-4">
-      <Link href={url({ view: "agenda", date: addDays(anchor, -AGENDA_DAYS) })} className={cn(PILL, "self-start")}>Earlier</Link>
+      <Link href={url({ view: "agenda", date: addDays(anchor, -AGENDA_DAYS) })} className={cn(LINK, "self-start text-sm text-[var(--ds-on-surface-muted)]")}>Earlier</Link>
       {keys.length === 0 ? empty : keys.map((d) => (
         <section key={d} aria-labelledby={`d-${d}`} className="rounded-3xl bg-[var(--ds-surface-container-low)] p-4">
           <h2 id={`d-${d}`} className={cn("px-2 pb-1 text-[13px] font-medium", d === today ? "text-[var(--ds-color-primary-300)]" : "text-[var(--ds-on-surface-variant)]")}>{dayHeading(d, today)}</h2>

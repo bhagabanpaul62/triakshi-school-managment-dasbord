@@ -1,6 +1,7 @@
 // Client-safe constants and shapes for notices.
 export const NOTICE_TYPES = ["notice", "circular", "urgent"] as const;
 export type NoticeType = (typeof NOTICE_TYPES)[number];
+export const TYPE_LABEL: Record<NoticeType, string> = { notice: "Notice", circular: "Circular", urgent: "Urgent alert" };
 export const NOTICE_STATES = ["draft", "waiting", "scheduled", "sending", "published", "expired", "withdrawn"] as const;
 export type NoticeState = (typeof NOTICE_STATES)[number];
 export const UNDO_SECONDS = 30;

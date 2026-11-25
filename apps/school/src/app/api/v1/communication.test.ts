@@ -46,9 +46,9 @@ async function call(path: string, method: string, tok: string | undefined, o: { 
   if (o.body instanceof FormData) body = o.body;
   else if (o.body !== undefined) { body = JSON.stringify(o.body); headers["content-type"] = "application/json"; }
   const res = await mod[method]!(new Request(`http://${host}/api/v1/x${o.query ?? ""}`, { method, headers, body }), { params: Promise.resolve(o.ids ?? {}) });
-  return { status: res.status, json: (await res.json()) as Record<string, any> };
+  return { status: res.status, json: await res.json() };
 }
-const ok = (r: { status: number; json: unknown }) => { expect(r.status, JSON.stringify(r.json)).toBe(200); return r.json as Record<string, any>; };
+const ok = (r: Awaited<ReturnType<typeof call>>) => { expect(r.status, JSON.stringify(r.json)).toBe(200); return r.json; };
 
 beforeAll(async () => {
   useServices({ storage: new MemoryStorage() });

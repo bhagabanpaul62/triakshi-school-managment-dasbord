@@ -73,3 +73,16 @@ describe("state table", () => {
     }
   });
 });
+
+describe("words the screens use", () => {
+  it("the report says 'Not yet' with nothing finished, never '0 hours'; ages carry a unit", async () => {
+    const { hoursWords, ageWords } = await import("./clock");
+    expect(hoursWords(null)).toBe("Not yet");
+    expect(hoursWords(0.02)).toBe("Under an hour");
+    expect(hoursWords(5.54)).toBe("5.5 hours");
+    expect(hoursWords(72)).toBe("3 days");
+    expect(ageWords(0)).toBe("Today");
+    expect(ageWords(1)).toBe("1 day");
+    expect(ageWords(5)).toBe("5 days");
+  });
+});

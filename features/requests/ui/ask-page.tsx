@@ -3,7 +3,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { CategoryService } from "../categories";
 import { RequestService } from "../service";
 import { AskForm } from "./ask-form";
-import { BackLink, Notice, NoAccess, SectionNav, canWriteFor, isFamilyRole, one, type Search } from "./shared";
+import { BackLink, Notice, NoAccess, canWriteFor, isFamilyRole, one, type Search } from "./shared";
 import { askContext, findStudents, raiseRequest } from "./actions";
 
 export const metadata = { title: "Ask the school" };
@@ -21,7 +21,6 @@ export default async function AskPage({ searchParams }: { searchParams: Search }
     <>
       <BackLink href="/app/requests">{family ? "My requests" : "Queue"}</BackLink>
       <PageHeader eyebrow="Communication" title={family ? "Ask the school" : "Write down a request"} description={family ? "Choose what it is about, then tell us. We will reply here, and tell you when we do." : "For a family who asked by phone or in person. They are told and can follow it from their login."} />
-      <SectionNav ctx={ctx} current="/app/requests/new" />
       {family && !context.child ? <Notice tone="warning">Your login is not linked to a student yet, so we cannot take a request. Please call the school office.</Notice> : null}
       <AskForm categories={categories} child={context.child} office={context.office} initialPeople={context.people} link={link} defaultCategory={one(sp.category)} action={raiseRequest} students={findStudents} context={askContext} />
     </>

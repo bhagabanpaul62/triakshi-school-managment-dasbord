@@ -1,17 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, isNotNull, isNull, max, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { channelsFor, priorityOf, type GroupPrefs } from "./channels";
+import { chunks } from "./constants";
 import { LEGACY_KIND_TOPIC, type NotificationRow } from "./inputs";
 import { commDeliveries, commSettings, notificationPrefs, notifications } from "./schema";
 
 export type { NotificationRow };
-const CHUNK = 1000;
 /** A grouped row that keeps growing pushes again only after this long, unless it is urgent. */
 const PUSH_GAP_MS = 5 * 60_000;
 const READ_IN_APP = "Already read in the app";
 
-const chunks = <T>(xs: T[], n = CHUNK) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 // Links stay inside the app; anything else is dropped rather than rendered as a link.
 const safeHref = (h?: string) => (h && /^\/app(\/|$)/.test(h) && !h.includes("//") ? h.slice(0, 300) : null);
 
@@ -66,12 +65,14 @@ export class NotificationWriter {
     const prefs = new Map((await tx.select({ userId: notificationPrefs.userId, groups: notificationPrefs.groups }).from(notificationPrefs).where(inArray(notificationPrefs.userId, [...ok]))).map((p) => [p.userId, p.groups]));
     const fresh = new Map(items.map((x) => [x.id, x]));
     const grown = saved.filter((s) => !fresh.has(s.id));
+    const now = new Date();
+    // Per grown row: when it last pushed, and whether a held push is already waiting (one is enough: it reads the newest words when it goes).
+    const waiting = sql`${commDeliveries.state} = 'pending' and ${commDeliveries.nextAt} > ${now.toISOString()}::timestamptz`;
     const lastPush = new Map(grown.length
-      ? (await tx.select({ id: commDeliveries.notificationId, at: max(commDeliveries.createdAt) }).from(commDeliveries)
-        .where(and(inArray(commDeliveries.notificationId, grown.map((g) => g.id)), eq(commDeliveries.channel, "push"))).groupBy(commDeliveries.notificationId)).map((l) => [l.id, l.at] as const)
+      ? (await tx.select({ id: commDeliveries.notificationId, at: sql<Date | null>`max(${commDeliveries.createdAt}) filter (where not (${waiting}))`, held: sql<boolean>`coalesce(bool_or(${waiting}), false)` }).from(commDeliveries)
+        .where(and(inArray(commDeliveries.notificationId, grown.map((g) => g.id)), eq(commDeliveries.channel, "push"))).groupBy(commDeliveries.notificationId)).map((l) => [l.id, l] as const)
       : []);
 
-    const now = new Date();
     const due: (typeof commDeliveries.$inferInsert)[] = [];
     for (const s of saved) {
       const item = fresh.get(s.id) ?? items.find((x) => x.row.userId === s.userId && x.row.groupKey === s.groupKey)!;
@@ -79,11 +80,17 @@ export class NotificationWriter {
       const base = { schoolId, userId: s.userId, notificationId: s.id, priority: priorityOf(item.topic, item.row.urgent), nextAt: item.row.deliverAfter ?? now };
       if (fresh.has(s.id)) {
         if (ch.push) due.push({ ...base, sourceKey: `notification:${s.id}`, channel: "push", mode: "instant" });
-        if (ch.email !== "off") due.push({ ...base, sourceKey: `notification:${s.id}`, channel: "email", mode: ch.email });
+        // An urgent row is never held for a digest: it goes out now, whatever its topic.
+        if (ch.email !== "off") due.push({ ...base, sourceKey: `notification:${s.id}`, channel: "email", mode: item.row.urgent ? "instant" : ch.email });
       } else {
         // A row that grew keeps its email (the digest reads the newest text); only the phone gets another tap, and not too often.
-        const last = lastPush.get(s.id);
-        if (ch.push && (item.row.urgent || !last || now.getTime() - last.getTime() > PUSH_GAP_MS)) due.push({ ...base, sourceKey: `notification:${s.id}:${s.count}`, channel: "push", mode: "instant" });
+        const info = lastPush.get(s.id), last = info?.at ? new Date(info.at) : null;
+        if (ch.push && (item.row.urgent || !info?.held)) {
+          const soon = !item.row.urgent && last && now.getTime() - last.getTime() <= PUSH_GAP_MS;
+          // Too soon after the last buzz: one push is held for the end of the gap, so the phone still hears the newest count.
+          const at = soon ? new Date(last.getTime() + PUSH_GAP_MS) : base.nextAt;
+          due.push({ ...base, nextAt: soon ? new Date(Math.max(at.getTime(), base.nextAt.getTime())) : base.nextAt, sourceKey: soon ? `notification:${s.id}:at:${at.getTime()}` : `notification:${s.id}:${s.count}`, channel: "push", mode: "instant" });
+        }
       }
     }
     for (const d of chunks(due)) await tx.insert(commDeliveries).values(d).onConflictDoNothing();

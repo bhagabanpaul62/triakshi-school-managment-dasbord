@@ -1,0 +1,165 @@
+import { notFound } from "next/navigation";
+import { NotFoundError, type Ctx } from "@smw/feature-kit";
+import { CopyValue } from "@smw/ui/finance/CopyValue";
+import { EmptyLine } from "@smw/ui/finance/States";
+import { FileList } from "@smw/ui/comm/FileList";
+import { ResponseFunnel } from "@smw/ui/comm/ResponseFunnel";
+import { SavedViews } from "@smw/ui/comm/SavedViews";
+import { StateChip } from "@smw/ui/comm/StateChip";
+import { Fact, FactList } from "@smw/ui/kit/FactList";
+import { Panel } from "@smw/ui/kit/Panel";
+import { ActionButton } from "@smw/ui/shell/ActionButton";
+import { FormModal } from "@smw/ui/shell/FormModal";
+import { PageHeader } from "@smw/ui/shell/PageHeader";
+import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
+import { dateTime } from "@smw/ui/format";
+import type { Tone } from "@smw/ui/tone";
+import { RESPONSE_WORDS } from "../content";
+import { NoticeService, type NoticeView } from "../service";
+import { approveNotice, approveWithEdits, askChanges, deleteDraft, duplicateNotice, recallNotice, rejectNotice, saveAsTemplate, sendScheduledNow, unscheduleNotice, withdrawNotice } from "./actions";
+import { NoticeCard } from "./card";
+import { diffLines } from "./diff";
+import { FamilyRecord } from "./family-record";
+import { RunButton, UndoSending } from "./notice-actions";
+import { Responses } from "./responses-tab";
+import { BackLink, HOME, LinkButton, Notice, one, STATE_KEY, TYPE_LABEL, type Query } from "./shared";
+
+const SENT = ["sending", "published", "expired", "withdrawn"];
+const text = (name: string, label: string, extra: object = {}) => ({ name, label, type: "textarea" as const, required: true, wide: true, ...extra });
+
+/** The next steps for this notice in this state, as the buttons the person can really use. Nothing here ends in a refusal. */
+function Steps({ v, canTemplate }: { v: NoticeView; canTemplate: boolean }) {
+  const n = v.notice, id = n.id, c = v.can, own = `${HOME}/${id}`;
+  const quiet = { variant: "secondary" as const, plus: false };
+  return (
+    <>
+      {c.edit ? <LinkButton href={`${own}/edit`} primary>{v.review ? "Edit and send again" : "Keep writing"}</LinkButton> : null}
+      {c.approve ? (c.approveNeedsReason
+        ? <FormModal title="Approve your own notice" description="No one else can approve notices at this school, so say why you are approving this yourself. It is kept on record." icon="megaphone" fields={[{ name: "reason", label: "Why", type: "textarea", required: true, wide: true }]} hidden={{ id }} action={approveNotice} submitLabel="Approve and send" trigger={{ label: "Approve", plus: false }} />
+        : <RunButton action={approveNotice} values={{ id }} label="Approve" primary />) : null}
+      {c.askChanges ? <FormModal title="Approve with your changes" description="Change the title or the words. The author is told, and the original is kept in History." icon="megaphone" fields={[{ name: "title", label: "Title", required: true, wide: true }, { name: "body", label: "Message", type: "textarea", required: true, wide: true }]} values={{ title: n.title, body: n.body }} hidden={{ id }} action={approveWithEdits} submitLabel="Approve with changes" trigger={{ label: "Approve with changes", ...quiet }} /> : null}
+      {c.askChanges ? <FormModal title="Ask for changes" description="The author gets your note and the notice goes back to their drafts." icon="megaphone" fields={[text("note", "What should change")]} hidden={{ id }} action={askChanges} submitLabel="Send back" trigger={{ label: "Ask for changes", ...quiet }} /> : null}
+      {c.reject ? <FormModal title="Reject this notice" description="The author is told why. It goes back to their drafts." icon="megaphone" fields={[text("reason", "Why")]} hidden={{ id }} action={rejectNotice} submitLabel="Reject" trigger={{ label: "Reject", ...quiet }} /> : null}
+      {c.recall ? <RunButton action={recallNotice} values={{ id }} label="Take it back" /> : null}
+      {c.sendNow ? <RunButton action={sendScheduledNow} values={{ id }} label="Send now" primary confirm="It goes to everyone it is for right now, ahead of its time." /> : null}
+      {c.unschedule ? <RunButton action={unscheduleNotice} values={{ id }} label="Take off the schedule" /> : null}
+      {c.report && n.state === "published" && n.response.kind !== "none" ? <LinkButton href={`${own}?tab=responses`} primary>Who has answered</LinkButton> : null}
+      {c.correct ? <LinkButton href={`${own}/edit`}>Correct</LinkButton> : null}
+      {c.withdraw ? <FormModal title="Withdraw this notice" description="People see Withdrawn by the school and your reason. The words are hidden from them. A circular keeps its number in the register." icon="megaphone" fields={[text("reason", "Why it is withdrawn, as people will read it")]} hidden={{ id }} action={withdrawNotice} submitLabel="Withdraw" trigger={{ label: "Withdraw", ...quiet }} summary="You can copy it to a new notice afterwards." /> : null}
+      {n.type === "circular" && n.number && SENT.includes(n.state) ? <LinkButton href={`/api/notices/${id}/circular`}>PDF</LinkButton> : null}
+      {c.duplicate ? <RunButton action={duplicateNotice} values={{ id }} label="Duplicate" to={`${HOME}/{id}/edit`} /> : null}
+      {canTemplate && SENT.includes(n.state) ? <FormModal title="Save as a template" icon="megaphone" fields={[{ name: "name", label: "Template name", required: true, wide: true }]} hidden={{ id }} action={saveAsTemplate} submitLabel="Save" trigger={{ label: "Save as template", ...quiet }} /> : null}
+      {c.delete ? <ActionButton variant="ghost" label="Delete draft" action={deleteDraft} values={{ id }} redirectTo={HOME} confirm={{ title: "Delete this draft?", body: `"${n.title || "This draft"}" and its files are deleted. This cannot be undone.`, confirmLabel: "Delete", danger: true }} /> : null}
+    </>
+  );
+}
+
+/** One line of what is happening now, with who it waits for. */
+function Banner({ v }: { v: NoticeView }) {
+  const n = v.notice;
+  if (v.review && n.state === "draft") return <Notice tone="warning">{v.review.kind === "rejected" ? "Rejected" : "Sent back with a note"}: {v.review.note}</Notice>;
+  if (n.state === "waiting") return <Notice tone="warning">{v.approvers.length ? `Waiting for ${v.approvers.join(" or ")} to approve it.` : "No one else is set up to approve notices. Ask the school admin to add an approver."} {v.can.recall ? "You can take it back to change it." : ""}</Notice>;
+  if (n.state === "scheduled" && n.scheduledAt) return <Notice tone="info">Goes out {dateTime(n.scheduledAt)}.</Notice>;
+  if (n.state === "sending") return <Notice tone="info">{v.can.undo ? "Sending in a moment. You can undo until the bar below runs out." : "It is on its way to people now."}</Notice>;
+  if (n.state === "withdrawn") return <Notice tone="warning">Withdrawn {dateTime(n.withdrawnAt)}: {n.withdrawReason}. People see Withdrawn by the school.</Notice>;
+  if (n.state === "expired") return <Notice>This notice ended and is in the archive. It no longer asks for answers.</Notice>;
+  return null;
+}
+
+function Changes({ v }: { v: NoticeView }) {
+  if (!v.versions.length) return <EmptyLine title="No earlier versions." hint="When the notice is corrected, or an approver changes it, the older wording is kept here." />;
+  const now = { title: v.notice.title, body: v.notice.body };
+  return (
+    <ol className="flex flex-col gap-3">
+      {v.versions.map((ver, i) => {
+        const newer = i === 0 ? now : (v.versions[i - 1]!.snapshot as { title?: string; body?: string });
+        const old = ver.snapshot as { title?: string; body?: string };
+        const lines = [...(old.title !== newer.title ? [{ kind: "removed" as const, text: `Title: ${old.title ?? ""}` }, { kind: "added" as const, text: `Title: ${newer.title ?? ""}` }] : []), ...diffLines(String(old.body ?? ""), String(newer.body ?? ""))];
+        return (
+          <li key={ver.version} className="flex flex-col gap-2 rounded-2xl bg-white/[0.04] p-4">
+            <p className="text-sm font-medium text-[var(--ds-on-surface)]">Version {ver.version}{ver.note ? `: ${ver.note}` : ""}</p>
+            <p className="text-xs text-[var(--ds-on-surface-muted)]">Replaced {dateTime(ver.at)}{ver.changedByName ? ` by ${ver.changedByName}` : ""}. Red was in this version, green is what came after.</p>
+            <pre className="custom-scrollbar max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 font-sans text-xs leading-5">
+              {lines.map((l, k) => <span key={k} className={`block ${l.kind === "added" ? "bg-[var(--ds-color-success-500)]/15 text-[var(--ds-color-success-400)]" : l.kind === "removed" ? "bg-[var(--ds-color-danger-500)]/15 text-[var(--ds-color-danger-400)] line-through" : "text-[var(--ds-on-surface-variant)]"}`}>{l.text || " "}</span>)}
+            </pre>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** /app/announcements/[id] for staff: the state and its next step, the notice as families see it, the report, the history. */
+export async function StaffRecord({ ctx, id, sp }: { ctx: Ctx; id: string; sp: Query }) {
+  const svc = new NoticeService(ctx);
+  let v: NoticeView;
+  try { v = await svc.get(id); } catch (e) { if (e instanceof NotFoundError) notFound(); throw e; }
+  const n = v.notice, c = v.can;
+  if (SENT.includes(n.state) && !c.report) return <FamilyRecord ctx={ctx} id={id} lang={one(sp.lang)} />;
+  const asks = n.response.kind !== "none";
+  const tabs = [{ key: "overview", label: "The notice" }, ...(c.report ? [{ key: "responses", label: asks ? "Responses" : "Who has read it", count: v.stats?.answered ?? undefined }] : []), ...(v.versions.length ? [{ key: "history", label: "History", count: v.versions.length }] : [])];
+  const tab = tabs.some((t) => t.key === one(sp.tab)) ? one(sp.tab)! : "overview";
+  const s = v.stats;
+  return (
+    <>
+      <BackLink href={HOME}>Notices</BackLink>
+      <PageHeader eyebrow={TYPE_LABEL[n.type]} title={n.title || "Untitled draft"}
+        description={<span className="flex flex-wrap items-center gap-2">
+          <StateChip kind="notice" state={STATE_KEY[n.state]} />
+          {v.category ? <ToneBadge label={v.category.name} tone={v.category.tone as Tone} /> : null}
+          {n.number ? <CopyValue value={n.number} label="circular number" /> : null}
+          {n.correctedAt ? <span className="text-xs">Updated {dateTime(n.correctedAt)}</span> : null}
+        </span>}
+        actions={ctx.readOnly ? null : <Steps v={v} canTemplate={svc.can("manage")} />} />
+      {ctx.readOnly ? <div className="pb-4"><Notice tone="warning">This school is in read only mode. You can read this, but nothing can be sent or changed until the school is open again.</Notice></div> : null}
+      <div className="flex flex-col gap-4">
+        <Banner v={v} />
+        <SavedViews views={tabs} active={tab} basePath={`${HOME}/${id}`} param="tab" label="This notice" />
+        {tab === "responses" ? <Responses ctx={ctx} v={v} sp={sp} /> : tab === "history" ? <Panel title="Earlier versions"><Changes v={v} /></Panel> : (
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <div className="flex min-w-0 flex-col gap-4">
+              {n.state === "waiting" && v.versions.length ? <Panel title="What changed"><Changes v={{ ...v, versions: v.versions.slice(0, 1) }} /></Panel> : null}
+              <Panel title="How families read it">
+                <div className="flex flex-col gap-3">
+                  <NoticeCard type={n.type} number={n.number} category={v.category} title={n.title} body={n.body} response={n.response} dueAt={n.dueAt} updatedAt={n.correctedAt} />
+                  {n.lang2 && n.title2 && n.body2 ? <NoticeCard type={n.type} category={v.category} title={n.title2} body={n.body2} /> : null}
+                  <FileList files={v.files.map((f) => ({ id: f.id, name: f.name, sizeBytes: f.size, type: f.contentType, href: `/api/notices/files/${f.id}` }))} />
+                </div>
+              </Panel>
+            </div>
+            <div className="flex min-w-0 flex-col gap-4">
+              {s && c.report ? (
+                <Panel title="How it is going" action={c.report ? <LinkButton href={`${HOME}/${id}?tab=responses`}>Open</LinkButton> : undefined}>
+                  <ResponseFunnel parts={asks ? [{ label: "Answered", value: s.answered, tone: "success" }, { label: "Not answered", value: Math.max(0, s.recipients - s.answered) }] : [{ label: "Opened", value: s.seen, tone: "success" }, { label: "Not opened", value: Math.max(0, s.recipients - s.seen) }]}
+                    progress={asks ? { done: s.answered, total: s.recipients } : { done: s.seen, total: s.recipients, verb: "opened" }} />
+                </Panel>
+              ) : null}
+              {v.preview && (n.state === "draft" || n.state === "waiting" || n.state === "scheduled") ? (
+                <Panel title="Who it reaches">
+                  <p className="text-sm text-[var(--ds-on-surface)]">{v.preview.total ? `${[v.preview.families ? `${v.preview.families} families` : "", v.preview.staff ? `${v.preview.staff} staff` : ""].filter(Boolean).join(" and ")}` : "Nobody yet"}</p>
+                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">{v.audienceText}</p>
+                  {v.preview.unreachable.length ? <p className="mt-2 text-xs text-[var(--ds-color-warning-400)]">{v.preview.unreachable.length}{v.preview.unreachable.length === 100 ? "+" : ""} will not get a message on their phone or email: {v.preview.unreachable.slice(0, 3).map((u) => `${u.name} (${u.why})`).join("; ")}.</p> : null}
+                </Panel>
+              ) : null}
+              <Panel title="Details">
+                <FactList>
+                  <Fact label="Written by">{v.authorName}</Fact>
+                  <Fact label="For">{v.audienceText}</Fact>
+                  <Fact label="Asks">{asks ? RESPONSE_WORDS[n.response.kind] : "Nothing"}</Fact>
+                  <Fact label="Answer by">{n.dueAt ? dateTime(n.dueAt) : null}</Fact>
+                  <Fact label="Sent">{n.publishedAt ? dateTime(n.publishedAt) : null}</Fact>
+                  <Fact label="Pinned until">{n.pinnedUntil && n.pinnedUntil > new Date() ? dateTime(n.pinnedUntil) : null}</Fact>
+                  <Fact label="Ends on">{n.expiresAt ? dateTime(n.expiresAt) : null}</Fact>
+                  <Fact label="Website">{n.website ? "On the school website" : "App only"}</Fact>
+                  <Fact label="Approved by">{v.approvedByName}</Fact>
+                  <Fact label="Version">{n.version}</Fact>
+                </FactList>
+              </Panel>
+            </div>
+          </div>
+        )}
+      </div>
+      {n.state === "sending" && c.undo && n.sendAt ? <UndoSending id={id} until={n.sendAt.toISOString()} /> : null}
+    </>
+  );
+}

@@ -83,13 +83,15 @@ const seed: FeatureSeed = async (admin, state) => {
     });
   }
 
-  // A reported conversation: the family reports a message from a teacher, and the safeguarding lead reviews it with a reason.
+  // A reported conversation: a family writes to a teacher of their child, the teacher's reply is reported, and the safeguarding lead reviews it with a reason.
+  // Only the teacher and the family are members; the admin reads it as a reviewer.
   const f3 = family(3);
-  if (f3 && t1) {
-    const id = await converse(admin, { subject: "Extra tuition", studentId: f3.student.id, recipientIds: [t1.userId] }, "Introducing the class teacher, who will write about extra support.",
-      [[t1, "Extra tuition for the exam can be arranged with me directly at my home, for a fee of Rs 2,000 a month in cash."]]);
+  const tutor = f3 ? (await new MessageService(f3.ctx).contacts(undefined, f3.student.id)).find((c) => c.role === "teacher") : undefined;
+  if (f3 && tutor) {
+    const id = await converse(f3.ctx, { subject: "Extra tuition", studentId: f3.student.id, recipientIds: [tutor.id] }, `Could you tell me how ${f3.student.name} is doing before the exams?`,
+      [[as(tutor.id, tutor.name, "teacher"), "Extra tuition for the exam can be arranged with me directly at my home, for a fee of Rs 2,000 a month in cash."]]);
     const view = await new MessageService(f3.ctx).thread(id);
-    const msg = view.messages.find((m) => m.sender === t1.name);
+    const msg = view.messages.find((m) => m.sender === tutor.name);
     await new MessageService(f3.ctx).report({ threadId: id, messageId: msg?.id, category: "pressure", note: "The teacher asked for cash for private tuition, which the school did not announce." });
     await new SafeguardService(admin).open({ threadId: id, reason: "Reading the reported message and what came before it." });
   }

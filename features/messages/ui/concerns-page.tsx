@@ -3,7 +3,7 @@ import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { shortDate } from "@smw/ui/format";
-import { REPORT_CATEGORIES, REPORT_CHIP, REPORT_STATE_WORDS } from "../constants";
+import { REPORT_CATEGORIES } from "../constants";
 import { MessageService } from "../service";
 import { UnreadFallback } from "./empty";
 

@@ -98,7 +98,7 @@ describe("deliveries", () => {
     await put({ userId: student(), topic: "account.security", title: "New sign-in" }, { userId: student(), topic: "homework.new", title: "HW", urgent: true });
     const d = await sends();
     expect(d.filter((x) => x.priority === 1)).toHaveLength(4);
-    expect(d.filter((x) => x.channel === "email" && x.mode === "instant")).toHaveLength(1);
+    expect(d.filter((x) => x.channel === "email" && x.mode === "instant")).toHaveLength(2); // the security mail, and the urgent homework one
   });
 
   it("honours deliverAfter", async () => {
@@ -107,18 +107,24 @@ describe("deliveries", () => {
     expect((await sends()).every((d) => d.nextAt.getTime() === at.getTime())).toBe(true);
   });
 
-  it("a grouped row that grows pushes again only after 5 minutes, unless urgent", async () => {
+  it("a grouped row that grows inside 5 minutes gets one push held for the end of the gap, not dropped and not repeated", async () => {
     const row = { userId: student(), topic: "message.new" as const, title: "m", groupKey: "t" };
     await put(row);
     await put(row);
-    expect((await sends()).filter((d) => d.channel === "push")).toHaveLength(1);
-    await withSchool(a.id, (tx) => tx.update(commDeliveries).set({ createdAt: new Date(Date.now() - 10 * 60_000) }));
-    await put(row);
-    const pushes = (await sends()).filter((d) => d.channel === "push");
+    let pushes = (await sends()).filter((d) => d.channel === "push");
     expect(pushes).toHaveLength(2);
-    expect(pushes.map((p) => p.sourceKey).some((k) => /^notification:[0-9a-f-]+:3$/.test(k))).toBe(true);
+    const first = pushes.find((p) => p.sourceKey.split(":").length === 2)!, held = pushes.find((p) => p.sourceKey.includes(":at:"))!;
+    expect(held.nextAt.getTime() - first.createdAt.getTime()).toBe(5 * 60_000);
+    await put(row);
+    expect((await sends()).filter((d) => d.channel === "push")).toHaveLength(2);
+    // time passes: the held push is due and the last one is old, so the next growth pushes at once
+    await withSchool(a.id, (tx) => tx.update(commDeliveries).set({ createdAt: new Date(Date.now() - 10 * 60_000), nextAt: new Date(Date.now() - 5 * 60_000) }));
+    await put(row);
+    pushes = (await sends()).filter((d) => d.channel === "push");
+    expect(pushes).toHaveLength(3);
+    expect(pushes.map((p) => p.sourceKey).some((k) => /^notification:[0-9a-f-]+:4$/.test(k))).toBe(true);
     await put({ ...row, urgent: true });
-    expect((await sends()).filter((d) => d.channel === "push")).toHaveLength(3);
+    expect((await sends()).filter((d) => d.channel === "push")).toHaveLength(4);
     expect((await sends()).filter((d) => d.channel === "email")).toHaveLength(1);
   });
 

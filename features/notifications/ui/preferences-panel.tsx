@@ -57,29 +57,31 @@ export function PreferencesPanel({ prefs, devices: initialDevices }: { prefs: My
   return (
     <div className="flex flex-col gap-3">
       <Panel title="What reaches you" action={<PushButton />}>
-        <div className="-mx-2 overflow-x-auto"><table className="w-full min-w-[34rem] text-left text-sm">
-          <thead className="text-xs text-[var(--ds-on-surface-muted)]"><tr><th className="px-2 pb-2 font-normal">Type</th><th className="px-2 pb-2 font-normal">App</th><th className="px-2 pb-2 font-normal">Push</th><th className="px-2 pb-2 font-normal">Email</th></tr></thead>
-          <tbody>
-            {(Object.keys(TOPIC_GROUPS) as TopicGroup[]).map((g) => {
-              const v = groups[g];
-              return (
-                <tr key={g} className="align-middle">
-                  <td className="px-2 py-1.5 text-[var(--ds-on-surface)]">
-                    <span className="flex items-center gap-2">{v.locked ? <IconLock className="h-4 w-4 shrink-0 text-[var(--ds-on-surface-muted)]" aria-hidden /> : null}{TOPIC_GROUPS[g]}</span>
-                    {v.locked ? <span className="block text-xs text-[var(--ds-on-surface-muted)]">{lockedWhy(g)}</span>
-                      : partlyLocked(g) ? <span className="block text-xs text-[var(--ds-on-surface-muted)]">Absence alerts are always sent.</span> : null}
-                  </td>
-                  <td className="px-2 text-[var(--ds-on-surface-muted)]">Always</td>
-                  <td className="px-2"><Switch on={v.push} disabled={v.locked} label={`Push for ${TOPIC_GROUPS[g]}`} onChange={(push) => setGroup(g, { push, email: v.email })} /></td>
-                  <td className="px-2">
-                    {v.locked ? <span className="text-[var(--ds-on-surface-muted)]">{EMAIL_LABEL[v.email]}</span>
-                      : <SegmentedControl size="sm" label={`Email for ${TOPIC_GROUPS[g]}`} options={EMAIL_MODES.map((m) => ({ value: m, label: EMAIL_LABEL[m] }))} value={v.email} onChange={(email) => setGroup(g, { push: v.push, email })} />}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table></div>
+        {/* One stacked row per group: App, Push and Email all in view at 375 px, no sideways scroll. From sm up the labels move to one header line. */}
+        <div className="hidden grid-cols-[minmax(0,1fr)_4rem_4.5rem_16rem] gap-3 px-1 pb-2 text-xs text-[var(--ds-on-surface-muted)] sm:grid"><span>Type</span><span>App</span><span>Push</span><span>Email</span></div>
+        <ul className="flex flex-col divide-y divide-white/[0.05]">
+          {(Object.keys(TOPIC_GROUPS) as TopicGroup[]).map((g) => {
+            const v = groups[g];
+            const cell = "flex items-center justify-between gap-3 sm:justify-start";
+            const tag = "text-xs text-[var(--ds-on-surface-muted)] sm:sr-only";
+            return (
+              <li key={g} className="flex flex-col gap-1 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_4rem_4.5rem_16rem] sm:items-center sm:gap-3 sm:px-1 sm:py-1.5">
+                <div className="min-w-0 text-sm text-[var(--ds-on-surface)]">
+                  <span className="flex items-center gap-2">{v.locked ? <IconLock className="h-4 w-4 shrink-0 text-[var(--ds-on-surface-muted)]" aria-hidden /> : null}{TOPIC_GROUPS[g]}</span>
+                  {v.locked ? <span className="block text-xs text-[var(--ds-on-surface-muted)]">{lockedWhy(g)}</span>
+                    : partlyLocked(g) ? <span className="block text-xs text-[var(--ds-on-surface-muted)]">Absence alerts are always sent.</span> : null}
+                </div>
+                <div className={cell}><span className={tag}>App</span><span className="text-sm text-[var(--ds-on-surface-muted)]">Always</span></div>
+                <div className={cell}><span className={tag}>Push</span><Switch on={v.push} disabled={v.locked} label={`Push for ${TOPIC_GROUPS[g]}`} onChange={(push) => setGroup(g, { push, email: v.email })} /></div>
+                <div className={cell}>
+                  <span className={tag}>Email</span>
+                  {v.locked ? <span className="text-sm text-[var(--ds-on-surface-muted)]">{EMAIL_LABEL[v.email]}</span>
+                    : <SegmentedControl size="sm" label={`Email for ${TOPIC_GROUPS[g]}`} options={EMAIL_MODES.map((m) => ({ value: m, label: EMAIL_LABEL[m] }))} value={v.email} onChange={(email) => setGroup(g, { push: v.push, email })} />}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       </Panel>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">

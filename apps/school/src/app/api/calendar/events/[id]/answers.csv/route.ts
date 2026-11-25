@@ -8,6 +8,6 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { name, text } = await new RsvpService(await actionCtx()).csv((await params).id);
-    return new Response(`﻿${text}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });
+    return new Response(`\uFEFF${text}`, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="${name}"`, "Cache-Control": "no-store" } });
   } catch (err) { return failure(err); }
 }

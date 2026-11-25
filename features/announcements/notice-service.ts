@@ -1,15 +1,15 @@
-import { and, asc, desc, eq, ilike, inArray, or, sql, count, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql, count } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, ValidationError, toPage, type Page } from "@smw/feature-kit";
-import { audiencePreview, describeAudience } from "@smw/feature-notifications/audience";
+import { audiencePreview, describeAudience, expandGroups } from "@smw/feature-notifications/audience";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
-import { audienceField } from "@smw/feature-notifications/audience-rules";
+import { audienceField, type Audience } from "@smw/feature-notifications/audience-rules";
 import { quietUntil } from "@smw/feature-notifications/quiet";
 import { publicAudience, contentOf, snapshotOf, readyErrors, plain, EMPTY, NO_AUDIENCE, CONTENT_KEYS, isWebsiteOnly, type Notice, type NoticeContent } from "./content";
 import { NoticeBase } from "./base";
 import { TAB_STATES, type NoticeCan, type NoticeState, type NoticeTab } from "./constants";
 import { fanOut, reconcile, subjectOf, tell } from "./fan-out";
-import { approveInput, correctInput, draftInput, listInput, noteInput, reasonInput, type DraftInput, type NoticeListQuery } from "./inputs";
+import { approveInput, correctInput, draftInput, editInput, listInput, noteInput, reasonInput, type DraftInput, type NoticeListQuery } from "./inputs";
 import { labelOf, startSending } from "./lifecycle";
 import { announcementCategories, announcementFiles, announcementRecipients, announcementResponses, announcements, announcementVersions } from "./schema";
 import { can as canDo, transition } from "./state";
@@ -94,6 +94,18 @@ export class NoticeService extends NoticeBase {
     }));
   }
 
+  /** Names for the single students and people an audience points at, in the picker's `type:id` form, so a draft shows "Asha Verma" and not "One student". */
+  async labelsFor(audience: Audience): Promise<Record<string, string>> {
+    this.staffOnly();
+    const rules = audience.include.concat(audience.exclude);
+    const pick = (type: "student" | "person") => [...new Set(rules.flatMap((r) => (r.type === type ? [r.id] : [])))];
+    const [students, people] = [pick("student"), pick("person")];
+    return this.read("read", async (tx) => {
+      const found = async (table: "students" | "users", list: string[]) => (list.length ? [...(await tx.execute(sql`select id::text as id, name from ${sql.raw(table)} where id in (${idList(list)})`))] as { id: string; name: string }[] : []);
+      return Object.fromEntries([...(await found("students", students)).map((s) => [`student:${s.id}`, s.name]), ...(await found("users", people)).map((p) => [`person:${p.id}`, p.name])]);
+    });
+  }
+
   /** The people who wrote the notices this person can see, for the author filter. */
   async authors(): Promise<{ id: string; name: string }[]> {
     this.staffOnly();
@@ -124,14 +136,17 @@ export class NoticeService extends NoticeBase {
         n.audience.include.length || isWebsiteOnly(n) ? this.reach(tx, n.audience, "publish").catch(() => null) : Promise.resolve(null),
       ]);
       const name = new Map(names.map((u) => [u.id, u.name]));
+      // Earlier wordings, approval reasons and what a reviewer asked are for the writer, an admin and approvers only.
+      const inner = this.isManager || this.can("approve") || n.createdBy === this.ctx.userId;
+      if (!inner) { notice.approvalReason = null; notice.reviewNote = null; }
       const unsent = n.state === "draft" || n.state === "waiting" || n.state === "scheduled";
       const [stats] = unsent ? [] : [...(await tx.execute(sql`select count(*) filter (where r.removed_at is null)::int as recipients, count(*) filter (where r.removed_at is null and r.seen_at is not null)::int as seen,
         count(a.id) filter (where r.removed_at is null)::int as answered from announcement_recipients r left join announcement_responses a on a.recipient_id = r.id where r.announcement_id = ${n.id}::uuid`))] as NonNullable<NoticeView["stats"]>[];
       return {
         notice, category: cat ? { id: cat.id, name: cat.name, tone: cat.tone } : null, authorName: n.createdBy ? name.get(n.createdBy) ?? null : null, approvedByName: n.approvedBy ? name.get(n.approvedBy) ?? null : null,
         files: files.map((f) => ({ id: f.id, name: f.fileName, size: f.size, contentType: f.contentType, sort: f.sort })),
-        versions: versions.map(({ v, by }) => ({ version: v.version, note: v.note, changedByName: by, at: v.createdAt, snapshot: v.snapshot })),
-        review: n.reviewNote ? n.reviewNote.startsWith(REJECTED) ? { kind: "rejected", note: n.reviewNote.slice(REJECTED.length) } : { kind: "changes", note: n.reviewNote } : null,
+        versions: !inner ? [] : versions.map(({ v, by }) => ({ version: v.version, note: v.note, changedByName: by, at: v.createdAt, snapshot: v.snapshot })),
+        review: !inner ? null : n.reviewNote ? n.reviewNote.startsWith(REJECTED) ? { kind: "rejected", note: n.reviewNote.slice(REJECTED.length) } : { kind: "changes", note: n.reviewNote } : null,
         approvers: approvers.filter((a) => a.id !== n.createdBy).map((a) => a.name),
         audienceText: unsent ? (n.audience.include.length ? await describeAudience(tx, n.audience) : n.audienceLabel) : n.audienceLabel,
         preview: unsent && n.audience.include.length ? await audiencePreview(tx, n.audience) : null,
@@ -158,6 +173,19 @@ export class NoticeService extends NoticeBase {
   }
 
   private websiteAllowed() { return this.isManager || this.can("approve"); }
+
+  /**
+   * Changing who a sent or approved notice is for is publishing to the new people: it needs the right to publish and a reach that goes out at once.
+   * Writes the saved groups out as rules into `c.audience`. Refused with a way forward: a new draft for an approver.
+   */
+  private async mayChangeAudience(tx: Tx, before: Audience, c: NoticeContent): Promise<void> {
+    const after = await expandGroups(tx, c.audience);
+    if (sameJson(before, after)) { c.audience = before; return; }
+    if (after.include.length && (!this.can("publish") || (await this.reach(tx, c.audience, "publish")) === "approval")) {
+      throw new ForbiddenError("Ask an approver: this changes who it reaches beyond your own classes. Save it as a new draft and send that for approval.");
+    }
+    c.audience = after;
+  }
 
   // ---------- writing ----------
 
@@ -226,7 +254,7 @@ export class NoticeService extends NoticeBase {
       await this.reach(tx, n.audience, "draft");
       const people = (await this.approvers(tx)).filter((a) => a.id !== this.ctx.userId);
       if (!people.length) throw new ConflictError("No one is set up to approve notices. Ask an admin, or an admin can approve their own.");
-      await tx.update(announcements).set({ state: "waiting", submittedAt: new Date(), reviewNote: null, updatedAt: new Date() }).where(eq(announcements.id, n.id));
+      await tx.update(announcements).set({ state: "waiting", audience: await expandGroups(tx, n.audience), submittedAt: new Date(), reviewNote: null, updatedAt: new Date() }).where(eq(announcements.id, n.id));
       await NotificationWriter.insert(tx, this.ctx.schoolId, people.map((a) => ({
         userId: a.id, topic: "notice.approval" as const, title: `Notice waiting for approval: ${n.title}`, body: `From ${this.ctx.name}`, href: `/app/announcements/${n.id}`, subject: { type: "notice-approval", id: n.id }, action: true,
       })));
@@ -274,12 +302,13 @@ export class NoticeService extends NoticeBase {
       let cur = n;
       if (d.edits && Object.keys(d.edits).length) {
         const c = await this.shape(tx, contentOf(n), d.edits);
+        await this.mayChangeAudience(tx, n.audience, c);
         await tx.insert(announcementVersions).values({ schoolId: this.ctx.schoolId, announcementId: n.id, version: n.version, snapshot: snapshotOf(n), note: "As sent for approval", changedBy: n.createdBy });
         cur = (await tx.update(announcements).set({ ...this.values(c, await labelOf(tx, c)), version: n.version + 1 }).where(eq(announcements.id, n.id)).returning())[0]!;
       }
       await this.problems(tx, contentOf(cur));
       const [approved] = await tx.update(announcements).set({ approvedBy: me, approvalReason: d.reason ?? null, reviewNote: null }).where(eq(announcements.id, n.id)).returning();
-      const row = next === "sending" ? await startSending(tx, this.ctx.schoolId, approved!, { immediate: false }) : (await tx.update(announcements).set({ state: "scheduled" }).where(eq(announcements.id, n.id)).returning())[0]!;
+      const row = next === "sending" ? await startSending(tx, approved!, { immediate: false }) : (await tx.update(announcements).set({ state: "scheduled", audience: await expandGroups(tx, approved!.audience) }).where(eq(announcements.id, n.id)).returning())[0]!;
       await NotificationWriter.done(tx, this.ctx.schoolId, { type: "notice-approval", id: n.id });
       if (n.createdBy && n.createdBy !== me) {
         await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: n.createdBy, topic: "work.update", title: `Approved: ${n.title}`, body: d.edits ? "The approver made some changes." : undefined, href: `/app/announcements/${n.id}` }]);
@@ -306,8 +335,8 @@ export class NoticeService extends NoticeBase {
         }
       }
       if (n.audience.include.length && (await this.reach(tx, n.audience, "publish")) === "approval") throw new ConflictError("This reaches beyond your own classes, so it needs approval. Send it for approval.");
-      const sending = await startSending(tx, this.ctx.schoolId, n, { immediate: n.type === "urgent" });
-      await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Published "${n.title}"${sending.number ? ` as ${sending.number}` : ""}` });
+      const sending = await startSending(tx, n, { immediate: n.type === "urgent" });
+      await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Published "${n.title}"` });
       return sending;
     });
     if (row.type === "urgent") await fanOut(this.ctx.schoolId, row.id);
@@ -326,7 +355,7 @@ export class NoticeService extends NoticeBase {
       if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() + 60_000) this.fieldError("scheduledAt", "Choose a time that has not passed");
       await this.problems(tx, { ...contentOf(n), scheduledAt: when });
       if (n.audience.include.length && (await this.reach(tx, n.audience, "publish")) === "approval") throw new ConflictError("This reaches beyond your own classes, so it needs approval. Send it for approval.");
-      await tx.update(announcements).set({ state: "scheduled", scheduledAt: when, updatedAt: new Date() }).where(eq(announcements.id, n.id));
+      await tx.update(announcements).set({ state: "scheduled", scheduledAt: when, audience: await expandGroups(tx, n.audience), updatedAt: new Date() }).where(eq(announcements.id, n.id));
       const s = await this.settings(tx);
       await this.audit(tx, { action: "schedule", entity: "Notice", entityId: n.id, summary: `Scheduled "${n.title}"` });
       return { id: n.id, scheduledAt: when, quietUntil: quietUntil(when, { from: s.quietFrom, to: s.quietTo, sundays: s.quietSundays }) };
@@ -381,7 +410,7 @@ export class NoticeService extends NoticeBase {
       const n = await this.find(tx, id, true);
       this.own(n);
       transition(n.state, "sendNow");
-      const sending = await startSending(tx, this.ctx.schoolId, n, { immediate: true });
+      const sending = await startSending(tx, n, { immediate: true });
       await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent scheduled notice "${n.title}" now` });
       return sending;
     });
@@ -398,6 +427,7 @@ export class NoticeService extends NoticeBase {
       this.own(n);
       transition(n.state, "correct");
       const c = await this.shape(tx, contentOf(n), d.edits);
+      await this.mayChangeAudience(tx, n.audience, c);
       if (!sameJson(c.response, n.response)) {
         const [answered] = await tx.select({ n: count() }).from(announcementResponses).innerJoin(announcementRecipients, eq(announcementRecipients.id, announcementResponses.recipientId)).where(eq(announcementRecipients.announcementId, n.id));
         if (Number(answered?.n ?? 0) > 0) this.fieldError("response", "People have already answered, so what you ask them cannot change. Withdraw and send a new notice instead.");
@@ -438,13 +468,14 @@ export class NoticeService extends NoticeBase {
   }
 
   /** A new draft with the same words, audience and question. Dates, the website flag and the number start fresh. */
-  async duplicate(id: string): Promise<{ id: string }> {
+  async duplicate(id: string, edits?: unknown): Promise<{ id: string }> {
     this.staffOnly();
     this.noSupport();
+    const d = edits ? this.parse(editInput, edits) : {};
     return this.write("draft", async (tx) => {
       const n = await this.find(tx, id);
-      const c: NoticeContent = { ...contentOf(n), dueAt: null, scheduledAt: null, expiresAt: null, pinnedUntil: null, website: false };
-      const [row] = await tx.insert(announcements).values({ ...this.values(c, n.audienceLabel), schoolId: this.ctx.schoolId, createdBy: this.ctx.userId, state: "draft" }).returning({ id: announcements.id });
+      const c = await this.shape(tx, { ...contentOf(n), dueAt: null, scheduledAt: null, expiresAt: null, pinnedUntil: null, website: false }, d);
+      const [row] = await tx.insert(announcements).values({ ...this.values(c, await labelOf(tx, c)), schoolId: this.ctx.schoolId, createdBy: this.ctx.userId, state: "draft" }).returning({ id: announcements.id });
       const files = await tx.select().from(announcementFiles).where(eq(announcementFiles.announcementId, n.id));
       if (files.length) await tx.insert(announcementFiles).values(files.map((f) => ({ schoolId: this.ctx.schoolId, announcementId: row!.id, fileKey: f.fileKey, fileName: f.fileName, contentType: f.contentType, size: f.size, sort: f.sort })));
       await this.audit(tx, { action: "create", entity: "Notice", entityId: row!.id, summary: `Copied "${n.title}" to a new draft` });

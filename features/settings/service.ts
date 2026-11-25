@@ -505,6 +505,8 @@ export class AuditService extends SettingsService {
         actorId ? eq(auditLogs.actorUserId, actorId) : undefined,
         from ? sql`${day} >= ${from}::date` : undefined,
         to ? sql`${day} <= ${to}::date` : undefined,
+        // A report or complaint about someone is not theirs to read, not even as a line in the log.
+        sql`not (${auditLogs.module} in ('messages', 'requests') and jsonb_exists(coalesce(${auditLogs.meta}->'aboutUserIds', '[]'::jsonb), ${this.ctx.userId}))`,
       );
       const [rows, totals] = await Promise.all([
         tx.select({
@@ -542,6 +544,8 @@ const PRIVATE_TALK = new Set(["message_threads", "thread_members", "messages", "
 /** Even with the tick, these need messages:safeguard as well. */
 const SAFEGUARD_ONLY = new Set(["message_reports", "message_reviews"]);
 const SAFEGUARD_FEATURE = { key: "messages", permissions: { safeguard: ["admin"] } } as const;
+/** Notifications on these topics carry private words; their text stays out of a file that was not ticked for private talk. */
+const PRIVATE_TOPICS = new Set(["message.new", "request.update", "request.work", "safety.report"]);
 const REASON_MIN = 10;
 
 export interface ExportResult { id: string; label: string; sizeBytes: number; url: string }
@@ -576,7 +580,7 @@ export class ExportService extends SettingsService {
       const [has] = await tx.execute<{ t: string | null }>(sql`select to_regclass('public.students')::text as t`);
       const [student] = has?.t ? await tx.execute<Record<string, unknown>>(sql`select * from students where id = ${studentId}`) : [];
       if (!student) throw new NotFoundError("Student");
-      return { label: `Student: ${student.name ?? studentId}`, data: { student, tables: { ...await this.dump(tx, "student_id", studentId), ...await this.studentTalk(tx, studentId) } } };
+      return { label: `Student: ${student.name ?? studentId}`, data: { student, tables: await this.withoutAboutMe(tx, { ...await this.dump(tx, "student_id", studentId), ...await this.studentTalk(tx, studentId) }) } };
     });
   }
 
@@ -624,7 +628,8 @@ export class ExportService extends SettingsService {
       order by c.table_name, c.ordinal_position`);
     const byTable = new Map<string, string[]>();
     for (const c of cols) {
-      if (SKIP_TABLES.has(c.table_name) || (PRIVATE_TALK.has(c.table_name) && !(talk && this.talkAllowed(c.table_name))) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
+      if (SKIP_TABLES.has(c.table_name) || (PRIVATE_TALK.has(c.table_name) && !(talk && this.talkAllowed(c.table_name))) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)
+        || (!talk && c.table_name === "meeting_slots" && c.column_name === "private_note")) continue;
       byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
     }
     const out: Record<string, Record<string, unknown>[]> = {};
@@ -633,6 +638,33 @@ export class ExportService extends SettingsService {
       out[table] = [...await tx.execute(sql`select ${list} from ${sql.identifier(table)} where ${sql.identifier(column)} = ${value} order by 1`)];
     }
     if (!payroll) await this.withoutPay(tx, out);
+    if (!talk && out.notifications) out.notifications = out.notifications.map((n) => (n.private_body || PRIVATE_TOPICS.has(n.topic as string) ? { ...n, body: null } : n));
+    await this.withoutAboutMe(tx, out);
+    return out;
+  }
+
+  /**
+   * Whoever takes the file out must not read what was written about them: requests and reports that name them, the conversations
+   * those belong to, and the reports and reviews of those conversations are left out.
+   */
+  private async withoutAboutMe(tx: Tx, out: Record<string, Record<string, unknown>[]>): Promise<Record<string, Record<string, unknown>[]>> {
+    if (!["message_threads", "thread_members", "messages", "message_files", "message_reports", "message_reviews", "requests", "request_events"].some((t) => out[t])) return out;
+    const me = this.ctx.userId;
+    const [has] = await tx.execute<{ r: string | null; m: string | null }>(sql`select to_regclass('public.requests')::text as r, to_regclass('public.message_reports')::text as m`);
+    const ids = async (q: ReturnType<typeof sql>) => new Set((await tx.execute<{ id: string }>(q)).map((r) => r.id));
+    const reqs = has?.r ? await ids(sql`select id::text as id from requests where ${me}::uuid = any(about_user_ids)`) : new Set<string>();
+    const threads = new Set([
+      ...(has?.r ? await ids(sql`select thread_id::text as id from requests where ${me}::uuid = any(about_user_ids)`) : []),
+      ...(has?.m ? await ids(sql`select thread_id::text as id from message_reports where ${me}::uuid = any(about_user_ids)`) : []),
+    ]);
+    if (!threads.size && !reqs.size) return out;
+    const msgs = threads.size ? await ids(sql`select id::text as id from messages where thread_id::text in (${sql.join([...threads].map((t) => sql`${t}`), sql`, `)})`) : new Set<string>();
+    const drop = (table: string, gone: (r: Record<string, unknown>) => boolean) => { if (out[table]) out[table] = out[table].filter((r) => !gone(r)); };
+    const inThread = (r: Record<string, unknown>) => threads.has(r.thread_id as string);
+    drop("message_threads", (r) => threads.has(r.id as string));
+    for (const t of ["thread_members", "messages", "message_reviews", "message_reports", "requests"]) drop(t, inThread);
+    drop("message_files", (r) => msgs.has(r.message_id as string));
+    drop("request_events", (r) => reqs.has(r.request_id as string));
     return out;
   }
 

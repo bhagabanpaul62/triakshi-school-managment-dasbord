@@ -105,11 +105,11 @@ export interface PeopleTableProps {
 }
 
 /** The people of a notice: tick some and remind them, or write down a paper answer for one. */
-export function PeopleTable({ noticeId, spec, canNudge, rows, ...table }: PeopleTableProps) {
+export function PeopleTable({ noticeId, spec, canNudge, rows, emptyText, ...table }: PeopleTableProps) {
   const router = useRouter();
   const asks = spec.kind !== "none";
   return (
-    <SelectableTable {...table} rows={rows} noun="person" searchPlaceholder="Search by name" empty={table.emptyText}
+    <SelectableTable {...table} rows={rows} noun="person" searchPlaceholder="Search by name" empty={emptyText}
       bulkActions={asks && canNudge ? [{ label: "Remind", run: async (ids) => {
         const fd = new FormData(); fd.set("id", noticeId); fd.set("ids", JSON.stringify(ids));
         const r = await nudgeChosen(fd).catch(() => null);

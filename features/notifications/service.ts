@@ -11,6 +11,8 @@ type Perm = keyof typeof notificationsFeature.permissions;
 export { NotificationWriter };
 export type { Notification };
 
+/** Topics whose words are private talk or reports: a support session never reads them. */
+const PRIVATE_TOPICS = new Set<TopicKey>(["message.new", "request.update", "request.work", "safety.report"]);
 const UUID = /^[0-9a-f-]{36}$/i;
 const topicsOf = (g: TopicGroup) => (Object.keys(TOPICS) as TopicKey[]).filter((k) => TOPICS[k].group === g);
 
@@ -19,6 +21,10 @@ export class NotificationService extends SchoolService<Perm> {
   protected feature = notificationsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
+  /** In a support session private rows show a title of "Private" and no body. */
+  private shown<T extends Notification>(n: T): T {
+    return this.ctx.supportStaffId && (n.privateBody || PRIVATE_TOPICS.has(n.topic)) ? { ...n, title: "Private", body: null } : n;
+  }
   private mine = () => eq(notifications.userId, this.ctx.userId);
   private needsAction = () => and(eq(notifications.action, true), isNull(notifications.doneAt));
 
@@ -39,7 +45,7 @@ export class NotificationService extends SchoolService<Perm> {
       this.read("read", (tx) => tx.select().from(notifications).where(this.mine()).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(Math.min(Math.max(limit, 1), 50))),
       this.pulse(),
     ]);
-    return { items, unread: p.bell };
+    return { items: items.map((n) => this.shown(n)), unread: p.bell };
   }
 
   /** Paginated list. Filters: `tab` = action (still to do) or all, `unread` = "1", `group` = a topic group. */
@@ -54,13 +60,13 @@ export class NotificationService extends SchoolService<Perm> {
         tx.select().from(notifications).where(where).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: count() }).from(notifications).where(where),
       ]);
-      return toPage(rows, Number(total?.n ?? 0), q);
+      return toPage(rows.map((n) => this.shown(n)), Number(total?.n ?? 0), q);
     });
   }
 
   /** Mark one, or "all", as read. Action rows are read but stay in Needs action until their module closes them. Pending pushes and emails for them are dropped. */
   async markRead(target: string | "all"): Promise<{ updated: number }> {
-    if (target !== "all" && !UUID.test(target)) return { updated: 0 };
+    if ((target !== "all" && !UUID.test(target)) || this.ctx.supportStaffId) return { updated: 0 };
     return this.read("read", async (tx) => {
       const rows = await tx.update(notifications).set({ readAt: sql`now()` })
         .where(and(this.mine(), isNull(notifications.readAt), target === "all" ? undefined : eq(notifications.id, target))).returning({ id: notifications.id });

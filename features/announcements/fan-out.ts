@@ -6,6 +6,7 @@ import { personKey, type Reached } from "@smw/feature-notifications/audience-rul
 import { commDeliveries, notifications } from "@smw/feature-notifications/schema";
 import { NotificationWriter, type NotificationRow } from "@smw/feature-notifications/writer";
 import { plain, type Notice } from "./content";
+import { giveNumber } from "./lifecycle";
 import { announcementRecipients, announcements } from "./schema";
 
 const CHUNK = 1000;
@@ -13,27 +14,31 @@ const chunks = <T>(xs: T[], n = CHUNK) => Array.from({ length: Math.ceil(xs.leng
 export const subjectOf = (id: string) => ({ type: "notice", id });
 export const noticeHref = (id: string) => `/app/announcements/${id}`;
 
-export type Kind = "new" | "changed" | "remind" | "removed";
+export type Kind = "new" | "changed" | "remind" | "late" | "removed";
+export const NO_LONGER = "This notice is no longer for you";
+/** An answer is wanted now: something is asked and the last date has not passed. */
+export const asksNow = (n: Notice, now: Date) => n.response.kind !== "none" && !(n.dueAt && n.dueAt <= now);
 
 /** The one notification a person gets for a notice. All kinds share a group key, so an unread one grows a count instead of piling up. */
-export function noticeRow(n: Notice, userId: string, kind: Kind): NotificationRow {
-  const asks = n.response.kind !== "none";
+export function noticeRow(n: Notice, userId: string, kind: Kind, now = new Date()): NotificationRow {
+  const asks = asksNow(n, now);
   const base = { userId, subject: subjectOf(n.id), href: noticeHref(n.id), groupKey: `notice:${n.id}`, body: plain(n) };
   switch (kind) {
     case "new": return n.type === "urgent"
       ? { ...base, topic: "urgent.alert", title: `Urgent: ${n.title}`, urgent: true, action: asks }
       : { ...base, topic: asks ? "notice.answer" : "notice.published", title: n.title, action: asks };
+    case "late": return { ...base, topic: "notice.published", title: `Last date has passed: ${n.title}`, action: false };
     case "changed": return { ...base, topic: "notice.changed", title: `Updated: ${n.title}` };
     case "remind": return { ...base, topic: "notice.answer", title: `Reminder: ${n.title}`, action: true, urgent: n.type === "urgent" };
-    case "removed": return { userId, topic: "notice.changed", title: `No longer for you: ${n.title}`, body: "The school changed who this notice is for.", href: "/app/announcements" };
+    case "removed": return { userId, topic: "notice.changed", title: NO_LONGER, href: "/app/announcements" };
   }
 }
 
 /** Notify people, once each. `silent` writes the row in the app but drops the push and email (a late joiner is not woken up). */
-export async function tell(tx: Tx, schoolId: string, n: Notice, userIds: string[], kind: Kind, o: { silent?: boolean } = {}): Promise<number> {
+export async function tell(tx: Tx, schoolId: string, n: Notice, userIds: string[], kind: Kind, o: { silent?: boolean; now?: Date } = {}): Promise<number> {
   const ids = [...new Set(userIds)];
   if (!ids.length) return 0;
-  const written = await NotificationWriter.insert(tx, schoolId, ids.map((id) => noticeRow(n, id, kind)));
+  const written = await NotificationWriter.insert(tx, schoolId, ids.map((id) => noticeRow(n, id, kind, o.now)));
   if (o.silent) {
     for (const part of chunks(ids)) {
       await tx.update(commDeliveries).set({ state: "skipped", reason: "Joined after it was sent" }).where(and(eq(commDeliveries.state, "pending"), inArray(commDeliveries.notificationId,
@@ -70,8 +75,11 @@ export async function fanOut(schoolId: string, noticeId: string, now = new Date(
     if (!n || (n.state !== "sending" && n.state !== "published")) return { recipients: 0, notified: 0 };
     if (n.state === "sending" && n.sendAt && n.sendAt > now) return { recipients: 0, notified: 0 };
     const fresh = await addRecipients(tx, schoolId, n, await resolveAudience(tx, n.audience), { now });
-    const notified = await tell(tx, schoolId, n, usersOf(fresh, n), "new");
-    if (n.state === "sending") await tx.update(announcements).set({ state: "published", fannedOutAt: now, updatedAt: now }).where(eq(announcements.id, n.id));
+    const notified = await tell(tx, schoolId, n, usersOf(fresh, n), "new", { now });
+    if (n.state === "sending") {
+      await giveNumber(tx, schoolId, n);
+      await tx.update(announcements).set({ state: "published", fannedOutAt: now, updatedAt: now }).where(eq(announcements.id, n.id));
+    }
     return { recipients: fresh.length, notified };
   });
 }
@@ -87,16 +95,19 @@ export async function reconcile(tx: Tx, schoolId: string, n: Notice, o: { notify
   const old = new Set(current.filter((c) => !c.removedAt).map((c) => c.key));
 
   await NotificationWriter.rewrite(tx, schoolId, subjectOf(n.id), { title: n.title, body: plain(n) });
+  const goneUsers = [...new Set(gone.flatMap((g) => (g.userId ? [g.userId] : [])))];
+  // The rewrite above reaches every row of the notice; the people who lose it must not see the new words.
+  for (const part of chunks(goneUsers)) await tx.update(notifications).set({ title: NO_LONGER, body: null })
+    .where(and(eq(notifications.schoolId, schoolId), eq(notifications.subjectType, "notice"), eq(notifications.subjectId, n.id), inArray(notifications.userId, part)));
   for (const part of chunks(back)) await tx.update(announcementRecipients).set({ removedAt: null }).where(and(eq(announcementRecipients.announcementId, n.id), inArray(announcementRecipients.personKey, part)));
   const fresh = await addRecipients(tx, schoolId, n, reached, { now });
   const newKeys = new Set([...back, ...fresh.map(personKey)]);
   const added = reached.filter((r) => newKeys.has(personKey(r)));
   for (const part of chunks(gone.map((g) => g.key))) await tx.update(announcementRecipients).set({ removedAt: now }).where(and(eq(announcementRecipients.announcementId, n.id), inArray(announcementRecipients.personKey, part), isNull(announcementRecipients.removedAt)));
 
-  const goneUsers = [...new Set(gone.flatMap((g) => (g.userId ? [g.userId] : [])))];
   for (const uid of goneUsers) { await NotificationWriter.seen(tx, schoolId, subjectOf(n.id), uid); await NotificationWriter.done(tx, schoolId, subjectOf(n.id), uid); }
   await tell(tx, schoolId, n, goneUsers, "removed");
-  await tell(tx, schoolId, n, usersOf(added, n), "new");
+  await tell(tx, schoolId, n, usersOf(added, n), "new", { now });
   if (o.notifyAgain) await tell(tx, schoolId, n, usersOf(reached.filter((r) => old.has(personKey(r))), n), "changed");
   return { added: added.length, removed: gone.length };
 }
@@ -104,7 +115,7 @@ export async function reconcile(tx: Tx, schoolId: string, n: Notice, o: { notify
 /** People who now match a live notice's audience and were never on it (new joiners): added quietly, no push. */
 export async function addLateJoiners(tx: Tx, schoolId: string, n: Notice, now = new Date()): Promise<number> {
   const fresh = await addRecipients(tx, schoolId, n, await resolveAudience(tx, n.audience), { joinedLate: true, now });
-  await tell(tx, schoolId, n, usersOf(fresh, n), "new", { silent: true });
+  await tell(tx, schoolId, n, usersOf(fresh, n), "new", { silent: true, now });
   return fresh.length;
 }
 

@@ -1,7 +1,7 @@
 import { AppError, type Ctx } from "@smw/feature-kit";
 import { buildCalendar, calendarEtag, eventItem, layerItem } from "@smw/feature-events/ics";
 import { EventService } from "@smw/feature-events/service";
-import { calendarItems, layersFor } from "@/lib/calendar-layers";
+import { calendarItems, defaultLayers } from "@/lib/calendar-layers";
 
 export const hostOf = (req: Request) => req.headers.get("host") ?? new URL(req.url).host;
 const DAY = 86_400_000;
@@ -29,7 +29,7 @@ export async function personalCalendar(ctx: Ctx, host: string, name: string): Pr
   const from = new Date(Date.now() - 30 * DAY), to = new Date(Date.now() + 400 * DAY);
   const [events, layers] = await Promise.all([
     ctx.features.has("events") ? new EventService(ctx).range(from, to, { drafts: false }) : [],
-    calendarItems(ctx, from, to, layersFor(ctx).filter((l) => l !== "events")),
+    calendarItems(ctx, from, to, defaultLayers(ctx).filter((l) => l !== "events")),
   ]);
   return buildCalendar([...events.map((e) => eventItem(e, host)), ...layers.map((i) => layerItem(i, host, new Date(i.startsAt)))], { name: `${name} calendar` });
 }

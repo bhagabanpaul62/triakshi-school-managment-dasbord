@@ -4,7 +4,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { SavedViews } from "@smw/ui/comm/SavedViews";
 import { relative } from "@smw/ui/format";
-import { REPORT_CATEGORIES, REPORT_CHIP } from "../constants";
+import { REPORT_CATEGORIES } from "../constants";
 import { SafeguardService } from "../safeguard";
 import { UnreadFallback } from "./empty";
 import { PILL_BTN } from "./styles";

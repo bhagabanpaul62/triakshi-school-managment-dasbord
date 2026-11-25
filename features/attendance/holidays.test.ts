@@ -1,14 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { auditLogs, closeDb, withSchool } from "@smw/db";
+import { auditLogs, closeDb, users, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryEmailSender, MemoryStorage, useServices, type SheetRows } from "@smw/integrations";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import { notifications } from "@smw/feature-notifications/schema";
+import { deliverDue } from "@smw/feature-notifications/delivery";
 import { closedDays, closedFrom, closedSet, isClosed, nationalDaysIn, openSundays, workingDayReport, type HolidayRow } from "./holidays";
-import { applyHolidayMove, HolidayService, moveScope, planHolidayMove, planMove } from "./holiday-service";
+import { HolidayService } from "./holiday-service";
 import { checkSheet, copyProposals } from "./holiday-import";
 import { holidayInput } from "./holiday-inputs";
 import { monthDays } from "./leave-api";
@@ -16,7 +17,7 @@ import { requestMonths } from "./leave-ledger";
 import { LeaveService } from "./leave-service";
 import { StaffAttendanceService, StudentAttendanceService } from "./service";
 import { attendanceHolidays, leaveRequests, studentAttendance } from "./schema";
-import { addDays, isSunday, monthDays as datesOf, todayIST } from "./stats";
+import { addDays, isSunday, todayIST } from "./stats";
 import { buildSchoolData, type Fixture } from "./test-fixture";
 
 const C5 = "00000000-0000-4000-8000-000000000005", C7 = "00000000-0000-4000-8000-000000000007";
@@ -25,7 +26,6 @@ const csv = (text: string) => ({ name: "holidays.csv", bytes: new TextEncoder().
 
 // March 2026: Sundays are the 1st, 8th, 15th, 22nd and 29th. Everything below is in the past, so marks are allowed.
 const MARCH = "2026-03";
-const sundays = datesOf(MARCH).filter(isSunday);
 
 let a: TestSchool, b: TestSchool;
 let fx: Fixture;
@@ -311,6 +311,24 @@ describe("notifying", () => {
     await admin().create({ from: "2026-03-20", name: "Past one", notify: true });
     expect((await titles(a.users.student)).some((t) => t.startsWith("Quiet one") || t.startsWith("Past one"))).toBe(false);
   });
+
+  it("an emergency closure, or one that starts today or tomorrow, is urgent and is mailed at 06:32 in quiet hours; a distant one is not", async () => {
+    const mail = new MemoryEmailSender();
+    useServices({ email: mail });
+    await withSchool(a.id, (tx) => tx.update(users).set({ email: `fam-${a.slug}@example.test` }).where(eq(users.id, a.users.student)));
+    const today = todayIST();
+    await admin().create({ from: addDays(future, 20), name: "Far away break", notify: true });
+    await admin().create({ from: addDays(today, 1), name: "Flood closure", kind: "emergency", notify: true });
+    await admin().create({ from: addDays(today, 2), name: "Not urgent yet", kind: "other", notify: true });
+    const rows = await withSchool(a.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, a.users.student), sql`${notifications.title} like any (array['Flood%', 'Far away%', 'Not urgent%'])`)));
+    const by = (n: string) => rows.find((r) => r.title.startsWith(n))!;
+    expect([by("Flood").urgent, by("Flood").topic]).toEqual([true, "urgent.alert"]);
+    expect([by("Far away").urgent, by("Not urgent").urgent]).toEqual([false, false]);
+    // The job runs at 06:32 India time the next morning: quiet hours, so only what is urgent may go.
+    await deliverDue({ schoolId: a.id, now: new Date(`${addDays(today, 1)}T06:32:00+05:30`) });
+    expect(mail.sent.filter((m) => m.to === `fam-${a.slug}@example.test`).map((m) => m.subject).filter((s) => /Flood closure/.test(s))).toHaveLength(1);
+    expect(mail.sent.some((m) => /Far away|Not urgent/.test(m.subject))).toBe(false);
+  });
 });
 
 describe("working days, copy and import through the service", () => {
@@ -372,40 +390,5 @@ describe("pay runs that are already approved or paid", () => {
     const draftMonth = (await admin().spans({ from: "2025-11-10", to: "2025-11-10" }))[0]!;
     await expect(admin().remove(draftMonth.id)).rejects.toMatchObject({ fieldErrors: { from: expect.stringContaining("November 2025 is already approved") } });
     await withSchool(a.id, (tx) => tx.execute(sql`delete from pay_runs`));
-  });
-});
-
-describe("moving the calendar's old holiday events", () => {
-  const ev = (title: string, first: string, last: string | null, audience: unknown) => ({ id: title, schoolId: a.id, title, first, last, audience });
-  const everyone = { include: [{ type: "everyone" }], exclude: [] };
-  const today = "2026-11-25", future = "2026-12-20";
-
-  it("adds future and unmarked days; lists past days with marks, leave or pay; skips staff-only; leaves existing days alone", () => {
-    const plan = planMove({
-      today,
-      events: [ev("Autumn break", "2026-11-09", "2026-11-13", everyone), ev("Staff retreat", future, null, { include: [{ type: "staff" }] }), ev("Families day", "2026-12-21", null, { include: [{ type: "families" }] }), ev("Old fest", "2026-11-16", null, "all"), ev("Today", today, null, everyone)],
-      existing: new Set(["2026-11-13"]), marked: new Set(["2026-11-09", today]), leave: [{ from: "2026-11-10", to: "2026-11-10" }], payMonths: new Set(["2026-10"]),
-    });
-    expect(plan.skip.map((s) => [s.date, s.why.split(" ")[0]])).toEqual([["2026-11-09", "Attendance"], ["2026-11-10", "Approved"], [future, "It"], [today, "Attendance"]]);
-    expect(plan.add.map((x) => [x.name, x.date, x.appliesTo])).toEqual([["Autumn break", "2026-11-11", "all"], ["Autumn break", "2026-11-12", "all"], ["Families day", "2026-12-21", "students"], ["Old fest", "2026-11-16", "all"]]);
-    expect(plan.already).toBe(1);
-    expect(planMove({ today, events: [ev("October break", "2026-10-05", null, everyone)], existing: new Set(), marked: new Set(), leave: [], payMonths: new Set(["2026-10"]) }).skip[0]!.why).toContain("Pay");
-  });
-
-  it("writes one span per event, keeps no mark or leave row from being touched, and is safe to run twice", async () => {
-    const plan = planMove({ today, events: [ev("Spring break", "2027-02-22", "2027-02-24", everyone), ev("Families day", "2027-02-26", null, { include: [{ type: "families" }] })], existing: new Set(), marked: new Set(), leave: [], payMonths: new Set() });
-    expect(await withSchool(a.id, (tx) => applyHolidayMove(tx, plan))).toBe(4);
-    expect(await withSchool(a.id, (tx) => applyHolidayMove(tx, plan))).toBe(0);
-    const spans = await admin().spans({ from: "2027-02-22", to: "2027-02-26" });
-    expect(spans.map((s) => [s.name, s.dates.length, s.appliesTo])).toEqual([["Spring break", 3, "all"], ["Families day", 1, "students"]]);
-    expect(await withSchool(a.id, (tx) => tx.select().from(studentAttendance).where(eq(studentAttendance.date, "2026-01-12")))).toHaveLength(1);
-  });
-
-  it("reads who an old event was for", () => {
-    expect([moveScope("staff"), moveScope("parents"), moveScope("all"), moveScope({ include: [{ type: "staff" }] }), moveScope({ include: [{ type: "families" }] }), moveScope({ include: [{ type: "everyone" }] })]).toEqual(["staff", "students", "all", "staff", "students", "all"]);
-  });
-
-  it("does nothing when the events table or the old column is missing", async () => {
-    expect(await withSchool(a.id, (tx) => planHolidayMove(tx))).toEqual({ add: [], skip: [], already: 0 });
   });
 });

@@ -5,7 +5,7 @@ import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { StateChip } from "@smw/ui/comm/StateChip";
 import { dateTime } from "@smw/ui/format";
-import { REPORT_CATEGORIES, REPORT_CHIP } from "../constants";
+import { REPORT_CATEGORIES } from "../constants";
 import { SafeguardService, type ReportDetail } from "../safeguard";
 import { UnreadFallback } from "./empty";
 import { HandleForm, ReviewForm } from "./safeguard-forms";

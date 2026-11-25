@@ -3,7 +3,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { EmptyLine } from "@smw/ui/finance/States";
-import { CategoryService, type Category } from "../categories";
+import { CategoryService } from "../categories";
 import { NATURE_WORDS } from "../constants";
 import { CategoryForm } from "./category-form";
 import { deleteCategory, moveCategory, saveCategory, setCategoryActive } from "./actions";
@@ -32,7 +32,7 @@ export default async function CategoriesPage() {
                   <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">
                     Answered by {roleName(c.ownerRole)} within {c.targetDays} {c.targetDays === 1 ? "day" : "days"}
                     {c.escalation.length ? `. Then ${c.escalation.map((l) => `${l.label} (${l.afterDays}d)`).join(", then ")}` : ". Never goes higher"}
-                    {c.fields.length ? `. Asks: ${c.fields.map((f) => f.label).join(", ")}` : ""}. {c.used} {c.used === 1 ? "request" : "requests"} so far.
+                    {c.fields.length ? `. Asks: ${c.fields.map((f) => f.label).join(", ")}` : ""}.{c.used === null ? "" : ` ${c.used} ${c.used === 1 ? "request" : "requests"} so far.`}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

@@ -1,5 +1,5 @@
 // Worker jobs. Each one runs school by school; one school failing never stops the rest (same pattern as assignments).
-import { and, eq, gt, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schools, withConsole } from "@smw/db";
 import { SchoolService, systemCtx, type Ctx } from "@smw/feature-kit";
 import { type Perm } from "./base";
@@ -15,19 +15,38 @@ class NoticeJobs extends SchoolService<Perm> {
   protected feature = announcementsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
-  /** Scheduled notices whose time has come start sending; sending notices past their undo time go out. */
+  /**
+   * The minute run. Scheduled notices whose time has come start sending; sending notices past their undo time go out; notices past
+   * their end date move to Archive; rows asking for an answer close when the last date passes. Each notice stands alone: one that
+   * fails never holds back the rest, and the run fails at the end so the queue retries it.
+   */
   async publishDue(now: Date): Promise<number> {
-    const ready = await this.write("manage", async (tx) => {
-      const due = await tx.select().from(announcements).where(and(eq(announcements.state, "scheduled"), lte(announcements.scheduledAt, now))).for("update", { skipLocked: true });
-      for (const n of due) {
-        transition(n.state, "due");
-        await startSending(tx, this.ctx.schoolId, n, { immediate: true, now });
-        await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent scheduled notice "${n.title}"` });
-      }
-      return (await tx.select({ id: announcements.id }).from(announcements).where(and(eq(announcements.state, "sending"), lte(announcements.sendAt, now), isNull(announcements.fannedOutAt)))).map((r) => r.id);
-    });
-    for (const id of ready) await fanOut(this.ctx.schoolId, id, now);
+    const failed: unknown[] = [];
+    const each = async (ids: string[], one: (id: string) => Promise<unknown>) => { for (const id of ids) { try { await one(id); } catch (err) { failed.push(err); console.error(JSON.stringify({ level: "error", msg: "notice failed", id, err: String(err) })); } } };
+    const due = await this.write("manage", (tx) => tx.select({ id: announcements.id }).from(announcements).where(and(eq(announcements.state, "scheduled"), lte(announcements.scheduledAt, now))).orderBy(asc(announcements.scheduledAt), asc(announcements.id)));
+    await each(due.map((d) => d.id), (id) => this.write("manage", async (tx) => {
+      const [n] = await tx.select().from(announcements).where(and(eq(announcements.id, id), eq(announcements.state, "scheduled"))).for("update", { skipLocked: true });
+      if (!n) return;
+      transition(n.state, "due");
+      await startSending(tx, n, { immediate: true, now });
+      await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent scheduled notice "${n.title}"` });
+    }));
+    const ready = await this.write("manage", (tx) => tx.select({ id: announcements.id }).from(announcements).where(and(eq(announcements.state, "sending"), lte(announcements.sendAt, now), isNull(announcements.fannedOutAt))).orderBy(asc(announcements.sendAt), asc(announcements.id)));
+    await each(ready.map((r) => r.id), (id) => fanOut(this.ctx.schoolId, id, now));
+    await each(["expire"], () => this.expire(now));
+    await each(["close"], () => this.closeDue(now));
+    if (failed.length) throw new Error(`${failed.length} notice step(s) failed: ${String(failed[0])}`);
     return ready.length;
+  }
+
+  /** The last date has passed: the "answer me" rows of that notice close, so no one is asked for what can no longer be given. */
+  closeDue(now: Date): Promise<number> {
+    return this.write("manage", async (tx) => {
+      const late = await tx.select({ id: announcements.id }).from(announcements).where(and(eq(announcements.state, "published"), isNotNull(announcements.dueAt), lte(announcements.dueAt, now),
+        sql`exists (select 1 from notifications x where x.subject_type = 'notice' and x.subject_id = ${announcements.id}::text and x.action and x.done_at is null)`));
+      for (const n of late) await closeForAll(tx, this.ctx.schoolId, n.id);
+      return late.length;
+    });
   }
 
   /** Remind people who have not answered: two days before the last date, on it, and the day after. At most once a day each. */

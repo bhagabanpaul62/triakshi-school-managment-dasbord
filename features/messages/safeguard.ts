@@ -9,7 +9,7 @@ import { conversationPdf } from "./conversation-pdf";
 import { hasActiveReview, isFamily, istToday, loadThread, noSupport, postSystem, type ThreadData } from "./core";
 import messagesFeature from "./feature";
 import { handleReportInput, restrictInput, reviewInput } from "./inputs";
-import { isNamed } from "./leads";
+import { hasOpenReport, isNamed, namedIn } from "./leads";
 import { messageRestrictions, messageReports, messageReviews, messageThreads, threadMembers } from "./schema";
 
 type Perm = keyof typeof messagesFeature.permissions;
@@ -72,9 +72,11 @@ export class SafeguardService extends SchoolService<Perm> {
   async handle(input: unknown): Promise<void> {
     this.authorize("safeguard", "write");
     const data = this.parse(handleReportInput, input);
+    let named: string[] = [];
     await this.write("safeguard", async (tx) => {
       const [r] = await tx.select().from(messageReports).where(and(eq(messageReports.id, data.reportId), this.notNamingMe()));
       if (!r) throw new NotFoundError("Report");
+      named = r.aboutUserIds;
       await tx.update(messageReports).set({ state: data.state, outcome: data.outcome ?? null, handledBy: this.ctx.userId, handledAt: new Date() }).where(eq(messageReports.id, r.id));
       if (data.state === "no_action") {
         const [open] = [...(await tx.execute(sql`select count(*)::int as n from message_reports where thread_id = ${r.threadId}::uuid and id <> ${r.id}::uuid and state in ('new', 'reviewing', 'action')`))] as { n: number }[];
@@ -87,7 +89,7 @@ export class SafeguardService extends SchoolService<Perm> {
         }]);
       }
       await NotificationWriter.done(tx, this.ctx.schoolId, { type: "report", id: r.id });
-    }, () => ({ action: "handle", entity: "Report", entityId: data.reportId, summary: `Marked a concern: ${REPORT_STATE_WORDS[data.state]}` }));
+    }, () => ({ action: "handle", entity: "Report", entityId: data.reportId, summary: `Marked a concern: ${REPORT_STATE_WORDS[data.state]}`, meta: { aboutUserIds: named } }));
   }
 
   // ---------- review ----------
@@ -108,14 +110,17 @@ export class SafeguardService extends SchoolService<Perm> {
   async open(input: unknown): Promise<ThreadData> {
     this.authorize("safeguard", "write");
     const data = this.parse(reviewInput, input);
+    let named: string[] = [];
     return this.write("safeguard", async (tx) => {
       const thread = await this.reviewable(tx, data.threadId);
+      named = await namedIn(tx, thread.id);
       const [recent] = [...(await tx.execute(sql`select exists (select 1 from message_reviews where thread_id = ${thread.id}::uuid and reviewer_id = ${this.ctx.userId}::uuid and created_at > now() - make_interval(hours => ${REVIEW_HOURS})) as r`))] as { r: boolean }[];
       await tx.insert(messageReviews).values({ schoolId: this.ctx.schoolId, threadId: thread.id, reportId: data.reportId ?? null, reviewerId: this.ctx.userId, reviewerName: this.ctx.name, reason: data.reason, action: "opened" });
       if (data.reportId) await tx.update(messageReports).set({ state: "reviewing", handledBy: this.ctx.userId, handledAt: new Date() }).where(and(eq(messageReports.id, data.reportId), eq(messageReports.state, "new"), eq(messageReports.threadId, thread.id)));
-      if (!recent?.r) await this.tellBothSides(tx, thread.id);
+      // The standing banner already tells both sides. A line in the conversation is added only when no open report is behind the review, so it can never hint at one.
+      if (!recent?.r && !(await hasOpenReport(tx, thread.id))) await this.tellBothSides(tx, thread.id);
       return loadThread(tx, thread.id, { userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 500 });
-    }, () => ({ action: "review", entity: "Conversation", entityId: data.threadId, summary: "Opened a conversation for review" }));
+    }, () => ({ action: "review", entity: "Conversation", entityId: data.threadId, summary: "Opened a conversation for review", meta: { aboutUserIds: named } }));
   }
 
   /** The conversation, unless a report about it names the caller (then it is "not found", not "forbidden", so nothing is revealed). */
@@ -147,13 +152,15 @@ export class SafeguardService extends SchoolService<Perm> {
   async exportPdf(input: unknown): Promise<{ name: string; bytes: Uint8Array }> {
     this.authorize("safeguard", "write");
     const data = this.parse(reviewInput, input);
+    let named: string[] = [];
     return this.write("safeguard", async (tx) => {
       const thread = await this.reviewable(tx, data.threadId);
+      named = await namedIn(tx, thread.id);
       await tx.insert(messageReviews).values({ schoolId: this.ctx.schoolId, threadId: thread.id, reportId: data.reportId ?? null, reviewerId: this.ctx.userId, reviewerName: this.ctx.name, reason: data.reason, action: "exported" });
       const view = await loadThread(tx, thread.id, { userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 5000 });
       const [school] = [...(await tx.execute(sql`select name from schools limit 1`))] as { name: string }[];
       return { name: `conversation-${thread.id.slice(0, 8)}.pdf`, bytes: await conversationPdf(view, { school: school?.name ?? "School", exportedBy: this.ctx.name, reason: data.reason }) };
-    }, () => ({ action: "export", entity: "Conversation", entityId: data.threadId, summary: "Exported a conversation for review" }));
+    }, () => ({ action: "export", entity: "Conversation", entityId: data.threadId, summary: "Exported a conversation for review", meta: { aboutUserIds: named } }));
   }
 
   /** Outside help to show when no lead can be told: the school's own list. */

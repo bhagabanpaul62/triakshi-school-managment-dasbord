@@ -9,11 +9,12 @@ const fail = (e: unknown) => {
 };
 const PDF = (bytes: Uint8Array, fileName: string) => new Response(Buffer.from(bytes), { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename="${fileName}"`, "cache-control": "private, no-store" } });
 
-/** GET /api/meetings/{id}/sheet?teacher=: one teacher's list on paper. */
+/** GET /api/meetings/{id}/sheet?teacher=&date=: one teacher's list on paper. */
 export async function sheet(req: Request, { params }: Params) {
   try {
     const { id } = await params;
-    const r = await new DayService(await actionCtx()).teacherSheetPdf(id, new URL(req.url).searchParams.get("teacher") ?? undefined);
+    const q = new URL(req.url).searchParams;
+    const r = await new DayService(await actionCtx()).teacherSheetPdf(id, q.get("teacher") ?? undefined, q.get("date") ?? undefined);
     return PDF(r.bytes, r.fileName);
   } catch (e) { return fail(e); }
 }

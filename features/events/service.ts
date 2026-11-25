@@ -3,8 +3,9 @@ import { and, asc, eq, gte, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ConflictError, CrudService, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { users, type Tx } from "@smw/db";
+import { downloadDisposition } from "@smw/integrations";
 import { closedDays, closedSet } from "@smw/feature-attendance/holidays";
-import { describeAudience } from "@smw/feature-notifications/audience";
+import { describeAudience, expandGroups } from "@smw/feature-notifications/audience";
 import { isEveryone, type Audience } from "@smw/feature-notifications/audience-rules";
 import { AudiencePolicy } from "@smw/feature-notifications/policy";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
@@ -183,7 +184,9 @@ export class EventService extends CrudService<typeof events, Perm> {
       const slots = await this.slots(tx, d);
       const seriesId = slots.length > 1 ? randomUUID() : null;
       const { notify, draft, repeat: _r, ...rest } = d;
-      const rows = (await tx.insert(events).values(slots.map((s) => this.values(rest, s, { state: draft ? "draft" : "live", seriesId, label, allDay: d.allDay }))).returning()).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+      // Saved groups are copied in now: a group edited later never changes who this event is for.
+      const frozen = { ...rest, audience: await expandGroups(tx, d.audience) };
+      const rows = (await tx.insert(events).values(slots.map((s) => this.values(frozen, s, { state: draft ? "draft" : "live", seriesId, label, allDay: d.allDay }))).returning()).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
       if (!draft) await this.goLive(tx, rows, notify);
       return rows[0]!;
     }, (row) => ({ action: "create", entity: "Event", entityId: row.id, summary: `Added event ${row.title}` }));
@@ -202,7 +205,7 @@ export class EventService extends CrudService<typeof events, Perm> {
       mustRun(this.ctx, e);
       if (e.state !== "draft") throw new ConflictError("This event is already published.");
       await this.checkAudience(tx, e.audience, e.isPublic, e);
-      const rows = (await tx.update(events).set({ state: "live", audienceLabel: await describeAudience(tx, e.audience), sequence: sql`${events.sequence} + 1` })
+      const rows = (await tx.update(events).set({ state: "live", audience: await expandGroups(tx, e.audience), audienceLabel: await describeAudience(tx, e.audience), sequence: sql`${events.sequence} + 1` })
         .where(e.seriesId ? and(eq(events.seriesId, e.seriesId), eq(events.state, "draft")) : eq(events.id, id)).returning()).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
       await this.goLive(tx, rows, notify);
       return rows.find((r) => r.id === id) ?? rows[0]!;
@@ -225,7 +228,8 @@ export class EventService extends CrudService<typeof events, Perm> {
       const row = await this.findOrThrow(tx, id);
       mustRun(this.ctx, row);
       if (row.state === "cancelled") throw new ConflictError("A cancelled event cannot be changed. Add a new one instead.");
-      const audienceChanged = canon(d.audience) !== canon(row.audience);
+      const audience = await expandGroups(tx, d.audience);
+      const audienceChanged = canon(audience) !== canon(row.audience);
       if (audienceChanged || (d.isPublic && !row.isPublic)) await this.checkAudience(tx, d.audience, d.isPublic, row);
       else if (d.isPublic && !isEveryone(d.audience)) throw new ValidationError({ isPublic: "Only an event for everyone can go on the website" });
       const label = audienceChanged ? await describeAudience(tx, d.audience) : row.audienceLabel;
@@ -245,7 +249,7 @@ export class EventService extends CrudService<typeof events, Perm> {
         moved ||= timeChanged || placeChanged;
         const [next] = await tx.update(events).set({
           type: d.type, title: d.title, description: d.description, bring: d.bring, location: d.location, mapUrl: d.mapUrl, consentHref: d.consentHref,
-          ...slot, allDay: d.allDay, audience: d.audience, audienceLabel: label, isPublic: d.isPublic, rsvp: d.rsvp, reminders: d.reminders,
+          ...slot, allDay: d.allDay, audience, audienceLabel: label, isPublic: d.isPublic, rsvp: d.rsvp, reminders: d.reminders,
           remindedFor: timeChanged || JSON.stringify(d.reminders) !== JSON.stringify(t.reminders) ? passed(d.reminders, slot.startsAt, now) : t.remindedFor,
           sequence: seen ? t.sequence + 1 : t.sequence, updatedAt: now,
         }).where(eq(events.id, t.id)).returning();
@@ -254,7 +258,7 @@ export class EventService extends CrudService<typeof events, Perm> {
       if (row.state === "live") {
         const ids = done.map((t) => t.id);
         if (audienceChanged) {
-          const added = await syncPeople(tx, this.ctx.schoolId, ids, d.audience);
+          const added = await syncPeople(tx, this.ctx.schoolId, ids, audience);
           await tell(tx, this.ctx.schoolId, added.map((r) => r.userId), this.ctx.userId, this.invite(done));
         }
         if (moved) {
@@ -315,16 +319,17 @@ export class EventService extends CrudService<typeof events, Perm> {
     return this.read("read", async (tx) => { await this.findOrThrow(tx, id); return tx.select().from(eventFiles).where(eq(eventFiles.eventId, id)).orderBy(asc(eventFiles.createdAt)); });
   }
 
-  /** A 60-second link to one file, after checking the caller may see its event. Support sessions get nothing. */
-  async fileLink(fileId: string): Promise<{ url: string; name: string }> {
+  /** One file's bytes with the type it was stored as and how a browser should treat it, after checking the caller may see its event. Support sessions get nothing. */
+  async fileContent(fileId: string): Promise<{ bytes: Uint8Array; type: string; disposition: string }> {
     if (this.ctx.supportStaffId) throw new ForbiddenError("This is not available in a support session.");
     if (!z.uuid().safeParse(fileId).success) throw new NotFoundError("File");
-    return this.read("read", async (tx) => {
-      const [f] = await tx.select().from(eventFiles).where(eq(eventFiles.id, fileId));
-      if (!f) throw new NotFoundError("File");
-      await this.findOrThrow(tx, f.eventId);
-      return { url: await EventFiles.url(f.fileKey), name: f.fileName };
+    const f = await this.read("read", async (tx) => {
+      const [row] = await tx.select().from(eventFiles).where(eq(eventFiles.id, fileId));
+      if (!row) throw new NotFoundError("File");
+      await this.findOrThrow(tx, row.eventId);
+      return row;
     });
+    return { bytes: await EventFiles.read(f.fileKey), type: f.contentType, disposition: downloadDisposition(f.contentType, f.fileName) };
   }
 
   /** Attach files to an event (and to its series, by scope). The bytes are stored once; each date points at them. */

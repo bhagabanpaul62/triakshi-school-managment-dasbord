@@ -25,3 +25,10 @@ export const PAGE_SIZE = 25;
 export const MAX_ABOUT = 3;
 /** Actions a family may see in its timeline; everything else is for staff. */
 export const FAMILY_EVENTS = ["raised", "answered", "asked", "replied", "resolved", "closed", "reopened", "escalated", "merged", "category", "feedback"] as const;
+/** The three things staff write under a request, and the line that says who will see each. */
+export type ReplyMode = "reply" | "answer" | "ask" | "note";
+export const MODE_WORDS = {
+  answer: { tab: "Answer", who: "The family sees this", placeholder: "Write the answer" },
+  ask: { tab: "Ask", who: "The family sees this. The school's clock waits for their reply", placeholder: "Ask the family a question" },
+  note: { tab: "Note", who: "Only staff see this", placeholder: "Write a note for staff" },
+} as const;

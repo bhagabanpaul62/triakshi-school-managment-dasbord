@@ -1,8 +1,8 @@
 import { createHash, createHmac } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { env, schoolUrl } from "@smw/config";
+import { env, isLocal, schoolUrl } from "@smw/config";
 import { withSchool, type Tx } from "@smw/db";
-import { NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { effectiveGroup, type GroupPref, type GroupPrefs } from "./channels";
 import notificationsFeature from "./feature";
 import { awayInput, digestInput, groupPrefInput, languageInput, quietInput, subscribeInput } from "./inputs";
@@ -25,7 +25,10 @@ export interface Device { id: string; device: string | null; createdAt: Date; la
 
 const LOCKED = "These are always sent, so they cannot be turned off.";
 /** The unsubscribe token is derived, not stored, so a link in an old email keeps working; only its sha-256 is kept for lookup. */
-const tokenFor = (schoolId: string, userId: string) => createHmac("sha256", createHash("sha256").update(env().DATA_KEY ?? "local-only-data-key").digest()).update(`unsubscribe:${schoolId}:${userId}`).digest("base64url");
+/** The secret behind signed links: DATA_KEY, or a fixed key on a developer's machine only. In production without DATA_KEY there is none, so no link is made. */
+export const tokenKeyFor = (dataKey: string | undefined, local: boolean): string | null => dataKey ?? (local ? "local-only-data-key" : null);
+export const tokenKey = () => tokenKeyFor(env().DATA_KEY, isLocal());
+const tokenFor = (key: string, schoolId: string, userId: string) => createHmac("sha256", createHash("sha256").update(key).digest()).update(`unsubscribe:${schoolId}:${userId}`).digest("base64url");
 const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
 
 const GROUPS = Object.keys(TOPIC_GROUPS) as TopicGroup[];
@@ -35,6 +38,8 @@ export class PreferenceService extends SchoolService<Perm> {
   protected feature = notificationsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
+  /** A support session looks, it never changes a person's settings or devices. */
+  private notSupport() { if (this.ctx.supportStaffId) throw new ForbiddenError("Not available in a support session."); }
   private mineWhere = () => eq(notificationPrefs.userId, this.ctx.userId);
   private upsert(tx: Tx, set: Partial<typeof notificationPrefs.$inferInsert>) {
     return tx.insert(notificationPrefs).values({ schoolId: this.ctx.schoolId, userId: this.ctx.userId, ...set }).onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set });
@@ -49,6 +54,7 @@ export class PreferenceService extends SchoolService<Perm> {
   }
 
   async saveGroup(input: unknown): Promise<GroupPref> {
+    this.notSupport();
     const { group, ...pref } = this.parse(groupPrefInput, input);
     if (lockedGroup(group)) throw new ValidationError({ [group]: LOCKED });
     return this.read("read", async (tx) => {
@@ -59,20 +65,24 @@ export class PreferenceService extends SchoolService<Perm> {
   }
 
   async saveQuiet(input: unknown) {
+    this.notSupport();
     const q = this.parse(quietInput, input);
     return this.read("read", (tx) => this.upsert(tx, { quietFrom: q?.from ?? null, quietTo: q?.to ?? null }));
   }
 
   async saveDigest(hour: unknown) {
+    this.notSupport();
     const digestHour = this.parse(digestInput, hour);
     return this.read("read", (tx) => this.upsert(tx, { digestHour }));
   }
 
   async saveLanguage(language: unknown) {
+    this.notSupport();
     return this.read("read", (tx) => this.upsert(tx, { language: this.parse(languageInput, language) }));
   }
 
   async setAway(until: unknown, text?: unknown) {
+    this.notSupport();
     const a = this.parse(awayInput, { until, text });
     return this.read("read", (tx) => this.upsert(tx, { awayUntil: a.until, awayText: a.until ? (a.text || null) : null }));
   }
@@ -83,11 +93,13 @@ export class PreferenceService extends SchoolService<Perm> {
   }
 
   async removeDevice(id: string) {
+    this.notSupport();
     const rows = await this.read("read", (tx) => tx.delete(pushSubscriptions).where(and(eq(pushSubscriptions.userId, this.ctx.userId), eq(pushSubscriptions.id, id))).returning({ id: pushSubscriptions.id }));
     if (!rows.length) throw new NotFoundError("Device");
   }
 
   async subscribe(endpoint: string, p256dh: string, auth: string, device?: string) {
+    this.notSupport();
     const s = this.parse(subscribeInput, { endpoint, p256dh, auth, device });
     return this.read("read", async (tx) => {
       await tx.insert(pushSubscriptions).values({ schoolId: this.ctx.schoolId, userId: this.ctx.userId, ...s, device: s.device ?? null })
@@ -113,9 +125,11 @@ export class PreferenceService extends SchoolService<Perm> {
     });
   }
 
-  /** The unsubscribe link for an email to this person (never signs in; the page behind it only calls unsubscribeByToken). */
-  static async unsubscribeUrlFor(tx: Tx, schoolId: string, slug: string, userId: string, group?: TopicGroup): Promise<string> {
-    const token = tokenFor(schoolId, userId);
+  /** The unsubscribe link for an email to this person (never signs in; the page behind it only calls unsubscribeByToken). Null when the server has no secret to sign it with. */
+  static async unsubscribeUrlFor(tx: Tx, schoolId: string, slug: string, userId: string, group?: TopicGroup): Promise<string | null> {
+    const key = tokenKey();
+    if (!key) return null;
+    const token = tokenFor(key, schoolId, userId);
     await tx.insert(notificationPrefs).values({ schoolId, userId, unsubscribeHash: hashOf(token) })
       .onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set: { unsubscribeHash: hashOf(token) } });
     return schoolUrl(slug, `/unsubscribe?${new URLSearchParams({ t: token, ...(group ? { g: group } : {}) })}`);

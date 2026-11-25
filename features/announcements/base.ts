@@ -9,6 +9,9 @@ import type { Notice } from "./content";
 import announcementsFeature from "./feature";
 import { announcements } from "./schema";
 
+/** Not past its end date, by the clock: a notice stops being live the moment its time ends, not when the nightly job gets to it. */
+export const notExpired = sql`(${announcements.expiresAt} is null or ${announcements.expiresAt} > now())`;
+
 export type Perm = keyof typeof announcementsFeature.permissions;
 
 /** What every notice service shares: who may see which notice, and who may change it. */

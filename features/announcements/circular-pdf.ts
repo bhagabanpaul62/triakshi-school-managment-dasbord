@@ -30,7 +30,8 @@ export class CircularService extends NoticeBase {
       return { n, number: n.number, school: school!, category: cat?.name ?? "General", author: author?.name ?? "" };
     });
     const { n, number, school, category, author } = d;
-    const verify = schoolUrl(school.slug, `/verify/circular/${verifyToken(this.ctx.schoolId, n.id)}`);
+    const token = verifyToken(this.ctx.schoolId, n.id);
+    const verify = token ? schoolUrl(school.slug, `/verify/circular/${token}`) : null;
     const text = markdownToText(n.body);
     const contact = [school.address, [school.phone, school.email].filter(Boolean).join("  ")].filter((x): x is string => !!x);
     const pdf = await PdfBuilder.create({ unicode: true });
@@ -43,14 +44,14 @@ export class CircularService extends NoticeBase {
     pdf.space(24);
     pdf.ensure(110);
     const top = pdf.cursor;
-    pdf.qr(verify, { x: pdf.right - 84, top, size: 84 });
+    if (verify) pdf.qr(verify, { x: pdf.right - 84, top, size: 84 });
     pdf.text("Signed", { size: 9, color: [0.4, 0.4, 0.45] });
     pdf.space(26);
     pdf.rule();
     pdf.text(author, { bold: true });
     pdf.text(school.name, { size: 9 });
     pdf.cursor = top - 90;
-    pdf.text("Scan to check that this circular is genuine.", { size: 8, color: [0.4, 0.4, 0.45], x: pdf.right - 210 });
+    if (verify) pdf.text("Scan to check that this circular is genuine.", { size: 8, color: [0.4, 0.4, 0.45], x: pdf.right - 210 });
     return { bytes: await pdf.save(), fileName: `circular-${SLUG(number)}.pdf` };
   }
 

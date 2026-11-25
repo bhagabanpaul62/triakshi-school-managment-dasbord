@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
 import { listQuerySchema, NotFoundError, toPage, type ListQuery, type Page } from "@smw/feature-kit";
-import { loadThread, markThreadRead, signedLink, unreadByThread, type ThreadData } from "@smw/feature-messages/core";
+import { loadThread, markThreadRead, readStored, signedLink, unreadByThread, type StoredBytes, type ThreadData } from "@smw/feature-messages/core";
 import { LINK_SECONDS } from "@smw/feature-messages/constants";
 import { messageFiles, messages, messageThreads, threadMembers } from "@smw/feature-messages/schema";
 import { leadIds } from "@smw/feature-messages/leads";
@@ -128,8 +128,9 @@ export abstract class RequestReads extends RequestBase {
       // Office readers who are not in the conversation read it through a logged-in office viewer, never as a member.
       const thread = await loadThread(tx, r.threadId, member ? this.ctx : { userId: this.ctx.userId, role: this.ctx.role, review: true });
       if (mark) {
-        if (member && thread.newestAt) await markThreadRead(tx, this.ctx, r.threadId, thread.newestAt);
-        await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "request", id: r.id }, this.ctx.userId);
+        // The bell row of the request clears only once the conversation is fully read, so the Requests badge and the bell agree.
+        const caughtUp = member ? await markThreadRead(tx, this.ctx, r.threadId, thread.newestAt) : true;
+        if (caughtUp) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "request", id: r.id }, this.ctx.userId);
       }
       const settings = await loadCommSettings(tx);
       const events = await tx.select().from(requestEvents).where(eq(requestEvents.requestId, r.id)).orderBy(asc(requestEvents.createdAt), asc(requestEvents.id));
@@ -153,16 +154,24 @@ export abstract class RequestReads extends RequestBase {
     return this.ctx.readOnly ? this.read("use", (tx) => load(tx, false)) : this.write("use", (tx) => load(tx, true));
   }
 
-  /** A 60-second link to a file of this request's conversation, if this person may see the message it is in. */
+  /** The stored key and name of a file in this request's conversation, if this person may see the message it is in. */
+  private async openable(tx: Tx, requestId: string, fileId: string): Promise<{ key: string; name: string; type: string }> {
+    const { v, r } = await this.load(tx, requestId);
+    if (!z.uuid().safeParse(fileId).success) throw new NotFoundError("File");
+    const [f] = await tx.select({ key: messageFiles.fileKey, name: messageFiles.fileName, type: messageFiles.contentType }).from(messageFiles).innerJoin(messages, eq(messages.id, messageFiles.messageId))
+      .where(and(eq(messageFiles.id, fileId), eq(messages.threadId, r.threadId), isNull(messages.removedAt), v.family ? eq(messages.internal, false) : undefined));
+    if (!f) throw new NotFoundError("File");
+    return f;
+  }
+
+  /** A 60-second link to a file, for callers that hand the link on (the mobile API). */
   async fileLink(requestId: string, fileId: string): Promise<string> {
-    return this.read("use", async (tx) => {
-      const { v, r } = await this.load(tx, requestId);
-      if (!z.uuid().safeParse(fileId).success) throw new NotFoundError("File");
-      const [f] = await tx.select({ key: messageFiles.fileKey }).from(messageFiles).innerJoin(messages, eq(messages.id, messageFiles.messageId))
-        .where(and(eq(messageFiles.id, fileId), eq(messages.threadId, r.threadId), isNull(messages.removedAt), v.family ? eq(messages.internal, false) : undefined));
-      if (!f) throw new NotFoundError("File");
-      return signedLink(f.key, LINK_SECONDS);
-    });
+    return this.read("use", async (tx) => signedLink((await this.openable(tx, requestId, fileId)).key, LINK_SECONDS));
+  }
+
+  /** The file itself, for the module's own route, which sets the download headers. */
+  async file(requestId: string, fileId: string): Promise<StoredBytes> {
+    return this.read("use", async (tx) => { const f = await this.openable(tx, requestId, fileId); return { bytes: await readStored(f.key), name: f.name, type: f.type }; });
   }
 }
 

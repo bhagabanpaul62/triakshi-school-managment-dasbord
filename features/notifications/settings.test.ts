@@ -9,7 +9,7 @@ import { CommSettingsService, commSettingsSchema, loadCommSettings } from "./set
 let a: TestSchool, b: TestSchool;
 beforeAll(async () => {
   await registerFeatures([notificationsFeature]);
-  ({ a, b } = await createSchoolPair(["notifications"], "s"));
+  ({ a, b } = await createSchoolPair(["notifications"], "cs"));
 });
 afterAll(closeDb);
 

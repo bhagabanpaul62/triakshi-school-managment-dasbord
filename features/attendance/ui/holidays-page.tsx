@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { requireCtx } from "@smw/runtime";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
@@ -22,6 +23,18 @@ export const metadata = { title: "Holidays" };
 export default async function HolidaysPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const svc = new HolidayService(ctx);
+  // Families and staff without attendance access cannot open this list. They are not sent to an error: the calendar already shows their holidays.
+  if (!svc.can("read")) {
+    return (
+      <>
+        <PageHeader eyebrow="Academics" title="Holidays" description="The days the school is closed." />
+        <Panel>
+          <WidgetEmptyState title="Holidays are on the calendar" description="Closed days show there as the Holidays layer. For anything else, ask the school office." />
+          <div className="flex justify-center pb-6"><Link href="/app/events?layers=holidays" className="rounded-full bg-[var(--ds-surface-container-high)] px-4 py-2 text-sm font-medium">Open the calendar</Link></div>
+        </Panel>
+      </>
+    );
+  }
   const asked = (await searchParams).year;
   const [years, classes, current] = await Promise.all([svc.years(), svc.classOptions(), svc.workingDays()]);
   const year = years.find((y) => y.id === asked) ?? current.year ?? years[0] ?? null;

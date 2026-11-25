@@ -18,7 +18,11 @@ export interface TeacherView {
   slots: { id: string; startsAt: Date; endsAt: Date }[];
   booked: BookedView | null; waiting: boolean;
 }
-export interface KidView { student: { id: string; name: string; label: string }; used: number; limit: number; booked: BookedView[]; teachers: TeacherView[] }
+export interface KidView {
+  student: { id: string; name: string; label: string }; used: number; limit: number; booked: BookedView[]; teachers: TeacherView[];
+  /** Teachers of the child who have no time in this meeting, so the page never claims "every teacher". */
+  notInMeeting: string[];
+}
 export interface BookingView {
   meeting: { id: string; title: string; note: string | null; state: MeetingState; opensAt: Date; closesAt: Date; perFamily: number; cancelReason: string | null };
   kids: KidView[];
@@ -117,7 +121,7 @@ export class BookingService extends MeetingBase {
           slots: free.filter((s) => s.teacherId === t.teacherId && !others.some((b) => b.startsAt < s.endsAt && b.endsAt > s.startsAt)),
         };
       }).sort((a, b) => a.name.localeCompare(b.name));
-      views.push({ student: { id: kid.id, name: kid.name, label: kid.label }, used: mine.length, limit: m.perFamily, booked: mine, teachers: listed });
+      views.push({ student: { id: kid.id, name: kid.name, label: kid.label }, used: mine.length, limit: m.perFamily, booked: mine, teachers: listed, notInMeeting: teachers.filter((t) => !wins.some((w) => w.teacherId === t.teacherId)).map((t) => t.name) });
     }
     return {
       meeting: { id: m.id, title: m.title, note: m.note, state: m.state, opensAt: m.opensAt, closesAt: m.closesAt, perFamily: m.perFamily, cancelReason: m.cancelReason },

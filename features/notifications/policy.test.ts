@@ -84,7 +84,7 @@ describe("who may reach whom", () => {
     expect(await reach(a.as.accountant, dues)).toBe("free");
     expect(await reach(a.as.admin, dues)).toBe("free");
     await expect(reach(custom(["announcements:publish"]), dues)).rejects.toBeInstanceOf(ForbiddenError);
-    expect(await reach(custom(["announcements:publish", "finance:read"]), dues)).toBe("free");
+    expect(await reach(custom(["announcements:publish", "finance:read"]), dues)).toBe("approval");
     await expect(reach(custom(["announcements:publish", "fees:read"], "teacher"), dues)).rejects.toBeInstanceOf(ForbiddenError);
   });
 
@@ -97,9 +97,42 @@ describe("who may reach whom", () => {
 
   it("other staff holding the permission are free; a custom role follows its grants", async () => {
     expect(await reach(a.as.accountant, aud([{ type: "families" }]))).toBe("free");
-    expect(await reach(custom(["announcements:publish"]), aud([{ type: "staff" }]))).toBe("free");
+    expect(await reach(custom(["announcements:publish"]), aud([{ type: "staff" }]))).toBe("approval");
+    expect(await reach(custom(["announcements:publish"]), aud([{ type: "section", id: f.s5a! }]))).toBe("free");
     expect(await reach(a.as.teacher, aud([{ type: "section", id: f.s5a! }]), "events", "write")).toBe("free");
     expect(await reach(a.as.teacher, aud([{ type: "everyone" }]), "events", "write")).toBe("approval");
+  });
+});
+
+describe("who is free to reach whom, by role", () => {
+  it("the whole permission frees anyone who holds it, even a teacher", async () => {
+    const everyone = aud([{ type: "everyone" }]);
+    expect(await reach(a.as.teacher, everyone)).toBe("approval");
+    expect(await reach(custom(["announcements:publish", "announcements:whole"], "teacher"), everyone)).toBe("free");
+    expect(await reach(custom(["announcements:publish", "announcements:whole"]), everyone)).toBe("free");
+  });
+
+  it("an accountant is free to reach families, but needs approval for staff and the whole school", async () => {
+    expect(await reach(a.as.accountant, aud([{ type: "section", id: f.s5a! }, { type: "fee_overdue", days: 10 }]))).toBe("free");
+    expect(await reach(a.as.accountant, aud([{ type: "everyone" }]))).toBe("approval");
+    expect(await reach(a.as.accountant, aud([{ type: "families" }, { type: "role", id: "teacher" }]))).toBe("approval");
+  });
+
+  it("messages: only a teacher, or someone with all, whole or manage, may address a list", async () => {
+    await expect(reach(custom(["messages:use"]), aud([{ type: "section", id: f.s5a! }]), "messages", "use")).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await reach(custom(["messages:use", "messages:all"]), aud([{ type: "everyone" }]), "messages", "use")).toBe("free");
+    expect(await reach(a.as.accountant, aud([{ type: "everyone" }]), "messages", "use")).toBe("free");
+    expect(await reach(a.as.teacher, aud([{ type: "section", id: f.s5a! }]), "messages", "use")).toBe("free");
+  });
+
+  it("a saved group is read through its own rules, so it cannot hide a wider reach or the dues list", async () => {
+    const [wide, dues] = await withSchool(a.id, (tx) => tx.insert(commGroups).values([
+      { schoolId: a.id, name: "Wide", audience: aud([{ type: "everyone" }]) },
+      { schoolId: a.id, name: "Dues", audience: aud([{ type: "fee_overdue", days: 5 }]) },
+    ]).returning());
+    expect(await reach(a.as.teacher, aud([{ type: "group", id: wide!.id }]))).toBe("approval");
+    await expect(reach(a.as.teacher, aud([{ type: "group", id: dues!.id }]))).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await reach(a.as.accountant, aud([{ type: "group", id: dues!.id }]))).toBe("free");
   });
 });
 
@@ -115,7 +148,7 @@ describe("school settings", () => {
   it("approvalFor families and whole school applies to everyone but admins", async () => {
     await new CommSettingsService(a.as.admin).save({ approvalFor: { families: true, wholeSchool: false, website: true } });
     expect(await reach(a.as.accountant, aud([{ type: "families" }]))).toBe("approval");
-    expect(await reach(a.as.accountant, aud([{ type: "staff" }]))).toBe("free");
+    expect(await reach(a.as.accountant, aud([{ type: "staff" }]))).toBe("approval");
     expect(await reach(a.as.admin, aud([{ type: "families" }]))).toBe("free");
     await new CommSettingsService(a.as.admin).save({ approvalFor: { families: false, wholeSchool: true, website: true } });
     expect(await reach(a.as.accountant, aud([{ type: "everyone" }]))).toBe("approval");

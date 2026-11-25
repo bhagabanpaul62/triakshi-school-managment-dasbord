@@ -7,6 +7,7 @@ import { shortDate } from "@smw/ui/format";
 import { NotificationService } from "../service";
 import { TOPIC_GROUPS, TOPICS, type TopicGroup } from "../topics";
 import { NotificationDays, type Day } from "./notification-item";
+import { TypeFilter } from "./type-filter";
 
 export const metadata = { title: "Notifications" };
 
@@ -41,7 +42,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   };
   const filtered = !!group || unreadOnly;
   const pager = "inline-flex h-10 items-center rounded-full bg-white/[0.06] px-4 hover:bg-white/[0.1]";
-  // Only groups that have a topic the person can receive are worth a chip.
+  // Only groups that have a topic the person can receive are worth a place in the menu.
   const groups = (Object.keys(TOPIC_GROUPS) as TopicGroup[]).filter((g) => Object.values(TOPICS).some((t) => t.group === g));
 
   return (
@@ -52,11 +53,10 @@ export default async function NotificationsPage({ searchParams }: { searchParams
         <Link href={href({ tab: "action" })} className={pill(tab === "action")} aria-current={tab === "action" ? "page" : undefined}>Needs action{pulse.needsAction ? ` (${pulse.needsAction})` : ""}</Link>
         <Link href={href({ tab: "all" })} className={pill(tab === "all")} aria-current={tab === "all" ? "page" : undefined}>Everything</Link>
       </nav>
-      <nav className="mb-4 flex flex-wrap gap-2" aria-label="Filter by type">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <TypeFilter value={group ?? ""} options={groups.map((g) => ({ value: g, label: TOPIC_GROUPS[g] }))} base={new URLSearchParams({ tab, ...(unreadOnly ? { unread: "1" } : {}) }).toString()} />
         <Link href={href({ unread: !unreadOnly, group })} className={pill(unreadOnly)} aria-pressed={unreadOnly}>Unread only</Link>
-        <Link href={href({ unread: unreadOnly })} className={pill(!group)}>All types</Link>
-        {groups.map((g) => <Link key={g} href={href({ group: g, unread: unreadOnly })} className={pill(group === g)} aria-current={group === g ? "true" : undefined}>{TOPIC_GROUPS[g]}</Link>)}
-      </nav>
+      </div>
       {days.length === 0 ? (
         <Panel>
           <p className="py-10 text-center text-sm text-[var(--ds-on-surface-muted)]">

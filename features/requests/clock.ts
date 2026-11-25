@@ -25,3 +25,9 @@ export function median(xs: number[]): number | null {
   const s = [...xs].sort((a, b) => a - b), m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
 }
+
+/** Median hours as the report says them. Nothing finished yet is "Not yet", never "0 hours". */
+export const hoursWords = (h: number | null) => (h === null ? "Not yet" : h < 1 ? "Under an hour" : h < 48 ? `${Math.round(h * 10) / 10} hours` : `${Math.round((h / 24) * 10) / 10} days`);
+
+/** How long a request has existed, with its unit: "Today", "1 day", "5 days". */
+export const ageWords = (days: number) => (days < 1 ? "Today" : `${days} ${days === 1 ? "day" : "days"}`);

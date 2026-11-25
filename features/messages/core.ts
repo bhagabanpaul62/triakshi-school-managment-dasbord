@@ -12,9 +12,9 @@ import { students } from "@smw/feature-students/schema";
 import { BODY_MAX, FAMILY_KINDS, MAX_FILES, NEW_PER_DAY, PER_MINUTE, REVIEW_HOURS, THREAD_WINDOW, type ThreadKind } from "./constants";
 import messagesFeature from "./feature";
 import { filePrefix, type StoredFile } from "./files";
-import { messageFiles, messageRestrictions, messageReviews, messages, messageThreads, threadMembers } from "./schema";
+import { messageFiles, messageReports, messageRestrictions, messageReviews, messages, messageThreads, threadMembers } from "./schema";
 
-export { filePrefix, removeStored, signedLink, sniff, storeFiles, type StoredFile, type UploadedFile } from "./files";
+export { fileResponse, filePrefix, readStored, removeStored, signedLink, storeFiles, type StoredBytes, type StoredFile, type UploadedFile } from "./files";
 
 export type Message = typeof messages.$inferSelect;
 export type ThreadRow = typeof messageThreads.$inferSelect;
@@ -173,13 +173,25 @@ export async function unreadByThread(tx: Tx, who: { userId: string; role: string
   return new Map(rows.map((r) => [r.threadId, Number(r.n)]));
 }
 
-/** Mark read up to the newest message the person was shown (`upTo`, a timestamp text from loadThread), never "now", so a message that lands meanwhile stays unread. Clears the bell row and pending push and email in the same transaction. */
-export async function markThreadRead(tx: Tx, ctx: Ctx, threadId: string, upTo?: string | null): Promise<void> {
-  const { member } = await requireMember(tx, ctx, threadId);
+/**
+ * Mark read up to the newest message the person was shown (`upTo`, a timestamp text from loadThread), never "now", so a message that lands meanwhile stays unread.
+ * The bell row, pending push and email clear only when nothing newer is unread: the badge and the bell read the same count. Returns whether the conversation is fully read.
+ */
+export async function markThreadRead(tx: Tx, ctx: Ctx, threadId: string, upTo?: string | null): Promise<boolean> {
+  const { thread, member } = await requireMember(tx, ctx, threadId);
   if (upTo) {
     await tx.update(threadMembers).set({ lastReadAt: sql`greatest(coalesce(${threadMembers.lastReadAt}, '-infinity'::timestamptz), ${upTo}::timestamptz)` }).where(eq(threadMembers.id, member.id));
   }
-  await NotificationWriter.seen(tx, ctx.schoolId, { type: "thread", id: threadId }, ctx.userId);
+  const left = (await unreadByThread(tx, ctx, [threadId], thread.kind === "request")).get(threadId) ?? 0;
+  if (!left) await NotificationWriter.seen(tx, ctx.schoolId, { type: "thread", id: threadId }, ctx.userId);
+  return !left;
+}
+
+/** Of these conversations, the ones this person reported. Only they, and the school's reviewers, are shown that a conversation is held. */
+export async function reportedBy(tx: Tx, userId: string, threadIds: string[]): Promise<Set<string>> {
+  if (!threadIds.length) return new Set();
+  const rows = await tx.selectDistinct({ id: messageReports.threadId }).from(messageReports).where(and(eq(messageReports.reportedBy, userId), inArray(messageReports.threadId, threadIds)));
+  return new Set(rows.map((r) => r.id));
 }
 
 // ---------- posting ----------
@@ -319,6 +331,7 @@ export async function loadThread(tx: Tx, threadId: string, viewer: Viewer, o: { 
 
   const family = isFamily(viewer.role);
   const limit = o.limit ?? THREAD_WINDOW;
+  const showHeld = !!thread.heldAt && (!!viewer.review || (await reportedBy(tx, viewer.userId, [thread.id])).has(thread.id));
   const settings = await loadCommSettings(tx);
   const [allMembers, recent, [stu], noteOnly] = await Promise.all([
     tx.select({ m: threadMembers, status: users.status }).from(threadMembers).leftJoin(users, eq(users.id, threadMembers.userId)).where(eq(threadMembers.threadId, thread.id)).orderBy(asc(threadMembers.createdAt)),
@@ -372,7 +385,7 @@ export async function loadThread(tx: Tx, threadId: string, viewer: Viewer, o: { 
   });
 
   return {
-    thread: { id: thread.id, kind: thread.kind, subject: thread.subject, state: thread.state, closedReason: thread.closedReason, held: !!thread.heldAt, studentId: thread.studentId, studentName: stu?.name ?? null, batchId: thread.batchId, createdBy: thread.createdBy },
+    thread: { id: thread.id, kind: thread.kind, subject: thread.subject, state: thread.state, closedReason: thread.closedReason, held: showHeld, studentId: thread.studentId, studentName: stu?.name ?? null, batchId: thread.batchId, createdBy: thread.createdBy },
     members: members.map((x) => {
       const p = prefOf(x.m.userId);
       return {

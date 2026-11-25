@@ -2,20 +2,25 @@
 import { sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { allows, ForbiddenError, type Ctx, type FeatureDef } from "@smw/feature-kit";
-import { canTargetFeeOverdue, teacherSections } from "./audience";
+import { canTargetFeeOverdue, expandGroups, teacherSections } from "./audience";
 import type { Audience, AudienceRule } from "./audience-rules";
 import { loadCommSettings } from "./settings";
 
 export type Reach = "free" | "approval";
 
+const FAMILY_SIDE = new Set(["families", "class", "section", "subject", "house", "route", "stop", "student", "fee_overdue"]);
+const WIDE = new Set(["everyone", "families", "staff", "fee_overdue"]);
+
 export class AudiencePolicy {
-  /** "free": send now. "approval": goes to a reviewer first. Throws ForbiddenError when never allowed. */
-  static async reach<P extends string>(tx: Tx, ctx: Ctx, audience: Audience, o: { feature: FeatureDef<P>; permission: P }): Promise<Reach> {
+  /** "free": send now. "approval": goes to a reviewer first. Throws ForbiddenError when never allowed. Saved groups are expanded first, so a group can never hide a wider rule. */
+  static async reach<P extends string>(tx: Tx, ctx: Ctx, rawAudience: Audience, o: { feature: FeatureDef<P>; permission: P }): Promise<Reach> {
     // Families never target a list: they message through the messages module itself.
     if (ctx.role === "student" || ctx.role === "parent" || !allows(ctx, o.feature, o.permission)) throw new ForbiddenError();
+    const audience = await expandGroups(tx, rawAudience);
     const all = audience.include.concat(audience.exclude);
     if (all.some((r) => r.type === "fee_overdue") && !canTargetFeeOverdue(ctx)) throw new ForbiddenError("Only the fees team can pick families with dues.");
-    if (ctx.role === "admin" || allows(ctx, o.feature, "manage")) return "free";
+    if (ctx.role === "admin" || allows(ctx, o.feature, "manage") || allows(ctx, o.feature, "whole") || allows(ctx, o.feature, "all")) return "free";
+    if (o.feature.key === "messages" && ctx.role !== "teacher") throw new ForbiddenError();
 
     const settings = o.feature.key === "announcements" ? await loadCommSettings(tx) : null;
     if (settings) {
@@ -23,12 +28,13 @@ export class AudiencePolicy {
       if ((wholeSchool && settings.approvalFor.wholeSchool) || (families && settings.approvalFor.families)) return "approval";
       if (ctx.role === "teacher" && settings.teacherPublish === "approval") return "approval";
     }
-    if (ctx.role !== "teacher") return "free";
-    return (await AudiencePolicy.isOwn(tx, ctx.userId, audience, 0)) ? "free" : "approval";
+    if (ctx.role === "teacher") return (await AudiencePolicy.isOwn(tx, ctx.userId, audience)) ? "free" : "approval";
+    if (ctx.role === "accountant") return audience.include.every((r) => FAMILY_SIDE.has(r.type)) ? "free" : "approval";
+    return audience.include.some((r) => WIDE.has(r.type)) ? "approval" : "free";
   }
 
-  /** True when every include rule stays inside the teacher's own sections (or is a saved group made only of those). */
-  private static async isOwn(tx: Tx, userId: string, audience: Audience, depth: number): Promise<boolean> {
+  /** True when every include rule stays inside the teacher's own sections. */
+  private static async isOwn(tx: Tx, userId: string, audience: Audience): Promise<boolean> {
     const mine = new Set(await teacherSections(tx, userId));
     const own = async (r: AudienceRule): Promise<boolean> => {
       switch (r.type) {
@@ -39,11 +45,6 @@ export class AudiencePolicy {
         case "class": {
           const secs = await rowsOf(tx, sql`select id::text as s from sections where class_id = ${r.id}::uuid and year_id in (select id from academic_years where is_current)`);
           return secs.length > 0 && secs.every((x) => mine.has(x.s));
-        }
-        case "group": {
-          if (depth > 0) return false;
-          const [g] = await rowsOf<{ a: Audience }>(tx, sql`select audience as a from comm_groups where id = ${r.id}::uuid`);
-          return !!g && (await AudiencePolicy.isOwn(tx, userId, g.a, 1));
         }
         default: return false;
       }

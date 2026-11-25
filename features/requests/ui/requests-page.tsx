@@ -12,7 +12,7 @@ import { REQUEST_STATE_TONE, REQUEST_STATE_WORDS, VIEWS, type RequestState, type
 import { CategoryService } from "../categories";
 import { RequestService, type RequestRow } from "../service";
 import { StateChip } from "@smw/ui/comm/StateChip";
-import { SectionNav, canWriteFor, dueWords, isFamilyRole, one, type Search } from "./shared";
+import { SectionNav, canWriteFor, dueWithAge, isFamilyRole, one, type Search } from "./shared";
 
 export const metadata = { title: "Requests" };
 
@@ -68,13 +68,14 @@ async function FamilyList({ sp }: { sp: Awaited<Search> }) {
   );
 }
 
+// Six columns fit 1366 px: the request number sits under its title, and the last column says when it is due and how old it is.
 const COLUMNS: Column[] = [
-  { key: "number", label: "Number", type: "mono" }, { key: "subject", label: "Title" }, { key: "studentName", label: "Child", type: "person", metaKey: "className" },
+  { key: "subject", label: "Request", metaKey: "number" }, { key: "studentName", label: "Child", type: "person", metaKey: "className" },
   { key: "categoryName", label: "Category", hideOnMobile: true }, { key: "state", label: "State", type: "badge", labels: REQUEST_STATE_WORDS, tones: REQUEST_STATE_TONE },
-  { key: "ownerName", label: "Owner", hideOnMobile: true }, { key: "age", label: "Age", type: "number", hideOnMobile: true }, { key: "due", label: "Next due" },
+  { key: "ownerName", label: "Owner", hideOnMobile: true }, { key: "due", label: "Due" },
 ];
 
-const plain = (r: RequestRow) => ({ ...r, age: r.ageDays, due: dueWords(r), dueAt: r.dueAt.toISOString(), createdAt: r.createdAt.toISOString(), resolvedAt: r.resolvedAt?.toISOString() ?? null });
+const plain = (r: RequestRow) => ({ ...r, due: dueWithAge(r), dueAt: r.dueAt.toISOString(), createdAt: r.createdAt.toISOString(), resolvedAt: r.resolvedAt?.toISOString() ?? null });
 
 async function StaffQueue({ sp }: { sp: Awaited<Search> }) {
   const ctx = await requireCtx();

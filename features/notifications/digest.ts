@@ -1,8 +1,10 @@
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { schoolUrl } from "@smw/config";
+import { todayIST } from "@smw/feature-kit/money";
 import { withConsole } from "@smw/db";
 import { emailHtml, escapeHtml, services } from "@smw/integrations";
-import { apply, emailTarget, failedTry, load, LEASE_MS, NO_BUDGET, releaseMail, reserveMail, tomorrowMorning, unsubscribeHeaders, type EmailTarget } from "./delivery";
+import { apply, emailTarget, failedTry, load, LEASE_MS, NO_BUDGET, releaseMail, reserveMail, SETTINGS_LINE, tomorrowMorning, unsubscribeHeaders, type EmailTarget } from "./delivery";
+import { chunks } from "./constants";
 import { isAddressRefusal, suppress } from "./email-health";
 import { PreferenceService } from "./prefs";
 import { commDeliveries, notificationPrefs, type Delivery, type Notification } from "./schema";
@@ -10,6 +12,8 @@ import { lockedGroup, TOPIC_GROUPS, topicOf, type TopicGroup } from "./topics";
 
 const MAX_LINES = 15;
 const DEFAULT_HOUR = 18;
+/** Rows taken per round; the run goes on round after round until nothing is left. */
+const TAKE = 2000;
 
 export interface DigestResult { mails: number; notifications: number; skipped: number; failed: number }
 
@@ -26,17 +30,34 @@ const lineText = (l: Line, many: boolean) => `${many ? `${l.name}: ` : ""}${l.li
 export async function runDigest(o: { hour: number; now?: Date; schoolId?: string }): Promise<DigestResult> {
   const now = o.now ?? new Date();
   const out: DigestResult = { mails: 0, notifications: 0, skipped: 0, failed: 0 };
-  const rows = await withConsole(async (tx) => {
+  for (;;) {
+    const rows = await claim(o, now);
+    if (!rows.length) return out;
+    await sendRound(rows, now, out);
+  }
+}
+
+/**
+ * Take up to 2000 due rows under a lock and hide them from other runs. A person whose hour has already passed today and who
+ * got no digest yet today is included too (a late run catches up); one who already got today's does not get a second.
+ */
+async function claim(o: { hour: number; schoolId?: string }, now: Date): Promise<Delivery[]> {
+  const dayStart = new Date(`${todayIST(now)}T00:00:00+05:30`);
+  return withConsole(async (tx) => {
+    const hour = sql`coalesce(${notificationPrefs.digestHour}, ${DEFAULT_HOUR})`;
     const due = await tx.select({ d: commDeliveries }).from(commDeliveries)
       .leftJoin(notificationPrefs, and(eq(notificationPrefs.schoolId, commDeliveries.schoolId), eq(notificationPrefs.userId, commDeliveries.userId)))
       .where(and(eq(commDeliveries.state, "pending"), eq(commDeliveries.mode, "digest"), eq(commDeliveries.channel, "email"), lte(commDeliveries.nextAt, now),
-        sql`coalesce(${notificationPrefs.digestHour}, ${DEFAULT_HOUR}) = ${o.hour}`, o.schoolId ? eq(commDeliveries.schoolId, o.schoolId) : undefined))
-      .orderBy(asc(commDeliveries.nextAt)).for("update", { of: commDeliveries, skipLocked: true });
+        sql`(${hour} = ${o.hour} or (${hour} < ${o.hour} and not exists (select 1 from comm_deliveries sent where sent.school_id = ${commDeliveries.schoolId} and sent.user_id = ${commDeliveries.userId}
+          and sent.mode = 'digest' and sent.channel = 'email' and sent.state = 'sent' and sent.sent_at >= ${dayStart.toISOString()}::timestamptz)))`, o.schoolId ? eq(commDeliveries.schoolId, o.schoolId) : undefined))
+      .orderBy(asc(commDeliveries.nextAt)).limit(TAKE).for("update", { of: commDeliveries, skipLocked: true });
     const list = due.map((r) => r.d);
-    if (list.length) await tx.update(commDeliveries).set({ nextAt: new Date(now.getTime() + LEASE_MS) }).where(inArray(commDeliveries.id, list.map((r) => r.id)));
+    for (const part of chunks(list.map((r) => r.id))) await tx.update(commDeliveries).set({ nextAt: new Date(now.getTime() + LEASE_MS) }).where(inArray(commDeliveries.id, part));
     return list;
   });
-  if (!rows.length) return out;
+}
+
+async function sendRound(rows: Delivery[], now: Date, out: DigestResult) {
   const b = await load(rows);
 
   const groups = new Map<string, { schoolId: string; userId: string; target: EmailTarget; lines: Line[] }>();
@@ -61,9 +82,7 @@ export async function runDigest(o: { hour: number; now?: Date; schoolId?: string
       const school = b.schools.get(g.schoolId)!;
       const base = await withConsole((tx) => PreferenceService.unsubscribeUrlFor(tx, g.schoolId, school.slug, g.userId));
       try {
-        await services().email.send({ to: g.target.address, ...compose(school, g.lines, base), headers: unsubscribeHeaders(base) });
-        await apply(ids, { state: "sent", address: g.target.address, sentAt: now, reason: null });
-        out.mails++; out.notifications += ids.length;
+        await services().email.send({ to: g.target.address, ...compose(school, g.lines, base), headers: base ? unsubscribeHeaders(base) : undefined });
       } catch (err) {
         await releaseMail(g.schoolId, now);
         if (isAddressRefusal(err)) {
@@ -71,10 +90,13 @@ export async function runDigest(o: { hour: number; now?: Date; schoolId?: string
           await apply(ids, { state: "bounced", address: g.target.address, reason: "The mailbox refused the mail. Correct the address to start again." });
           out.skipped += ids.length;
         } else await release(g.lines.map((l) => l.row), err, now, out);
+        continue;
       }
+      // Sent. Saving that is best effort: a failure here must never hand the rows back and send them twice.
+      out.mails++; out.notifications += ids.length;
+      await apply(ids, { state: "sent", address: g.target.address, sentAt: now, reason: null }).catch((e) => console.error("digest sent but not saved", ids, e));
     } catch (err) { await release(g.lines.map((l) => l.row), err, now, out); }
   }
-  return out;
 }
 
 /** Hand rows back so the next digest run tries them again; after 5 tries they are marked failed. */
@@ -82,12 +104,12 @@ async function release(rows: Delivery[], err: unknown, now: Date, out: DigestRes
   for (const row of rows) {
     const p = failedTry(row, err, now);
     // Waiting 1 minute makes no sense for a twice-a-day mail: just come back at the next digest.
-    await apply([row.id], p.state === "failed" ? p : { ...p, nextAt: now });
+    await apply([row.id], p.state === "failed" ? p : { ...p, nextAt: new Date(now.getTime() + 1) });
     if (p.state === "failed") out.failed++;
   }
 }
 
-function compose(school: { name: string; slug: string }, lines: Line[], unsubscribe: string) {
+function compose(school: { name: string; slug: string }, lines: Line[], unsubscribe: string | null) {
   const many = new Set(lines.map((l) => l.row.userId)).size > 1;
   const byGroup = new Map<TopicGroup, Line[]>();
   for (const l of lines) byGroup.set(topicOf(l.note.topic).group, [...(byGroup.get(topicOf(l.note.topic).group) ?? []), l]);
@@ -95,12 +117,12 @@ function compose(school: { name: string; slug: string }, lines: Line[], unsubscr
   const sections = [...byGroup].map(([group, ls]) => {
     ls.sort((a, b) => b.note.createdAt.getTime() - a.note.createdAt.getTime());
     const shown = ls.slice(0, MAX_LINES), more = ls.length - shown.length;
-    return { label: TOPIC_GROUPS[group], lines: shown.map((l) => lineText(l, many)), more, stop: lockedGroup(group) ? null : `${unsubscribe}${unsubscribe.includes("?") ? "&" : "?"}g=${group}` };
+    return { label: TOPIC_GROUPS[group], lines: shown.map((l) => lineText(l, many)), more, stop: lockedGroup(group) || !unsubscribe ? null : `${unsubscribe}${unsubscribe.includes("?") ? "&" : "?"}g=${group}` };
   });
   const n = lines.length;
-  const text = [...sections.map((s) => `${s.label}\n${s.lines.map((l) => `- ${l}`).join("\n")}${s.more ? `\n...and ${s.more} more` : ""}${s.stop ? `\nStop these emails: ${s.stop}` : ""}`), `Open everything: ${open}`].join("\n\n");
+  const text = [...sections.map((s) => `${s.label}\n${s.lines.map((l) => `- ${l}`).join("\n")}${s.more ? `\n...and ${s.more} more` : ""}${s.stop ? `\nStop these emails: ${s.stop}` : ""}`), `Open everything: ${open}`, ...(unsubscribe ? [] : [SETTINGS_LINE])].join("\n\n");
   const html = emailHtml(`${n} ${n === 1 ? "update" : "updates"} from ${escapeHtml(school.name)}`,
-    sections.map((s) => `<h3 style="font-weight:600;margin:18px 0 6px">${escapeHtml(s.label)}</h3><ul>${s.lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>${s.more ? `<p>...and ${s.more} more.</p>` : ""}${s.stop ? `<p style="font-size:12px"><a href="${escapeHtml(s.stop)}">Stop these emails</a></p>` : ""}`).join(""),
+    sections.map((s) => `<h3 style="font-weight:600;margin:18px 0 6px">${escapeHtml(s.label)}</h3><ul>${s.lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>${s.more ? `<p>...and ${s.more} more.</p>` : ""}${s.stop ? `<p style="font-size:12px"><a href="${escapeHtml(s.stop)}">Stop these emails</a></p>` : ""}`).join("") + (unsubscribe ? "" : `<p style="font-size:12px">${SETTINGS_LINE}</p>`),
     { label: "Open notifications", url: open });
   return { subject: `${n} ${n === 1 ? "update" : "updates"} · ${school.name}`, text, html };
 }

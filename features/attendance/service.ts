@@ -10,7 +10,7 @@ import { closedDays, dayLook, isClosed, type Who } from "./holidays";
 import { markStaffInput, markStudentsInput, monthInput } from "./inputs";
 import { loadSettings, queueAlerts } from "./alerts";
 import { registerCsv, registerPdf, type RegisterInput } from "./register-export";
-import { periodAttendance, staffAttendance, studentAttendance } from "./schema";
+import { staffAttendance, studentAttendance } from "./schema";
 import { addDays, attendancePercent, countsOf, groupBy, isDate, monthDays, tally, todayIST, type Counts } from "./stats";
 
 type Perm = keyof typeof attendanceFeature.permissions;

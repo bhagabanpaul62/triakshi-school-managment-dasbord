@@ -65,6 +65,15 @@ export class Starters {
     return hit;
   }
 
+  /** The students among `ids` this person may not write to, by the same section rule as `students` and `studentFor`. A family login is not needed here: "Message families" reports who cannot be reached on its own. */
+  async outside(tx: Tx, ids: string[]): Promise<string[]> {
+    const scope = await this.sectionScope(tx);
+    if (!scope || !ids.length) return scope ? ids : [];
+    const ok = scope.length ? await tx.select({ id: students.id }).from(students).where(and(inArray(students.id, ids), eq(students.status, "active"), inArray(students.sectionId, scope))) : [];
+    const inside = new Set(ok.map((r) => r.id));
+    return ids.filter((id) => !inside.has(id));
+  }
+
   private async byId(tx: Tx, studentId: string, scope: string[] | null): Promise<StudentContact | null> {
     if (scope && !scope.length) return null;
     const [r] = await tx.select({ id: students.id, name: students.name, userId: students.userId, cls: classes.name, sec: sections.name }).from(students)

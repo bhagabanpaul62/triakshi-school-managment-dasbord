@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, notInArray, or, sql, type SQL } from "drizzle-or
 import { schoolRoles, users, type Tx } from "@smw/db";
 import { z } from "zod";
 import { leadIds } from "@smw/feature-messages/leads";
-import { sections } from "@smw/feature-academics/schema";
+import { sections, sectionTeachers } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import type { Nature } from "./constants";
 
@@ -25,6 +25,15 @@ const ids = async (tx: Tx, where: SQL | undefined, skip: string[]) =>
 export const officeIds = (tx: Tx, skip: string[]) =>
   ids(tx, or(inArray(users.role, ["admin", "accountant"]), inArray(users.roleId, tx.select({ id: schoolRoles.id }).from(schoolRoles).where(sql`'requests:office' = any(${schoolRoles.grants})`))), skip);
 
+/** "Any teacher" means a teacher of this child: the class teacher or a subject teacher of the child's section. */
+const teachesStudent = (tx: Tx, studentId: string) => {
+  const section = tx.select({ id: students.sectionId }).from(students).where(eq(students.id, studentId));
+  return or(
+    inArray(users.id, tx.select({ id: sections.classTeacherId }).from(sections).where(inArray(sections.id, section))),
+    inArray(users.id, tx.select({ id: sectionTeachers.teacherId }).from(sectionTeachers).where(inArray(sectionTeachers.sectionId, section))),
+  );
+};
+
 /** A role is a built-in key ("admin"), a custom role id, or "class_teacher" (the teacher of the child's section). */
 export async function resolveRoute(tx: Tx, spec: { userId?: string | null; role: string }, o: { studentId?: string | null; nature?: Nature; skip: string[] }): Promise<Route> {
   const { skip } = o;
@@ -40,7 +49,7 @@ export async function resolveRoute(tx: Tx, spec: { userId?: string | null; role:
       if (t?.id && !skip.includes(t.id)) found = await ids(tx, eq(users.id, t.id), skip);
     }
   } else if (z.uuid().safeParse(spec.role).success) found = await ids(tx, eq(users.roleId, spec.role), skip);
-  else found = await ids(tx, and(eq(users.role, spec.role as never), inArray(users.role, STAFF_ROLES as never[])), skip);
+  else found = await ids(tx, and(eq(users.role, spec.role as never), inArray(users.role, STAFF_ROLES as never[]), spec.role === "teacher" && o.studentId ? teachesStudent(tx, o.studentId) : undefined), skip);
   if (found.length) return pick(found, spec.role);
   const admins = await ids(tx, eq(users.role, "admin"), skip);
   return admins.length ? pick(admins, "admin") : pick(await officeIds(tx, skip), "admin");

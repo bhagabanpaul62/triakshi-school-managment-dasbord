@@ -9,7 +9,7 @@ import { NotificationService, NotificationWriter } from "./service";
 let a: TestSchool, b: TestSchool;
 beforeAll(async () => {
   await registerFeatures([notificationsFeature]);
-  ({ a, b } = await createSchoolPair(["notifications"], "s"));
+  ({ a, b } = await createSchoolPair(["notifications"], "nv"));
 });
 afterAll(closeDb);
 beforeEach(async () => { for (const s of [a, b]) await withSchool(s.id, async (tx) => { await tx.delete(commDeliveries); await tx.delete(notifications); }); });
@@ -82,5 +82,23 @@ describe("NotificationService", () => {
     expect((await ro.pulse()).bell).toBe(1);
     expect((await ro.markRead("all")).updated).toBe(1);
     await expect(new NotificationService({ ...a.as.student, features: new Set() }).pulse()).rejects.toThrow();
+  });
+
+  it("a support session sees no private words, changes nothing, and still reads the rest", async () => {
+    await send(a, a.users.student, "Plain notice", { body: "open text" });
+    await send(a, a.users.student, "Marks inside", { topic: "work.update", body: "secret", privateBody: true });
+    await send(a, a.users.student, "Teacher wrote to you", { topic: "message.new", body: "private talk" });
+    await send(a, a.users.student, "Your request moved", { topic: "request.update", body: "private request" });
+    for (const readOnly of [false, true]) {
+      const support = new NotificationService({ ...a.as.student, supportStaffId: crypto.randomUUID(), readOnly });
+      const rows = [...(await support.list()).rows, ...(await support.forUser()).items];
+      const byOld = (t: string) => rows.filter((r) => r.title === t);
+      expect(byOld("Plain notice").length).toBeGreaterThan(0);
+      expect(byOld("Plain notice")[0]!.body).toBe("open text");
+      expect(rows.filter((r) => r.title === "Private" && r.body === null)).toHaveLength(6);
+      expect(JSON.stringify(rows)).not.toMatch(/secret|private talk|private request|Marks inside|Teacher wrote|Your request moved/);
+      expect((await support.markRead("all")).updated).toBe(0);
+    }
+    expect((await svc(a, "student").pulse()).bell).toBe(4);
   });
 });

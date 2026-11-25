@@ -98,7 +98,7 @@ export async function FamilyPage({ ctx, id, studentId }: { ctx: Ctx; id: string;
       <div className="mt-3 flex flex-col gap-3">
         {v.kids.length === 0 ? <Notice>No child is linked to this login right now. Ask the school office.</Notice> : null}
         {v.kids.map((kid) => (
-          <Panel key={kid.student.id} title={`${kid.student.name}${kid.student.label ? ` · ${kid.student.label}` : ""}`} action={<span className="text-sm tabular-nums text-[var(--ds-on-surface-muted)]">{kid.used} of {kid.limit} booked</span>}>
+          <Panel key={kid.student.id} title={`${kid.student.name}${kid.student.label ? ` · ${kid.student.label}` : ""}`} action={<span className="text-sm tabular-nums text-[var(--ds-on-surface-muted)]">{kid.used} booked, up to {kid.limit}</span>}>
             <div className="flex flex-col gap-5">
               {kid.booked.length ? (
                 <section aria-label="Your times"><h3 className="mb-2 text-sm font-medium">Booked</h3>
@@ -108,7 +108,7 @@ export async function FamilyPage({ ctx, id, studentId }: { ctx: Ctx; id: string;
                 {kid.teachers.length === 0 ? <Notice>None of {kid.student.name}'s teachers have a time in this meeting. Ask the school office to add them.</Notice> : (
                   <ul className="flex flex-col gap-3">{kid.teachers.filter((t) => !t.booked).map((t) => <TeacherCard key={t.teacherId} t={t} kid={kid} meetingId={id} studentId={studentId} can={v.can} />)}</ul>
                 )}
-                {kid.teachers.length > 0 && kid.teachers.every((t) => t.booked) ? <p className="text-sm text-[var(--ds-on-surface-muted)]">You have a time with every teacher.</p> : null}
+                {kid.teachers.length > 0 && kid.teachers.every((t) => t.booked) ? <p className="text-sm text-[var(--ds-on-surface-muted)]">{kid.notInMeeting.length ? `You have a time with every teacher in this meeting. ${kid.notInMeeting.join(", ")} ${kid.notInMeeting.length === 1 ? "has" : "have"} no time in it.` : "You have a time with every teacher."}</p> : null}
               </section>
             </div>
           </Panel>

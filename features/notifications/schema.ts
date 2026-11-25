@@ -29,7 +29,7 @@ export const notifications = pgTable("notifications", {
   readAt: timestamp("read_at", { withTimezone: true }),
 }, (t) => [...tenant(t, "notifications"),
   index("notifications_user_created").on(t.schoolId, t.userId, t.createdAt),
-  index("notifications_subject").on(t.schoolId, t.subjectType, t.subjectId),
+  index("notifications_subject").on(t.schoolId, t.subjectType, t.subjectId, t.userId),
   index("notifications_open_action").on(t.schoolId, t.userId).where(sql`${t.action} and ${t.doneAt} is null`),
   uniqueIndex("notifications_group_open").on(t.schoolId, t.userId, t.groupKey).where(sql`${t.groupKey} is not null and ${t.readAt} is null and ${t.doneAt} is null`)]);
 

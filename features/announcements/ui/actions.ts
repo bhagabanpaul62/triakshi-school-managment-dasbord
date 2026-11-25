@@ -102,3 +102,6 @@ export async function saveGroup(fd: FormData) {
   return serviceAction(CommGroupService, (s) => (body.id ? s.update(String(body.id), body) : s.create(body)), "Group saved");
 }
 export async function deleteGroup(fd: FormData) { return serviceAction(CommGroupService, (s) => s.remove(id(fd)), "Group deleted"); }
+export async function approveWithEdits(fd: FormData) {
+  return serviceAction(NoticeService, (s) => s.approve({ id: id(fd), edits: { title: text(fd, "title"), body: text(fd, "body") } }), "Approved with your changes");
+}
