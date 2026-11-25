@@ -16,7 +16,7 @@ beforeEach(async () => { for (const s of [a, b]) await withSchool(s.id, async (t
 
 const send = (s: TestSchool, userId: string, title: string, extra: Partial<Parameters<typeof NotificationWriter.insert>[2][number]> = {}) =>
   withSchool(s.id, (tx) => NotificationWriter.insert(tx, s.id, [{ userId, topic: "notice.published", title, href: "/app/announcements", ...extra } as never]));
-const svc = (s: TestSchool, role: keyof TestSchool["as"], readOnly = false) => new NotificationService({ ...s.as[role], readOnly });
+const svc = (s: TestSchool, role: keyof TestSchool["as"], readOnly = false) => new NotificationService({ ...s.as[role], readOnly, features: new Set(["notifications", "requests"]) });
 
 describe("NotificationService", () => {
   it("lists only the caller's own rows and counts unread", async () => {
@@ -25,6 +25,16 @@ describe("NotificationService", () => {
     const mine = await svc(a, "accountant").forUser();
     expect(mine.items.map((n) => n.title)).toEqual(["For the accountant"]);
     expect(mine.unread).toBe(1);
+  });
+
+  it("rows of a module the plan does not have are not shown or counted", async () => {
+    await send(a, a.users.teacher, "Notice");
+    await send(a, a.users.teacher, "Request", { topic: "request.work", href: "/app/requests" });
+    const off = new NotificationService({ ...a.as.teacher, features: new Set(["notifications"]) });
+    expect((await off.forUser()).items.map((n) => n.title)).toEqual(["Notice"]);
+    expect((await off.pulse()).bell).toBe(1);
+    expect((await off.list()).total).toBe(1);
+    expect((await svc(a, "teacher").pulse()).bell).toBe(2);
   });
 
   it("pulse gives the bell and Needs action in one call", async () => {
@@ -90,7 +100,7 @@ describe("NotificationService", () => {
     await send(a, a.users.student, "Teacher wrote to you", { topic: "message.new", body: "private talk" });
     await send(a, a.users.student, "Your request moved", { topic: "request.update", body: "private request" });
     for (const readOnly of [false, true]) {
-      const support = new NotificationService({ ...a.as.student, supportStaffId: crypto.randomUUID(), readOnly });
+      const support = new NotificationService({ ...a.as.student, features: new Set(["notifications", "requests"]), supportStaffId: crypto.randomUUID(), readOnly });
       const rows = [...(await support.list()).rows, ...(await support.forUser()).items];
       const byOld = (t: string) => rows.filter((r) => r.title === t);
       expect(byOld("Plain notice").length).toBeGreaterThan(0);

@@ -1,9 +1,9 @@
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { listQuerySchema, SchoolService, toPage, type Ctx, type ListQuery, type Page } from "@smw/feature-kit";
 import notificationsFeature from "./feature";
 import { listFilters } from "./inputs";
 import { notifications, type Notification } from "./schema";
-import { TOPICS, type TopicGroup, type TopicKey } from "./topics";
+import { hiddenTopics, TOPICS, type TopicGroup, type TopicKey } from "./topics";
 import { NotificationWriter } from "./writer";
 
 type Perm = keyof typeof notificationsFeature.permissions;
@@ -25,7 +25,10 @@ export class NotificationService extends SchoolService<Perm> {
   private shown<T extends Notification>(n: T): T {
     return this.ctx.supportStaffId && (n.privateBody || PRIVATE_TOPICS.has(n.topic)) ? { ...n, title: "Private", body: null } : n;
   }
-  private mine = () => eq(notifications.userId, this.ctx.userId);
+  private mine = () => {
+    const off = hiddenTopics(this.ctx.features);
+    return and(eq(notifications.userId, this.ctx.userId), off.length ? notInArray(notifications.topic, off) : undefined);
+  };
   private needsAction = () => and(eq(notifications.action, true), isNull(notifications.doneAt));
 
   /** The bell and the Needs action count: two index-only counts, each on its own partial index (unread, open action). */

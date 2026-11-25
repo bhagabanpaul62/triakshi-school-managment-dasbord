@@ -46,6 +46,12 @@ export const TOPICS = {
   "payroll.payslip": t("work", "Payslips and salary", true, "digest"),
 } as const satisfies Record<string, Topic>;
 export type TopicKey = keyof typeof TOPICS;
+/** The module behind a topic, where a school's plan can leave it out. Rows of a module that is off (a smaller plan) are not shown: their link would open nothing. */
+const TOPIC_MODULE: Partial<Record<TopicKey, string>> = {
+  "request.update": "requests", "request.work": "requests", "meeting.open": "meetings", "meeting.changed": "meetings", "meeting.reminder": "meetings",
+  "library.due": "library", "transport.notice": "transport", "payroll.payslip": "payroll",
+};
+export const hiddenTopics = (on: ReadonlySet<string>) => (Object.keys(TOPIC_MODULE) as TopicKey[]).filter((k) => !on.has(TOPIC_MODULE[k]!));
 export const topicOf = (k: TopicKey): Topic => TOPICS[k];
 /** Groups where every topic must be told: shown locked in the preferences. */
 export const lockedGroup = (g: TopicGroup) => Object.values(TOPICS as Record<string, Topic>).filter((x) => x.group === g).every((x) => x.mustTell);

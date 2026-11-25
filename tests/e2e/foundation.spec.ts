@@ -34,14 +34,17 @@ test("wrong password is rejected with a clear message", async ({ page }) => {
   await expect(page.getByText(/login ID or password is not right/i)).toBeVisible();
 });
 
-test("admin posts an announcement @mobile", async ({ page }) => {
+test("admin publishes a notice @mobile", async ({ page }) => {
   await login(page, "greenvalley", "admin");
   await page.goto(`${SCHOOL("greenvalley")}/app/announcements`);
   await expectHealthy(page);
   const title = `E2E notice ${Date.now()}`;
-  await page.getByRole("button", { name: /new announcement/i }).first().click();
-  await page.getByLabel(/^title/i).fill(title);
-  await page.getByLabel(/^message/i).fill("Posted by the browser test.");
-  await page.getByRole("button", { name: /^post$/i }).click();
-  await expect(page.getByText(title)).toBeVisible();
+  await page.getByRole("button", { name: /new notice/i }).first().click();
+  await page.getByRole("menuitem", { name: "Notice", exact: true }).click();
+  await page.getByRole("group", { name: "Quick choices" }).getByRole("button").first().click();
+  await page.getByLabel("Title", { exact: true }).fill(title);
+  await page.getByLabel("Message", { exact: true }).fill("Posted by the browser test.");
+  await page.getByRole("button", { name: /^publish$/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^publish to \d+/i }).click();
+  await expect(page.getByText(title).first()).toBeVisible();
 });
