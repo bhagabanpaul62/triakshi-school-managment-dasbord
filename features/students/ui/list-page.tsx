@@ -7,6 +7,7 @@ import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { PageHeader, KpiRow } from "@smw/ui/shell/PageHeader";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
 import { Button } from "@smw/ui/ui/button";
+import { NoAccess } from "@smw/ui/shell/NoAccess";
 import { StudentService } from "../service";
 import { createStudent } from "./actions";
 import { StudentModal } from "./student-modal";
@@ -26,7 +27,10 @@ const columns: Column[] = [
 export default async function StudentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const svc = new StudentService(ctx);
+  // A role with no student access gets a plain page, not the error page.
+  if (!svc.can("read") && !svc.can("self")) return <NoAccess title="Student records are kept by the office." hint="Ask your school admin if you need to see them." />;
   const canWrite = svc.can("write");
+  const canEdit = canWrite && !ctx.readOnly; // a read-only school or support session sees the list without the buttons that change it
   const query = listQueryFrom(await searchParams);
   if (!query.sort) Object.assign(query, { sort: "name", dir: "asc" });
 
@@ -50,7 +54,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
     <>
       <PageHeader eyebrow="People" title="Students"
         description={ctx.role === "student" ? "Your student record." : "Everyone enrolled, by class and section."}
-        actions={canWrite ? (<>
+        actions={canEdit ? (<>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/credentials">Login slips</Link></Button>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/import">Import CSV</Link></Button>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/promote">Promote</Link></Button>
@@ -75,7 +79,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
         </>
       ) : null}
 
-      {canWrite && j.notice ? (
+      {canEdit && j.notice ? (
         <Inset className="mb-3 flex flex-wrap items-center gap-3">
           <ToneBadge label="Next year" tone="info" />
           <p className="text-sm text-[var(--ds-on-surface-variant)]">{j.notice} <Link href={j.years.every((y) => y.isCurrent) ? "/app/academics/years" : "/app/academics/classes"} className="underline underline-offset-4">{j.years.every((y) => y.isCurrent) ? "Add next year" : "Set up classes and sections"}</Link></p>
@@ -99,7 +103,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
         empty={{
           title: canWrite ? "No students yet." : "No students to show.",
           description: canWrite ? "Admit the first student, or import a CSV of the whole school." : "Students you can see will appear here.",
-          action: canWrite ? admit : undefined,
+          action: canEdit ? admit : undefined,
         }}
       />
     </>

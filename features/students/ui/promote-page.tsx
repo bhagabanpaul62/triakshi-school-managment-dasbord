@@ -14,7 +14,7 @@ export const metadata = { title: "Promote students" };
 
 export default async function PromotePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
-  if (!new StudentService(ctx).can("write")) redirect("/app/students");
+  if (!new StudentService(ctx).can("write") || ctx.readOnly) redirect("/app/students");
   const svc = new PromotionService(ctx);
   const raw = (await searchParams).from;
   const from = Array.isArray(raw) ? raw[0] : raw;

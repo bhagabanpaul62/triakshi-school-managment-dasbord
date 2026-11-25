@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { NotFoundError } from "@smw/feature-kit";
 import { allows } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
+import { NoAccess } from "@smw/ui/shell/NoAccess";
 import Link from "next/link";
 import { Panel } from "@smw/ui/kit/Panel";
 import { StatCard } from "@smw/ui/kit/StatCard";
@@ -34,6 +35,9 @@ import { RecordTabs } from "./record-tabs";
 
 // shortcut: mirrors the read roles in features/library/feature.ts (importing it would make the packages circular); custom roles go by their library:read grant.
 const libraryRead = (ctx: Parameters<typeof allows>[0]) => allows(ctx, { key: "library", permissions: { read: ["admin", "teacher"] } }, "read");
+// The same for the pages the "Elsewhere" links open (attendance and exams read roles), so nobody is shown a link that ends in a refusal.
+const attendanceRead = (ctx: Parameters<typeof allows>[0]) => allows(ctx, { key: "attendance", permissions: { read: ["admin", "teacher", "accountant"] } }, "read");
+const examsRead = (ctx: Parameters<typeof allows>[0]) => allows(ctx, { key: "exams", permissions: { read: ["admin", "teacher"] } }, "read");
 
 export const metadata = { title: "Student" };
 
@@ -57,10 +61,14 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
   const tab: Tab = TABS.find((t) => t === rawTab) ?? "overview";
 
   const students = new StudentService(ctx);
+  // A role with no student access gets a plain page, not the error page.
+  if (!students.can("read") && !students.can("self")) return <NoAccess title="Student records are kept by the office." hint="Ask your school admin if you need to see them." />;
   const guardianSvc = new GuardianService(ctx);
   const ov = await students.overview(id).catch((e: unknown) => (e instanceof NotFoundError ? notFound() : Promise.reject(e)));
   const { student: s } = ov;
   const canWrite = students.can("write");
+  // A read-only school or support session sees the record without the buttons that change it; the banner says why.
+  const canEdit = canWrite && !ctx.readOnly;
 
   const [photoUrl, guardians, look, login, enquiry] = await Promise.all([
     new PhotoService(ctx).url(id), guardianSvc.forStudent(id), canWrite ? students.lookups() : null,
@@ -92,8 +100,8 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
   const has = (k: string) => ctx.features.has(k);
   const related = [
     has("fees") && !slots?.fees ? { label: "Fees", hint: "Dues and receipts", href: `/app/fees/students/${id}` } : null,
-    has("attendance") ? { label: "Attendance", hint: "Present and absent days", href: "/app/attendance" } : null,
-    has("exams") ? { label: "Results", hint: "Marks and report cards", href: "/app/results" } : null,
+    attendanceRead(ctx) ? { label: "Attendance", hint: "Present and absent days", href: "/app/attendance" } : null,
+    examsRead(ctx) ? { label: "Results", hint: "Marks and report cards", href: "/app/results" } : null,
     libraryRead(ctx) ? { label: "Library", hint: "Books borrowed and fines", href: `/app/library/members/student/${id}` } : null,
   ].filter((x): x is { label: string; hint: string; href: string } => !!x);
 
@@ -105,7 +113,7 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
         title={s.name}
         chips={<><ToneBadge label={cap(s.status)} tone={STATUS_TONE[s.status]} />{ov.classSection ? <ToneBadge label={`Class ${ov.classSection}`} /> : null}{s.rteQuota ? <ToneBadge label="RTE quota" tone="info" /> : null}{emailStopped ? <EmailNotWorking fixHref="?tab=guardians" /> : null}</>}
         meta={[s.admissionNo, s.rollNo ? `Roll ${s.rollNo}` : null, ov.age != null ? `${ov.age} years` : null, ov.joining ? `Joins ${ov.joining.on ? shortDate(ov.joining.on) : "on a day to be set"}${ov.joining.yearName ? ` in ${ov.joining.yearName}` : ""}` : null, enquiry ? <Link key="enquiry" href={`/app/enquiries/${enquiry.id}`} className="underline underline-offset-4">Came from enquiry {enquiry.ref ?? ""}</Link> : null]}
-        actions={canWrite ? (<>
+        actions={canEdit ? (<>
           <StudentModal title="Edit student" icon="users" fields={studentFields(sectionOptions, "edit", undefined, joining ? plannedOptions : undefined)} values={{ ...s }} hidden={{ id: s.id }}
             action={updateStudent} trigger={{ label: "Edit", variant: "secondary" }} />
           {joining && joinInfo && open && choices ? (<>
@@ -244,14 +252,14 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
 
         {tab === "guardians" ? (
           <Panel title="Guardians"
-            action={canWrite ? <FormModal title="Add guardian" icon="parent" fields={guardianFields} hidden={{ studentId: s.id }} action={addGuardian} submitLabel="Add"
+            action={canEdit ? <FormModal title="Add guardian" icon="parent" fields={guardianFields} hidden={{ studentId: s.id }} action={addGuardian} submitLabel="Add"
               summary="A contact record only. Families sign in with the student login" /> : null}>
             <RowList
               empty={{ title: "No guardian yet.", description: "Add a guardian so the office can reach the family." }}
               items={guardians.map((g): RowItem => ({
                 id: g.id, leading: <Avatar name={g.name} size={36} />, title: g.name, subtitle: [g.phone, g.email, g.occupation].filter(Boolean).join(" · "),
                 trailing: <><ToneBadge label={g.relation} />{g.isPrimary ? <ToneBadge label="Primary" tone="info" /> : null}</>,
-                actions: canWrite ? (<>
+                actions: canEdit ? (<>
                   {g.isPrimary ? null : <ActionButton variant="ghost" label="Make primary" action={setPrimaryGuardian} values={{ studentId: s.id, guardianId: g.id }} successMessage="Primary guardian changed" />}
                   <ActionButton variant="icon-delete" label={`Remove ${g.name}`} action={removeGuardian} values={{ studentId: s.id, guardianId: g.id }}
                     confirm={{ title: `Remove ${g.name}?`, body: "They are no longer listed for this student. If this is their only child here, the guardian record is removed.", confirmLabel: "Remove", danger: true }} />
@@ -260,8 +268,8 @@ export default async function StudentRecordPage({ params, searchParams, slots }:
           </Panel>
         ) : null}
 
-        {tab === "documents" ? <DocumentsPanel ctxId={id} svc={new DocumentService(ctx)} canWrite={canWrite} /> : null}
-        {tab === "consent" ? <ConsentPanel studentId={id} svc={new ConsentService(ctx)} canWrite={canWrite} guardians={guardians.map((g) => ({ value: g.id, label: g.name }))} /> : null}
+        {tab === "documents" ? <DocumentsPanel ctxId={id} svc={new DocumentService(ctx)} canWrite={canEdit} /> : null}
+        {tab === "consent" ? <ConsentPanel studentId={id} svc={new ConsentService(ctx)} canWrite={canEdit} guardians={guardians.map((g) => ({ value: g.id, label: g.name }))} /> : null}
       </div>
     </>
   );
