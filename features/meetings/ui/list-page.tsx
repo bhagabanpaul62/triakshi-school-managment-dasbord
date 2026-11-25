@@ -42,7 +42,8 @@ function nextStep(m: MeetingRow, manage: boolean): { label: string; href: string
 async function MeetingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   if (ctx.role === "parent") notFound();
-  return ctx.role === "student" ? <FamilyList ctx={ctx} /> : <StaffList ctx={ctx} searchParams={await searchParams} />;
+  // Called, not rendered as elements: a refusal thrown inside must reach refusalOr, which only sees this function's own run.
+  return ctx.role === "student" ? FamilyList({ ctx }) : StaffList({ ctx, searchParams: await searchParams });
 }
 
 async function StaffList({ ctx, searchParams }: { ctx: Ctx; searchParams: Record<string, string | string[] | undefined> }) {

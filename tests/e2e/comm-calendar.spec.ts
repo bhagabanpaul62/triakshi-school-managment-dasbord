@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { expect, request, test, type Page } from "@playwright/test";
 import { crawl } from "./crawl-lib";
-import { at, dialog, job, mails, main, People, sql, SLUG } from "./comm-lib";
+import { at, dialog, job, mails, main, newMailDay, People, schoolAwake, sql, SLUG } from "./comm-lib";
 import { login, reloadIfSchoolNotFound, SCHOOL, STUDENT_PASSWORD } from "./helpers";
 
 // J9 to J13 of docs/COMMUNICATION-PRD.md 13.1, walked as people do: click what is on screen, family on a 375 px phone.
@@ -87,8 +87,9 @@ const toasts = (page: Page) => page.evaluate(() => (window as unknown as { __toa
 let crowd: People;
 const asFamily = (n: "family" | "family2" = "family") => crowd.as(n);
 
-test.beforeAll(async ({ browser }) => { crowd = new People(browser); });
-test.afterAll(async () => { await crowd?.close(); });
+let asleep: (() => void) | undefined;
+test.beforeAll(async ({ browser }) => { newMailDay(); asleep = schoolAwake(); crowd = new People(browser); });
+test.afterAll(async () => { asleep?.(); await crowd?.close(); });
 
 // ======================================================================================================
 // J9  Event with answers and a limit -> full -> waiting list -> time changed -> cancelled -> phone calendar
@@ -268,6 +269,12 @@ function unlinkSiblings() {
   sql(`delete from student_guardians where student_id = ${adm("GR0002")} and guardian_id = '${guardian}'`);
 }
 
+/** Let each page take its own focus-time refresh (the bell check) first, so a tap is not met by a page that is just then redrawn under it. */
+async function settled(...pages: Page[]) {
+  for (const p of pages) await p.evaluate(() => { window.dispatchEvent(new Event("focus")); document.dispatchEvent(new Event("visibilitychange")); });
+  await pages[0]!.waitForTimeout(2000);
+}
+
 test.describe("J10 parent-teacher meeting", () => {
   test.describe.configure({ mode: "serial" });
   test.beforeAll(() => { journey = "J10"; });
@@ -333,6 +340,7 @@ test.describe("J10 parent-teacher meeting", () => {
     const one = await openMine("family"), two = await openMine("family2");
     await fits(one, "family booking page");
     await watchToasts(one); await watchToasts(two);
+    await settled(one, two);
     await Promise.all([slot(one, "Meera Iyer", "10:00 am").click(), slot(two, "Meera Iyer", "10:00 am").click()]);
     await one.waitForTimeout(1500); await two.waitForTimeout(1500);
     const said = [await toasts(one), await toasts(two)];
@@ -394,6 +402,7 @@ test.describe("J10 parent-teacher meeting", () => {
     linkSiblings();
     const one = await openMine("family"), two = await openMine("family2");
     await watchToasts(one); await watchToasts(two);
+    await settled(one, two);
     await Promise.all([slot(one, "Meera Iyer", "10:10 am").click(), slot(two, "Anjali Gupta", "10:10 am").click()]);
     await one.waitForTimeout(1500); await two.waitForTimeout(1500);
     const said = [await toasts(one), await toasts(two)];
@@ -410,6 +419,10 @@ test.describe("J10 parent-teacher meeting", () => {
     await slot(lost, "Meera Iyer", "10:20 am").click();
     await expect(lost.getByText("Booked", { exact: true })).toBeVisible();
     await fits(lost, "family after clash");
+
+    // The "book a time" row closes when the family holds every time the meeting lets it have (here both teachers), not after the first.
+    await slot(lost, "Anjali Gupta", "10:00 am").click();
+    await expect(lost.getByText("2 booked, up to 3")).toBeVisible();
 
     // Having booked, the family is no longer asked to book: "Needs action" and the page agree.
     await lost.getByRole("button", { name: /^notifications/i }).click();
@@ -708,6 +721,8 @@ test.describe("J12 bell and counts", () => {
   test.afterAll(async () => { await fam?.context().close(); });
 
   test("before anything: the numbers already agree", async () => {
+    // The worker's first minute settles what the clock has already ended (a seeded notice whose last date has passed closes its action row); count after that.
+    job("comms.publish-due");
     await fam.goto(at(""));
     base = await agree(fam, "start");
     await listAgrees(fam, "start", base);

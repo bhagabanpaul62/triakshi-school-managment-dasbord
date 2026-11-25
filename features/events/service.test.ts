@@ -53,6 +53,9 @@ describe("who may write", () => {
 
   it("the website flag is for the office and for everyone only", async () => {
     await expect(teacher().create(make({ audience: OWN(), isPublic: "true" }))).rejects.toMatchObject({ fieldErrors: { isPublic: expect.any(String) } });
+    const due = { type: "fee_overdue" as const, days: 0 };
+    await expect(admin().create(make({ audience: { include: [due], exclude: [] } }))).rejects.toMatchObject({ fieldErrors: { audience: expect.any(String) } });
+    await expect(admin().create(make({ audience: { include: [{ type: "families" }], exclude: [due] } }))).rejects.toMatchObject({ fieldErrors: { audience: expect.any(String) } });
     await expect(admin().create(make({ audience: FAMILIES, isPublic: "true" }))).rejects.toMatchObject({ fieldErrors: { isPublic: expect.any(String) } });
     await expect(admin().create(make({ audience: EVERYONE, isPublic: "true" }))).resolves.toMatchObject({ isPublic: true });
   });

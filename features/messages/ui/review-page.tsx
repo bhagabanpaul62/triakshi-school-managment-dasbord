@@ -35,7 +35,7 @@ async function ReviewPage({ params }: { params: Promise<{ threadId: string }> })
   const told = await svc.told(threadId);
   return (
     <>
-      <PageHeader eyebrow="Safeguarding review" title={data.thread.subject} description={`${data.members.map((m) => m.name).join(", ")}${data.thread.studentName ? `. About ${data.thread.studentName}` : ""}. You are reading as a reviewer: both sides were told, and you cannot write here.`}
+      <PageHeader eyebrow="Safeguarding review" title={data.thread.subject} description={`${data.members.map((m) => m.name).join(", ")}${data.thread.studentName ? `. About ${data.thread.studentName}` : ""}. You are reading as a reviewer and you cannot write here.`}
         actions={<Link href="/app/safeguarding" className={PILL_BTN}>Back to concerns</Link>} />
       <p className="mb-3 text-sm text-[var(--ds-on-surface-muted)]"><span className="font-medium text-[var(--ds-on-surface)]">What actually happened: </span>{told ? REVIEWED_LINE : "Not told yet. An open concern kept the review quiet."}</p>
       <Panel>

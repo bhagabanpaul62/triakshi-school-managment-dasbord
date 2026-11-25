@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { CONSOLE, consoleLogin, SCHOOL } from "./helpers";
-import { at, dialog, job, main, mails, People, says, SLUG, sql } from "./comm-lib";
+import { at, dialog, job, main, mails, newMailDay, People, schoolAwake, says, SLUG, sql } from "./comm-lib";
 
 /**
  * Communication journeys J5, J6, J7, J8, J15 (PRD 13.1): talk, concerns, requests, complaints, support session.
@@ -16,8 +16,9 @@ test.use({ trace: "off" });
 const watch = (page: Page, who: string) => { page.on("console", (m) => { if (process.env.DEBUGTAB) console.log(`${who} ${m.type()}: ${m.text().slice(0, 160)}`); }); page.on("crash", () => console.log(`CRASH: ${who} tab`)); page.on("pageerror", (e) => console.log(`PAGEERROR ${who}: ${String(e).slice(0, 200)}`)); return page; };
 const STAMP = Date.now().toString().slice(-6);
 let people: People;
-test.beforeAll(({ browser }) => { people = new People(browser, ["family", "family2"]); });
-test.afterAll(async () => { await people.close(); });
+let asleep: (() => void) | undefined;
+test.beforeAll(({ browser }) => { newMailDay(); asleep = schoolAwake(); people = new People(browser, ["family", "family2"]); });
+test.afterAll(async () => { asleep?.(); await people.close(); });
 
 // ---------- helpers ----------
 const SCHOOL_ID = () => sql(`select id from schools where slug = '${SLUG}'`);
@@ -124,7 +125,7 @@ test("J5 family writes at night: told when it is delivered, teacher away, answer
     await expect(fam.getByRole("heading", { name: subject, level: 2 })).toBeVisible({ timeout: 20_000 });
     await expect(fam.getByText(body, { exact: true })).toBeVisible();
     await fam.screenshot({ path: `${process.env.SHOTS ?? "/tmp"}/j5-thread.png` });
-    await says(fam, new RegExp(`Will be delivered at ${clock12(toH, toM)}`, "i"));
+    await says(fam, new RegExp(`Will be delivered (today |tomorrow |\\d+ [A-Z][a-z]{2} )${clock12(toH, toM)}`, "i"));
     await expect.soft(fam.getByText(/They can read it in the app now/i).first(), "family is told the teacher can already read it in the app").toBeVisible();
     await expect.soft(fam.getByText(/This message is not delivered|not delivered/i)).toHaveCount(0);
     await fits(fam, "family thread at night");
@@ -145,7 +146,7 @@ test("J5 family writes at night: told when it is delivered, teacher away, answer
     // In quiet hours the family must not yet see "Seen".
     await fam.waitForTimeout(12_000); // one refresh of the family's open conversation
     await expect(fam.getByText(/^Seen\b/)).toHaveCount(0);
-    await expect.soft(fam.getByText(/Delivered/).first(), "the family sees a state for the message while the teacher has read it at night").toBeVisible();
+    await expect.soft(fam.getByText(/Waiting until (today|tomorrow|\w{3} \d+ \w{3}) \d{1,2}:\d{2}\s?[ap]m/).first(), "the family sees that the message waits for the morning while the teacher has read it at night").toBeVisible();
 
     // The teacher goes away: More, My hours, a date and a note. The family reads it under the box.
     await via(teacher, /^Messages/);
@@ -183,8 +184,8 @@ test("J5 family writes at night: told when it is delivered, teacher away, answer
     expect((await mails("teacher@greenvalley.test")).filter((m) => m.Subject.includes(STAMP) || m.Subject.includes(body)), "no private text in any email subject").toHaveLength(0);
     await via(fam, /^Messages/);
     await openThread(fam, subject);
-    await expect(fam.getByText(/Seen\s+\d{1,2}:\d{2}\s?[ap]m/i).first(), "after the night ends the family sees Seen with a time").toBeVisible();
-    await expect(fam.getByText(/Will be delivered at/)).toHaveCount(0);
+    await expect(fam.getByText(/Seen (today|tomorrow|yesterday|\w{3} \d+ \w{3}) \d{1,2}:\d{2}\s?[ap]m/i).first(), "after the night ends the family sees Seen with the day and time").toBeVisible();
+    await expect(fam.getByText(/Will be delivered/)).toHaveCount(0);
     await fits(fam, "family thread in the morning");
   } finally { restore(); }
 });
@@ -258,14 +259,16 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
     expect(await teacher.getByRole("log").innerText(), "the teacher reads one family's conversation at a time").not.toContain(reply1);
 
     // ---- GR0002 reports a concern about the teacher: What happened, Tell us more, who it is about ----
-    await fam2.getByRole("button", { name: "Report a concern" }).click();
+    // on a phone the conversation's actions are in its More menu
+    await fam2.getByRole("button", { name: "More" }).click();
+    await fam2.getByRole("menuitem", { name: "Report a concern" }).click();
     let d = dialog(fam2);
     await expect(d.getByText(/The people it is about are not told/)).toBeVisible();
     await fits(fam2, "report a concern on a phone");
     await d.getByRole("button", { name: "Send report" }).click();
     await expect.soft(d.getByText("Choose what happened"), "an empty report says what is missing").toBeVisible();
-    // Naming the teacher is only offered on one message, not on the whole conversation: the family uses the Report link under her message.
-    expect.soft(await d.getByLabel(/someone else in this conversation/).count(), "reporting the whole 1:1 conversation gives no way to name the teacher it is about").toBeGreaterThan(0);
+    // On the whole conversation the only other person is already ticked as who it is about.
+    await expect.soft(d.getByRole("checkbox", { name: "Meera Iyer" }), "reporting the whole 1:1 conversation names the teacher it is about").toBeChecked();
     await d.getByRole("button", { name: "Cancel" }).click();
     await fam2.getByRole("button", { name: "Report", exact: true }).first().click();
     d = dialog(fam2);
@@ -273,7 +276,7 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
     await fits(fam2, "report one message on a phone");
     await d.getByLabel("What happened").selectOption({ label: "Pressure, threat or money" });
     await d.getByLabel("Tell us more").fill(`She asked us to pay for private lessons ${STAMP}.`);
-    await d.getByLabel(/someone else in this conversation/).selectOption({ label: "Meera Iyer" });
+    // on one message the writer of that message is who it is about: nothing to pick
     await d.getByRole("button", { name: "Send report" }).click();
     await expect(d.getByText(/the school's safeguarding lead has been told/i)).toBeVisible();
     await expect.soft(d.getByRole("button", { name: "Close", exact: true }).first(), "after reporting the family can close the box").toBeVisible();
@@ -283,7 +286,7 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
     // ---- "You can follow it under Messages, My concerns": there must be a way to get there ----
     await via(fam2, /^Messages/);
     const concernsLink = main(fam2).getByRole("link", { name: /My concerns/ });
-    expect.soft(await concernsLink.count(), "the family was told to look under Messages, My concerns: that link must be on the Messages screen").toBeGreaterThan(0);
+    await expect.soft(concernsLink, "the family was told to look under Messages, My concerns: that link must be on the Messages screen").not.toHaveCount(0);
 
     // ---- the named teacher is told nothing: bell, notifications, e-mail, sidebar ----
     await teacher.getByRole("button", { name: /^Notifications/ }).click();
@@ -321,12 +324,13 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
     await admin.getByRole("link", { name: "Review log" }).click();
     await expect(main(admin).locator("tr", { hasText: subject }).filter({ hasText: "A family reported pressure" }).first(), "the review log shows who opened it and why").toContainText(/Opened/);
     await expect(main(admin).locator("tr", { hasText: subject }).filter({ hasText: "Copy for the file of the concern" }).first(), "the PDF copy is logged with its reason").toContainText(/Exported/);
-    // The screens say "both sides were told". If they say so, the family must really have been told.
-    if (/both sides (were|are) told/i.test(reviewText)) {
-      await via(fam2, /^Messages/);
-      await openThread(fam2, subject);
-      await expect.soft(fam2.getByText(/The school reviewed this conversation/), "the review screen says both sides were told: the family must see it").toBeVisible(LIVE);
-    }
+    // The review screen says what actually happened. The family's thread must agree: the line is there when it says both sides were told,
+    // and absent while an open concern kept the review quiet (so the line can never hint at the report).
+    const toldOnScreen = /The school reviewed this conversation to check it is safe\./.test(reviewText);
+    await via(fam2, /^Messages/);
+    await openThread(fam2, subject);
+    if (toldOnScreen) await expect(fam2.getByText(/The school reviewed this conversation/), "the review screen says both sides were told: the family must see it").toBeVisible(LIVE);
+    else { await fam2.waitForTimeout(12_000); await expect(fam2.getByText(/The school reviewed this conversation to check/), "the review screen says nobody was told: the family must not see a line").toHaveCount(0); }
 
     // ---- the lead limits the teacher: she is told and can still answer, but cannot start new ones ----
     await admin.getByRole("link", { name: "Limits" }).click();
@@ -520,6 +524,10 @@ test("J7 certificate request: claim, ask, answer, resolve, not solved, reopen, c
   await fits(fam, "family request closed");
   await via(admin, /^Requests/);
   await main(admin).getByRole("link", { name: /^All/ }).click();
+  await expect(main(admin).getByRole("link", { name: /^All/ })).toHaveAttribute("aria-current", /.+/);
+  // "All" is paged and grows with every run: the office finds it by searching, as a person would.
+  await main(admin).getByPlaceholder("Search number, title or child").fill(subject);
+  await main(admin).getByPlaceholder("Search number, title or child").press("Enter");
   await expect(main(admin).locator("tr", { hasText: subject }).first(), "the office queue says Closed too").toContainText("Closed");
   await via(fam, /^Requests/);
   await expect(main(fam).locator("li", { hasText: subject }), "the family list says Closed too").toContainText("Closed");
@@ -548,7 +556,7 @@ test("J7 certificate request: claim, ask, answer, resolve, not solved, reopen, c
   await fits(fam2, "family request after it was escalated");
   // The office has it, says it reached the Office level, and is told in the bell list.
   await openRequest(admin, "Mine", lateSubject).catch(async () => { await main(admin).getByRole("link", { name: /^Unassigned|^All/ }).first().click(); await main(admin).getByText(lateSubject).first().click(); });
-  await expect.soft(main(admin).getByText(/Office \(escalated\)/), "Details > Level names the level it reached (Office), not a number").toBeVisible();
+  await expect.soft(main(admin).getByText(/Office \(escalated (once|twice|\d+ times)\)/), "Details > Level names the level it reached (Office) and how often, not a number").toBeVisible();
   await expect(main(admin).getByText(/Sent to Office/).first(), "the history says it was sent to the Office").toBeVisible();
   // The teacher who was late no longer has it in her queue: it moved up, and the screen says so rather than leaving a ghost.
   await via(teacher, /^Requests/);
@@ -566,8 +574,7 @@ test("J7 certificate request: claim, ask, answer, resolve, not solved, reopen, c
     await main(fam2).getByLabel("Short title").fill(`One more ${STAMP}`);
     await main(fam2).getByLabel("Tell us what you need").fill(`A question after the limit ${STAMP}`);
     await main(fam2).getByRole("button", { name: "Send to the school" }).click();
-    await expect(main(fam2).getByText(/You have started many conversations today\. Try again/), "at the daily limit the family reads why it was not sent").toBeVisible();
-    await expect.soft(main(fam2).getByText(/Try again (at|on|tomorrow)[^.]*(tomorrow|\d{1,2} \w{3})/i), "the limit says which day it lifts, not only a clock time").toBeVisible();
+    await expect(main(fam2).getByText(/You have started many conversations today\. You can start a new one (today|tomorrow|\w{3} \d+ \w{3}) at \d{1,2}:\d{2}\s?[ap]m\./), "at the daily limit the family reads why it was not sent and on which day it lifts").toBeVisible();
     await fits(fam2, "ask the school at the daily limit");
   } finally { sql(`delete from message_threads where school_id = '${school}' and subject like 'Quota filler ${STAMP}%'`); }
 });
@@ -582,7 +589,8 @@ test("J8 complaint about a teacher: the teacher sees nothing, the principal hand
   const sidebarCount = async (p: Page, name: string) => Number((await p.getByRole("navigation", { name: "Main" }).getByRole("link", { name: new RegExp(`^${name}`) }).innerText()).match(/\d+/)?.[0] ?? 0);
   const requestsBefore = await sidebarCount(teacher, "Requests"), messagesBefore = await sidebarCount(teacher, "Messages");
   freeQuota();
-  const noticesFor = () => sql(`select count(*) from notifications where user_id = '${teacherId}' and (title || ' ' || coalesce(body, '') || ' ' || coalesce(subject_id, '')) ilike '%${STAMP}%'`);
+  // Only this complaint: the other journeys of this file notify the same teacher with the same stamp in their own words.
+  const noticesFor = () => sql(`select count(*) from notifications where user_id = '${teacherId}' and (title || ' ' || coalesce(body, '') || ' ' || coalesce(subject_id, '')) ilike any (array['%${subject}%', '%${details}%', '%${requestId}%'])`);
 
   // ---- the family: Ask the school, Complaint, picks the person it is about ----
   const send = await ask(fam, "Complaint", subject, details, async (p) => {
@@ -744,7 +752,10 @@ test("J15 support session: messages, requests, safeguarding, responses, notifica
   // A notice's responses
   await via(sup, /^Notices/);
   await quiet("support: Notices list");
-  await main(sup).getByText(/School closed tomorrow/).first().click();
+  // The list grows with every run and shows the newest first: the support person searches for the notice, as anyone would.
+  await main(sup).getByPlaceholder("Search title, text or number").fill("School closed tomorrow");
+  await main(sup).getByPlaceholder("Search title, text or number").press("Enter");
+  await main(sup).getByRole("link", { name: /School closed tomorrow/ }).first().click();
   await expect(main(sup).getByRole("heading", { name: /School closed tomorrow/ })).toBeVisible();
   const responses = main(sup).getByRole("link", { name: /^Who has answered|^Responses/ });
   if (await responses.count()) await responses.first().click(); else await sup.goto(`${sup.url().split("?")[0]}?tab=responses`); // no link to press: the address a bookmark would hold

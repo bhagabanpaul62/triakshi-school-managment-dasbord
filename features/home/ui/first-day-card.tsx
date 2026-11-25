@@ -24,6 +24,7 @@ export function FirstDayCard({ steps }: { steps: Pick<CommStep, "key" | "label" 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <p className="min-w-0 flex-1 basis-56 text-sm text-[var(--ds-on-surface-variant)]"><span className="font-medium text-[var(--ds-on-surface)]">{done} of {steps.length} done.</span> {next.text}</p>
         <Button asChild className="rounded-full"><Link href={next.href}>{next.label}</Link></Button>
+        <Link href="/app/setup/done" className="min-h-10 content-center text-sm text-[var(--ds-on-surface-variant)] underline-offset-4 hover:underline">See all first steps</Link>
       </div>
     </Panel>
   );

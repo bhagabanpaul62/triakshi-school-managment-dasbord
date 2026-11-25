@@ -262,6 +262,16 @@ describe("circular numbers (11)", () => {
     await expect(new CircularService(A().teacher).register()).rejects.toBeInstanceOf(ForbiddenError);
   });
 
+  it("an approver may open any circular the register lists; a writer without approval may not open another's", async () => {
+    const { id } = await publishNow(A().admin, { type: "circular", title: "Read by approvers", body: "x", audience: section(fx.ids.s5a!) });
+    const grants = new Set(["announcements:read", "announcements:draft", "announcements:publish", "announcements:approve"]);
+    const approver = new NoticeService(fx.as(fx.school.users.teacher, "staff", { grants }));
+    expect((await approver.get(id)).notice.title).toBe("Read by approvers");
+    await expect(approver.withdraw(id, "Not mine to withdraw")).rejects.toThrow();
+    const plain = new NoticeService(fx.as(fx.school.users.teacher, "staff", { grants: new Set(["announcements:read", "announcements:draft", "announcements:publish"]) }));
+    await expect(plain.get(id)).rejects.toMatchObject({ name: expect.stringMatching(/NotFound/) });
+  });
+
   it("7: an undone circular never used a number, so the next one takes the next number with no gap", async () => {
     const admin = new NoticeService(A().admin);
     const { id } = await admin.saveDraft({ type: "circular", title: "Undo circular", body: "x", audience: section(fx.ids.s5a!) });

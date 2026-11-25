@@ -19,7 +19,7 @@ import { toIstInput } from "@smw/feature-kit/words";
 import type { Tone } from "@smw/ui/tone";
 import { RESPONSE_WORDS, stop } from "../content";
 import { changedSettings } from "../what-changed";
-import { NoticeService, type NoticeView } from "../service";
+import { FeedService, NoticeService, type NoticeView } from "../service";
 import { askChanges, deleteDraft, duplicateNotice, recallNotice, rejectNotice, saveAsTemplate, sendScheduledNow, unscheduleNotice, withdrawNotice } from "./actions";
 import { NoticeCard } from "./card";
 import { ApproveDialog } from "./approve-dialog";
@@ -102,7 +102,9 @@ export async function StaffRecord({ ctx, id, sp, related = [] }: { ctx: Ctx; id:
   let v: NoticeView;
   try { v = await svc.get(id); } catch (e) { if (e instanceof NotFoundError) notFound(); throw e; }
   const n = v.notice, c = v.can;
-  if (SENT.includes(n.state) && !c.report) {
+  // An approver may read any circular without being one of its recipients: then there is no recipient view, and the staff page below shows it.
+  const recipient = SENT.includes(n.state) && !c.report && (await new FeedService(ctx).open(id).then(() => true, (e) => { if (e instanceof NotFoundError && svc.can("approve")) return false; throw e; }));
+  if (recipient) {
     // A staff reader of a sent notice sees what its recipients see, and the earlier wordings under it (never a family: this page is staff only).
     return <><FamilyRecord ctx={ctx} id={id} lang={one(sp.lang)} related={related} />{v.versions.length ? <div className="max-w-3xl pt-4"><Panel title="Earlier versions"><Changes v={v} /></Panel></div> : null}</>;
   }

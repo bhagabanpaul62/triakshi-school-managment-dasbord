@@ -171,7 +171,7 @@ export function CommSettingsForm({ initial }: { initial: CommSettings }) {
       </Panel>
 
       <Panel title="Keeping messages">
-        <Row title="Keep old conversations and notices for" hint="Reported conversations are never removed.">
+        <Row title="Keep conversations for this long after a student leaves" hint="Reported conversations are never removed.">
           <SegmentedControl size="sm" label="Years to keep" options={[1, 2, 3, 5, 7].map((y) => ({ value: String(y), label: `${plural(y, "year")}` }))} value={String(s.retentionYears)} onChange={(v) => set({ retentionYears: Number(v) })} />
         </Row>
       </Panel>

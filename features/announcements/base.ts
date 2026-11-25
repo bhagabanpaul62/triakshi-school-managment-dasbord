@@ -1,4 +1,4 @@
-import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { Tx } from "@smw/db";
 import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
@@ -39,7 +39,9 @@ export abstract class NoticeBase extends SchoolService<Perm> {
 
   protected async find(tx: Tx, id: string, lock = false): Promise<Notice> {
     if (!z.uuid().safeParse(id).success) throw new NotFoundError("Notice");
-    const q = tx.select().from(announcements).where(and(eq(announcements.id, id), this.visible())).limit(1);
+    // An approver may open (not change) any circular: the register lists them all.
+    const readable = !lock && this.can("approve") && !this.isManager ? or(this.visible(), isNotNull(announcements.number)) : this.visible();
+    const q = tx.select().from(announcements).where(and(eq(announcements.id, id), readable)).limit(1);
     const [n] = await (lock ? q.for("update") : q);
     if (!n) throw new NotFoundError("Notice");
     return n;

@@ -149,6 +149,9 @@ export class EventService extends CrudService<typeof events, Perm> {
 
   /** Who may be invited, and whether it may go on the website. */
   private async checkAudience(tx: Tx, audience: Audience, isPublic: boolean, was?: SchoolEvent) {
+    // Whoever sees the event sees who it is for, so a dues list is never its audience.
+    const { include, exclude } = await expandGroups(tx, audience);
+    if ([...include, ...exclude].some((r) => r.type === "fee_overdue")) throw new ValidationError({ audience: "An event cannot be for families with dues. Choose classes, sections or students." });
     if (isPublic && !isEveryone(audience)) throw new ValidationError({ isPublic: "Only an event for everyone can go on the website" });
     if (isPublic && !this.can("manage") && !was?.isPublic) throw new ValidationError({ isPublic: "Only the office can put an event on the website" });
     if ((await AudiencePolicy.reach(tx, this.ctx, audience, { feature: eventsFeature, permission: "write" })) === "approval") {

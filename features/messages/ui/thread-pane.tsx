@@ -93,10 +93,11 @@ export function ThreadPane(p: PaneProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Link href={p.backHref} className={cn(PILL_BTN, "lg:hidden")}>Back</Link>
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-medium text-[var(--ds-on-surface)]">{p.subject}</h2>
+        {/* The title wraps (two lines at most) and keeps room beside the toolbar, which drops to its own line when the pane is narrow. */}
+        <div className="min-w-0 flex-1 lg:min-w-[14rem]">
+          <h2 className="line-clamp-2 break-words text-base font-medium text-[var(--ds-on-surface)]">{p.subject}</h2>
           <p className="truncate text-xs text-[var(--ds-on-surface-muted)]" title={others.map((x) => x.name).join(", ")}>
             {p.studentName ? `About ${p.studentName} · ` : ""}{others.map((x) => `${x.name} (${ROLE_WORDS[x.role] ?? x.role})`).join(", ") || "Only you"}
           </p>

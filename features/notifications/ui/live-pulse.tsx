@@ -41,10 +41,9 @@ export function LivePulse({ bell, messages, requests, notices, stamp, fast = fal
   // Page changes rewrite the title: put the count back.
   useEffect(() => {
     setTitle(bell);
-    const el = document.querySelector("title");
-    if (!el) return;
+    // The head, not the <title> element: Next may replace the element itself, which would leave an observer on it watching a detached node.
     const mo = new MutationObserver(() => setTitle());
-    mo.observe(el, { childList: true, characterData: true, subtree: true });
+    mo.observe(document.head, { childList: true, characterData: true, subtree: true });
     return () => mo.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the count is kept true by the effect below
   }, []);

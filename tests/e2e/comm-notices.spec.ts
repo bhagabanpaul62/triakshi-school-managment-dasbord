@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { at, dialog, job, mails, main, People, says, sql, SLUG } from "./comm-lib";
+import { at, dialog, job, mails, main, newMailDay, People, schoolAwake, says, sql, SLUG } from "./comm-lib";
 import { login, loginStudent, SCHOOL } from "./helpers";
 
 // Notice journeys J1, J2, J3, J4, J14 (PRD 13.1), walked the way a person does: click what is on screen.
@@ -53,8 +53,9 @@ const noSideways = async (page: Page, where: string) => {
 };
 
 let people: People;
-test.beforeAll(async ({ browser }) => { people = new People(browser); });
-test.afterAll(async () => { await people?.close(); });
+let asleep: (() => void) | undefined;
+test.beforeAll(async ({ browser }) => { newMailDay(); asleep = schoolAwake(); people = new People(browser); });
+test.afterAll(async () => { asleep?.(); await people?.close(); });
 
 // ---------------------------------------------------------------- J1
 test.describe("J1 clerk circular needs the principal", () => {
@@ -116,6 +117,7 @@ test.describe("J1 clerk circular needs the principal", () => {
     // UX gap (reported): after a send-back the approver is not shown what the author changed.
     await expect(principal.getByText(/corrected|Pay into the school account/i).first()).toBeVisible();
     await btn(principal, /^approve$/i).click();
+    await dialog(principal).getByRole("button", { name: /^approve and send$/i }).click();
     await expect(principal.getByText(/Goes out \d/).first()).toBeVisible({ timeout: 20_000 });
     await principal.goto(at("announcements?tab=scheduled"));
     await expect(principal.getByRole("link", { name: title2 })).toBeVisible();
@@ -252,9 +254,10 @@ test.describe("J2 principal publishes to everyone", () => {
     await expect(principal.getByText(/Withdrawn .*Dates will be shared again/).first()).toBeVisible({ timeout: 20_000 });
     await family.goto(at("announcements"));
     const gone = family.locator("main section[aria-label] ul li a", { hasText: /withdrawn by the school/i });
-    // UX: a withdrawn card names no title, so a family cannot tell which notice was taken back
+    // the card names the notice, struck through, so a family can tell which one was taken back
     expect(await gone.count(), "withdrawn notice still shows to the family as Withdrawn by the school").toBeGreaterThan(withdrawnBefore);
-    await expect(family.locator("main").getByText(title), "withdrawn title hidden from families").toHaveCount(0);
+    await expect(gone.filter({ hasText: title }).locator("span.line-through").first(), "withdrawn title is shown struck through").toBeVisible();
+    await expect(family.locator("main").getByText("2:45 from Monday"), "withdrawn words are not in the feed").toHaveCount(0);
     await gone.first().click();
     await family.waitForURL(/\/announcements\/[0-9a-f-]{20,}/);
     await expect(family.getByText(/withdrawn by the school/i).first()).toBeVisible();
@@ -415,12 +418,15 @@ test.describe("J4 emergency closure", () => {
     await expect(family.getByRole("alert").filter({ hasText: alert })).toBeVisible();
     await noSideways(family, "J4 home with banner");
     await family.getByRole("alert").getByRole("link", { name: new RegExp(alert) }).click();
-    await expect(family.getByRole("button", { name: /i am safe, received/i })).toBeVisible();
-    // a family in an emergency is asked for a name and a relation before the button works
-    await family.getByLabel("Your name").fill("Mohan Lal Sharma");
-    await family.getByLabel("You are the").selectOption({ index: 1 });
-    await btn(family, /i am safe, received/i).click();
-    await expect(family.getByText(/^Saved\./).first()).toBeVisible({ timeout: 20_000 });
+    // one tap, nothing to fill in first; the name is asked after only when the school has none for this child
+    await btn(family, /^i am safe$/i).click();
+    await expect(family.getByText(/^Safe, received\. Thank you\./).first()).toBeVisible({ timeout: 20_000 });
+    if (await family.getByRole("button", { name: /save my name/i }).isVisible()) {
+      await family.getByLabel("Your name").fill("Mohan Lal Sharma");
+      await family.getByLabel("You are the").selectOption({ index: 1 });
+      await btn(family, /save my name/i).click();
+    }
+    await expect(family.getByText(/Safe, received .* · .+, .+/).first(), "the answer names who gave it").toBeVisible({ timeout: 20_000 });
     await family.goto(at(""));
     await expect(family.getByRole("alert").filter({ hasText: alert }), "banner goes once opened").toHaveCount(0);
 

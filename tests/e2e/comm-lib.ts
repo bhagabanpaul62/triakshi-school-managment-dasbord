@@ -35,3 +35,16 @@ export async function mails(to: string): Promise<{ Subject: string; ID: string }
   const r = await fetch(`http://localhost:8025/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=50`);
   return (await r.json()).messages;
 }
+
+/** Today's mail budget back to zero, as a new day would: a full run sends about a hundred mails, so a second run on the same day would meet the daily limit. */
+export const newMailDay = () => sql(`update mail_usage set count = 0 where day::text = to_char(now() at time zone 'Asia/Kolkata', 'YYYY-MM-DD')`);
+
+/** School hours for the demo school: quiet hours far from now and no quiet Sunday, so mail goes out whatever the clock says when the tests run. Returns what puts the school's own setting back. */
+export function schoolAwake(): () => void {
+  const id = sql(`select id from schools where slug = '${SLUG}'`);
+  const was = sql(`select coalesce(jsonb_object_agg(k, settings -> k) filter (where settings ? k), '{}')::text from comm_settings, unnest(array['quietFrom', 'quietTo', 'quietSundays']) k where school_id = '${id}'`) || "{}";
+  const ist = (h: number) => new Date(Date.now() + 330 * 60_000 + h * 3_600_000).toISOString().slice(11, 16);
+  const now = JSON.stringify({ quietFrom: ist(10), quietTo: ist(12), quietSundays: false });
+  sql(`insert into comm_settings (id, school_id, settings) values (gen_random_uuid(), '${id}', '${now}') on conflict (school_id) do update set settings = comm_settings.settings || excluded.settings`);
+  return () => { sql(`update comm_settings set settings = (settings - array['quietFrom', 'quietTo', 'quietSundays']) || '${was}'::jsonb where school_id = '${id}'`); };
+}
