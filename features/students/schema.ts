@@ -1,9 +1,11 @@
 // Contract tables for students and guardians. Attendance, fees, exams, assignments, transport and library read these.
+import { sql } from "drizzle-orm";
 import { boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { schoolColumns, tenant, users } from "@smw/db";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 
-export const STUDENT_STATUSES = ["active", "alumni", "left"] as const;
+/** "joining": accepted, not started. May be billed and may pay; in no register, audience or plan count; login off until `joinsOn`. */
+export const STUDENT_STATUSES = ["joining", "active", "alumni", "left"] as const;
 export const GENDERS = ["male", "female", "other"] as const;
 
 export const students = pgTable("students", {
@@ -38,9 +40,18 @@ export const students = pgTable("students", {
   emergencyPhone: text("emergency_phone"),
   /** The student's own login (role student), login_id = admission number. */
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  /** The last day attended. */
   leftOn: date("left_on"),
+  leftReason: text("left_reason"),
+  /** Permanent Education Number (UDISE+). */
+  pen: text("pen"),
+  /** Only while joining: the first day, its year, and the section planned for it (sectionId stays empty until the day). */
+  joinsOn: date("joins_on"),
+  joinsYearId: uuid("joins_year_id").references(() => academicYears.id, { onDelete: "restrict" }),
+  joinsSectionId: uuid("joins_section_id").references(() => sections.id, { onDelete: "set null" }),
 }, (t) => [
   ...tenant(t, "students"),
+  index("students_joins").on(t.schoolId, t.joinsOn).where(sql`${t.status} = 'joining'`),
   uniqueIndex("students_admission_no").on(t.schoolId, t.admissionNo),
   index("students_section").on(t.schoolId, t.sectionId),
   index("students_status").on(t.schoolId, t.status),
