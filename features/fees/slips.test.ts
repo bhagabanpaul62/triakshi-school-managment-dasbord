@@ -83,7 +83,7 @@ describe("UPI slips", () => {
 describe("reminders", () => {
   let f: Fixture;
   const remind = () => new ReminderService(f.school.as.admin);
-  const sent = async () => (await withSchool(f.school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, f.school.users.student)))).filter((n) => n.kind === "fee_due" && /^Fee (reminder|overdue)/.test(n.title));
+  const sent = async () => (await withSchool(f.school.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, f.school.users.student)))).filter((n) => n.topic === "fees.due" && /^Fee (reminder|overdue)/.test(n.title));
   beforeAll(async () => {
     f = await makeSchool("remind", { plan: false });
     await publish(f, { name: "Class 5", classIds: [f.classId], lines: [{ headId: f.heads.tuition, dues: [due("A", 5, 100_000), due("B", -3, 50_000)] }] });

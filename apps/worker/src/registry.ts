@@ -11,7 +11,19 @@ export interface JobLike { id: string; data: unknown }
 /** Cron schedules for platform jobs. A schedule is only created when a handler for that name is registered. */
 export const SCHEDULES: Record<string, { cron: string; tz: string }> = {
   "billing.lifecycle": { cron: "30 1 * * *", tz: "Asia/Kolkata" }, // 01:30 IST daily
-  "notifications.email-digest": { cron: "0 8 * * *", tz: "Asia/Kolkata" }, // 08:00 IST daily
+  "notifications.digest": { cron: "0 8,18 * * *", tz: "Asia/Kolkata" }, // 08:00 and 18:00 IST; each person gets it at their own hour
+  "comms.deliver": { cron: "* * * * *", tz: "UTC" }, // every minute; push and email by priority, budget and quiet hours
+  "comms.publish-due": { cron: "* * * * *", tz: "UTC" }, // every minute; scheduled notices, and the end of the 30-second undo
+  "comms.response-reminders": { cron: "0 9,17 * * *", tz: "Asia/Kolkata" }, // 09:00 and 17:00 IST; only people who have not answered
+  "comms.late-joiners": { cron: "30 2 * * *", tz: "Asia/Kolkata" }, // 02:30 IST daily; new students get live notices without a push
+  "comms.expire": { cron: "10 0 * * *", tz: "Asia/Kolkata" }, // 00:10 IST daily; expiry and unpin
+  "messages.lapse": { cron: "40 2 * * *", tz: "Asia/Kolkata" }, // 02:40 IST daily; teacher changed or student left
+  "messages.retention": { cron: "50 3 * * *", tz: "Asia/Kolkata" }, // 03:50 IST daily; after the school's keeping time, held ones stay
+  "requests.clock": { cron: "5 8-18 * * *", tz: "Asia/Kolkata" }, // hourly in office hours; overdue, escalate, auto-close
+  "events.reminders": { cron: "*/5 * * * *", tz: "UTC" }, // every 5 minutes; each reminder once
+  "events.late-joiners": { cron: "35 2 * * *", tz: "Asia/Kolkata" }, // 02:35 IST daily; new students see the events of their class
+  "meetings.reminders": { cron: "*/15 * * * *", tz: "UTC" }, // every 15 minutes; day before, hour before, close and finish
+  "comms.cleanup": { cron: "30 3 * * *", tz: "Asia/Kolkata" }, // 03:30 IST daily; keeping rules, dead push devices
   "domains.verify-pending": { cron: "*/10 * * * *", tz: "UTC" }, // every 10 minutes
   "assignments.due-reminders": { cron: "*/15 * * * *", tz: "UTC" }, // every 15 minutes; each assignment is reminded once
   "assignments.publish-due": { cron: "*/5 * * * *", tz: "UTC" }, // every 5 minutes; scheduled drafts go live

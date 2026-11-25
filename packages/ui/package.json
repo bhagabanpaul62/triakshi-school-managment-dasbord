@@ -13,13 +13,17 @@
     "./finance/document-types": "./src/components/finance/document-types.ts",
     "./finance/logic": "./src/components/finance/logic.ts",
     "./finance/*": "./src/components/finance/*.tsx",
+    "./comm/states": "./src/components/comm/states.ts",
+    "./comm/*": "./src/components/comm/*.tsx",
     "./tone": "./src/lib/tone.ts",
+    "./markdown": "./src/lib/markdown.ts",
     "./format": "./src/lib/format.ts",
     "./shell/*": "./src/shell/*.tsx",
     "./styles/*": "./src/styles/*"
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",

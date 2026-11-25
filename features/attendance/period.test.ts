@@ -15,7 +15,7 @@ import { periodAttendance } from "./schema";
 import { StudentAttendanceService } from "./service";
 import { subjectCsv } from "./register-export";
 import { addDays, isSunday, rollupStatus, todayIST } from "./stats";
-import { sendDueAlerts, sendMails } from "./alerts";
+import { sendDueAlerts } from "./alerts";
 
 let a: TestSchool, b: TestSchool;
 let fx: Fixture;
@@ -227,7 +227,7 @@ describe("roll-up to daily", () => {
     const title = (n: string[]) => n.filter((t) => t.includes(when));
     const before = title(await notes(a, a.users.student)).length;
     await withSchool(a.id, (tx) => tx.delete(periodAttendance).where(eq(periodAttendance.date, when)));
-    const sendAfterWindow = async () => sendMails(await withSchool(a.id, (tx) => sendDueAlerts(tx, a.id, new Date(Date.now() + 31 * 60_000))));
+    const sendAfterWindow = async () => withSchool(a.id, (tx) => sendDueAlerts(tx, a.id, new Date(Date.now() + 31 * 60_000)));
     await svc.markPeriod({ date: when, ...ref(0), entries: entries([kid], "absent") });
     expect(await dailyOf(a.as.admin, fx.own, when, kid)).toBe("absent");
     await sendAfterWindow();

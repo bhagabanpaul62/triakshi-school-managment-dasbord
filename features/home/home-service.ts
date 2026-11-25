@@ -2,7 +2,8 @@ import { and, asc, count, eq, sql } from "drizzle-orm";
 import { AppError, FeatureOffError, ForbiddenError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { academicYears, classes, sections, terms } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
-import { attendanceHolidays, studentAttendance } from "@smw/feature-attendance/schema";
+import { closedClassIds, isClosed } from "@smw/feature-attendance/holidays";
+import { studentAttendance } from "@smw/feature-attendance/schema";
 import { attendancePercent } from "@smw/feature-attendance/stats";
 import { StudentService, type StudentCapacity } from "@smw/feature-students/service";
 import { StudentAttendanceService } from "@smw/feature-attendance/service";
@@ -16,7 +17,7 @@ import { EventService, type SchoolEvent } from "@smw/feature-events/service";
 import { EnquiryService } from "@smw/feature-website/service";
 import homeFeature from "./feature";
 import { staffLinks } from "./staff-links";
-import { clockIST, dayLabel, greeting, isSunday, markPeriods, monthStart, todayIST, type PeriodState } from "./rules";
+import { clockIST, dayLabel, greeting, markPeriods, monthStart, todayIST, type PeriodState } from "./rules";
 
 // ---------- shapes ----------
 
@@ -160,11 +161,11 @@ export class HomeService extends SchoolService<Perm> {
   protected sectionsToMark(classTeacherOnly: boolean): Promise<SectionsToMark> {
     const date = this.today;
     return this.read("view", async (tx) => {
-      if (isSunday(date)) return { dayOff: "Sunday", rows: [] };
-      const [holiday] = await tx.select({ name: attendanceHolidays.name }).from(attendanceHolidays).where(eq(attendanceHolidays.date, date)).limit(1);
-      if (holiday) return { dayOff: holiday.name, rows: [] };
+      const off = await isClosed(tx, date, { classId: null });
+      if (off) return { dayOff: off.name, rows: [] };
+      const shut = await closedClassIds(tx, date);
       const [secs, sizes, marked] = await Promise.all([
-        tx.select({ id: sections.id, cls: classes.name, name: sections.name }).from(sections)
+        tx.select({ id: sections.id, classId: sections.classId, cls: classes.name, name: sections.name }).from(sections)
           .innerJoin(classes, eq(classes.id, sections.classId))
           .innerJoin(academicYears, and(eq(academicYears.id, sections.yearId), eq(academicYears.isCurrent, true)))
           .where(classTeacherOnly ? eq(sections.classTeacherId, this.ctx.userId) : undefined).orderBy(asc(classes.grade), asc(sections.name)),
@@ -175,7 +176,7 @@ export class HomeService extends SchoolService<Perm> {
       const done = new Set(marked.filter((r) => Number(r.n) > 0).map((r) => r.id));
       return {
         dayOff: null,
-        rows: secs.map((s) => ({ id: s.id, label: `${s.cls}-${s.name}`, students: size.get(s.id) ?? 0, marked: done.has(s.id) })).filter((s) => s.students > 0),
+        rows: secs.filter((s) => !shut.has(s.classId)).map((s) => ({ id: s.id, label: `${s.cls}-${s.name}`, students: size.get(s.id) ?? 0, marked: done.has(s.id) })).filter((s) => s.students > 0),
       };
     });
   }

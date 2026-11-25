@@ -42,10 +42,9 @@ export function EventsBody({ rows }: { rows: SchoolEvent[] }) {
   return (
     <EntityList
       maxItems={5}
-      empty={{ title: "Nothing coming up.", description: "Events and holidays show here once they are on the calendar." }}
+      empty={{ title: "Nothing coming up.", description: "Events show here once they are on the calendar." }}
       items={rows.map((e) => ({
-        id: e.id, title: e.title, subtitle: e.location ?? undefined, meta: shortDate(e.startsAt), href: "/app/events",
-        badge: e.isHoliday ? <ToneBadge label="Holiday" tone="warning" /> : undefined,
+        id: e.id, title: e.title, subtitle: e.location ?? undefined, meta: shortDate(e.startsAt), href: `/app/events/${e.id}`,
       }))}
     />
   );

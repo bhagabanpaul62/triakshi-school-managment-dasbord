@@ -1,10 +1,45 @@
 import { z } from "zod";
-import { NOTIFICATION_KINDS } from "./schema";
+import { EMAIL_MODES } from "./constants";
+import { TOPIC_GROUPS, type TopicKey } from "./topics";
 
-export const notificationPayload = z.object({
-  kind: z.enum(NOTIFICATION_KINDS).default("system"),
-  title: z.string().trim().min(1, "Add a title").max(160),
-  body: z.string().trim().max(1000).optional(),
-  href: z.string().trim().max(300).regex(/^\/app(\/|$)/, "Link must be inside the app").optional(),
+/** What a module hands the writer. Exactly one of `topic` or the temporary `kind`. */
+interface RowBase {
+  userId: string;
+  title: string;
+  body?: string;
+  href?: string;
+  /** The thing it is about: opening it marks this read. */
+  subject?: { type: string; id: string };
+  groupKey?: string;
+  action?: boolean;
+  urgent?: boolean;
+  privateBody?: boolean;
+  /** Earliest time to push or email it (the app row shows at once). */
+  deliverAfter?: Date;
+}
+
+// TEMPORARY: the 19 older callers still send `kind`. Remove this table when every call names a topic.
+export const LEGACY_KIND_TOPIC = {
+  announcement: "notice.published", fee_due: "fees.due", result: "exam.result", assignment: "homework.new", message: "message.new", system: "work.update",
+} as const satisfies Record<string, TopicKey>;
+export type LegacyKind = keyof typeof LEGACY_KIND_TOPIC;
+
+export type NotificationRow = RowBase & ({ topic: TopicKey; kind?: never } | { kind: LegacyKind; topic?: never });
+
+const group = z.enum(Object.keys(TOPIC_GROUPS) as [keyof typeof TOPIC_GROUPS, ...(keyof typeof TOPIC_GROUPS)[]]);
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 20:00");
+
+export const groupPrefInput = z.object({ group, push: z.boolean(), email: z.enum(EMAIL_MODES) });
+export const quietInput = z.object({ from: hhmm, to: hhmm }).nullable();
+export const digestInput = z.union([z.literal(8), z.literal(18)]);
+export const languageInput = z.string().regex(/^[a-z]{2,3}(-[A-Z]{2})?$/, "Choose a language from the list").nullable();
+export const awayInput = z.object({
+  until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date").nullable(),
+  text: z.string().trim().max(200, "Keep it under 200 characters").optional(),
 });
-export type NotificationPayload = z.input<typeof notificationPayload>;
+export const subscribeInput = z.object({
+  endpoint: z.url().max(1000).refine((u) => u.startsWith("https://"), "Push needs a secure address"),
+  p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100), device: z.string().trim().max(80).optional(),
+});
+
+export const listFilters = z.object({ tab: z.enum(["action", "all"]).default("all"), unread: z.literal("1").optional(), group: group.optional() });

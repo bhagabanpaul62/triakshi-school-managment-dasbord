@@ -8,7 +8,7 @@ export default defineFeature({
   core: true,
   permissions: {
     read: ["admin", "accountant", "teacher", "student"],
-    /** Create notifications for other users (other features normally use NotificationWriter inside their own transaction). */
-    send: ["admin", "accountant", "teacher"],
+    manage: ["admin"],
+    delivery: ["admin"],
   },
 });

@@ -3,8 +3,9 @@ import { NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/fe
 import { users, type Tx } from "@smw/db";
 import attendanceFeature from "./feature";
 import { leaveAdjustInput, leavePreviewInput } from "./inputs";
+import { closedSet } from "./holidays";
 import { fmtDays, halfDaysOfDay, workingDays } from "./leave-days";
-import { balanceHalfDays, ensureCredit, ensureTypes, heldHalfDays, holidaySet, lockPerson, requestMonths, yearOf, yearsNeeded, type LeaveType, type Month } from "./leave-ledger";
+import { balanceHalfDays, ensureCredit, ensureTypes, heldHalfDays, lockPerson, requestMonths, yearOf, yearsNeeded, type LeaveType, type Month } from "./leave-ledger";
 import { leaveLedger, leaveRequests, leaveTypes } from "./schema";
 import { monthDays as datesOf, todayIST } from "./stats";
 
@@ -41,7 +42,7 @@ export class LeaveBalanceService extends SchoolService<Perm> {
       if (data.fromDate !== data.toDate) throw new ValidationError({ halfDay: "A half day is for one day only" });
       if (!type.halfDayAllowed) throw new ValidationError({ halfDay: `${type.name} leave cannot be taken as a half day` });
     }
-    const days = workingDays(data.fromDate, data.toDate, await holidaySet(tx, data.fromDate, data.toDate));
+    const days = workingDays(data.fromDate, data.toDate, await closedSet(tx, data.fromDate, data.toDate, { staff: true }));
     if (days.length === 0) throw new ValidationError({ fromDate: "Every one of these days is a Sunday or a holiday" });
     const months = await requestMonths(tx, { fromDate: data.fromDate, toDate: data.toDate, halfDay: data.halfDay ?? null });
     const halfDays = days.length * halfDaysOfDay(data.halfDay);
@@ -159,8 +160,8 @@ export class LeaveBalanceService extends SchoolService<Perm> {
         .from(leaveRequests).innerJoin(users, eq(users.id, leaveRequests.userId))
         .where(and(eq(leaveRequests.kind, "staff"), inArray(leaveRequests.status, ["approved", "pending"]), lte(leaveRequests.fromDate, days.at(-1)!), gte(leaveRequests.toDate, days[0]!)))
         .orderBy(asc(users.name), asc(leaveRequests.fromDate));
-      const holidays = await holidaySet(tx, days[0]!, days.at(-1)!);
-      return { days: days.map((date) => ({ date, off: holidays.has(date) || new Date(`${date}T00:00:00Z`).getUTCDay() === 0 })), rows };
+      const closed = await closedSet(tx, days[0]!, days.at(-1)!, { staff: true });
+      return { days: days.map((date) => ({ date, off: closed.has(date) })), rows };
     });
   }
 }

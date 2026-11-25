@@ -61,7 +61,7 @@ export class ReminderService extends FeesBase {
         if (!userId) return [];
         const d = daysBetween(today, s.due_on);
         const when = d > 0 ? `is due in ${d} day${d === 1 ? "" : "s"}` : d === 0 ? "is due today" : `was due ${-d} day${d === -1 ? "" : "s"} ago`;
-        return [{ userId, kind: "fee_due" as const, title: d < 0 ? `Fee overdue: ${s.label}` : `Fee reminder: ${s.label}`, body: `${rupees(Number(s.open_paise))} ${when}.`, href: `/app/fees/invoices/${s.invoice_id}` }];
+        return [{ userId, topic: "fees.due" as const, subject: { type: "invoice", id: s.invoice_id }, groupKey: `fee-reminder:${s.invoice_id}`, title: d < 0 ? `Fee overdue: ${s.label}` : `Fee reminder: ${s.label}`, body: `${rupees(Number(s.open_paise))} ${when}.`, href: `/app/fees/invoices/${s.invoice_id}` }];
       }));
     });
   }
@@ -100,7 +100,7 @@ export class ReminderService extends FeesBase {
         if (!logins.has(s.id)) { skip("no_login", "The family has no login to send a notice to."); continue; }
         await tx.insert(feeReminders).values(fresh.map((b) => ({ schoolId: this.ctx.schoolId, invoiceId: b.id, studentId: s.id, offsetDays: MANUAL_BASE + dayNumber(today), dueOn: b.dueDate, sentOn: today }))).onConflictDoNothing();
         const total = fresh.reduce((n, b) => n + openOf(b), 0), late = fresh.filter((b) => b.dueDate < today).length;
-        await this.tell(tx, [s.id], late ? "Fees are overdue" : "Fee reminder", `${rupees(total)} is open${late ? `, ${late} bill${late === 1 ? " is" : "s are"} past the due date` : ""}. Open your fees to pay.`, "/app/fees");
+        await this.tell(tx, [s.id], "fees.due", late ? "Fees are overdue" : "Fee reminder", `${rupees(total)} is open${late ? `, ${late} bill${late === 1 ? " is" : "s are"} past the due date` : ""}. Open your fees to pay.`, "/app/fees");
         sent.push({ studentId: s.id, name: s.name, bills: fresh.length, totalPaise: total });
       }
       return { sent, skipped };

@@ -5,7 +5,8 @@ import { rupees, todayIST } from "@smw/feature-kit/money";
 import { users, type Tx } from "@smw/db";
 import { postJournal, type Poster } from "@smw/feature-finance/posting";
 import { finAccounts, finApprovals } from "@smw/feature-finance/schema";
-import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, makerMayDecide, managers, need, onlyId, tell } from "./base";
+import { ExpenseService, checkAccount, checkCentre, cashFor, journalIdOf, journalIdSql, makerMayDecide, managers, need, onlyId, tell, closeApprovals } from "./base";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { ExpenseFiles, type UploadedFile } from "./files";
 import { day, method, optionalId, paiseAmount } from "./inputs";
 import { expClaims } from "./schema";
@@ -36,6 +37,7 @@ export async function approveClaim(tx: Tx, by: Poster, id: string, pick: { accou
   if (accountId) await checkAccount(tx, accountId, "expense");
   const [row] = await tx.update(expClaims).set({ status: "approved", accountId: accountId ?? null, costCentreId: pick.costCentreId ?? c.costCentreId }).where(eq(expClaims.id, id)).returning();
   await postClaim(tx, by, row!);
+  await NotificationWriter.done(tx, row!.schoolId, { type: "claim", id });
   return row!;
 }
 
@@ -117,7 +119,7 @@ export class ClaimService extends ExpenseService {
           row = (await tx.update(expClaims).set(vals).where(eq(expClaims.id, id)).returning())[0]!;
         } else {
           row = (await tx.insert(expClaims).values({ ...vals, schoolId: this.ctx.schoolId, userId: this.ctx.userId, fileKey: stored!.fileKey }).returning())[0]!;
-          await tell(tx, this.ctx.schoolId, (await managers(tx)).filter((u) => u !== this.ctx.userId), "New expense claim", `${this.ctx.name}: ${d.title}, ${rupees(d.amountPaise)}`, "/app/expenses/claims");
+          await tell(tx, this.ctx.schoolId, (await managers(tx)).filter((u) => u !== this.ctx.userId), "work.approval", "New expense claim", `${this.ctx.name}: ${d.title}, ${rupees(d.amountPaise)}`, "/app/expenses/claims", { subject: { type: "claim", id: row.id }, action: true });
         }
         return { row, old };
       }, ({ row }) => ({ action: id ? "resubmit" : "submit", entity: "Claim", entityId: row.id, summary: `Claim "${row.title}" of ${rupees(row.amountPaise)}` }));
@@ -132,7 +134,8 @@ export class ClaimService extends ExpenseService {
       const [c] = await tx.select().from(expClaims).where(eq(expClaims.id, id)).for("update");
       if (!c || c.userId !== this.ctx.userId) throw new NotFoundError("Claim");
       if (c.status !== "submitted") throw new ConflictError(`This claim is ${c.status}, so it cannot be withdrawn.`);
-      await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(and(eq(finApprovals.kind, "expenses.claim"), eq(finApprovals.refId, id), eq(finApprovals.status, "pending")));
+      await closeApprovals(tx, this.ctx, "expenses.claim", id);
+      await NotificationWriter.done(tx, this.ctx.schoolId, { type: "claim", id });
       await this.record(tx, c, "withdrawn", "Withdrawn by the person who made it.");
       return (await tx.update(expClaims).set({ status: "rejected" }).where(eq(expClaims.id, id)).returning())[0]!;
     }, (c) => ({ action: "withdraw", entity: "Claim", entityId: c.id, summary: `Withdrew claim "${c.title}"` }));
@@ -170,9 +173,10 @@ export class ClaimService extends ExpenseService {
       const [c] = await tx.select().from(expClaims).where(eq(expClaims.id, id)).for("update");
       if (!c) throw new NotFoundError("Claim");
       if (c.status !== "submitted") throw new ConflictError(`This claim is already ${c.status}.`);
-      await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(and(eq(finApprovals.kind, "expenses.claim"), eq(finApprovals.refId, id), eq(finApprovals.status, "pending")));
+      await closeApprovals(tx, this.ctx, "expenses.claim", id);
       await this.record(tx, c, "rejected", why);
-      await tell(tx, this.ctx.schoolId, [c.userId], "Claim not accepted", `${c.title}: ${why}`, "/app/expenses/claims");
+      await NotificationWriter.done(tx, this.ctx.schoolId, { type: "claim", id });
+      await tell(tx, this.ctx.schoolId, [c.userId], "work.decision", "Claim not accepted", `${c.title}: ${why}`, "/app/expenses/claims", { subject: { type: "claim", id } });
       return (await tx.update(expClaims).set({ status: "rejected" }).where(eq(expClaims.id, id)).returning())[0]!;
     }, (c) => ({ action: "reject", entity: "Claim", entityId: c.id, summary: `Turned down claim "${c.title}"` }));
   }
@@ -187,7 +191,7 @@ export class ClaimService extends ExpenseService {
       const date = await this.moneyDate(tx, d.date);
       const cash = await cashFor(tx, this.ctx.schoolId, d.method, d.cashAccountId);
       await this.post(tx, { date, sourceKey: `expenses:claim-pay:${id}`, sourceType: "exp_claim", sourceId: id, memo: `Paid claim: ${c.title}`, lines: [{ account: "claims_payable", debit: c.amountPaise, party: { type: "staff", id: c.userId } }, { account: { id: cash.accountId }, credit: c.amountPaise }] });
-      await tell(tx, this.ctx.schoolId, [c.userId], "Claim paid", `${c.title}: ${rupees(c.amountPaise)}`, "/app/expenses/claims");
+      await tell(tx, this.ctx.schoolId, [c.userId], "work.decision", "Claim paid", `${c.title}: ${rupees(c.amountPaise)}`, "/app/expenses/claims", { subject: { type: "claim", id } });
       return (await tx.update(expClaims).set({ status: "paid", paidOn: date, cashAccountId: cash.id, payWith: "now" }).where(eq(expClaims.id, id)).returning())[0]!;
     }, (c) => ({ action: "pay", entity: "Claim", entityId: c.id, summary: `Paid claim "${c.title}" of ${rupees(c.amountPaise)}` }));
   }

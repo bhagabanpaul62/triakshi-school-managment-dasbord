@@ -217,7 +217,7 @@ export class ExamService extends CrudService<typeof exams, Perm> {
       .innerJoin(examPapers, and(eq(examPapers.classId, students.classId), eq(examPapers.examId, exam.id))).where(eq(students.status, "active"));
     if (!kids.length) return;
     const rows = kids.flatMap((k) => (k.userId && k.userId !== this.ctx.userId
-      ? [{ userId: k.userId, kind: "result" as const, title: `${exam.name} results are out`, body: k.name, href: `/app/results/${exam.id}/${k.id}` }] : []));
+      ? [{ userId: k.userId, topic: "exam.result" as const, subject: { type: "result", id: `${exam.id}:${k.id}` }, title: `${exam.name} results are out`, body: k.name, href: `/app/results/${exam.id}/${k.id}` }] : []));
     await NotificationWriter.insert(tx, this.ctx.schoolId, rows);
   }
 
@@ -573,6 +573,7 @@ export class ResultService extends ResultReader {
     const perm = this.viewPerm();
     return this.read(perm, async (tx) => {
       const exam = await this.visible(tx, examId, studentId, perm);
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "result", id: `${exam.id}:${studentId}` }, this.ctx.userId);
       return { exam, result: await this.resultFor(tx, exam, studentId) };
     });
   }

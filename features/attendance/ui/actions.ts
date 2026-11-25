@@ -1,13 +1,15 @@
 "use server";
 
 import { formToObject, serviceAction } from "@smw/runtime";
+import { ValidationError } from "@smw/feature-kit";
 import { EligibilityService } from "../eligibility";
 import type { UploadedFile } from "../files";
 import { LeaveBalanceService } from "../leave-balances";
 import { LeaveService } from "../leave-service";
 import { LeaveTypeService } from "../leave-types";
 import { PeriodAttendanceService } from "../period-service";
-import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "../service";
+import { HolidayService } from "../holiday-service";
+import { StaffAttendanceService, StudentAttendanceService } from "../service";
 
 /** The optional file from a form field as plain values: `File` never reaches a service. */
 async function uploadFrom(fd: FormData, field: string): Promise<UploadedFile | undefined> {
@@ -33,6 +35,21 @@ export async function updateHoliday(fd: FormData) {
 }
 export async function deleteHoliday(fd: FormData) {
   return serviceAction(HolidayService, (s) => s.remove(String(fd.get("id"))), "Holiday removed");
+}
+/** The days ticked in "copy last year" or the ready list, sent as one JSON field. */
+export async function addHolidays(fd: FormData) {
+  return serviceAction(HolidayService, (s) => s.addMany(formToObject(fd)), "Holidays added");
+}
+const sheetFrom = async (fd: FormData) => {
+  const v = fd.get("file");
+  if (!(v instanceof File) || v.size === 0) throw new ValidationError({ file: "Choose a file" });
+  return { name: v.name, bytes: new Uint8Array(await v.arrayBuffer()) };
+};
+export async function checkHolidayImport(fd: FormData) {
+  return serviceAction(HolidayService, async (s) => s.importCheck(await sheetFrom(fd)));
+}
+export async function commitHolidayImport(fd: FormData) {
+  return serviceAction(HolidayService, async (s) => s.importCommit(await sheetFrom(fd)));
 }
 
 export async function applyLeave(fd: FormData) {

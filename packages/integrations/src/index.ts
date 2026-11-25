@@ -7,10 +7,12 @@ import { S3Storage, type FileStorage } from "./storage";
 import { SmtpEmailSender, type EmailSender } from "./mail";
 import { LogSmsSender, type SmsSender } from "./sms";
 import { NodeDnsResolver, type DnsResolver } from "./dns";
+import { WebPushSender, type PushSender } from "./push";
 import { FakePaymentGateway, type PaymentGateway } from "./payments";
 
 export * from "./storage";
 export * from "./mail";
+export * from "./push";
 export * from "./sms";
 export * from "./dns";
 export * from "./pdf";
@@ -18,7 +20,7 @@ export * from "./fonts";
 export * from "./qr";
 export * from "./payments";
 
-export interface Services { storage: FileStorage; email: EmailSender; sms: SmsSender; dns: DnsResolver; payments: PaymentGateway }
+export interface Services { storage: FileStorage; email: EmailSender; sms: SmsSender; dns: DnsResolver; payments: PaymentGateway; push: PushSender }
 
 const g = globalThis as unknown as { __smwServices?: Partial<Services>; __smwPaymentFactory?: () => PaymentGateway };
 
@@ -32,6 +34,7 @@ export function services(): Services {
     get email() { return (s.email ??= new SmtpEmailSender()); },
     get sms() { return (s.sms ??= new LogSmsSender()); },
     get dns() { return (s.dns ??= new NodeDnsResolver()); },
+    get push() { return (s.push ??= new WebPushSender()); },
     get payments() { return (s.payments ??= g.__smwPaymentFactory?.() ?? new FakePaymentGateway()); },
   };
 }

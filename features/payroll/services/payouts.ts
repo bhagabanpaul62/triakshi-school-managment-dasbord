@@ -154,7 +154,7 @@ export class PayoutService extends PayrollService {
       const who = (await this.people(tx, [userId])).get(userId);
       if (!who || who.left) return;
       const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active")));
-      await NotificationWriter.insert(tx, this.ctx.schoolId, admins.map((a) => ({ userId: a.id, kind: "system" as const, title: `Deactivate ${who.name}: the final pay is paid`, body: "Their login is still active. Open their staff record and deactivate them.", href: `/app/staff/${userId}` })));
+      await NotificationWriter.insert(tx, this.ctx.schoolId, admins.map((a) => ({ userId: a.id, topic: "work.update" as const, subject: { type: "staff", id: userId }, title: `Deactivate ${who.name}: the final pay is paid`, body: "Their login is still active. Open their staff record and deactivate them.", href: `/app/staff/${userId}` })));
     });
   }
 

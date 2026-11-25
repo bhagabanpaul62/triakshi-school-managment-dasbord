@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { withSchool } from "@smw/db";
 import { ConflictError, FeatureOffError, NotFoundError, ReadOnlyError, SchoolService, type Ctx } from "@smw/feature-kit";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { approversOf, type ApprovalHandlers } from "../approvals";
 import financeFeature from "../feature";
 import { finApprovals } from "../schema";
@@ -22,6 +23,7 @@ export class ApprovalDeskService extends SchoolService<FinancePermission> {
       const handler = this.handlers[a.kind];
       await (handler?.withdraw ?? handler?.reject)?.call(handler, tx, a, this.ctx);
       const [row] = await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(eq(finApprovals.id, id)).returning();
+      await NotificationWriter.done(tx, this.ctx.schoolId, { type: "approval", id });
       await this.audit(tx, { action: "withdraw", entity: "Approval", entityId: id, summary: `Withdrew: ${a.title}`, meta: { kind: a.kind, refId: a.refId } });
       return row!;
     });

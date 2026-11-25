@@ -73,7 +73,7 @@ export async function sendBudgetAlerts(tx: Tx, schoolId: string) {
       const [made] = await tx.insert(expBudgetAlerts).values({ schoolId, budgetId: b.id, percent: level }).onConflictDoNothing().returning();
       if (!made) continue;
       sent++;
-      await tell(tx, schoolId, who, level >= 100 ? "Budget used up" : "Budget nearly used", `${names.get(b.accountId)}: ${Math.floor(pct)}% of ${rupees(cap)} is spent or promised.`, "/app/expenses/budgets");
+      await tell(tx, schoolId, who, "work.update", level >= 100 ? "Budget used up" : "Budget nearly used", `${names.get(b.accountId)}: ${Math.floor(pct)}% of ${rupees(cap)} is spent or promised.`, "/app/expenses/budgets", { subject: { type: "budget", id: b.id }, groupKey: `budget:${b.id}` });
     }
   }
   return sent;

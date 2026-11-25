@@ -152,8 +152,13 @@ describe("run lifecycle", () => {
     await runs.review(run.id);
     await expect(runs.addAdjustment(view.items[0]!.id, { code: "bonus", amountPaise: 100 })).rejects.toBeInstanceOf(ConflictError);
     const ap = await runs.submit(run.id);
+    const askRows = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.subjectId, ap.id)));
+    const asked = (await askRows()).filter((n) => n.topic === "work.approval");
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((n) => n.action && !n.doneAt)).toBe(true);
     await expect(decider(a, a.as.accountant).approve({ id: ap.id })).rejects.toBeInstanceOf(ForbiddenError);
     await decider().approve({ id: ap.id });
+    expect((await askRows()).filter((n) => n.topic === "work.approval").every((n) => n.doneAt)).toBe(true); // the approvers' action row closes
     const done = await runs.get(run.id);
     expect(done.run.status).toBe("approved");
     expect(done.items.every((i) => i.payslipNo)).toBe(true);

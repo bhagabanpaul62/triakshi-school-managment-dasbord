@@ -74,7 +74,7 @@ export class SlipService extends FeesBase {
     return this.write("collect", async (tx) => {
       const [s] = await tx.update(feeUpiSlips).set({ status: "rejected", reason: d.reason, decidedBy: this.ctx.userId, decidedAt: new Date() }).where(and(eq(feeUpiSlips.id, d.id), eq(feeUpiSlips.status, "submitted"))).returning();
       if (!s) throw new ConflictError("This slip is not waiting for a decision.");
-      await this.tell(tx, [s.studentId], "UPI payment not matched", `We could not match UTR ${s.utr}: ${d.reason}. Please send it again with the right details.`);
+      await this.tell(tx, [s.studentId], "fees.payment", "UPI payment not matched", `We could not match UTR ${s.utr}: ${d.reason}. Please send it again with the right details.`, "/app/fees", { type: "slip", id: s.id });
       return s;
     }, (s) => ({ action: "reject", entity: "UPI slip", entityId: s.id, summary: `Rejected UPI slip: ${d.reason}` }));
   }

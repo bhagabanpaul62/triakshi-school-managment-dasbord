@@ -4,9 +4,10 @@ import { closeDb, supportMessages, supportTickets, withSchool } from "@smw/db";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { AnnouncementService } from "@smw/feature-announcements/service";
 import { StudentAttendanceService } from "@smw/feature-attendance/service";
+import { attendanceHolidays } from "@smw/feature-attendance/schema";
 import { todayIST } from "@smw/feature-attendance/stats";
 import { buildSchoolData, type Fixture } from "@smw/feature-attendance/test-fixture";
-import { academicYears, terms } from "@smw/feature-academics/schema";
+import { academicYears, sections, terms } from "@smw/feature-academics/schema";
 import { feeReceiptMethods, feeReceipts } from "@smw/feature-fees/schema";
 import { students } from "@smw/feature-students/schema";
 import { HomeService, type Slot } from "./home-service";
@@ -137,6 +138,22 @@ describe("teacher home", () => {
 
   it("no register on a Sunday", async () => {
     expect(ok((await new HomeService(a.as.teacher, SUN).teacher()).toMark)).toEqual({ dayOff: "Sunday", rows: [] });
+  });
+});
+
+describe("teacher home on closed and open days", () => {
+  const on = (date: string) => new HomeService(a.as.teacher, () => new Date(`${date}T10:00:00+05:30`));
+  const hol = (date: string, name: string, over: Partial<typeof attendanceHolidays.$inferInsert> = {}) =>
+    withSchool(a.id, (tx) => tx.insert(attendanceHolidays).values({ schoolId: a.id, date, name, ...over }));
+
+  it("a closure of chosen classes takes only those sections off the register; one for everyone names the day; a working Sunday opens it", async () => {
+    const [sec] = await withSchool(a.id, (tx) => tx.select({ classId: sections.classId }).from(sections).where(eq(sections.id, fx.own)));
+    await hol("2026-11-12", "Class 5 trip", { appliesTo: "classes", classIds: [sec!.classId] });
+    expect(ok((await on("2026-11-12").teacher()).toMark)).toEqual({ dayOff: null, rows: [] });
+    await hol("2026-11-13", "Founders day");
+    expect(ok((await on("2026-11-13").teacher()).toMark)).toEqual({ dayOff: "Founders day", rows: [] });
+    await hol("2026-11-15", "Make-up Sunday", { kind: "working" });
+    expect(ok((await on("2026-11-15").teacher()).toMark).rows).toHaveLength(1);
   });
 });
 

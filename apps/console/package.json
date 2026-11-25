@@ -51,7 +51,9 @@
     "@smw/feature-setup": "workspace:*",
     "@smw/feature-expenses": "workspace:*",
     "@smw/feature-finance": "workspace:*",
-    "@smw/feature-payroll": "workspace:*"
+    "@smw/feature-payroll": "workspace:*",
+    "@smw/feature-meetings": "workspace:*",
+    "@smw/feature-requests": "workspace:*"
   },
   "devDependencies": {
     "@smw/config": "workspace:*",

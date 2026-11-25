@@ -116,7 +116,7 @@ export class PeriodAttendanceService extends StudentAttendanceService {
       const [marks, holiday, settings] = await Promise.all([
         roster.length ? tx.select({ studentId: periodAttendance.studentId, status: periodAttendance.status }).from(periodAttendance)
           .where(and(eq(periodAttendance.date, date), eq(periodAttendance.periodId, cell.periodId), inArray(periodAttendance.studentId, roster.map((r) => r.id)))) : [],
-        this.holidayOn(tx, date), loadSettings(tx),
+        this.studentWho(tx, [...new Set(roster.map((r) => r.sectionId))]).then((who) => this.holidayOn(tx, date, who)), loadSettings(tx),
       ]);
       const status = new Map(marks.map((m) => [m.studentId, m.status]));
       const isTeacher = this.ctx.role === "teacher";
@@ -147,7 +147,7 @@ export class PeriodAttendanceService extends StudentAttendanceService {
     const out = await this.write("mark", async (tx) => {
       const settings = await loadSettings(tx);
       if (settings.mode !== "period") throw new ValidationError({ date: "Period attendance is not turned on for this school" });
-      await this.assertOpenDay(tx, data.date);
+      await this.assertOpenDay(tx, data.date, await this.studentWho(tx, [...new Set([...roster.values()].map((r) => r.sectionId))]));
       const cell = await this.cell(tx, ref);
       if (cell.day !== weekday(data.date)) throw new ValidationError({ date: "This period does not run on that day" });
       await this.assertMine(tx, ref, cell.teacherId, data.date);

@@ -2,8 +2,9 @@
 import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { todayIST } from "@smw/feature-kit/money";
-import { addDays, isSunday, monthDays as datesOf } from "./stats";
-import { balanceHalfDays, holidaySet, joiningDates, yearOf } from "./leave-ledger";
+import { addDays, monthDays as datesOf } from "./stats";
+import { closedDays } from "./holidays";
+import { balanceHalfDays, joiningDates, yearOf } from "./leave-ledger";
 import { halfDaysOfDay } from "./leave-days";
 import { leaveRequests, leaveTypes, staffAttendance } from "./schema";
 
@@ -37,8 +38,8 @@ export async function monthDays(tx: Tx, userIds: string[], month: string, opts: 
   const dates = datesOf(month), first = dates[0]!, last = dates.at(-1)!;
   const out: Record<string, MonthDays> = {};
   if (userIds.length === 0) return out;
-  const [holidays, marks, requests, joined, people] = await Promise.all([
-    holidaySet(tx, first, last),
+  const [closed, marks, requests, joined, people] = await Promise.all([
+    closedDays(tx, first, last, { staff: true }),
     tx.select().from(staffAttendance).where(and(inArray(staffAttendance.userId, userIds), gte(staffAttendance.date, first), lte(staffAttendance.date, last))),
     tx.select({ r: leaveRequests, paid: leaveTypes.paid }).from(leaveRequests).leftJoin(leaveTypes, eq(leaveTypes.id, leaveRequests.typeId))
       .where(and(inArray(leaveRequests.userId, userIds), eq(leaveRequests.kind, "staff"), eq(leaveRequests.status, "approved"), lte(leaveRequests.fromDate, last), gte(leaveRequests.toDate, first))),
@@ -50,18 +51,18 @@ export async function monthDays(tx: Tx, userIds: string[], month: string, opts: 
   const away = new Map<string, { paid: boolean; half: boolean }>();
   for (const { r, paid } of requests) for (let d = r.fromDate < first ? first : r.fromDate; d <= r.toDate && d <= last; d = addDays(d, 1)) away.set(`${r.userId}|${d}`, { paid: paid ?? true, half: !!r.halfDay });
   const status = new Map(people.map((p) => [p.id, p.status]));
-  const sundays = dates.filter(isSunday).length;
-  const closed = dates.filter((d) => holidays.has(d) && !isSunday(d)).length;
+  const sundays = dates.filter((d) => closed.get(d)?.kind === "sunday").length;
+  const holidayCount = dates.filter((d) => closed.has(d) && closed.get(d)!.kind !== "sunday").length;
 
   for (const id of userIds) {
     const t = blank();
-    t.calendarDays = dates.length; t.sundays = sundays; t.holidays = closed;
+    t.calendarDays = dates.length; t.sundays = sundays; t.holidays = holidayCount;
     const from = [first, joined.get(id) ?? first].sort().at(-1)!;
     const markedDays = marks.filter((m) => m.userId === id).map((m) => m.date).sort();
     const leftOn = opts.leftOn?.[id] ?? (status.get(id) === "disabled" ? markedDays.at(-1) ?? addDays(first, -1) : last);
     const to = leftOn < last ? leftOn : last;
     for (const d of dates) {
-      if (d < from || d > to || isSunday(d) || holidays.has(d)) continue;
+      if (d < from || d > to || closed.has(d)) continue;
       t.workingDays++;
       const s = mark.get(`${id}|${d}`), a = away.get(`${id}|${d}`);
       const leave = (halfDays: number) => { if (a?.paid ?? true) t.paidLeaveHalfDays += halfDays; else t.unpaidLeaveHalfDays += halfDays; };

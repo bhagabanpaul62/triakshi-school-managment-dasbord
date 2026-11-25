@@ -6,7 +6,7 @@ import type { PgColumn } from "drizzle-orm/pg-core";
 import { users, type Tx } from "@smw/db";
 import { postJournal, type PostLine, type Poster } from "@smw/feature-finance/posting";
 import { finAccounts, finApprovals, finCostCentres, finJournals } from "@smw/feature-finance/schema";
-import { ExpenseService, checkAccount, checkCentre, checkVehicle, journalIdOf, journalIdSql, need } from "./base";
+import { ExpenseService, checkAccount, checkCentre, checkVehicle, journalIdOf, journalIdSql, need, closeApprovals } from "./base";
 import { budgetCheck } from "./budgets";
 import { ExpenseFiles, type UploadedFile } from "./files";
 import { day, optionalId, paiseAmount } from "./inputs";
@@ -235,7 +235,7 @@ export class BillService extends ExpenseService {
       const [b] = await tx.select().from(expBills).where(eq(expBills.id, id)).for("update");
       if (!b) throw new NotFoundError("Bill");
       if (b.status !== "pending") throw new ConflictError("Only a bill waiting for approval can be withdrawn.");
-      await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(and(eq(finApprovals.kind, "expenses.bill"), eq(finApprovals.refId, id), eq(finApprovals.status, "pending")));
+      await closeApprovals(tx, this.ctx, "expenses.bill", id);
       const [r] = await tx.update(expBills).set({ status: "draft" }).where(eq(expBills.id, id)).returning();
       return r!;
     }, (r) => ({ action: "withdraw", entity: "Bill", entityId: r.id, summary: `Withdrew bill ${r.billNo} from approval` }));
@@ -249,7 +249,7 @@ export class BillService extends ExpenseService {
       if (!b) throw new NotFoundError("Bill");
       if (b.status === "cancelled") throw new ConflictError("This bill is already cancelled.");
       if (b.paidPaise > 0) throw new ConflictError("This bill has payments. Reverse them from the payments list first, then cancel it.");
-      if (b.status === "pending") await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(and(eq(finApprovals.kind, "expenses.bill"), eq(finApprovals.refId, id), eq(finApprovals.status, "pending")));
+      if (b.status === "pending") await closeApprovals(tx, this.ctx, "expenses.bill", id);
       if (b.status === "approved") await this.reverse(tx, `expenses:bill:${id}`, `Cancelled bill ${b.billNo}: ${why}`);
       const [r] = await tx.update(expBills).set({ status: "cancelled", note: [b.note, `Cancelled: ${why}`].filter(Boolean).join("\n") }).where(eq(expBills.id, id)).returning();
       return r!;

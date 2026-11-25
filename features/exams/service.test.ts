@@ -335,7 +335,7 @@ describe("result notifications", () => {
     expect(await notes(a, a.users.student)).toHaveLength(0);
     await svc.transition({ id, to: "published", force: true });
     const [kid] = await notes(a, a.users.student);
-    expect(kid).toMatchObject({ kind: "result", title: "Unit Test Notify results are out", href: `/app/results/${id}/${fa.s1}` });
+    expect(kid).toMatchObject({ topic: "exam.result", subjectType: "result", title: "Unit Test Notify results are out", href: `/app/results/${id}/${fa.s1}` });
     expect(await notes(a, a.users.parent)).toHaveLength(0);
     expect(await notes(a, a.users.admin)).toHaveLength(0);
     expect(await notes(a, a.users.teacher)).toHaveLength(0);

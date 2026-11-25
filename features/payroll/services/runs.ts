@@ -4,6 +4,7 @@ import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, listQuerySchema, toPage, type ListQuery, type Page } from "@smw/feature-kit";
 import { monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
 import { finApprovals } from "@smw/feature-finance/schema";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { computeMonth, refreshTotals, saveItem, ratesOf, TYPED_CODES, type CalcEnv, type ItemRow, type LineRow } from "../compute";
 import { monthLabel } from "../csv";
 import type { Flag } from "../engine";
@@ -353,6 +354,7 @@ export class RunService extends PayrollService {
     if (!a) return;
     if (a.requestedBy !== this.ctx.userId) throw new ForbiddenError("Someone else sent this for approval. Ask them to withdraw it.");
     await tx.update(finApprovals).set({ status: "withdrawn", decidedBy: this.ctx.userId, decidedAt: new Date() }).where(eq(finApprovals.id, a.id));
+    await NotificationWriter.done(tx, this.ctx.schoolId, { type: "approval", id: a.id });
   }
 
   /** Ask for approval; the money is posted when someone else approves. */

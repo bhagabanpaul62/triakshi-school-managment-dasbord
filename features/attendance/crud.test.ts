@@ -10,7 +10,8 @@ import { sections } from "@smw/feature-academics/schema";
 import { buildSchoolData, type Fixture } from "./test-fixture";
 import { EligibilityService } from "./eligibility";
 import { LeaveService } from "./leave-service";
-import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "./service";
+import { HolidayService } from "./holiday-service";
+import { StaffAttendanceService, StudentAttendanceService } from "./service";
 import { attendanceCondonations, leaveRequests, studentAttendance } from "./schema";
 import { addDays, todayIST } from "./stats";
 
@@ -122,17 +123,17 @@ describe("holidays: edit, and a guard where history matters", () => {
   it("refuses a holiday on a day somebody already marked; edits and deletes the rest; one holiday per date", async () => {
     const svc = new HolidayService(a.as.admin);
     await new StudentAttendanceService(a.as.admin).mark({ sectionId: fx.own, date: before(20), entries: [{ studentId: fx.kids[0], status: "present" }] }, { alerts: false });
-    await expect(svc.create({ date: before(20), name: "Founders day" })).rejects.toMatchObject({ fieldErrors: { date: expect.stringContaining("already marked") } });
-    const h = await svc.create({ date: before(21), name: "Founders day" });
-    expect(await svc.update(h.id, { date: before(21), name: "Founders Day" })).toMatchObject({ name: "Founders Day" });
-    await expect(svc.update(h.id, { date: before(20), name: "Founders Day" })).rejects.toBeInstanceOf(ValidationError);
-    const h2 = await svc.create({ date: before(22), name: "Other" });
-    await expect(svc.update(h2.id, { date: before(21), name: "Other" })).rejects.toBeInstanceOf(ConflictError);
-    expect(await svc.update(h2.id, { date: before(23), name: "Other" })).toMatchObject({ date: before(23) });
+    await expect(svc.create({ from: before(20), name: "Founders day" })).rejects.toMatchObject({ fieldErrors: { from: expect.stringContaining("already marked") } });
+    const h = await svc.create({ from: before(21), name: "Founders day" });
+    expect(await svc.update(h.id, { from: before(21), name: "Founders Day" })).toMatchObject({ name: "Founders Day" });
+    await expect(svc.update(h.id, { from: before(20), name: "Founders Day" })).rejects.toBeInstanceOf(ValidationError);
+    const h2 = await svc.create({ from: before(22), name: "Other" });
+    await expect(svc.update(h2.id, { from: before(21), name: "Other" })).rejects.toBeInstanceOf(ConflictError);
+    expect(await svc.update(h2.id, { from: before(23), name: "Other" })).toMatchObject({ from: before(23) });
     await svc.remove(h.id);
     await expect(svc.get(h.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(new HolidayService(a.as.teacher).update(h2.id, { date: before(24), name: "Nope" })).rejects.toBeInstanceOf(ForbiddenError);
-    await expect(new HolidayService(b.as.admin).update(h2.id, { date: before(24), name: "Nope" })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(new HolidayService(a.as.teacher).update(h2.id, { from: before(24), name: "Nope" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new HolidayService(b.as.admin).update(h2.id, { from: before(24), name: "Nope" })).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

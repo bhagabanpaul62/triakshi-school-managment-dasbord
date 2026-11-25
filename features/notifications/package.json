@@ -9,6 +9,7 @@
     "./service": "./service.ts",
     "./seed": "./seed.ts",
     "./jobs": "./jobs.ts",
+    "./ui/audience-actions": "./ui/audience-actions.ts",
     "./ui/*": "./ui/*.tsx",
     "./*": "./*.ts"
   },
@@ -24,14 +25,14 @@
     "@smw/integrations": "workspace:*",
     "drizzle-orm": "^0.45.4",
     "zod": "^4.6.7",
-    "@tabler/icons-react": "^3.52.0"
+    "@tabler/icons-react": "^3.52.0",
+    "@smw/config": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",
     "react": "^19.3.1"
   },
   "devDependencies": {
-    "@smw/config": "workspace:*",
     "next": "^16.4.6",
     "react": "^19.3.1",
     "typescript": "^5.9.3"

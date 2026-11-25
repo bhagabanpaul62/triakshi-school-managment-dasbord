@@ -1,10 +1,18 @@
 // One field definition per attendance entity, used by its create form and its edit form.
 import type { Field } from "@smw/ui/shell/FormModal";
-import { CONDONATION_REASONS } from "../constants";
+import { CONDONATION_REASONS, HOLIDAY_KINDS } from "../constants";
+import { HOLIDAY_SCOPES } from "../holiday-inputs";
 
-export const holidayFields: Field[] = [
-  { name: "date", label: "Date", type: "date", required: true },
+/** Adding or editing a holiday. Adding offers to tell the people it affects; editing does not. */
+export const holidayFields = (classes: { id: string; name: string }[], opts: { notify?: boolean } = {}): Field[] => [
+  { name: "from", label: "First day", type: "date", required: true },
+  { name: "to", label: "Last day", type: "date", hint: "Leave empty for one day." },
   { name: "name", label: "Name", required: true, wide: true },
+  { name: "kind", label: "Kind", type: "select", required: true, options: Object.entries(HOLIDAY_KINDS).map(([value, label]) => ({ value, label })), hint: "A working Sunday opens a Sunday for the people it covers." },
+  { name: "appliesTo", label: "Who is off", type: "select", required: true, options: Object.entries(HOLIDAY_SCOPES).map(([value, label]) => ({ value, label })), hint: "Staff work unless it says everyone." },
+  { name: "classIds", label: "Classes (only for chosen classes)", type: "multiselect", options: classes.map((c) => ({ value: c.id, label: c.name })) },
+  { name: "note", label: "Note", type: "textarea", wide: true },
+  ...(opts.notify ? [{ name: "notify", label: "Tell them", type: "checkbox" as const, placeholder: "Send a notice to everyone this affects", wide: true }] : []),
 ];
 
 /** Applying for leave and editing a waiting request share these; only applying takes a file and (for a family login) a student. */

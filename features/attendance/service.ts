@@ -1,21 +1,22 @@
 import { and, asc, count, eq, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
-import { CrudService, ForbiddenError, NotFoundError, SchoolService, ValidationError, rethrowUnique, type Ctx } from "@smw/feature-kit";
+import { ForbiddenError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { schools, users, type Tx } from "@smw/db";
 import { academicYears, classes, sectionTeachers, sections } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import attendanceFeature from "./feature";
 import { DEFAULTER_BELOW } from "./constants";
-import { holidayInput, markStaffInput, markStudentsInput, monthInput } from "./inputs";
+import { closedDays, dayLook, isClosed, type Who } from "./holidays";
+import { markStaffInput, markStudentsInput, monthInput } from "./inputs";
 import { loadSettings, queueAlerts } from "./alerts";
 import { registerCsv, registerPdf, type RegisterInput } from "./register-export";
-import { attendanceHolidays, periodAttendance, staffAttendance, studentAttendance } from "./schema";
-import { addDays, attendancePercent, countsOf, groupBy, isDate, isSunday, monthDays, tally, todayIST, type Counts } from "./stats";
+import { periodAttendance, staffAttendance, studentAttendance } from "./schema";
+import { addDays, attendancePercent, countsOf, groupBy, isDate, monthDays, tally, todayIST, type Counts } from "./stats";
 
 type Perm = keyof typeof attendanceFeature.permissions;
-export type Holiday = typeof attendanceHolidays.$inferSelect;
 
 const MIN_DAYS_FOR_DEFAULTER = 5;
+const STAFF: Who = { staff: true };
 
 /**
  * What student and staff attendance share: the "can this day be marked" rules (no future dates, no holidays)
@@ -30,16 +31,27 @@ abstract class AttendanceBase extends SchoolService<Perm> {
     if (!isDate(date)) throw new ValidationError({ [field]: "Pick a date" });
   }
 
-  protected async holidayOn(tx: Tx, date: string): Promise<string | null> {
-    const [h] = await tx.select({ name: attendanceHolidays.name }).from(attendanceHolidays).where(eq(attendanceHolidays.date, date)).limit(1);
-    return h?.name ?? null;
+  /** The students of these sections: one entry per class, since a closure can be for chosen classes. */
+  protected async studentWho(tx: Tx, sectionIds: string[]): Promise<Who[]> {
+    if (!sectionIds.length) return [{ classId: null }];
+    const rows = await tx.select({ id: sections.classId }).from(sections).where(inArray(sections.id, sectionIds));
+    return [...new Set(rows.map((r) => r.id))].map((classId) => ({ classId }));
   }
 
-  /** A day can be marked when it is not in the future and not a holiday. */
-  protected async assertOpenDay(tx: Tx, date: string) {
+  /** The name of the holiday that closes `date` for any of these people. A Sunday is the weekly off, not a holiday: marking it stays allowed. */
+  protected async holidayOn(tx: Tx, date: string, who: Who | Who[]): Promise<string | null> {
+    for (const w of Array.isArray(who) ? who : [who]) {
+      const c = await isClosed(tx, date, w);
+      if (c && c.kind !== "sunday") return c.name;
+    }
+    return null;
+  }
+
+  /** A day can be marked when it is not in the future and not a holiday for these people. */
+  protected async assertOpenDay(tx: Tx, date: string, who: Who | Who[]) {
     this.assertDate(date);
     if (date > todayIST()) throw new ValidationError({ date: "You cannot mark a future date" });
-    const holiday = await this.holidayOn(tx, date);
+    const holiday = await this.holidayOn(tx, date, who);
     if (holiday) throw new ValidationError({ date: `${holiday} is a holiday` });
   }
 
@@ -144,7 +156,8 @@ export class StudentAttendanceService extends AttendanceBase {
         .leftJoin(studentAttendance, and(eq(studentAttendance.studentId, students.id), eq(studentAttendance.date, date)))
         .where(and(eq(students.sectionId, sectionId), eq(students.status, "active")))
         .orderBy(asc(students.rollNo), asc(students.name));
-      return { section: { id: sectionId, label }, date, holiday: await this.holidayOn(tx, date), rows };
+      const who = await this.studentWho(tx, [sectionId]);
+      return { section: { id: sectionId, label }, date, holiday: await this.holidayOn(tx, date, who), sunday: (await isClosed(tx, date, who[0]!))?.kind === "sunday", rows };
     });
   }
 
@@ -161,7 +174,7 @@ export class StudentAttendanceService extends AttendanceBase {
       await this.assertSectionAccess(tx, data.sectionId);
       // In period mode the day is worked out from the periods; the office keeps the daily sheet for corrections.
       if (this.ctx.role === "teacher" && this.ctx.features.has("timetable") && (await loadSettings(tx)).mode === "period") throw new ForbiddenError("This school takes attendance period by period. Mark from My classes.");
-      await this.assertOpenDay(tx, data.date);
+      await this.assertOpenDay(tx, data.date, await this.studentWho(tx, [data.sectionId]));
       const ids = entries.map((e) => e.studentId);
       const inSection = await tx.select({ id: students.id }).from(students).where(and(eq(students.sectionId, data.sectionId), inArray(students.id, ids)));
       if (inSection.length !== ids.length) throw new ValidationError({ entries: "Some students are not in this section" });
@@ -183,20 +196,18 @@ export class StudentAttendanceService extends AttendanceBase {
     return this.read("read", async (tx) => {
       await this.assertSectionAccess(tx, sectionId);
       const label = await this.sectionLabel(tx, sectionId);
-      const [people, marks, holidays] = await Promise.all([
+      const [people, marks, closed] = await Promise.all([
         tx.select({ studentId: students.id, name: students.name, rollNo: students.rollNo }).from(students)
           .where(and(eq(students.sectionId, sectionId), eq(students.status, "active"))).orderBy(asc(students.rollNo), asc(students.name)),
         tx.select({ studentId: studentAttendance.studentId, date: studentAttendance.date, status: studentAttendance.status }).from(studentAttendance)
           .innerJoin(students, eq(students.id, studentAttendance.studentId))
           .where(and(eq(students.sectionId, sectionId), gte(studentAttendance.date, days[0]!), lte(studentAttendance.date, days.at(-1)!))),
-        tx.select({ date: attendanceHolidays.date, name: attendanceHolidays.name }).from(attendanceHolidays)
-          .where(and(gte(attendanceHolidays.date, days[0]!), lte(attendanceHolidays.date, days.at(-1)!))),
+        this.studentWho(tx, [sectionId]).then(([w]) => closedDays(tx, days[0]!, days.at(-1)!, w!)),
       ]);
       const byStudent = groupBy(marks, (m) => m.studentId);
-      const holidayOf = new Map(holidays.map((h) => [h.date, h.name]));
       return {
         section: { id: sectionId, label }, month,
-        days: days.map((date) => ({ date, day: Number(date.slice(8)), sunday: isSunday(date), holiday: holidayOf.get(date) ?? null })),
+        days: days.map((date) => ({ date, day: Number(date.slice(8)), ...dayLook(closed, date) })),
         rows: people.map((p) => {
           const mine = byStudent.get(p.studentId) ?? [];
           const counts = tally(mine.map((m) => m.status));
@@ -268,13 +279,17 @@ export class StudentAttendanceService extends AttendanceBase {
     this.parse(monthInput, month);
     const days = monthDays(month);
     return this.viewStudent(studentId, async (tx) => {
-      const [marks, holidays] = await Promise.all([
+      const [marks, [kid]] = await Promise.all([
         tx.select({ date: studentAttendance.date, status: studentAttendance.status }).from(studentAttendance)
           .where(and(eq(studentAttendance.studentId, studentId), gte(studentAttendance.date, days[0]!), lte(studentAttendance.date, days.at(-1)!))),
-        tx.select({ date: attendanceHolidays.date, name: attendanceHolidays.name }).from(attendanceHolidays)
-          .where(and(gte(attendanceHolidays.date, days[0]!), lte(attendanceHolidays.date, days.at(-1)!))),
+        tx.select({ classId: students.classId }).from(students).where(eq(students.id, studentId)).limit(1),
       ]);
-      return { month, marks: Object.fromEntries(marks.map((m) => [m.date, m.status])), holidays: Object.fromEntries(holidays.map((h) => [h.date, h.name])), counts: tally(marks.map((m) => m.status)) };
+      const closed = await closedDays(tx, days[0]!, days.at(-1)!, { classId: kid?.classId ?? null });
+      const looks = days.map((date) => ({ date, ...dayLook(closed, date) }));
+      return {
+        month, marks: Object.fromEntries(marks.map((m) => [m.date, m.status])), holidays: Object.fromEntries(looks.flatMap((l) => (l.holiday ? [[l.date, l.holiday]] : []))),
+        sundays: looks.filter((l) => l.sunday).map((l) => l.date), counts: tally(marks.map((m) => m.status)),
+      };
     });
   }
 
@@ -345,7 +360,7 @@ export class StaffAttendanceService extends AttendanceBase {
         .leftJoin(staffAttendance, and(eq(staffAttendance.userId, users.id), eq(staffAttendance.date, date)))
         .where(and(or(eq(users.role, "teacher"), eq(users.role, "accountant")), eq(users.status, "active")))
         .orderBy(asc(users.role), asc(users.name));
-      return { date, holiday: await this.holidayOn(tx, date), rows };
+      return { date, holiday: await this.holidayOn(tx, date, STAFF), rows };
     });
   }
 
@@ -354,7 +369,7 @@ export class StaffAttendanceService extends AttendanceBase {
     const data = this.parse(markStaffInput, input);
     const entries = this.lastPerKey(data.entries, "userId");
     return this.write("manage", async (tx) => {
-      await this.assertOpenDay(tx, data.date);
+      await this.assertOpenDay(tx, data.date, STAFF);
       const ids = entries.map((e) => e.userId);
       const staff = await tx.select({ id: users.id }).from(users).where(and(inArray(users.id, ids), inArray(users.role, ["teacher", "accountant"])));
       if (staff.length !== ids.length) throw new ValidationError({ entries: "Some people are not staff" });
@@ -369,20 +384,18 @@ export class StaffAttendanceService extends AttendanceBase {
     this.parse(monthInput, month);
     const days = monthDays(month);
     return this.read("manage", async (tx) => {
-      const [people, marks, holidays, school] = await Promise.all([
+      const [people, marks, closed, school] = await Promise.all([
         tx.select({ userId: users.id, name: users.name, role: users.role }).from(users)
           .where(and(or(eq(users.role, "teacher"), eq(users.role, "accountant")), eq(users.status, "active"))).orderBy(asc(users.role), asc(users.name)),
         tx.select({ userId: staffAttendance.userId, date: staffAttendance.date, status: staffAttendance.status }).from(staffAttendance)
           .where(and(gte(staffAttendance.date, days[0]!), lte(staffAttendance.date, days.at(-1)!))),
-        tx.select({ date: attendanceHolidays.date, name: attendanceHolidays.name }).from(attendanceHolidays)
-          .where(and(gte(attendanceHolidays.date, days[0]!), lte(attendanceHolidays.date, days.at(-1)!))),
+        closedDays(tx, days[0]!, days.at(-1)!, STAFF),
         tx.select({ name: schools.name }).from(schools).limit(1).then((r) => r[0]?.name ?? "School"),
       ]);
       const byUser = groupBy(marks, (m) => m.userId);
-      const holidayOf = new Map(holidays.map((h) => [h.date, h.name]));
       const input: RegisterInput = {
         school, title: "Staff attendance register", subtitle: month,
-        days: days.map((date) => ({ date, day: Number(date.slice(8)), sunday: isSunday(date), holiday: holidayOf.get(date) ?? null })),
+        days: days.map((date) => ({ date, day: Number(date.slice(8)), ...dayLook(closed, date) })),
         people: people.map((p) => ({ name: p.name, sub: p.role === "teacher" ? "Teacher" : "Accounts", marks: Object.fromEntries((byUser.get(p.userId) ?? []).map((m) => [m.date, m.status])) })),
       };
       return input;
@@ -399,39 +412,5 @@ export class StaffAttendanceService extends AttendanceBase {
       const counts = countsOf(rows);
       return { date, ...counts, pct: attendancePercent(counts) };
     });
-  }
-}
-
-/** School holidays: days nobody can be marked. */
-export class HolidayService extends CrudService<typeof attendanceHolidays, Perm> {
-  protected feature = attendanceFeature;
-  protected table = attendanceHolidays;
-  protected entityName = "Holiday";
-  protected readPermission = "read" as const;
-  protected writePermission = "manage" as const;
-  protected createSchema = holidayInput;
-  protected updateSchema = holidayInput;
-  protected defaultSort = "date";
-
-  constructor(ctx: Ctx) { super(ctx); }
-
-  protected sortColumns() { return { date: attendanceHolidays.date }; }
-  protected searchColumns() { return [attendanceHolidays.name]; }
-  protected describe(r: Holiday) { return `${r.name} (${r.date})`; }
-
-  /** A day somebody already marked cannot become a holiday: the marks would sit on a closed day and skew every %. */
-  private async assertUnmarked(tx: Tx, date: string) {
-    const used = await Promise.all([studentAttendance, staffAttendance, periodAttendance].map((t) => tx.select({ id: t.id }).from(t).where(eq(t.date, date)).limit(1)));
-    if (used.some((r) => r.length)) throw new ValidationError({ date: "Attendance was already marked on that day. Clear it first or pick another date." });
-  }
-  protected async beforeCreate(tx: Tx, data: Record<string, unknown>) { await this.assertUnmarked(tx, String(data.date)); return data; }
-  protected async beforeUpdate(tx: Tx, existing: Holiday, data: Record<string, unknown>) { if (data.date !== existing.date) await this.assertUnmarked(tx, String(data.date)); return data; }
-
-  async create(input: unknown) {
-    try { return await super.create(input); } catch (e) { rethrowUnique(e, "That date is already a holiday"); }
-  }
-
-  async update(id: string, input: unknown) {
-    try { return await super.update(id, input); } catch (e) { rethrowUnique(e, "That date is already a holiday"); }
   }
 }

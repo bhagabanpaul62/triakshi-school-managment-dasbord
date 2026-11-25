@@ -1,9 +1,9 @@
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { listQuerySchema, SchoolService, toPage, type Ctx, type ListQuery, type Page } from "@smw/feature-kit";
-import type { Tx } from "@smw/db";
 import notificationsFeature from "./feature";
-import { notificationPayload } from "./inputs";
-import { notificationPrefs, notifications, type Notification } from "./schema";
+import { listFilters } from "./inputs";
+import { notifications, type Notification } from "./schema";
+import { TOPICS, type TopicGroup, type TopicKey } from "./topics";
 import { NotificationWriter } from "./writer";
 
 type Perm = keyof typeof notificationsFeature.permissions;
@@ -11,29 +11,45 @@ type Perm = keyof typeof notificationsFeature.permissions;
 export { NotificationWriter };
 export type { Notification };
 
-/** The signed-in user's own notifications. Every query is pinned to ctx.userId on top of the school's RLS scope. */
+const UUID = /^[0-9a-f-]{36}$/i;
+const topicsOf = (g: TopicGroup) => (Object.keys(TOPICS) as TopicKey[]).filter((k) => TOPICS[k].group === g);
+
+/** The signed-in user's own notifications. Every query is pinned to ctx.userId on top of the school's RLS scope. Reading and read marks work in a read-only school. */
 export class NotificationService extends SchoolService<Perm> {
   protected feature = notificationsFeature;
   constructor(ctx: Ctx) { super(ctx); }
 
   private mine = () => eq(notifications.userId, this.ctx.userId);
+  private needsAction = () => and(eq(notifications.action, true), isNull(notifications.doneAt));
 
-  /** Newest first, with the unread total (for the bell). */
-  async forUser(limit = 10): Promise<{ items: Notification[]; unread: number }> {
+  /** The bell and the Needs action count in one cheap query. */
+  async pulse(): Promise<{ bell: number; needsAction: number }> {
     return this.read("read", async (tx) => {
-      const [items, [u]] = await Promise.all([
-        tx.select().from(notifications).where(this.mine()).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(Math.min(Math.max(limit, 1), 50)),
-        tx.select({ n: count() }).from(notifications).where(and(this.mine(), isNull(notifications.readAt))),
-      ]);
-      return { items, unread: Number(u?.n ?? 0) };
+      const [r] = await tx.select({
+        bell: sql<number>`count(*) filter (where ${notifications.readAt} is null)`.mapWith(Number),
+        needsAction: sql<number>`count(*) filter (where ${notifications.action} and ${notifications.doneAt} is null)`.mapWith(Number),
+      }).from(notifications).where(and(this.mine(), sql`(${notifications.readAt} is null or (${notifications.action} and ${notifications.doneAt} is null))`));
+      return { bell: r?.bell ?? 0, needsAction: r?.needsAction ?? 0 };
     });
   }
 
-  /** Paginated list for the full page. `filters.unread = "1"` shows unread only. */
+  /** Newest first, with the unread total (for the bell). */
+  async forUser(limit = 10): Promise<{ items: Notification[]; unread: number }> {
+    const [items, p] = await Promise.all([
+      this.read("read", (tx) => tx.select().from(notifications).where(this.mine()).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(Math.min(Math.max(limit, 1), 50))),
+      this.pulse(),
+    ]);
+    return { items, unread: p.bell };
+  }
+
+  /** Paginated list. Filters: `tab` = action (still to do) or all, `unread` = "1", `group` = a topic group. */
   async list(query: ListQuery = {}): Promise<Page<Notification>> {
     const q = listQuerySchema.parse(query);
+    const f = listFilters.safeParse(q.filters);
+    const { tab, unread, group } = f.success ? f.data : { tab: "all" as const, unread: undefined, group: undefined };
     return this.read("read", async (tx) => {
-      const where = and(this.mine(), q.filters.unread === "1" ? isNull(notifications.readAt) : undefined);
+      const where = and(this.mine(), tab === "action" ? this.needsAction() : undefined, unread ? isNull(notifications.readAt) : undefined,
+        group ? inArray(notifications.topic, topicsOf(group)) : undefined);
       const [rows, [total]] = await Promise.all([
         tx.select().from(notifications).where(where).orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
         tx.select({ n: count() }).from(notifications).where(where),
@@ -42,39 +58,14 @@ export class NotificationService extends SchoolService<Perm> {
     });
   }
 
-  /**
-   * Mark one notification, or "all", as read. Uses a read-mode scope on purpose: it only touches the caller's own
-   * rows, so it keeps working in a read-only school.
-   */
+  /** Mark one, or "all", as read. Action rows are read but stay in Needs action until their module closes them. Pending pushes and emails for them are dropped. */
   async markRead(target: string | "all"): Promise<{ updated: number }> {
+    if (target !== "all" && !UUID.test(target)) return { updated: 0 };
     return this.read("read", async (tx) => {
-      const where = and(this.mine(), isNull(notifications.readAt), target === "all" ? undefined : eq(notifications.id, target));
-      if (target !== "all" && !/^[0-9a-f-]{36}$/i.test(target)) return { updated: 0 };
-      const rows = await tx.update(notifications).set({ readAt: new Date() }).where(where).returning({ id: notifications.id });
+      const rows = await tx.update(notifications).set({ readAt: sql`now()` })
+        .where(and(this.mine(), isNull(notifications.readAt), target === "all" ? undefined : eq(notifications.id, target))).returning({ id: notifications.id });
+      if (rows.length) await NotificationWriter.skipReadFor(tx, this.ctx.userId);
       return { updated: rows.length };
-    });
-  }
-
-  /** Notify other users from this service (inside `tx` when the caller has one). */
-  async notify(userIds: string[], payload: unknown, tx?: Tx): Promise<number> {
-    this.authorize("send", "write");
-    const p = this.parse(notificationPayload, payload);
-    const rows = [...new Set(userIds)].map((userId) => ({ userId, ...p }));
-    return tx ? NotificationWriter.insert(tx, this.ctx.schoolId, rows) : this.write("send", (t) => NotificationWriter.insert(t, this.ctx.schoolId, rows));
-  }
-
-  async emailDigestEnabled(): Promise<boolean> {
-    return this.read("read", async (tx) => {
-      const [p] = await tx.select().from(notificationPrefs).where(eq(notificationPrefs.userId, this.ctx.userId)).limit(1);
-      return p?.emailDigest ?? true;
-    });
-  }
-
-  async setEmailDigest(enabled: boolean): Promise<{ emailDigest: boolean }> {
-    return this.read("read", async (tx) => {
-      await tx.insert(notificationPrefs).values({ schoolId: this.ctx.schoolId, userId: this.ctx.userId, emailDigest: enabled })
-        .onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set: { emailDigest: enabled } });
-      return { emailDigest: enabled };
     });
   }
 }

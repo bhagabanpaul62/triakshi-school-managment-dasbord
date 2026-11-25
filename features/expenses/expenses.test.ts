@@ -4,6 +4,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx
 import { addDays, todayIST } from "@smw/feature-kit/money";
 import { createSchoolPair, createTestSchool, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryStorage, useServices } from "@smw/integrations";
+import { notifications } from "@smw/feature-notifications/schema";
 import { systemAccounts } from "@smw/feature-finance/chart";
 import { balanceOf } from "@smw/feature-finance/posting";
 import { finAccounts, finApprovals, finJournalLines, finJournals, finSettings } from "@smw/feature-finance/schema";
@@ -383,6 +384,20 @@ describe("petty cash", () => {
 });
 
 describe("claims", () => {
+  it("the managers' action row closes when the claim is decided", async () => {
+    const mine = new ClaimService(a.as.teacher);
+    const claim = await mine.submit({ title: "Row closes", spentOn: today, amountPaise: 10_000, accountId: await expenseAcc(a, "5140"), payWith: "now" }, png);
+    const rows = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.subjectId, claim.id)));
+    const asked = (await rows()).filter((n) => n.topic === "work.approval");
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((n) => n.action && n.subjectType === "claim" && !n.doneAt)).toBe(true);
+    await limit(a, 1_000_000);
+    await new ClaimService(a.as.accountant).reject(claim.id, "Not allowed");
+    const after = await rows();
+    expect(after.filter((n) => n.topic === "work.approval").every((n) => n.doneAt)).toBe(true);
+    expect(after.some((n) => n.topic === "work.decision" && n.userId === a.users.teacher)).toBe(true);
+  });
+
   it("photo required; manager approves (not the claimer); posts claims_payable; pay now; salary claims are handed to payroll", async () => {
     const mine = new ClaimService(a.as.teacher);
     const input = { title: "Taxi to the board", spentOn: today, amountPaise: 80_000, accountId: await expenseAcc(a, "5140"), payWith: "salary" };

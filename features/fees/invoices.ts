@@ -7,6 +7,7 @@ import { students } from "@smw/feature-students/schema";
 import { FeesBase, asId, calcOf, invalid, newToken, type InvoiceFull } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { chargeManyInput, draftInput, bulkInput, reviseInput } from "./inputs";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { ChangeService } from "./changes";
 import { invoiceData } from "./documents";
 import { NoteService } from "./notes";
@@ -58,6 +59,7 @@ export class InvoiceService extends FeesBase {
       if (!inv) throw new NotFoundError("Invoice");
       this.assertVisible(own, inv.studentId, "Invoice");
       if (own && inv.status === "draft") throw new NotFoundError("Invoice");
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "invoice", id }, this.ctx.userId);
       const today = todayIST();
       const [notes, allocations, versions, student] = await Promise.all([
         tx.select().from(feeNotes).where(eq(feeNotes.invoiceId, id)).orderBy(asc(feeNotes.createdAt)),

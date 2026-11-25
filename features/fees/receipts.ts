@@ -12,6 +12,7 @@ import { allocatePlan, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL } from "./constants";
 import { collectInput, reversalInput } from "./inputs";
 import { feeAdvances, feeAllocations, feeCheques, feeCounters, feeInvoiceLines, feeInvoices, feeReceiptMethods, feeReceipts } from "./schema";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
 
 export type Receipt = typeof feeReceipts.$inferSelect;
 type Collect = ReturnType<typeof collectInput.parse>;
@@ -94,7 +95,7 @@ export class ReceiptService extends FeesBase {
     await this.post(tx, { date, sourceKey: `fees:receipt:${id}`, sourceType: "fee_receipt", sourceId: id, memo: `Receipt ${receipt!.number}`, lines: [...debits, ...credits] });
 
     const warnings = await this.cashWarning(tx, payer.id, date, settings.cashLimitPaise);
-    await this.tell(tx, [...new Set([payer.id, ...slices.map((s) => s.studentId)])], "Payment received", `Receipt ${receipt!.number} for ${rupees(total)}.`, `/app/fees/receipts/${id}`);
+    await this.tell(tx, [...new Set([payer.id, ...slices.map((s) => s.studentId)])], "fees.payment", "Payment received", `Receipt ${receipt!.number} for ${rupees(total)}.`, `/app/fees/receipts/${id}`, { type: "receipt", id });
     return { ...receipt!, allocatedPaise: allocated, allocations: slices, warnings };
   }
 
@@ -176,7 +177,7 @@ export class ReceiptService extends FeesBase {
     // A cheque of a reversed receipt can never be deposited or cleared.
     if (cheque) await tx.update(feeCheques).set({ status: "cancelled" }).where(eq(feeCheques.id, cheque.id));
     await tx.update(feeReceipts).set({ status: "reversed", reverseReason: reason, reversedAt: new Date() }).where(eq(feeReceipts.id, receiptId));
-    await this.tell(tx, [r!.studentId], "Receipt reversed", `Receipt ${r!.number} was reversed: ${reason}`, `/app/fees/receipts/${r!.id}`);
+    await this.tell(tx, [r!.studentId], "fees.payment", "Receipt reversed", `Receipt ${r!.number} was reversed: ${reason}`, `/app/fees/receipts/${r!.id}`, { type: "receipt", id: r!.id });
     await this.audit(tx, { action: "reverse", entity: "Receipt", entityId: r!.id, summary: `Reversed receipt ${r!.number}: ${reason}` });
   }
 
@@ -231,6 +232,7 @@ export class ReceiptService extends FeesBase {
       const [r] = await tx.select().from(feeReceipts).where(eq(feeReceipts.id, asId(id, "Receipt")));
       if (!r) throw new NotFoundError("Receipt");
       this.assertVisible(own, r.studentId, "Receipt");
+      if (!this.ctx.readOnly) await NotificationWriter.seen(tx, this.ctx.schoolId, { type: "receipt", id }, this.ctx.userId);
       const [methods, cheque, allocations, journal, by, reversal, prints] = await Promise.all([
         tx.select().from(feeReceiptMethods).where(eq(feeReceiptMethods.receiptId, id)),
         tx.select().from(feeCheques).where(eq(feeCheques.receiptId, id)),

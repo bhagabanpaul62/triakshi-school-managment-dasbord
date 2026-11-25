@@ -1,16 +1,16 @@
-import { and, desc, eq, gte, inArray, lte, ne, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, countIn, type Ctx } from "@smw/feature-kit";
-import { users, type Tx } from "@smw/db";
+import { schoolRoles, users, type Tx } from "@smw/db";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { classes, sections } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import attendanceFeature from "./feature";
-import { notice, sendMails, type AlertMail } from "./alerts";
 import { FileStore, type StoredRef, type UploadedFile } from "./files";
 import { leaveApplyInput, leaveDecisionInput, leaveEditInput, leaveReverseInput } from "./inputs";
 import { LeaveBalanceService } from "./leave-balances";
 import { workingDays } from "./leave-days";
-import { assertBalance, ensureCredit, ensureTypes, holidaySet, lockPerson, requestMonths, writeReversed, writeUsed } from "./leave-ledger";
+import { closedSet } from "./holidays";
+import { assertBalance, ensureCredit, ensureTypes, lockPerson, requestMonths, writeReversed, writeUsed } from "./leave-ledger";
 import { leaveRequests, leaveTypes, staffAttendance, studentAttendance } from "./schema";
 import { addDays, isDate, todayIST } from "./stats";
 
@@ -91,10 +91,11 @@ export class LeaveService extends SchoolService<Perm> {
       } else userId = this.ctx.userId;
 
       await this.assertNoClash(tx, { studentId, userId }, data.fromDate, data.toDate);
+      const asked = async (row: typeof leaveRequests.$inferSelect) => { await this.asked(tx, row); return row; };
       const base = { schoolId: this.ctx.schoolId, kind: studentId ? "student" as const : "staff" as const, studentId, userId, requestedBy: this.ctx.userId, reason: data.reason, fileKey: ref?.fileKey ?? null, fileName: ref?.fileName ?? null };
       if (studentId) {
         const [row] = await tx.insert(leaveRequests).values({ ...base, fromDate: data.fromDate, toDate: data.toDate }).returning();
-        return row!;
+        return asked(row!);
       }
 
       if (!data.typeId) throw new ValidationError({ typeId: "Pick a leave type" });
@@ -103,7 +104,7 @@ export class LeaveService extends SchoolService<Perm> {
       if (plan.needsFile && !ref) throw new ValidationError({ file: `${plan.type.name} leave over ${plan.type.needsFileAfterDays} days needs a note or document` });
       if (plan.unpaidDays.length === 0) {
         const [row] = await tx.insert(leaveRequests).values({ ...base, fromDate: data.fromDate, toDate: data.toDate, typeId: plan.type.id, halfDay: data.halfDay ?? null }).returning();
-        return row!;
+        return asked(row!);
       }
       // Short of balance: the person must say yes to taking the rest as unpaid, and sees the split before sending.
       const unpaid = await LeaveBalanceService.unpaidType(tx);
@@ -114,8 +115,29 @@ export class LeaveService extends SchoolService<Perm> {
       const lastPaid = plan.paidDays.at(-1), firstUnpaid = plan.unpaidDays[0]!;
       const paid = lastPaid ? (await tx.insert(leaveRequests).values({ ...base, fromDate: data.fromDate, toDate: lastPaid, typeId: plan.type.id, halfDay: data.halfDay ?? null }).returning())[0] : null;
       const [rest] = await tx.insert(leaveRequests).values({ ...base, fromDate: firstUnpaid, toDate: data.toDate, typeId: unpaid.id, halfDay: data.halfDay ?? null }).returning();
-      return paid ?? rest!;
+      return asked(paid ?? rest!);
     }, (r) => ({ action: "apply", entity: "Leave request", entityId: r.id, summary: `Leave ${r.fromDate} to ${r.toDate}` }));
+  }
+
+  /** A new request: the people who decide it are told (their desk row closes when it is decided). */
+  private async asked(tx: Tx, r: typeof leaveRequests.$inferSelect) {
+    const [who] = r.kind === "staff"
+      ? await tx.select({ name: users.name, sectionId: sql<string | null>`null` }).from(users).where(eq(users.id, r.userId!)).limit(1)
+      : await tx.select({ name: students.name, sectionId: students.sectionId }).from(students).where(eq(students.id, r.studentId!)).limit(1);
+    const teacher = who?.sectionId ? (await tx.select({ id: sections.classTeacherId }).from(sections).where(eq(sections.id, who.sectionId)).limit(1))[0]?.id : null;
+    const wide = await tx.select({ id: users.id }).from(users).leftJoin(schoolRoles, eq(schoolRoles.id, users.roleId))
+      .where(and(eq(users.status, "active"), ne(users.id, r.requestedBy), or(eq(users.role, "admin"), sql`${"attendance:manage"} = any(${schoolRoles.grants})`)));
+    const ids = new Set([...wide.map((w) => w.id), ...(r.kind === "student" && teacher && teacher !== r.requestedBy ? [teacher] : [])]);
+    await NotificationWriter.insert(tx, this.ctx.schoolId, [...ids].map((userId) => ({
+      userId, topic: "attendance.leave" as const, action: true, title: `${who?.name ?? "Someone"} asked for leave ${r.fromDate} to ${r.toDate}`,
+      body: r.reason, href: "/app/attendance/leave-requests", subject: { type: "leave", id: r.id }, groupKey: `leave:${r.id}`,
+    })));
+  }
+
+  /** A decision: the approvers' rows close, the asker is told. */
+  private async told(tx: Tx, r: typeof leaveRequests.$inferSelect, title: string, note?: string) {
+    await NotificationWriter.done(tx, this.ctx.schoolId, { type: "leave", id: r.id });
+    await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: r.requestedBy, topic: "attendance.leave", title, body: note, href: "/app/attendance/my-leave", subject: { type: "leave", id: r.id } }]);
   }
 
   /** The requester withdraws a request nobody has decided yet. */
@@ -199,7 +221,6 @@ export class LeaveService extends SchoolService<Perm> {
   async decide(input: unknown) {
     this.authorize("approve", "write");
     const data = this.parse(leaveDecisionInput, input);
-    const mails: AlertMail[] = [];
     const out = await this.write("approve", async (tx) => {
       const [r] = await tx.select().from(leaveRequests).where(eq(leaveRequests.id, data.id)).limit(1);
       if (!r) throw new NotFoundError("Leave request");
@@ -216,14 +237,9 @@ export class LeaveService extends SchoolService<Perm> {
 
       const verdict = data.decision === "approved" ? "approved" : "not approved";
       const title = `Leave ${r.fromDate} to ${r.toDate} ${verdict}`;
-      const body = data.note ? `${title}. ${data.note}` : title;
-      await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: r.requestedBy, kind: "system", title, body: data.note ?? undefined, href: "/app/attendance/my-leave" }]);
-      const [who] = await tx.select({ email: users.email }).from(users).where(eq(users.id, r.requestedBy)).limit(1);
-      const mail = notice(who?.email ?? null, title, body);
-      if (mail) mails.push(mail);
+      await this.told(tx, r, title, data.note);
       return { request: r, marked, own };
     }, (o) => ({ action: data.decision === "approved" ? "approve" : "reject", entity: "Leave request", entityId: o.request.id, summary: `${data.decision} leave ${o.request.fromDate} to ${o.request.toDate}, ${o.marked} days marked${o.own ? " (own leave, only admin)" : ""}` }));
-    await sendMails(mails);
     return { id: out.request.id, status: data.decision, marked: out.marked };
   }
 
@@ -234,7 +250,6 @@ export class LeaveService extends SchoolService<Perm> {
   async reverse(input: unknown) {
     this.authorize("approve", "write");
     const data = this.parse(leaveReverseInput, input);
-    const mails: AlertMail[] = [];
     const out = await this.write("approve", async (tx) => {
       const [r] = await tx.select().from(leaveRequests).where(eq(leaveRequests.id, data.id)).limit(1);
       if (!r) throw new NotFoundError("Leave request");
@@ -252,13 +267,9 @@ export class LeaveService extends SchoolService<Perm> {
       const days = to === "approved" ? await this.markDays(tx, r) : await this.clearDays(tx, r);
 
       const title = `Leave ${r.fromDate} to ${r.toDate} is now ${to === "approved" ? "approved" : "not approved"}`;
-      await NotificationWriter.insert(tx, this.ctx.schoolId, [{ userId: r.requestedBy, kind: "system", title, body: data.note ?? undefined, href: "/app/attendance/my-leave" }]);
-      const [who] = await tx.select({ email: users.email }).from(users).where(eq(users.id, r.requestedBy)).limit(1);
-      const mail = notice(who?.email ?? null, title, data.note ? `${title}. ${data.note}` : title);
-      if (mail) mails.push(mail);
+      await this.told(tx, r, title, data.note);
       return { request: r, from: r.status, to, days, own };
     }, (o) => ({ action: "reverse", entity: "Leave request", entityId: o.request.id, summary: `Reversed leave ${o.request.fromDate} to ${o.request.toDate}: ${o.from} to ${o.to}, ${o.days} days ${o.to === "approved" ? "marked" : "cleared"}${o.own ? " (own leave, only admin)" : ""}`, meta: { from: o.from, to: o.to } }));
-    await sendMails(mails);
     return { id: out.request.id, status: out.to, days: out.days };
   }
 
@@ -317,7 +328,8 @@ export class LeaveService extends SchoolService<Perm> {
 
   /** Mark each school day of the request as leave: skips holidays and Sundays, fills only days that are unmarked or marked absent, so present, late and half-day marks stay. */
   private async markDays(tx: Tx, r: typeof leaveRequests.$inferSelect): Promise<number> {
-    const days = workingDays(r.fromDate, r.toDate, await holidaySet(tx, r.fromDate, r.toDate));
+    const kid = r.kind === "staff" ? null : (await tx.select({ sectionId: students.sectionId, classId: students.classId }).from(students).where(eq(students.id, r.studentId!)).limit(1))[0];
+    const days = workingDays(r.fromDate, r.toDate, await closedSet(tx, r.fromDate, r.toDate, kid ? { classId: kid.classId } : { staff: true }));
     if (days.length === 0) return 0;
     const status = r.halfDay ? "half_day" as const : "leave" as const;
     const note = LEAVE_NOTE;
@@ -328,10 +340,10 @@ export class LeaveService extends SchoolService<Perm> {
         .returning({ id: staffAttendance.id });
       return done.length;
     }
-    const [s] = await tx.select({ sectionId: students.sectionId }).from(students).where(eq(students.id, r.studentId!)).limit(1);
-    if (!s?.sectionId) return 0;
-    const done = await tx.insert(studentAttendance).values(days.map((date) => ({ schoolId: this.ctx.schoolId, studentId: r.studentId!, sectionId: s.sectionId!, date, status: "leave" as const, note, markedBy: this.ctx.userId })))
-      .onConflictDoUpdate({ target: [studentAttendance.studentId, studentAttendance.date], set: { status: "leave", sectionId: s.sectionId, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${studentAttendance.status} = 'absent'` })
+    const sectionId = kid?.sectionId;
+    if (!sectionId) return 0;
+    const done = await tx.insert(studentAttendance).values(days.map((date) => ({ schoolId: this.ctx.schoolId, studentId: r.studentId!, sectionId, date, status: "leave" as const, note, markedBy: this.ctx.userId })))
+      .onConflictDoUpdate({ target: [studentAttendance.studentId, studentAttendance.date], set: { status: "leave", sectionId, note, markedBy: this.ctx.userId, updatedAt: sql`now()` }, setWhere: sql`${studentAttendance.status} = 'absent'` })
       .returning({ id: studentAttendance.id });
     return done.length;
   }

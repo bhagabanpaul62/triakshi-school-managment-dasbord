@@ -11,11 +11,12 @@ import { buildSchoolData, type Fixture } from "./test-fixture";
 import { EligibilityService } from "./eligibility";
 import { LeaveService } from "./leave-service";
 import { LeaveTypeService } from "./leave-types";
-import { HolidayService, StaffAttendanceService, StudentAttendanceService } from "./service";
+import { HolidayService } from "./holiday-service";
+import { StaffAttendanceService, StudentAttendanceService } from "./service";
 import { registerCsv, registerPdf } from "./register-export";
 import { absenceAlerts, attendanceSettings } from "./schema";
 import { addDays, todayIST } from "./stats";
-import { sendDueAlerts, sendMails } from "./alerts";
+import { sendDueAlerts } from "./alerts";
 
 let a: TestSchool, b: TestSchool;
 let fx: Fixture;
@@ -42,12 +43,11 @@ describe("absence alert", () => {
   const kid = () => fx.studentUserKid;
 
   /** What the worker does every 10 minutes, run as if `minutes` had passed. */
-  const sendAfter = async (minutes: number) => sendMails(await withSchool(a.id, (tx) => sendDueAlerts(tx, a.id, new Date(Date.now() + minutes * 60_000))));
+  const sendAfter = async (minutes: number) => withSchool(a.id, (tx) => sendDueAlerts(tx, a.id, new Date(Date.now() + minutes * 60_000)));
   const rows = () => withSchool(a.id, (tx) => tx.select().from(absenceAlerts).where(eq(absenceAlerts.studentId, kid())));
 
   it("queues one alert per student and date however often the day is saved, and sends it once after the grace window", async () => {
     const svc = new StudentAttendanceService(a.as.teacher);
-    const before = mail.sent.length;
     await svc.mark({ sectionId: fx.own, date: today, entries: [{ studentId: kid(), status: "absent" }] });
     await svc.mark({ sectionId: fx.own, date: today, entries: [{ studentId: kid(), status: "absent" }] });
     await svc.mark({ sectionId: fx.own, date: today, entries: [{ studentId: kid(), status: "late" }] });
@@ -57,7 +57,8 @@ describe("absence alert", () => {
     await sendAfter(31);
     await sendAfter(31); // a second run sends nothing more
     expect((await notes(a, a.users.student)).filter((t) => t.includes(today))).toEqual([expect.stringContaining("marked late")]);
-    expect(mail.sent.slice(before).filter((m) => m.to === `student@${a.slug}.test`)).toHaveLength(1);
+    const [n] = await withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.userId, a.users.student)));
+    expect(n).toMatchObject({ topic: "attendance.absence", subjectType: "attendance", subjectId: `${kid()}:${today}`, href: `/app/attendance?month=${today.slice(0, 7)}` });
     expect((await rows()).filter((r) => r.date === today)).toMatchObject([{ sentAt: expect.any(Date) }]);
   });
 
@@ -86,14 +87,6 @@ describe("absence alert", () => {
     await svc.mark({ sectionId: fx.own, date: day, entries: [{ studentId: kid(), status: "present" }] });
   });
 
-  it("a failing email never fails the mark or the run", async () => {
-    const day = addDays(todayIST(), -1);
-    await expect(new StudentAttendanceService(a.as.admin).mark({ sectionId: fx.own, date: day, entries: [{ studentId: kid(), status: "late" }] })).resolves.toMatchObject({ late: 1 });
-    useServices({ email: { send: async () => { throw new Error("smtp down"); } } });
-    await expect(sendAfter(31)).resolves.toBeUndefined();
-    useServices({ email: mail });
-  });
-
   it("only the admin changes the settings; school B's alerts are its own", async () => {
     await expect(new EligibilityService(a.as.teacher).updateSettings({ alertsEnabled: false, thresholdPercent: 75 })).rejects.toBeInstanceOf(ForbiddenError);
     await new EligibilityService(b.as.admin).updateSettings({ alertsEnabled: false, thresholdPercent: 60 });
@@ -108,7 +101,7 @@ describe("leave requests", () => {
   let id: string;
 
   it("a student applies; the class teacher approves; days become leave, skipping holiday, Sunday and present days", async () => {
-    await new HolidayService(a.as.admin).create({ date: d(2), name: "School day off" });
+    await new HolidayService(a.as.admin).create({ from: d(2), name: "School day off" });
     const admin = new StudentAttendanceService(a.as.admin);
     await admin.mark({ sectionId: fx.own, date: d(1), entries: [{ studentId: fx.studentUserKid, status: "present" }] }, { alerts: false });
     await admin.mark({ sectionId: fx.own, date: d(3), entries: [{ studentId: fx.studentUserKid, status: "absent" }] }, { alerts: false });
@@ -126,7 +119,6 @@ describe("leave requests", () => {
     expect(s.marks[d(2)]).toBeUndefined();
     expect(s.marks[d(6)]).toBeUndefined();
     expect((await notes(a, a.users.student)).some((t) => t.includes("approved"))).toBe(true);
-    expect(mail.sent.some((m) => m.to === `student@${a.slug}.test` && m.subject.includes("approved"))).toBe(true);
     expect((await new LeaveService(a.as.teacher).inbox("decided")).map((r) => r.id)).toContain(id);
   });
 

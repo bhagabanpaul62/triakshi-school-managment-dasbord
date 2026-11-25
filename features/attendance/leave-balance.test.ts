@@ -37,8 +37,8 @@ afterAll(closeDb);
 describe("leave arithmetic", () => {
   it("counts working days over a holiday, a Sunday and a month end", () => {
     // Thu 29 Jan 2026 to Tue 3 Feb: Friday is a holiday, Sunday 1 Feb is skipped.
-    expect(workingDays("2026-01-29", "2026-02-03", new Set(["2026-01-30"]))).toEqual(["2026-01-29", "2026-01-31", "2026-02-02", "2026-02-03"]);
-    expect(workingDays("2026-02-01", "2026-02-01", new Set())).toEqual([]);
+    expect(workingDays("2026-01-29", "2026-02-03", new Set(["2026-01-30", "2026-02-01"]))).toEqual(["2026-01-29", "2026-01-31", "2026-02-02", "2026-02-03"]);
+    expect(workingDays("2026-02-01", "2026-02-01", new Set(["2026-02-01"]))).toEqual([]);
   });
   it("finds the leave year and pro-rates joiners by month", () => {
     expect(leaveYearStart("2026-03-31", 4)).toBe("2025-04-01");

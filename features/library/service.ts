@@ -49,7 +49,7 @@ export async function settleHolds(tx: Tx, schoolId: string, bookId: string, titl
     const s = logins.find((x) => x.id === h.studentId);
     return { userId: s?.userId ?? h.userId, name: s?.name ?? staffRows.find((u) => u.id === h.userId)?.name ?? "Member" };
   });
-  await NotificationWriter.insert(tx, schoolId, targets.flatMap((t) => (t.userId ? [{ userId: t.userId, kind: "system" as const, title: `${title} is ready for you`, body: `The library is keeping a copy aside until ${readyUntil}.`, href: "/app/library" }] : [])));
+  await NotificationWriter.insert(tx, schoolId, targets.flatMap((t) => (t.userId ? [{ userId: t.userId, topic: "library.due" as const, subject: { type: "book", id: bookId }, title: `${title} is ready for you`, body: `The library is keeping a copy aside until ${readyUntil}.`, href: "/app/library" }] : [])));
   return targets.map((t) => t.name);
 }
 
