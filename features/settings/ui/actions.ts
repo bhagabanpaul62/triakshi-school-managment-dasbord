@@ -1,8 +1,8 @@
 "use server";
 
-import { ValidationError } from "@smw/feature-kit";
+import { ConflictError, ValidationError } from "@smw/feature-kit";
 import { formToObject, serviceAction } from "@smw/runtime";
-import { ExportService, SchoolProfileService, UserAdminService, type UploadFile } from "../service";
+import { SchoolProfileService, UserAdminService, type UploadFile } from "../service";
 
 /** The one place a browser `File` becomes plain data, so services never see it. */
 async function uploadFrom(fd: FormData, field: string): Promise<UploadFile> {
@@ -42,13 +42,24 @@ export async function signOutUser(fd: FormData) {
   return serviceAction(UserAdminService, (s) => s.signOutEverywhere(idOf(fd)), "Signed out everywhere");
 }
 
-// Data export
-const ticked = (fd: FormData, name: string) => fd.get(name) === "true" || fd.get(name) === "on";
-export async function exportSchoolData(fd: FormData) {
-  return serviceAction(ExportService, (s) => s.exportSchool({
-    includePayroll: ticked(fd, "includePayroll"), includePrivate: ticked(fd, "includePrivate"), reason: String(fd.get("reason") ?? ""),
-  }), "Export ready. Download it from the list.");
+// Add a login, invites, bulk, devices
+export async function addLogin(fd: FormData) {
+  return serviceAction(UserAdminService, async (s) => {
+    const r = await s.createLogin(formToObject(fd));
+    return { id: r.user.id, name: r.user.name, emailed: r.emailed, accessLink: r.accessLink };
+  });
 }
-export async function exportStudentData(fd: FormData) {
-  return serviceAction(ExportService, (s) => s.exportStudent(formToObject(fd)), "Export ready. Download it from the list.");
+/** Mails a fresh invite. When the mail cannot go, the person is told to copy an access link instead of being left with a silent failure. */
+export async function resendInvite(fd: FormData) {
+  return serviceAction(UserAdminService, async (s) => {
+    const r = await s.resendInvite(idOf(fd));
+    if (!r.emailed) throw new ConflictError("The invite could not be emailed (there may be no email on file). Copy an access link instead.");
+    return r;
+  }, "Invite emailed");
+}
+export async function bulkUsers(fd: FormData) {
+  return serviceAction(UserAdminService, (s) => s.bulk({ ids: fd.getAll("ids").map(String), action: String(fd.get("action")) }));
+}
+export async function endUserSession(fd: FormData) {
+  return serviceAction(UserAdminService, (s) => s.endSession(idOf(fd), String(fd.get("sessionId"))), "Device signed out");
 }

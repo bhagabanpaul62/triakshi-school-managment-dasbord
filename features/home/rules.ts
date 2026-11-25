@@ -63,3 +63,78 @@ export const planTone = (active: number, cap: number): "info" | "warning" | "dan
   cap > 0 && active >= cap ? "danger" : cap > 0 && active >= cap * 0.9 ? "warning" : "info";
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+// ---------- dates, change and birthdays (pure) ----------
+
+/** "YYYY-MM-DD" plus `n` days (calendar arithmetic, no time zone involved). */
+export function addDays(date: string, n: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+const weekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" });
+const dayMonth = (date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** "Monday" for a day within the week, "Monday, 30 Nov" further out. */
+export function dayWords(date: string, today: string): string {
+  const gap = (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000;
+  return gap > 0 && gap < 7 ? weekdayOf(date) : `${weekdayOf(date)}, ${dayMonth(date)}`;
+}
+
+/** The first open day after `today` among closed days `closed` (a set of "YYYY-MM-DD"), looking `horizon` days ahead; null when all are closed. */
+export function nextOpenDay(closed: ReadonlySet<string>, today: string, horizon = 30): string | null {
+  for (let i = 1; i <= horizon; i++) { const d = addDays(today, i); if (!closed.has(d)) return d; }
+  return null;
+}
+
+/** How a number moved. `tone` is about good or bad, not about up or down. */
+export interface Change { text: string; direction: "up" | "down" | "flat"; tone: "success" | "danger" | "default" }
+
+/** Percentage change of `current` against `previous` (money, counts). Null when there is nothing to compare with. `lowerIsBetter` flips the colour. */
+export function changePct(current: number, previous: number | null | undefined, lowerIsBetter = false): Change | null {
+  if (previous == null || previous <= 0) return null;
+  const pct = Math.round(((current - previous) / previous) * 100);
+  if (pct === 0) return { text: "same", direction: "flat", tone: "default" };
+  const up = pct > 0;
+  return { text: `${Math.abs(pct)}%`, direction: up ? "up" : "down", tone: up !== lowerIsBetter ? "success" : "danger" };
+}
+
+/** Change in percentage points (attendance), worked out from the two numbers as shown (whole percents), so 75 against 88 reads "13 pts". Null with nothing to compare. */
+export function changePoints(current: number, previous: number | null | undefined): Change | null {
+  if (previous == null) return null;
+  const pts = Math.round(current) - Math.round(previous);
+  if (pts === 0) return { text: "same", direction: "flat", tone: "default" };
+  return { text: `${Math.abs(pts)} ${Math.abs(pts) === 1 ? "pt" : "pts"}`, direction: pts > 0 ? "up" : "down", tone: pts > 0 ? "success" : "danger" };
+}
+
+/** Average of the same weekday over the last `weeks` weeks before `today`, from days that were marked. Null when none was. */
+export function sameWeekdayAverage(points: { date: string; pct: number }[], today: string, weeks = 4): number | null {
+  const want = new Set(Array.from({ length: weeks }, (_, i) => addDays(today, -7 * (i + 1))));
+  const hit = points.filter((p) => want.has(p.date));
+  return hit.length ? hit.reduce((s, p) => s + p.pct, 0) / hit.length : null;
+}
+
+/** Collected so far this month and over the same days of last month, from per-day totals (zero-filled or not). */
+export function monthToDate(days: { key: string; paise: number }[], today: string): { thisMonth: number; lastMonthSame: number } {
+  const month = today.slice(0, 7), dd = today.slice(8, 10);
+  const last = addDays(`${month}-01`, -1).slice(0, 7);
+  let thisMonth = 0, lastMonthSame = 0;
+  for (const d of days) {
+    if (d.key.startsWith(month) && d.key <= today) thisMonth += d.paise;
+    else if (d.key.startsWith(last) && d.key.slice(8, 10) <= dd) lastMonthSame += d.paise;
+  }
+  return { thisMonth, lastMonthSame };
+}
+
+/** "MM-DD" of a day, the key birthdays match on. */
+export const monthDayOf = (date: string) => date.slice(5, 10);
+
+/** Whole years on `today` for someone born on `dob`. */
+export function ageOn(dob: string, today: string): number {
+  const years = Number(today.slice(0, 4)) - Number(dob.slice(0, 4));
+  return monthDayOf(today) < monthDayOf(dob) ? years - 1 : years;
+}
+
+/** The receipt register for a span of days, the same rule as the money cards (live receipts, new money): the number and its list agree. */
+export const receiptsHref = (from: string, to: string) => `/app/fees/receipts?period=custom&from=${from}&to=${to}`;

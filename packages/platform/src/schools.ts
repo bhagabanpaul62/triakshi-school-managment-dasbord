@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, count, desc, eq, ilike, oneTimeTokens, or, plans, schoolDomains, schoolModuleOverrides, modules, invoices, schools, supportTickets, users, sql, SCHOOL_STATUSES as ALL_STATUSES, type SchoolStatus, type Tx } from "@smw/db";
+import { and, count, desc, eq, ilike, lt, platformAuditLogs, oneTimeTokens, or, plans, schoolDomains, schoolSetupStatus, schoolModuleOverrides, modules, invoices, schools, supportTickets, users, sql, SCHOOL_STATUSES as ALL_STATUSES, type SchoolStatus, type Tx } from "@smw/db";
 import { Tokens } from "@smw/auth";
 import { createSchool } from "@smw/onboarding";
 import { ConflictError, NotFoundError, listQuerySchema, toPage, PlatformService, type ListQuery, type Page } from "@smw/feature-kit";
@@ -34,7 +34,14 @@ export async function createSchoolRecord(tx: Tx, input: CreateSchoolInput): Prom
   return { schoolId: r.schoolId, slug: r.slug, adminUserId: r.adminUserId, inviteToken };
 }
 
-export type SchoolRow = { id: string; slug: string; name: string; status: SchoolStatus; city: string | null; state: string | null; planName: string | null; planKey: string | null; studentCap: number; studentCount: number; trialEndsAt: Date | null; createdAt: Date };
+/** When the school's clock started: the owner's approval for a self-serve signup, else the day it was created (a school made by sales starts in trial). */
+export const setupStartSql = sql<Date>`coalesce((select max(${platformAuditLogs.createdAt}) from ${platformAuditLogs} where ${platformAuditLogs.schoolId} = ${schools.id} and ${platformAuditLogs.action} = 'school.approve'), ${schools.createdAt})`;
+
+/** A school is stuck when its nightly picture says under half done, 5 days or more after it started (approval, not signup). */
+export const STUCK_PERCENT = 50;
+export const STUCK_DAYS = 5;
+
+export type SchoolRow = { id: string; slug: string; name: string; status: SchoolStatus; city: string | null; state: string | null; planName: string | null; planKey: string | null; studentCap: number; studentCount: number; trialEndsAt: Date | null; createdAt: Date; setupPercent: number | null; setupNext: string | null; stuck: boolean };
 
 /** Schools across the platform: search, filter, detail and every lifecycle action. Each change writes the platform audit log. */
 export class SchoolAdminService extends PlatformService {
@@ -46,16 +53,18 @@ export class SchoolAdminService extends PlatformService {
       q.q ? or(ilike(schools.name, `%${q.q}%`), ilike(schools.slug, `%${q.q}%`), ilike(schools.city, `%${q.q}%`)) : undefined,
       status ? eq(schools.status, status) : undefined,
       q.filters.plan ? eq(plans.key, q.filters.plan) : undefined,
+      q.filters.stuck === "1" ? and(lt(schoolSetupStatus.percent, STUCK_PERCENT), sql`${setupStartSql} < ${new Date(Date.now() - STUCK_DAYS * DAY).toISOString()}::timestamptz`, or(eq(schools.status, "active"), eq(schools.status, "trial"))) : undefined,
     );
     return this.tx(async (tx) => {
       const [rows, total] = await Promise.all([
         tx.select({
           id: schools.id, slug: schools.slug, name: schools.name, status: schools.status, city: schools.city, state: schools.state,
           planName: plans.name, planKey: plans.key, studentCap: schools.studentCap, studentCount: studentCountSql,
-          trialEndsAt: schools.trialEndsAt, createdAt: schools.createdAt,
-        }).from(schools).leftJoin(plans, eq(plans.id, schools.planId)).where(where)
+          trialEndsAt: schools.trialEndsAt, createdAt: schools.createdAt, setupPercent: schoolSetupStatus.percent, setupNext: schoolSetupStatus.nextLabel,
+          stuck: sql<boolean>`coalesce(${schoolSetupStatus.percent} < ${STUCK_PERCENT} and ${setupStartSql} < now() - ${STUCK_DAYS}::int * interval '1 day' and ${schools.status} in ('active', 'trial'), false)`,
+        }).from(schools).leftJoin(plans, eq(plans.id, schools.planId)).leftJoin(schoolSetupStatus, eq(schoolSetupStatus.schoolId, schools.id)).where(where)
           .orderBy(desc(schools.createdAt), schools.id).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
-        tx.select({ n: count() }).from(schools).leftJoin(plans, eq(plans.id, schools.planId)).where(where),
+        tx.select({ n: count() }).from(schools).leftJoin(plans, eq(plans.id, schools.planId)).leftJoin(schoolSetupStatus, eq(schoolSetupStatus.schoolId, schools.id)).where(where),
       ]);
       return toPage(rows, Number(total[0]?.n ?? 0), q);
     });

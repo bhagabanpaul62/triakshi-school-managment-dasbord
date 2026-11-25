@@ -11,6 +11,7 @@ export default defineFeature({
     manage: ["admin"],
     audit: ["admin"],
     export: ["admin"],
+    privacy: ["admin"],
   },
   menu: [
     { label: "Settings", href: "/app/settings", icon: "settings", permission: "manage", group: "admin", order: 10 },

@@ -19,7 +19,9 @@ export default async function SupportLoginPage({ searchParams }: { searchParams:
         {bad ? (
           <>
             <p role="alert" className="mt-4 text-sm text-[var(--ds-on-surface-variant)]">
-              This link has expired or was already used. Ask the person who sent it to make a new one in the console. Links work once and only for five minutes.
+              {failed === "refused"
+                ? "This school has asked that Triakshi does not sign in right now, so the link did not work. Ask the school's administrator to allow it in Settings, then make a new link."
+                : "This link has expired or was already used. Ask the person who sent it to make a new one in the console. Links work once and only for five minutes."}
             </p>
             <a href="/login" className="mt-6 inline-flex h-11 items-center rounded-full bg-white/[0.07] px-5 text-sm">Go to sign-in</a>
           </>

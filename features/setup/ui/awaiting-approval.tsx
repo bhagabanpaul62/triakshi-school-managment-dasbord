@@ -31,7 +31,7 @@ export function AwaitingApproval({ schoolName, status, email, supportEmail = SUP
         </h1>
         {rejected ? (
           <p className="mt-2 text-sm text-[var(--ds-on-surface-variant)]">
-            This usually means a detail did not match, or something was missing. Write to <a href={`mailto:${supportEmail}`} className="text-[var(--ds-primary)] underline">{supportEmail}</a> with
+            This usually means a detail did not match, or something was missing. Write to <a href={`mailto:${supportEmail}`} className="text-[var(--ds-primary-text)] underline">{supportEmail}</a> with
             your school name and we will look at it again. Nothing you entered has been lost.
           </p>
         ) : (

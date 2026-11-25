@@ -8,7 +8,6 @@
     "./schema": "./schema.ts",
     "./service": "./service.ts",
     "./resend": "./resend.ts",
-    "./seed": "./seed.ts",
     "./jobs": "./jobs.ts",
     "./ui/*": "./ui/*.tsx",
     "./*": "./*.ts"
@@ -39,7 +38,8 @@
     "@smw/feature-billing": "workspace:*",
     "@smw/feature-settings": "workspace:*",
     "@smw/feature-website": "workspace:*",
-    "@smw/feature-support": "workspace:*"
+    "@smw/feature-support": "workspace:*",
+    "@smw/feature-fees": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

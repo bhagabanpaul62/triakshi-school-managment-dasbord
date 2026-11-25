@@ -14,12 +14,14 @@ export default defineFeature({
   permissions: {
     read: ["admin"],
     manage: ["admin"],
+    publish: ["admin"],
     enquiries: ["admin", "accountant"],
+    pipeline: ["admin"],
     public: ["admin"],
   },
   menu: [
-    { label: "Website", href: "/app/website", icon: "web", permission: "read", group: "website", order: 10 },
-    { label: "Theme", href: "/app/theme", icon: "palette", permission: "read", group: "website", order: 20 },
-    { label: "Enquiries", href: "/app/enquiries", icon: "inbox", permission: "enquiries", group: "website", order: 30 },
+    { label: "Website", href: "/app/website", icon: "web", permission: "read", also: ["manage", "publish"], group: "website", order: 10 },
+    { label: "Enquiries", href: "/app/enquiries", icon: "inbox", permission: "enquiries", group: "website", order: 20 },
+    { label: "Theme", href: "/app/theme", icon: "palette", permission: "manage", group: "website", order: 40 },
   ],
 });

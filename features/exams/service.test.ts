@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, closeDb, eq, sql, withSchool } from "@smw/db";
 import { notifications } from "@smw/feature-notifications/schema";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classSubjects, classes, sectionTeachers, sections, subjects, terms } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
+import { ExamRepo } from "./repo";
 import { ExamService, GradeScaleService, MarksService, ReportCardService, ResultService } from "./service";
 
 let a: TestSchool, b: TestSchool;
@@ -386,5 +387,41 @@ describe("homework marks for internal assessment", () => {
     expect(got[fa.s1]!.pct).toBeCloseTo(20 / 30);
     expect(await new MarksService(withHw(a.as.teacher)).homeworkMarks(maths.id)).toHaveProperty(fa.s1); // teacher of Maths in A
     expect(await new MarksService(a.as.admin).homeworkMarks(maths.id)).toEqual({}); // Assignments module off
+  });
+});
+
+describe("pendingPapers (home: one batch instead of one detail per exam)", () => {
+  const viaDetail = async (ctx: typeof a.as.admin) => {
+    const svc = new ExamService(ctx);
+    const open = await svc.list({ filters: { status: "marks_open" }, pageSize: 100 });
+    const details = await Promise.all(open.rows.map((e) => svc.detail(e.id)));
+    return details.flatMap((d) => d.papers.filter((p) => p.students > 0 && p.entered < p.students).map((p) => ({ examId: d.exam.id, id: p.id, canEnter: p.canEnter, students: p.students, entered: p.entered })));
+  };
+  const key = (r: { examId: string; id: string }) => `${r.examId}:${r.id}`;
+
+  it("gives the same papers, counts and canEnter as asking every exam by itself, for the admin and for a teacher", async () => {
+    const one = await openExam("Pending one"), two = await openExam("Pending two");
+    await new MarksService(a.as.admin).save({ paperId: one.maths.id, entries: entries([[fa.s1, 50], [fa.s2, 40], [fa.s3, 30], [fa.s4, 20]]) });
+    for (const ctx of [a.as.admin, a.as.teacher]) {
+      const got = (await new ExamService(ctx).pendingPapers()).map((p) => ({ examId: p.examId, id: p.id, canEnter: p.canEnter, students: p.students, entered: p.entered }));
+      const want = await viaDetail(ctx);
+      expect(got.map(key).sort()).toEqual(want.map(key).sort());
+      for (const w of want) expect(got.find((g) => key(g) === key(w))).toEqual(w);
+    }
+    const all = await new ExamService(a.as.admin).pendingPapers();
+    expect(all.find((p) => p.id === one.maths.id)).toBeUndefined(); // every student has a mark
+    expect(all.find((p) => p.id === two.maths.id)).toMatchObject({ students: 4, entered: 0, canEnter: true });
+    const mine = await new ExamService(a.as.teacher).pendingPapers();
+    expect(mine.filter((p) => p.canEnter).every((p) => p.subjectName === "Maths")).toBe(true);
+  });
+
+  it("does not walk the exams one by one, and is isolated to the school", async () => {
+    const detail = vi.spyOn(ExamService.prototype, "detail");
+    const progress = vi.spyOn(ExamRepo, "progress");
+    await new ExamService(a.as.admin).pendingPapers();
+    expect(detail).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    expect(await new ExamService(b.as.admin).pendingPapers()).toEqual([]);
   });
 });

@@ -37,7 +37,7 @@ const open = (page: Page, path: string) => page.goto(`${SCHOOL(SLUG)}${path}`, {
 /** A seeded value straight from the local database (read-only), or null when it is not reachable. */
 function sql(query: string): string | null {
   try {
-    return execFileSync("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", "smw", "-Atc", query], { env: { ...process.env, PGPASSWORD: "postgres" }, timeout: 60_000 }).toString().trim() || null;
+    return execFileSync("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", process.env.E2E_DB ?? "smw", "-Atc", query], { env: { ...process.env, PGPASSWORD: "postgres" }, timeout: 60_000 }).toString().trim() || null;
   } catch { return null; }
 }
 

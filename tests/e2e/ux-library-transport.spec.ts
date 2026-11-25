@@ -136,7 +136,7 @@ test("admin sees transport occupancy, route page and the route PDF", async ({ pa
 
 // No parent logins: the student's own login shows their bus, stop and times.
 test("student sees their bus, stop and times on a phone", async ({ page }) => {
-  const psql = (q: string) => execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tAc "${q}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
+  const psql = (q: string) => execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d ${process.env.E2E_DB ?? "smw"} -tAc "${q}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
   const row = psql("select s.admission_no || '|' || to_char(s.dob,'DDMMYYYY') from student_transport t join students s on s.id=t.student_id join schools sc on sc.id=s.school_id where sc.slug='greenvalley' and s.dob is not null order by s.admission_no limit 1");
   test.skip(!row, "no student on a seeded route");
   const [no, dob] = row.split("|");

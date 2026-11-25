@@ -314,6 +314,9 @@ describe("reading and marks (M7, M15, acceptance 13, 15)", () => {
   });
 
   it("Seen: the sender sees Delivered then Seen; a school switch hides staff Seen from families", async () => {
+    // Quiet hours hold "seen" until the morning: keep them far from now, whatever the clock says when the tests run.
+    const ist = (h: number) => new Date(Date.now() + 330 * 60_000 + h * 3_600_000).toISOString().slice(11, 16);
+    await new CommSettingsService(w.a.as.admin).save({ quietFrom: ist(10), quietTo: ist(12), quietSundays: false });
     const { id } = await svc(w.own).start(about(w.st1, { subject: "Seen" }));
     const mine = async () => (await svc(w.own).thread(id)).messages.find((m) => m.mine)!;
     expect((await mine()).seen).toMatchObject({ by: 0, of: 1 });
@@ -326,7 +329,7 @@ describe("reading and marks (M7, M15, acceptance 13, 15)", () => {
       await svc(w.own).send(id, "second");
       expect((await svc(w.a.as.student).thread(id)).messages.every((m) => !m.seen)).toBe(true);
       expect((await svc(w.own).thread(id)).messages.find((m) => m.mine && m.body === "second")!.seen).toMatchObject({ of: 1 });
-    } finally { await settings.save({ showStaffSeen: true }); }
+    } finally { await settings.save({ showStaffSeen: true, quietFrom: "20:00", quietTo: "07:00", quietSundays: true }); }
   });
 });
 

@@ -242,6 +242,44 @@ export class ExamService extends CrudService<typeof exams, Perm> {
     });
   }
 
+  /**
+   * Papers of every exam open for marks that still miss marks, in one pass (home asked `detail` once per exam). The number of
+   * queries depends on the years involved, not on the exams. A paper is `canEnter` for the admin, the exam manager, and a teacher who teaches that class and subject.
+   */
+  async pendingPapers(limit = 20): Promise<(PaperProgress & { examId: string; examName: string; canEnter: boolean })[]> {
+    return this.read("read", async (tx) => {
+      const open = await tx.select().from(exams).where(eq(exams.status, "marks_open")).orderBy(desc(exams.startsOn), asc(exams.id)).limit(limit);
+      if (!open.length) return [];
+      const papers = await tx.select({
+        examId: examPapers.examId, id: examPapers.id, classId: examPapers.classId, className: classes.name, grade: classes.grade, subjectId: examPapers.subjectId,
+        subjectName: subjects.name, date: examPapers.date, maxMarks: examPapers.maxMarks, passMarks: examPapers.passMarks, startTime: examPapers.startTime, endTime: examPapers.endTime,
+      }).from(examPapers)
+        .innerJoin(classes, eq(classes.id, examPapers.classId))
+        .innerJoin(subjects, eq(subjects.id, examPapers.subjectId))
+        .where(inArray(examPapers.examId, open.map((e) => e.id)))
+        .orderBy(asc(classes.grade), asc(classes.name), asc(examPapers.date), asc(subjects.name));
+      if (!papers.length) return [];
+      const years = [...new Set(open.map((e) => e.yearId))], classIds = [...new Set(papers.map((p) => p.classId))];
+      const everything = this.ctx.role === "admin" || this.can("manage");
+      const [roster, entered, takers, slots] = await Promise.all([
+        tx.select({ yearId: sections.yearId, classId: sections.classId, n: count() }).from(students).innerJoin(sections, eq(sections.id, students.sectionId))
+          .where(and(inArray(sections.classId, classIds), inArray(sections.yearId, years), eq(students.status, "active"))).groupBy(sections.yearId, sections.classId),
+        tx.select({ paperId: marks.paperId, n: count() }).from(marks).where(inArray(marks.paperId, papers.map((p) => p.id))).groupBy(marks.paperId),
+        Promise.all(years.map(async (y) => [y, await ExamRepo.electiveTakers(tx, y, classIds)] as const)),
+        everything ? Promise.resolve(null) : Promise.all(years.map(async (y) => [y, await ExamRepo.teacherSlots(tx, this.ctx.userId, y)] as const)),
+      ]);
+      const size = new Map(roster.map((r) => [`${r.yearId}:${r.classId}`, Number(r.n)])), done = new Map(entered.map((r) => [r.paperId, Number(r.n)]));
+      const takersOf = new Map(takers), slotsOf = slots && new Map(slots), yearOf = new Map(open.map((e) => [e.id, e.yearId])), nameOf = new Map(open.map((e) => [e.id, e.name]));
+      return papers.map((p) => {
+        const y = yearOf.get(p.examId)!;
+        return {
+          ...p, examName: nameOf.get(p.examId)!, canEnter: slotsOf === null || (slotsOf.get(y)?.has(`${p.classId}:${p.subjectId}`) ?? false),
+          students: takersOf.get(y)?.get(`${p.classId}:${p.subjectId}`)?.size ?? size.get(`${y}:${p.classId}`) ?? 0, entered: done.get(p.id) ?? 0,
+        };
+      }).filter((p) => p.students > 0 && p.entered < p.students);
+    });
+  }
+
   /** Choices for the create-exam form. */
   async formOptions() {
     return this.read("read", async (tx) => {

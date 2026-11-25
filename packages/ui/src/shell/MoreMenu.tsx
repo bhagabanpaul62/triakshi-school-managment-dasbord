@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown, IconDots } from "@tabler/icons-react";
 import { cn } from "../lib/utils";
 import { FOCUS, PILL_BTN, PRIMARY_BTN } from "../components/finance/ui";
 
@@ -26,7 +26,7 @@ export function MenuItem({ tone, className, ...rest }: ButtonHTMLAttributes<HTML
  * puts focus back on the button, a click outside or leaving with Tab closes it. The items stay mounted while shut, so a dialog an item opened
  * is not lost when the menu closes. Plain buttons placed inside (a FormModal trigger) fill the row.
  */
-export function MoreMenu({ children, label = "More", icon, primary = false, align = "right" }: { children: ReactNode; label?: string; icon?: ReactNode; primary?: boolean; align?: "left" | "right" }) {
+export function MoreMenu({ children, label = "More", icon, primary = false, align = "right", iconOnly = false }: { children: ReactNode; label?: string; icon?: ReactNode; primary?: boolean; align?: "left" | "right"; iconOnly?: boolean }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -51,8 +51,9 @@ export function MoreMenu({ children, label = "More", icon, primary = false, alig
   };
   return (
     <div ref={box} className="relative" onKeyDown={keys} onBlur={(e) => { if (open && !box.current?.contains(e.relatedTarget as Node | null) && e.relatedTarget) setOpen(false); }}>
-      <button ref={trigger} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} className={primary ? PRIMARY_BTN : PILL_BTN}>
-        {icon}{label}<IconChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} aria-hidden />
+      <button ref={trigger} type="button" aria-haspopup="menu" aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)} aria-label={iconOnly ? label : undefined} title={iconOnly ? label : undefined}
+        className={iconOnly ? cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--ds-on-surface-variant)] hover:bg-white/[0.08]", FOCUS) : primary ? PRIMARY_BTN : PILL_BTN}>
+        {iconOnly ? <IconDots className="h-5 w-5" aria-hidden /> : <>{icon}{label}<IconChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} aria-hidden /></>}
       </button>
       <div id={id} ref={panel} role="menu" onClick={() => setOpen(false)}
         className={cn("absolute z-30 mt-2 max-h-96 w-64 max-w-[calc(100vw-2rem)] flex-col gap-0.5 overflow-y-auto rounded-2xl bg-[var(--ds-surface-container-highest)] p-1.5 shadow-lg [&_button]:w-full [&_button]:justify-start", align === "right" ? "right-0" : "left-0", open ? "flex" : "hidden")}>

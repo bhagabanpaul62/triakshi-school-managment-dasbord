@@ -8,3 +8,8 @@ export * from "./editor";
 export * from "./ops";
 export * from "./pages";
 export * from "./starters";
+export * from "./disclosure";
+export * from "./settings";
+export * from "./site-utils";
+export * from "./consent";
+export * from "./phone";

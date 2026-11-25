@@ -14,7 +14,7 @@ import { FOCUS, PILL_BTN, PRIMARY_BTN } from "./styles";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { relative } from "@smw/ui/format";
 import { cn } from "@smw/ui/utils";
-import { INPUT } from "@smw/ui/shell/FormModal";
+import { INPUT } from "@smw/ui/tone";
 import { isFamily } from "../core";
 import { MessageService, type InboxQuery, type InboxThread } from "../service";
 import { NoSupport, UnreadFallback } from "./empty";

@@ -60,13 +60,10 @@ test("admin: raise a support ticket and see the thread", async ({ page }) => {
   await page.goto(`${SCHOOL("greenvalley")}/app/support`, { timeout: 150_000, waitUntil: "domcontentloaded" });
   await expectHealthy(page);
   await shoot(page, "support-list");
-  // dev compile can swallow the first click before hydration, so retry until the form opens
-  await expect(async () => {
-    await page.getByRole("button", { name: /new ticket/i }).first().click({ timeout: 5000 });
-    await expect(page.getByLabel(/what is this about/i)).toBeVisible({ timeout: 3000 });
-  }).toPass({ timeout: 120_000 });
+  await page.getByRole("link", { name: "New ticket" }).first().click();
+  await page.waitForURL(/\/app\/support\/new/);
   const subject = `UX check ${Date.now()}`;
-  await page.getByLabel(/what is this about/i).fill(subject);
+  await page.getByLabel("Subject").fill(subject);
   await page.getByLabel(/tell us more/i).fill("Checking that the ticket journey works end to end.");
   await shoot(page, "support-new");
   await page.getByRole("button", { name: /^send/i }).click();

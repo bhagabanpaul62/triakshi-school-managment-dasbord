@@ -11,6 +11,12 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Use a colour like #1E66F5");
 export const FONTS = ["Inter", "Poppins", "Merriweather", "Nunito", "Playfair Display", "Source Sans 3"] as const;
 export const RADII = { none: "0px", sm: "6px", md: "12px", lg: "20px" } as const;
 
+/** A logo or icon: a secure link, or a file this school uploaded. Never `javascript:` or another scheme. */
+export const SAFE_IMAGE = /^(https:\/\/[^\s"'<>]+|\/api\/files\/[^\s"'<>\\]+)$/i;
+/** The address when it is allowed, else null: for a stored logo column that may hold an older value. */
+export const safeImage = (v: string | null | undefined): string | null => (v && SAFE_IMAGE.test(v.trim()) ? v.trim() : null);
+const imageUrl = z.string().trim().max(500).regex(SAFE_IMAGE, "Upload a picture, or use a full link starting with https://").nullish();
+
 export const themeSchema = z.object({
   preset: z.string().default("ocean"),
   colors: z.object({
@@ -21,8 +27,8 @@ export const themeSchema = z.object({
   }),
   radius: z.enum(["none", "sm", "md", "lg"]).default("md"),
   font: z.enum(FONTS).default("Inter"),
-  logoUrl: z.string().url().nullish(),
-  faviconUrl: z.string().url().nullish(),
+  logoUrl: imageUrl,
+  faviconUrl: imageUrl,
 });
 export type Theme = z.infer<typeof themeSchema>;
 
@@ -83,10 +89,19 @@ export function checkContrast(t: Theme): ContrastIssue[] {
   return pairs.map(([pair, a, b, min]) => ({ pair, ratio: Math.round(contrast(a, b) * 100) / 100, min })).filter((p) => p.ratio < p.min);
 }
 
-/** Parse a stored theme, falling back to the default for anything missing or invalid. */
+/**
+ * Parse a stored theme, falling back to the default for anything missing or invalid. A logo or icon address that is no longer
+ * allowed (an old `http:` or `javascript:` link) is dropped on its own: the school keeps its colours and font.
+ */
 export function themeOf(stored: unknown): Theme {
   const r = themeSchema.safeParse(stored);
-  return r.success ? r.data : DEFAULT_THEME;
+  if (r.success) return r.data;
+  if (stored && typeof stored === "object") {
+    const clean = Object.fromEntries(Object.entries(stored).map(([k, v]) => [k, (k === "logoUrl" || k === "faviconUrl") && !(typeof v === "string" && SAFE_IMAGE.test(v.trim())) ? null : v]));
+    const again = themeSchema.safeParse(clean);
+    if (again.success) return again.data;
+  }
+  return DEFAULT_THEME;
 }
 
 /** First ramp step that reaches 4.5:1 against `bg` (or, with `on`, as a fill under `on` text); `last` is the fallback. */
@@ -109,10 +124,42 @@ export function panelCss(t: Theme): string {
   return `:root{${vars}--ds-primary:${fill};--ds-primary-text:${text};--ds-primary-container:${r[800]};--school-radius:${RADII[t.radius]};}`;
 }
 
+/** The black or white that reads best on `bg`. */
+const bestOn = (bg: string) => (contrast("#FFFFFF", bg) >= contrast("#000000", bg) ? "#FFFFFF" : "#000000");
+
+/**
+ * `color` itself when it reads at `min` (4.5 = WCAG AA body text) against every colour in `bgs`, else the nearest shade of it,
+ * moved toward black on light backgrounds or toward white on dark ones, that does. Pure; works for any saved colours.
+ */
+export function readable(color: string, bgs: string[], min = 4.5): string {
+  const ok = (c: string) => bgs.every((b) => contrast(c, b) >= min);
+  if (ok(color)) return color;
+  const to = bgs.reduce((n, b) => n + luminance(b), 0) / bgs.length > 0.18 ? "#000000" : "#FFFFFF";
+  for (let i = 1; i <= 20; i++) { const c = toHex(mix(toRgb(color), toRgb(to), i / 20)); if (ok(c)) return c; }
+  return to;
+}
+
+/** AA-safe colours for the public site, derived from a theme. The school colour stays the brand colour where it only decorates. */
+export function siteRoles(t: Theme) {
+  const c = t.colors;
+  const grounds = [c.background, c.surface, c.primaryLight, c.secondaryLight, c.accentLight];
+  const onPrimary = luminance(c.primary) > 0.4 ? "#111111" : "#FFFFFF";
+  const mixed = (a: string, b: string, p: number) => toHex(mix(toRgb(a), toRgb(b), p));
+  const fill = readable(c.primary, [onPrimary]);
+  const deep = readable(mixed(fill, "#000000", 0.2), ["#FFFFFF"], 6);
+  return {
+    text: readable(c.text, grounds), mutedText: readable(c.mutedText, grounds),
+    primaryText: readable(c.primary, grounds), fill, onPrimary, deep,
+    dark: readable(mixed(c.text, c.primary, 0.1), ["#FFFFFF"], 6),
+    onAccent: bestOn(c.accent),
+  };
+}
+
 /** CSS variables for the light public website and emails. */
 export function siteCss(t: Theme): string {
-  const c = t.colors;
+  const c = t.colors, r = siteRoles(t);
   const kebab = (k: string) => k.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
-  const vars = Object.entries(c).map(([k, v]) => `--site-${kebab(k)}:${v};`).join("");
-  return `:root{${vars}--site-radius:${RADII[t.radius]};--site-font:'${t.font}',system-ui,sans-serif;}`;
+  const vars = Object.entries({ ...c, text: r.text, mutedText: r.mutedText }).map(([k, v]) => `--site-${kebab(k)}:${v};`).join("");
+  const roles = `--site-primary-text:${r.primaryText};--site-fill:${r.fill};--site-on-primary:${r.onPrimary};--site-deep:${r.deep};--site-dark:${r.dark};--site-on-accent:${r.onAccent};`;
+  return `:root{${vars}${roles}--site-radius:${RADII[t.radius]};--site-font:'${t.font}',system-ui,sans-serif;}`;
 }

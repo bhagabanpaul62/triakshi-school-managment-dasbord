@@ -110,11 +110,11 @@ async function release(rows: Delivery[], err: unknown, now: Date, out: DigestRes
   }
 }
 
-function compose(school: { name: string; slug: string }, lines: Line[], unsubscribe: string | null) {
+function compose(school: { name: string; slug: string; origin?: string }, lines: Line[], unsubscribe: string | null) {
   const many = new Set(lines.map((l) => l.row.userId)).size > 1;
   const byGroup = new Map<TopicGroup, Line[]>();
   for (const l of lines) byGroup.set(topicOf(l.note.topic).group, [...(byGroup.get(topicOf(l.note.topic).group) ?? []), l]);
-  const open = schoolUrl(school.slug, "/app/notifications");
+  const open = `${school.origin ?? schoolUrl(school.slug)}/app/notifications`;
   const sections = [...byGroup].map(([group, ls]) => {
     ls.sort((a, b) => b.note.createdAt.getTime() - a.note.createdAt.getTime());
     const shown = ls.slice(0, MAX_LINES), more = ls.length - shown.length;

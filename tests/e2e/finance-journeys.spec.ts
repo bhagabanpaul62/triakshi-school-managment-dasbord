@@ -451,7 +451,7 @@ test("J1 first day: nothing is set up; the checklist leads, step by step, to the
   const river = (p: string) => `${SCHOOL("riverside")}/app/${p}`;
   await login(admin, "riverside", "admin");
   // Classes and a student come from the People and Academics modules, which have their own tests.
-  const db = (q: string) => execSync("psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tA", { input: q, env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
+  const db = (q: string) => execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d ${process.env.E2E_DB ?? "smw"} -tA`, { input: q, env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
   db(`with s as (select id from schools where slug='riverside'),
     y as (insert into academic_years(id,school_id,name,starts_on,ends_on,is_current) select gen_random_uuid(), id, '2026-27','2026-04-01','2027-03-31',true from s where not exists (select 1 from academic_years a where a.school_id=s.id) returning id, school_id),
     c as (insert into classes(id,school_id,name,grade) select gen_random_uuid(), school_id, 'Class 1', 1 from y returning id, school_id)

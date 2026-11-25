@@ -1,23 +1,21 @@
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { BigStat } from "@smw/ui/kit/BigStat";
 import { Fact, FactList } from "@smw/ui/kit/FactList";
 import { ArrowButton } from "@smw/ui/kit/Panel";
 import { SegmentedGauge } from "@smw/ui/kit/SegmentedGauge";
+import { SummaryRows } from "@smw/ui/kit/SummaryRows";
 import { TickBar } from "@smw/ui/kit/TickBar";
 import { EntityList, ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { paise, relative, shortDate } from "@smw/ui/format";
 import type { SchoolEvent } from "@smw/feature-events/service";
 import type { DueRow } from "@smw/feature-fees/service";
 import { attendanceTone, clock12 } from "../rules";
-import type { ActionItem, AssignmentsDue, AttendanceMonth, HomeNotice, LatestResult, MeetingSlotToday, RequestsSummary, TodayTimetable } from "../home-service";
+import type { ActionItem, AssignmentsDue, AttendanceMonth, DayOff, HomeNotice, LatestResult, MeetingSlotToday, RequestsSummary, TodayTimetable } from "../home-service";
 
 const LINK = "text-sm text-[var(--ds-color-primary-300)] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]";
 
-/** A quiet text link under an empty state: the "what do I do next" of that panel. */
-export function NextStep({ href, children }: { href: string; children: ReactNode }) {
-  return <Link href={href} className={`mx-auto mb-2 ${LINK}`}>{children}</Link>;
-}
+/** "Sunday. Next school day: Monday." */
+export const dayOffWords = (d: DayOff) => `${d.name}.${d.next ? ` Next school day: ${d.next}.` : ""}`;
 
 /** The round arrow in a panel's corner that leads to the full page. */
 export const open = (href: string, label: string) => <ArrowButton href={href} label={label} />;
@@ -48,19 +46,15 @@ export function NeedsActionBody({ rows }: { rows: ActionItem[] }) {
   );
 }
 
-/** What the office has on its desk: mine, not taken by anyone, late. */
+/** What the office has on its desk: mine, not taken by anyone, late. One number per row; the tone sits on the number. */
 export function RequestsBody({ r }: { r: RequestsSummary }) {
-  if (!r.mine && !r.unassigned && !r.overdue) return <><WidgetEmptyState title="No requests waiting." description="Families' requests show here as they arrive." /><NextStep href="/app/requests">Open requests</NextStep></>;
+  const v = (n: number, tone: "info" | "danger") => ({ value: String(n), tone: n ? tone : undefined });
   return (
-    <EntityList
-      maxItems={3}
-      empty={{ title: "", description: "" }}
-      items={[
-        { id: "mine", title: "Waiting for me", meta: String(r.mine), href: "/app/requests?view=mine" },
-        { id: "unassigned", title: "Nobody has taken them", meta: String(r.unassigned), href: "/app/requests?view=unassigned", badge: r.unassigned ? <ToneBadge label="Take one" tone="info" /> : undefined },
-        { id: "overdue", title: "Late", meta: String(r.overdue), href: "/app/requests?view=overdue", badge: r.overdue ? <ToneBadge label="Late" tone="danger" /> : undefined },
-      ]}
-    />
+    <SummaryRows rows={[
+      { key: "mine", label: "Waiting for me", href: "/app/requests?view=mine", value: String(r.mine) },
+      { key: "unassigned", label: "Nobody has taken them", href: "/app/requests?view=unassigned", ...v(r.unassigned, "info") },
+      { key: "overdue", label: "Late", href: "/app/requests?view=overdue", ...v(r.overdue, "danger") },
+    ]} />
   );
 }
 
@@ -94,7 +88,7 @@ export function EventsBody({ rows }: { rows: SchoolEvent[] }) {
 // ---------- timetable ----------
 
 export function TimetableBody({ t, emptyHint }: { t: TodayTimetable; emptyHint: string }) {
-  if (t.dayOff) return <WidgetEmptyState title="No classes today." description={t.dayOff === "Sunday" ? "It is Sunday. Enjoy the day off." : `${t.dayOff}. Enjoy the day off.`} />;
+  if (t.dayOff) return <WidgetEmptyState title="No classes today." description={dayOffWords(t.dayOff)} />;
   if (t.day === null) return <WidgetEmptyState title="No periods are set for today." description="School is open today but the timetable has no periods for it." />;
   if (t.rows.length === 0) return <WidgetEmptyState title="Your timetable is not set yet." description={emptyHint} />;
   return (
@@ -162,7 +156,7 @@ export function ResultBody({ r }: { r: LatestResult | null }) {
   );
 }
 
-export function FeesBody({ row, studentId }: { row: DueRow | null; studentId: string }) {
+export function FeesBody({ row }: { row: DueRow | null }) {
   if (!row) return <WidgetEmptyState title="No fees to show yet." description="Fees appear here once the school sets them up for this class." />;
   const billed = row.gross - row.concession + row.late;
   const paidPct = billed > 0 ? Math.round((row.paid / billed) * 100) : 100;
@@ -181,11 +175,11 @@ export function FeesBody({ row, studentId }: { row: DueRow | null; studentId: st
           />
           <div>
             <div className="mb-2 flex justify-between text-xs text-[var(--ds-on-surface-muted)]"><span>{paise(row.paid)} paid</span><span>{paidPct}% of {paise(billed)}</span></div>
-            <TickBar value={paidPct} tone={row.overdue > 0 ? "danger" : "info"} />
+            <TickBar label="Paid so far" value={paidPct} tone={row.overdue > 0 ? "danger" : "info"} />
           </div>
         </>
       )}
-      <Link href={`/app/fees/students/${studentId}`} className={LINK}>View ledger and receipts</Link>
+      <Link href={`/app/fees/students/${row.id}`} className={LINK}>View ledger and receipts</Link>
     </div>
   );
 }

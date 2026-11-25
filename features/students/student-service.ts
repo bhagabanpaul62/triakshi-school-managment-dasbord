@@ -1,8 +1,8 @@
-import { and, asc, count, desc, eq, max, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, max, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { Passwords } from "@smw/auth";
-import { nextSequence, schools, users, uuidv7, type Tx } from "@smw/db";
-import { ConflictError, CrudService, by, countIn, ForbiddenError, LimitError, ValidationError, rethrowUnique, type Ctx, type ListQuery } from "@smw/feature-kit";
+import { nextSequence, schools, sessions, users, uuidv7, type Tx } from "@smw/db";
+import { ConflictError, CrudService, by, countIn, ForbiddenError, LimitError, NotFoundError, ValidationError, refuseSupport, rethrowUnique, type Ctx, type ListQuery } from "@smw/feature-kit";
 import { services } from "@smw/integrations";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import studentsFeature from "./feature";
@@ -80,6 +80,8 @@ export class StudentService extends CrudService<typeof students, Perm> {
     ];
   }
   protected describe(r: Student) { return `${r.name} (${r.admissionNo})`; }
+  // Caste category, religion and the APAAR id are personal enough that the log says only "changed".
+  protected auditHidden() { return ["category", "religion", "apaarId", "emergencyName", "emergencyPhone"] as const; }
   protected scopeClause(tx: Tx) { return this.access.scope(tx); }
 
   // Medical notes and the emergency contact: a teacher sees them only for their own sections (PRD P8).
@@ -348,4 +350,123 @@ export class StudentService extends CrudService<typeof students, Perm> {
     await this.parents.releaseAll(tx, existing.id);
     if (existing.userId) await tx.delete(users).where(eq(users.id, existing.userId));
   }
+
+  // ---------- erasure (DPDP) ----------
+
+  /** What blanking a left student's optional data does, shown before the admin types the confirmation. Lists everything that will go. */
+  async erasePreview(id: string): Promise<ErasePreview> {
+    refuseSupport(this.ctx, "erase");
+    return this.read("read", async (tx) => {
+      this.adminOnly();
+      const s = await super.findOrThrow(tx, id);
+      const guardiansOf = await this.eraseGuardians(tx, s.id);
+      const docs = await countIn(tx, "student_documents", by("student_id", s.id));
+      const gone = guardiansOf.filter((g) => !g.otherActive);
+      const logins = [s.userId, ...gone.map((g) => g.userId)].filter((x): x is string => !!x);
+      const enquiries = await this.linkedEnquiries(tx, s.id);
+      const scrub = await this.auditScrubCount(tx, [s.id, ...gone.map((g) => g.id), ...logins, ...enquiries]);
+      const set = (label: string, value: unknown) => ({ label, filled: value !== null && value !== undefined && value !== "" });
+      return {
+        id: s.id, name: s.name, admissionNo: s.admissionNo, status: s.status,
+        refusal: s.status === "active" ? "An active student cannot be erased. Mark the student as left first." : null,
+        blank: [
+          set("Phone numbers", s.phone ?? s.altPhone), set("Home address", s.address), set("Photo", s.photoKey), set("Medical notes", s.medicalNotes),
+          set("Emergency contact", s.emergencyName ?? s.emergencyPhone), set("Blood group", s.bloodGroup), set("APAAR ID", s.apaarId),
+          set("Student login (turned off, its email and phone removed)", s.userId), { label: "Phone push and calendar links of those logins", filled: logins.length > 0 },
+          { label: `Website enquiry contact details (${enquiries.length} ${enquiries.length === 1 ? "enquiry" : "enquiries"})`, filled: enquiries.length > 0 },
+          { label: `Phone numbers and addresses written in the audit log (${scrub} ${scrub === 1 ? "entry" : "entries"}); the entries stay, those values read "(erased)"`, filled: scrub > 0 },
+        ],
+        guardians: guardiansOf.map((g) => ({ name: g.name, blanked: !g.otherActive, why: g.otherActive ? "Has another child studying here, so the contact stays" : "No other child here, so phone, email and login are blanked" })),
+        keep: ["Name and admission number", "Class history and marks", "Fee bills, receipts and refunds", "Transfer certificate details", `Uploaded documents (${docs}): delete them from the student's page if they must go too`, "Date of birth, gender and category (needed for school returns)"],
+      };
+    });
+  }
+
+  /** Blank the optional personal data of a student who left. Refuses an active student. Safe to run again. Audited with the reason. */
+  async eraseOptional(id: string, reason: string): Promise<{ blanked: string[]; guardians: number }> {
+    refuseSupport(this.ctx, "erase");
+    const why = String(reason ?? "").trim();
+    if (why.length < 10) throw new ValidationError({ reason: "Write why (at least 10 characters). It goes in the audit log." });
+    let photo: string | null = null;
+    const out = await this.write("write", async (tx) => {
+      this.adminOnly();
+      const [s] = await tx.select().from(students).where(eq(students.id, id)).for("update").limit(1);
+      if (!s) throw new NotFoundError("Student");
+      if (s.status === "active") throw new ConflictError("An active student cannot be erased. Mark the student as left first.");
+      photo = s.photoKey;
+      await tx.update(students).set({ phone: null, altPhone: null, address: null, photoKey: null, medicalNotes: null, emergencyName: null, emergencyPhone: null, bloodGroup: null, apaarId: null }).where(eq(students.id, id));
+      const blankGuardians = (await this.eraseGuardians(tx, id)).filter((g) => !g.otherActive);
+      if (blankGuardians.length) await tx.update(guardians).set({ phone: null, email: null, occupation: null }).where(inArray(guardians.id, blankGuardians.map((g) => g.id)));
+      const logins = [s.userId, ...blankGuardians.map((g) => g.userId)].filter((x): x is string => !!x);
+      if (logins.length) {
+        // Turned off, no way to reach the person, and marked: Settings refuses to switch an erased login back on.
+        await Promise.all(logins.map((u) => tx.update(users).set({ status: "disabled", email: null, phone: null, loginId: `erased-${u}`, passwordHash: null }).where(eq(users.id, u))));
+        await tx.delete(sessions).where(inArray(sessions.userId, logins));
+        for (const table of ["push_subscriptions", "calendar_feeds"]) {
+          if (await this.hasTable(tx, table)) await tx.execute(sql`delete from ${sql.identifier(table)} where user_id in (${sql.join(logins.map((u) => sql`${u}::uuid`), sql`, `)})`);
+        }
+      }
+      const enquiries = await this.linkedEnquiries(tx, id);
+      if (enquiries.length) {
+        const list = sql.join(enquiries.map((e) => sql`${e}::uuid`), sql`, `);
+        await tx.execute(sql`update enquiries set parent_name = '(erased)', phone = '', phone_key = '', alt_phone = null, email = null, address = null, message = null, notes = null where id in (${list})`);
+        if (await this.hasTable(tx, "enquiry_events")) await tx.execute(sql`update enquiry_events set body = null where enquiry_id in (${list})`);
+      }
+      const scrubbed = await this.scrubAudit(tx, [id, ...blankGuardians.map((g) => g.id), ...logins, ...enquiries]);
+      return { blanked: ["phone numbers", "address", "photo", "medical notes", "emergency contact", "blood group", "APAAR ID", ...(s.userId ? ["login"] : []), ...(enquiries.length ? ["enquiry contact"] : []), ...(scrubbed ? ["contact values in the audit log"] : [])], guardians: blankGuardians.length, name: s.name, scrubbed };
+    }, (r) => ({ action: "erase", entity: "Student", entityId: id, summary: `Erased optional data of ${r.name}`, meta: { reason: why, blanked: r.blanked, guardiansBlanked: r.guardians, auditEntriesScrubbed: r.scrubbed } }));
+    if (photo) await services().storage.delete(photo).catch(() => undefined);
+    return { blanked: out.blanked, guardians: out.guardians };
+  }
+
+  private async hasTable(tx: Tx, name: string) {
+    const [r] = await tx.execute<{ t: string | null }>(sql`select to_regclass(${`public.${name}`})::text as t`);
+    return !!r?.t;
+  }
+
+  /** Website enquiries that became this student. The table exists only when the website module was ever on. */
+  private async linkedEnquiries(tx: Tx, studentId: string): Promise<string[]> {
+    if (!(await this.hasTable(tx, "enquiries"))) return [];
+    return (await tx.execute<{ id: string }>(sql`select id from enquiries where converted_student_id = ${studentId}`)).map((r) => r.id);
+  }
+
+  /** Settings owns the one door into the audit log (erase_audit_contacts); without it nothing is scrubbed. */
+  private async hasScrubber(tx: Tx) {
+    const [r] = await tx.execute<{ f: string | null }>(sql`select to_regprocedure('erase_audit_contacts(text[])')::text as f`);
+    return !!r?.f;
+  }
+
+  private async scrubAudit(tx: Tx, ids: string[]): Promise<number> {
+    if (!(await this.hasScrubber(tx))) return 0;
+    const [r] = await tx.execute<{ n: number }>(sql`select erase_audit_contacts(${sql.raw("ARRAY[")}${sql.join(ids.map((i) => sql`${i}::text`), sql`, `)}]) as n`);
+    return Number(r?.n ?? 0);
+  }
+
+  private async auditScrubCount(tx: Tx, ids: string[]): Promise<number> {
+    const [r] = await tx.execute<{ n: number }>(sql`select count(*)::int as n from audit_logs where entity_id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+      and jsonb_typeof(meta -> 'changes') = 'object' and exists (select 1 from jsonb_object_keys(meta -> 'changes') k where k in ('phone', 'altPhone', 'emergencyPhone', 'emergencyName', 'address', 'email', 'parentName', 'message', 'notes', 'occupation')
+        and (meta -> 'changes' -> k) <> '["(erased)", "(erased)"]'::jsonb)`);
+    return Number(r?.n ?? 0);
+  }
+
+  /** The student's guardians and whether each also has another active child here. */
+  private async eraseGuardians(tx: Tx, studentId: string) {
+    const links = await tx.select({ id: guardians.id, name: guardians.name, userId: guardians.userId }).from(studentGuardians).innerJoin(guardians, eq(guardians.id, studentGuardians.guardianId)).where(eq(studentGuardians.studentId, studentId));
+    return Promise.all(links.map(async (g) => {
+      const [other] = await tx.select({ n: count() }).from(studentGuardians).innerJoin(students, eq(students.id, studentGuardians.studentId))
+        .where(and(eq(studentGuardians.guardianId, g.id), ne(studentGuardians.studentId, studentId), eq(students.status, "active")));
+      return { ...g, otherActive: Number(other?.n) > 0 };
+    }));
+  }
+
+  private adminOnly() {
+    if (this.ctx.role !== "admin") throw new ForbiddenError("Only a school admin can erase a student's data.");
+  }
+}
+
+export interface ErasePreview {
+  id: string; name: string; admissionNo: string; status: Student["status"]; refusal: string | null;
+  blank: { label: string; filled: boolean }[];
+  guardians: { name: string; blanked: boolean; why: string }[];
+  keep: string[];
 }

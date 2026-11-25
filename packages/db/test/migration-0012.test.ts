@@ -109,9 +109,10 @@ beforeAll(async () => {
   for (const { tag } of journal) { if (tag.startsWith("0012")) break; for (const st of steps(tag)) await db.unsafe(st); }
   S.push(await seed("alpha"), await seed("beta"));
   before = await hash();
-  const last = journal[journal.length - 1].tag;
-  expect(last.startsWith("0012")).toBe(true);
-  await db.begin(async (tx) => { for (const st of steps(last)) await tx.unsafe(st); });
+  const own = journal.findIndex(({ tag }) => tag.startsWith("0012"));
+  await db.begin(async (tx) => { for (const st of steps(journal[own]!.tag)) await tx.unsafe(st); });
+  // The post SQL is today's, so the later migrations must be there too.
+  for (const { tag } of journal.slice(own + 1)) for (const st of steps(tag)) await db.unsafe(st);
   for (const f of postSql()) await db.unsafe(readFileSync(f, "utf8"));
 });
 afterAll(async () => {
@@ -244,7 +245,7 @@ describe("migration 0012 (PRD section 11)", () => {
     const snap = async () => [await n("select count(*) c from announcement_recipients"), await n("select count(*) c from attendance_holidays"), await n("select count(*) c from school_roles"), await n("select count(*) c from event_people"), ...(await hash())].join("|");
     const was = await snap();
     for (const f of postSql()) await db.unsafe(readFileSync(f, "utf8"));
-    await expect(db.begin(async (tx) => { for (const st of steps(journal[journal.length - 1].tag)) await tx.unsafe(st); })).rejects.toThrow();
+    await expect(db.begin(async (tx) => { for (const st of steps("0012_communication")) await tx.unsafe(st); })).rejects.toThrow();
     expect(await snap()).toBe(was);
   });
 });

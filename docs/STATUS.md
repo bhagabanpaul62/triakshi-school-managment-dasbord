@@ -27,7 +27,7 @@ Logged 2026-11-25. All three are open.
 | 3 | Rehearse the move of old fee data on a copy of the live data, after a backup (`move-fees --dry-run`, then bootstrap) | It worked on local data: 287 receipts, every difference explained. It has not been run on live data | The report on the copy explains every difference, and Finance shows no red "books do not match" panel |
 
 ## Communication module (2026-11-25)
-Open as PR #6 (`feat/communication` into `main`), no conflicts: **not merged, not deployed**. Guide: [COMMUNICATION](COMMUNICATION.md). Rules for changing it: [COMMUNICATION-BUILD](COMMUNICATION-BUILD.md). Plan: [COMMUNICATION-PRD](COMMUNICATION-PRD.md).
+**Merged to `main` as PR #6 (`6b01e84`, 2026-11-25), not deployed.** Guide: [COMMUNICATION](COMMUNICATION.md). Rules for changing it: [COMMUNICATION-BUILD](COMMUNICATION-BUILD.md). Plan: [COMMUNICATION-PRD](COMMUNICATION-PRD.md).
 
 | Part | State |
 |---|---|
@@ -67,23 +67,51 @@ Open as PR #6 (`feat/communication` into `main`), no conflicts: **not merged, no
 - Legal rules for keeping and reviewing private messages, and the school's own policy for them.
 - Migration 0012 on a copy of live data.
 
+## Website and admin (2026-11-25)
+On branch `feat/website-admin`, PR into `main`: **not merged, not deployed**. Guide: [WEBSITE-ADMIN](WEBSITE-ADMIN.md). Rules: [WEBSITE-ADMIN-BUILD](WEBSITE-ADMIN-BUILD.md). Plan: [WEBSITE-ADMIN-PRD](WEBSITE-ADMIN-PRD.md).
+
+| Part | State |
+|---|---|
+| Public site (six new sections, news and event pages, search engines, 404, offline, counting visits) | built |
+| Website rooms (editor, pages and menu, media, disclosure, versions, insights, settings, schedule, ask to publish) | built |
+| Admission enquiries (pipeline, board, follow-ups, visits, admit, reports, import, public form) | built |
+| Domains (checks per record, main domain redirect, recheck, release, console) | built |
+| Settings (profile, users, roles, sign-ins, audit, exports, privacy requests, support access, modules) | built |
+| Setup wizard and Getting started, console setup picture | built |
+| Support desk both sides, help centre (66 articles), status notices | built |
+| Home per role, custom roles included | built |
+| Migration `0013_website_admin.sql` | built; hand-written data steps, never regenerate it; not run on a copy of live data |
+
+**Tested 2026-11-25, local, production build in a separate copy with its own database:** journeys K1 to K11 16 of 16; home numbers (K12) for 7 people; axe 6 of 6 (panel and the five site designs); crawl of every link for six roles and the console, with communication and finance, 23 of 23, at phone and desktop width. Older specs: all pass after one real fix (equal panel heights on home) and updates for the new screens. Communication and finance journeys: 59 of 61 in one run, the other 2 (first day, both use the one empty school) pass on their own clean database. The checks ran in parts over several builds; later builds changed only layout and one chart. Unit: 2,604 passed in 39 packages. Typecheck 42/42, lint 0 errors, no schema drift. Six independent reviews (about 85 findings) were fixed. **Not run:** the three marketing signup specs (`ux-marketing`, `onboarding-flow`, `ux-approval-setup`).
+
+### Before real schools use it
+1. Back up the database, run migrations (0013), then `pnpm --filter @smw/db post-sql`.
+2. Restart the worker. Run `domains.recheck` once.
+3. Optional env: `SUPPORT_EMAIL`, `TRUSTED_PROXY_HOPS`.
+4. A lawyer checks the privacy request time, the consent words and the disclosure rows.
+
+### Not verified
+- Real DNS, a real certificate check, a real S3 upload of an export.
+- Support reply mail in an outside inbox; drag and drop by touch.
+- Migration 0013 on a copy of live data.
+
 ## Where things stand
 | What | State |
 |---|---|
-| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is in PR #6. |
-| `origin/main` | Has everything through Finance (PR #5, `69f1898`). |
+| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is on `main` (PR #6). Website and admin is on `feat/website-admin`. |
+| `origin/main` | Has everything through Communication (PR #6, `6b01e84`). |
 | `63f18d5` (forms keep what was typed after a refusal; e2e fixes) | In `origin/main`; **not on the demo**. |
 | CI | Runs on pushes, on the fork for PR #6 (the PR page shows none). **Red on `main`** since PR #5: an attendance leave test failed on Wednesdays and Sundays; PR #6 fixes it. The first run of PR #6 failed: two events tests needed a file store CI does not have. Fixed in later commits; rehearsed locally with all 39 test packages passing. |
 | Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
 | Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
-| Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) only on `feat/communication`. 0005, 0006, 0008 and 0012 hold hand-written data steps: never regenerate them. |
+| Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) on `main`; 0013 only on `feat/website-admin`. 0005, 0006, 0008, 0012 and 0013 hold hand-written data steps: never regenerate them. |
 
 PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
 
 ## Next
 0. Do the three items in "Before real schools use it" (Finance) before deploying Finance.
 1. Deploy `main` to the demo. It needs the owner's go-ahead.
-1a. Review and merge `feat/communication`, then do its "Before real schools use it" list.
+1a. Do the "Before real schools use it" lists of Communication and of Website and admin. Review and merge `feat/website-admin`.
 2. Get the approved demo schools signed in; resend their sign-in email from the console school page where needed.
 3. Prove email delivery to outside inboxes. A sender on a domain of our own, verified in Brevo, is the likely fix (not confirmed). Communication needs this too.
 4. Add browser tests for `/app/staff/import` and for the school-record panels on My profile (student and teacher). They have unit tests only. Student import has a browser test.

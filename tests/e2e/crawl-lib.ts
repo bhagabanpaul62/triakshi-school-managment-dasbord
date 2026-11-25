@@ -4,7 +4,7 @@ import { SCHOOL } from "./helpers";
 
 // Follows every link inside the given sections as one person. A dead link, an error page, a refusal reached by a link the
 // person was shown, a broken value, a script error or a page wider than a phone is a problem.
-const FILE = /\/(pdf|csv|file|voucher|receipt|slip|template|statement|tuition-certificate|no-dues|bank-file)(\/|$|\?)|\/export(\/|$|\?)|\/files\/|^\/api\/|\.ics/;
+const FILE = /\/(pdf|csv|file|voucher|receipt|slip|poster|template|statement|tuition-certificate|no-dues|bank-file)(\/|$|\?)|\/export(\/|$|\?)|\/files\/|^\/api\/|\.ics/;
 const MAX = Number(process.env.CRAWL_MAX ?? 220);
 /** Set CRAWL_SHOTS=dir to keep a picture of every page at desk and phone width. */
 const SHOTS = process.env.CRAWL_SHOTS;
@@ -12,7 +12,7 @@ const SHOTS = process.env.CRAWL_SHOTS;
 /** One page per shape: ids and most query values collapse, so a list of 300 bills is visited once. */
 const shape = (u: URL) => u.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ":id") + [...u.searchParams.keys()].filter((k) => ["tab", "kind", "state", "status"].includes(k)).map((k) => `?${k}=${u.searchParams.get(k)}`).join("");
 
-export async function crawl(page: Page, o: { slug: string; sections: RegExp; starts: string[]; role: string }) {
+export async function crawl(page: Page, o: { slug: string; sections: RegExp; starts: string[]; role: string; desk?: number }) {
   const { slug, sections, starts, role } = o;
   const base = SCHOOL(slug), seen = new Set<string>(), queue = starts.map((s) => ({ href: base + s, from: "(start)" })), problems: string[] = [];
   let errors: string[] = [];
@@ -43,12 +43,14 @@ export async function crawl(page: Page, o: { slug: string; sections: RegExp; sta
     if (/undefined|NaN|\[object Object\]|Invalid Date/.test(body)) problems.push(`broken value on ${at}: ${/.{0,40}(undefined|NaN|\[object Object\]|Invalid Date).{0,40}/.exec(body)![0].replace(/\s+/g, " ")}`);
     const shot = SHOTS ? `${SHOTS}/${role}${key.replace(/[^a-z0-9]+/gi, "_")}` : null;
     if (shot) { mkdirSync(SHOTS!, { recursive: true }); await page.screenshot({ path: `${shot}.desk.png` }); }
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) problems.push(`${wide}px too wide on a desktop: ${at}`);
     await page.setViewportSize({ width: 375, height: 812 });
     await page.waitForTimeout(80);
     const over = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     if (over > 1) problems.push(`${over}px too wide on a phone: ${at}`);
     if (shot) await page.screenshot({ path: `${shot}.phone.png` });
-    await page.setViewportSize({ width: 1366, height: 900 });
+    await page.setViewportSize({ width: o.desk ?? 1366, height: 900 });
     const links = await page.locator("a[href]").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).href));
     for (const l of links) {
       const n = new URL(l, base);

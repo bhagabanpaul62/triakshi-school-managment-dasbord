@@ -25,6 +25,18 @@ export const SCHEDULES: Record<string, { cron: string; tz: string }> = {
   "meetings.reminders": { cron: "*/15 * * * *", tz: "UTC" }, // every 15 minutes; day before, hour before, close and finish
   "comms.cleanup": { cron: "30 3 * * *", tz: "Asia/Kolkata" }, // 03:30 IST daily; keeping rules, dead push devices
   "domains.verify-pending": { cron: "*/10 * * * *", tz: "UTC" }, // every 10 minutes
+  "domains.recheck": { cron: "20 4 * * *", tz: "Asia/Kolkata" }, // 04:20 IST daily; every verified domain; failing ones are checked with the pending ones
+  "website.publish-due": { cron: "*/5 * * * *", tz: "UTC" }, // every 5 minutes; scheduled publishes
+  "website.enquiry-clock": { cron: "10 8-18 * * 1-6", tz: "Asia/Kolkata" }, // hourly in office hours; follow-ups due, first call late
+  "website.enquiry-retention": { cron: "15 4 * * *", tz: "Asia/Kolkata" }, // 04:15 IST daily; after the school's keeping time
+  "website.document-expiry": { cron: "5 9 * * *", tz: "Asia/Kolkata" }, // 09:05 IST daily; 30 days before and on the day, once each
+  "settings.exports": { cron: "* * * * *", tz: "UTC" }, // every minute; queued exports, one at a time per school
+  "settings.cleanup": { cron: "25 4 * * *", tz: "Asia/Kolkata" }, // 04:25 IST daily; old export files and sign-in events
+  "settings.privacy-due": { cron: "0 10 * * *", tz: "Asia/Kolkata" }, // 10:00 IST daily; 14 days before, on the day, weekly after
+  "settings.sign-in-watch": { cron: "*/10 * * * *", tz: "UTC" }, // every 10 minutes; bursts of failed sign-ins, told once an hour
+  "setup.snapshot": { cron: "45 2 * * *", tz: "Asia/Kolkata" }, // 02:45 IST daily; how far each school has come, for the console
+  "support.tell": { cron: "* * * * *", tz: "UTC" }, // every minute; replies and visits are told to the school once
+  "support.clock": { cron: "15 * * * *", tz: "Asia/Kolkata" }, // hourly; reply targets, reminders, auto-solve and close
   "assignments.due-reminders": { cron: "*/15 * * * *", tz: "UTC" }, // every 15 minutes; each assignment is reminded once
   "assignments.publish-due": { cron: "*/5 * * * *", tz: "UTC" }, // every 5 minutes; scheduled drafts go live
   "library.overdue-reminders": { cron: "0 9 * * *", tz: "Asia/Kolkata" }, // 09:00 IST daily; each loan is reminded at most weekly

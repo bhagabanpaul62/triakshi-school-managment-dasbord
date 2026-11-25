@@ -6,7 +6,14 @@ REVOKE UPDATE, DELETE ON audit_logs FROM app_school;
 REVOKE INSERT, DELETE ON schools FROM app_school;
 REVOKE UPDATE ON schools FROM app_school;
 GRANT UPDATE (name, board, state, city, address, phone, email, gstin, udise_code, timezone,
-  academic_year_start_month, theme, logo_url, setup_completed_at, updated_at) ON schools TO app_school;
+  academic_year_start_month, theme, logo_url, setup_completed_at, affiliation_no, school_code, school_type, medium,
+  established_year, district, pincode, website, head_name, head_qualification, support_access, support_access_until,
+  redirect_to_primary, updated_at) ON schools TO app_school;
+-- Triakshi's own side of support, and what the platform writes about a school.
+REVOKE ALL ON support_notes, support_saved_replies FROM app_school;
+REVOKE INSERT, UPDATE, DELETE ON platform_notices, support_visits, school_setup_status FROM app_school;
+-- The worker writes the setup picture as the console role. Sign-in history and domain history are append-only for the school.
+REVOKE UPDATE, DELETE ON login_events, school_domain_events FROM app_school;
 -- Audit log is append-only for everyone but the migration owner.
 REVOKE UPDATE, DELETE ON audit_logs FROM app_console;
 

@@ -10,7 +10,6 @@ import { FormModal } from "@smw/ui/shell/FormModal";
 import { Button } from "@smw/ui/ui/button";
 import { StudentService } from "../service";
 import { createStudent } from "./actions";
-import { OpenOnLoad } from "./open-on-load";
 import { GENDER_OPTIONS, STATUS_OPTIONS, studentFields } from "./fields";
 
 export const metadata = { title: "Students" };
@@ -23,29 +22,18 @@ const columns: Column[] = [
   { key: "guardianPhone", label: "Guardian phone", type: "mono", hideOnMobile: true },
 ];
 
-/** What the enquiry "Convert" link sends: ?new=1&name=&guardian=&phone=&dob=&email=&class= . They prefill the admit form and are not list filters. */
-const PREFILL_KEYS = ["new", "name", "guardian", "phone", "dob", "email", "class"] as const;
-
 export default async function StudentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
   const svc = new StudentService(ctx);
   const canWrite = svc.can("write");
-  const params = await searchParams;
-  const first = (k: string) => { const v = params[k]; return (Array.isArray(v) ? v[0] : v)?.trim() || undefined; };
-  const query = listQueryFrom(Object.fromEntries(Object.entries(params).filter(([k]) => !(PREFILL_KEYS as readonly string[]).includes(k))));
+  const query = listQueryFrom(await searchParams);
   if (!query.sort) Object.assign(query, { sort: "name", dir: "asc" });
 
   const [page, look, stats] = await Promise.all([svc.listView(query), svc.lookups(), canWrite ? svc.stats() : null]);
   const sectionOptions = look.sections.map((s) => ({ value: s.id, label: s.label }));
-  // `class` is a class id or a class name; the form picks sections, so take that class's first one.
-  const wanted = first("class")?.toLowerCase();
-  const section = wanted ? look.sections.find((s) => s.classId === first("class") || s.label.toLowerCase().startsWith(wanted)) : undefined;
-  const values = canWrite && first("new") === "1"
-    ? { name: first("name"), dob: first("dob"), guardianName: first("guardian"), guardianPhone: first("phone"), sectionId: section?.id }
-    : undefined;
   const admit = (
     <FormModal title="Admit student" icon="users" fields={studentFields(sectionOptions, "admit")} action={createStudent} submitLabel="Admit"
-      values={{ guardianRelation: "father", ...values }} summary="Creates the student login and the class enrolment" />
+      values={{ guardianRelation: "father" }} summary="Creates the student login and the class enrolment" />
   );
   const capacity = stats?.capacity;
 
@@ -57,7 +45,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/credentials">Login slips</Link></Button>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/import">Import CSV</Link></Button>
           <Button asChild variant="secondary" className="rounded-full"><Link href="/app/students/promote">Promote</Link></Button>
-          <OpenOnLoad when={!!values}>{admit}</OpenOnLoad>
+          {admit}
         </>) : null} />
 
       {capacity && stats ? (

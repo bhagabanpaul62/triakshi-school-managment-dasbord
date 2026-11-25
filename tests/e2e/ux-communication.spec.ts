@@ -5,7 +5,7 @@ import { expectHealthy, login, loginStudent, SCHOOL } from "./helpers";
 // Assignments, and the family screens of Communication on a phone. Screenshots land in test-results/ux-communication/.
 /** One value from the local seed database, or null when it is not reachable. */
 function sql(q: string): string | null {
-  try { return execFileSync("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", "smw", "-At", "-c", q], { env: { ...process.env, PGPASSWORD: "postgres" }, timeout: 20_000 }).toString().trim() || null; }
+  try { return execFileSync("psql", ["-h", "127.0.0.1", "-p", "5433", "-U", "postgres", "-d", process.env.E2E_DB ?? "smw", "-At", "-c", q], { env: { ...process.env, PGPASSWORD: "postgres" }, timeout: 20_000 }).toString().trim() || null; }
   catch { return null; }
 }
 const OUT = "test-results/ux-communication";

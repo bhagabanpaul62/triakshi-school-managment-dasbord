@@ -1,5 +1,6 @@
 import type { Field } from "@smw/ui/shell/FormModal";
 import type { MatrixModule } from "../catalogue";
+import { INDIAN_STATES, MEDIUMS, SCHOOL_TYPES, type ProfileGroup } from "../profile-meta";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 export const monthName = (m: number) => MONTHS[m - 1] ?? "-";
@@ -13,19 +14,43 @@ const TIMEZONES = [
 ];
 export const timezoneName = (tz: string) => TIMEZONES.find((t) => t.value === tz)?.label ?? tz;
 
-export const schoolFields: Field[] = [
-  { name: "name", label: "School name", required: true, wide: true, section: "School" },
-  { name: "board", label: "Board", type: "select", section: "School", options: ["CBSE", "ICSE", "State board", "IB", "Cambridge (IGCSE)"].map((b) => ({ value: b, label: b })) },
-  { name: "udiseCode", label: "UDISE+ code", hint: "11 digits", section: "School" },
-  { name: "city", label: "City", section: "Address" },
-  { name: "state", label: "State", section: "Address" },
-  { name: "address", label: "Address", type: "textarea", section: "Address" },
-  { name: "phone", label: "Phone", type: "tel", section: "Contact" },
-  { name: "email", label: "Email", type: "email", section: "Contact" },
-  { name: "gstin", label: "GSTIN", hint: "Only if the school is GST registered", section: "Contact" },
-  { name: "timezone", label: "Timezone", type: "select", required: true, options: TIMEZONES, section: "Calendar" },
-  { name: "academicYearStartMonth", label: "Academic year starts in", type: "select", required: true, options: MONTHS.map((m, i) => ({ value: String(i + 1), label: m })), section: "Calendar" },
-];
+const opts = (list: string[], current?: string | null) => [...new Set([...(current ? [current] : []), ...list])].map((v) => ({ value: v, label: v }));
+
+/** The form of one profile group. The page sends every other field along (hidden), so saving a group never clears another. */
+export const schoolGroupFields = (group: ProfileGroup, p: { board: string | null; state: string | null; schoolType: string | null; medium: string | null }): Field[] => {
+  const groups: Record<ProfileGroup, Field[]> = {
+  identity: [
+    { name: "name", label: "School name", required: true, wide: true },
+    { name: "board", label: "Board", type: "select", options: opts(["CBSE", "ICSE", "State board", "IB", "Cambridge (IGCSE)"], p.board) },
+    { name: "affiliationNo", label: "Affiliation number" },
+    { name: "schoolCode", label: "School code" },
+    { name: "udiseCode", label: "UDISE+ code", hint: "11 digits" },
+    { name: "schoolType", label: "Type", type: "select", options: opts(SCHOOL_TYPES, p.schoolType) },
+    { name: "medium", label: "Medium", type: "select", options: opts(MEDIUMS, p.medium) },
+    { name: "establishedYear", label: "Established in", type: "number", min: 1800, max: new Date().getFullYear(), hint: "The year, for example 1998" },
+  ],
+  contact: [
+    { name: "address", label: "Address", type: "textarea", wide: true },
+    { name: "city", label: "City" },
+    { name: "district", label: "District" },
+    { name: "state", label: "State", type: "select", options: opts(INDIAN_STATES, p.state) },
+    { name: "pincode", label: "PIN code", hint: "6 digits" },
+    { name: "phone", label: "Phone", type: "tel" },
+    { name: "email", label: "Email", type: "email" },
+    { name: "website", label: "Website", hint: "For example www.school.in" },
+  ],
+  head: [
+    { name: "headName", label: "Name of the head of school", wide: true },
+    { name: "headQualification", label: "Qualification", wide: true },
+  ],
+  tax: [{ name: "gstin", label: "GSTIN", wide: true, hint: "Only if the school is GST registered. The first two digits are the state." }],
+  calendar: [
+    { name: "timezone", label: "Timezone", type: "select", required: true, options: TIMEZONES },
+    { name: "academicYearStartMonth", label: "Academic year starts in", type: "select", required: true, options: MONTHS.map((m, i) => ({ value: String(i + 1), label: m })) },
+  ],
+};
+  return groups[group];
+};
 
 export const logoFields: Field[] = [
   { name: "logo", label: "Logo", type: "file", required: true, accept: "image/png,image/jpeg,image/webp", hint: "PNG, JPG or WebP, up to 5 MB. A square image works best.", wide: true },
@@ -65,15 +90,4 @@ export const passwordFields: Field[] = [
   { name: "current", label: "Current password", type: "password", required: true, wide: true },
   { name: "next", label: "New password", type: "password", required: true, hint: "At least 8 characters, different from the old one" },
   { name: "confirm", label: "New password again", type: "password", required: true },
-];
-
-export const studentExportFields = (options: { value: string; label: string }[]): Field[] => [
-  { name: "studentId", label: "Student", type: "select", required: true, wide: true, options },
-];
-
-export const exportSchoolFields: Field[] = [
-  { name: "includePayroll", label: "Payroll", type: "checkbox", placeholder: "Include salaries and payslips", hint: "PAN and bank numbers are never exported.", wide: true },
-  { name: "includePrivate", label: "Private conversations", type: "checkbox", placeholder: "Include private conversations and requests", wide: true,
-    hint: "Messages between staff and families, and requests. Reports and reviews also need the safeguarding permission." },
-  { name: "reason", label: "Why do you need them?", type: "textarea", wide: true, hint: "Only needed if you ticked private conversations. It is saved in the audit log." },
 ];

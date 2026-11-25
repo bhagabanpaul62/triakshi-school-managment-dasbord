@@ -78,6 +78,18 @@ export class DayService extends MeetingBase {
     });
   }
 
+  /** This teacher's booked slots of one day (default today) across every running meeting, in one read. Marks nothing seen, so a dashboard can call it. */
+  async mineOn(date?: string): Promise<{ slotId: string; meetingId: string; meetingTitle: string; startsAt: Date; studentName: string; studentLabel: string | null; visit: VisitState | null }[]> {
+    return this.read("use", async (tx) => {
+      this.guardStaff();
+      const day = date ?? istDay(this.now());
+      return rows(tx, sql`select s.id as "slotId", m.id as "meetingId", m.title as "meetingTitle", s.starts_at as "startsAt", st.name as "studentName",
+          coalesce(c.name || coalesce('-' || sec.name, ''), null) as "studentLabel", s.visit
+        from meeting_slots s join meeting_days m on m.id = s.meeting_id join students st on st.id = s.student_id left join classes c on c.id = st.class_id left join sections sec on sec.id = st.section_id
+        where s.teacher_id = ${this.ctx.userId}::uuid and s.state = 'booked' and m.state in ('open', 'closed') and (s.starts_at at time zone 'Asia/Kolkata')::date = ${day}::date order by s.starts_at`);
+    });
+  }
+
   private async ownSlot(tx: Tx, slotId: string) {
     this.guardStaff();
     const [s] = /^[0-9a-f-]{36}$/i.test(slotId) ? await tx.select().from(meetingSlots).where(and(eq(meetingSlots.id, slotId), eq(meetingSlots.state, "booked"))).limit(1) : [];

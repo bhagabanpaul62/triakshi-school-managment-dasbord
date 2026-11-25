@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type MouseEvent } from "react";
 import type { Theme } from "@smw/themes";
-import { HOME_SLUG, type SiteContent, type TemplateKey } from "@smw/site-templates";
+import { HOME_SLUG, type SiteContent, type SiteSettings, type TemplateKey } from "@smw/site-templates";
 import { SiteView, type SiteData } from "@smw/site-templates/render";
 
 export interface LiveState { content: SiteContent; slug: string; template: TemplateKey; focus?: string }
@@ -16,7 +16,7 @@ const previewOnly = async () => ({ ok: false as const, error: "This is a preview
  * The draft site inside the editor's preview frame. The editor posts the content as it is typed, so nothing is
  * saved to show a change. A click on a link changes the page in the editor; a click on a section opens it there.
  */
-export function LivePreview({ school, theme, data, initial }: { school: { name: string; logoUrl?: string | null }; theme: Theme; data: SiteData; initial: LiveState }) {
+export function LivePreview({ school, theme, data, initial, settings }: { school: { name: string; logoUrl?: string | null }; theme: Theme; data: SiteData; initial: LiveState; settings?: SiteSettings }) {
   const [s, setS] = useState(initial);
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function LivePreview({ school, theme, data, initial }: { school: { name: 
   return (
     <div onClickCapture={click}>
       <style>{`main section[id]{cursor:pointer}main section[id]:hover{outline:2px dashed color-mix(in srgb,var(--site-accent) 70%,transparent);outline-offset:-2px}${s.focus ? `[id=${JSON.stringify(s.focus)}]{outline:3px solid var(--site-accent)!important;outline-offset:-3px}` : ""}`}</style>
-      <SiteView school={school} template={s.template} theme={theme} content={s.content} slug={s.slug} data={data} enquiry={previewOnly} />
+      <SiteView school={school} template={s.template} theme={theme} content={s.content} slug={s.slug} data={data} enquiry={previewOnly} settings={settings} />
     </div>
   );
 }

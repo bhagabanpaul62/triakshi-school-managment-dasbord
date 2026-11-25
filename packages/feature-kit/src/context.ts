@@ -44,3 +44,8 @@ export function refuseSupport(ctx: Pick<Ctx, "schoolId" | "supportStaffId">, wha
   console.warn(JSON.stringify({ level: "warn", msg: "support session refused", schoolId: ctx.schoolId, supportStaffId: ctx.supportStaffId, what }));
   throw new ForbiddenError("Not available in a support session.");
 }
+
+/** May Triakshi staff be inside this school now? `always`, `until` (only before the time), or `never`. One rule for making a link and for every request of a support session. */
+export function supportMayEnter(s: { supportAccess: string; supportAccessUntil: Date | null }, now = new Date()): boolean {
+  return s.supportAccess === "always" || (s.supportAccess === "until" && !!s.supportAccessUntil && s.supportAccessUntil > now);
+}

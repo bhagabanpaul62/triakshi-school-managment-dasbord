@@ -4,9 +4,10 @@ import { formToObject } from "@smw/runtime";
 import { services } from "@smw/integrations";
 import { schoolUrl } from "@smw/config";
 import {
-  ApprovalService, DesignRequestService, ModuleAdminService, PlanAdminService, SchoolAdminService, StaffAdminService, SupportDeskService, SupportLoginService,
-  type DesignStatus,
+  ApprovalService, DesignRequestService, ModuleAdminService, NoticeService, PlanAdminService, SchoolAdminService, StaffAdminService, SupportDeskService, SupportLoginService,
+  type DeskFile, type DesignStatus,
 } from "@smw/platform";
+import { addWorkingHours, replyHours } from "@smw/feature-support/sla";
 import { consoleAction, field } from "@/lib/console-action";
 
 const id = (fd: FormData) => field(fd, "id");
@@ -110,17 +111,52 @@ export async function resetStaffTwoFactor(fd: FormData) {
 
 // ----- support desk and design requests -----
 
+/** The files of a form, in the order they were picked. */
+async function filesOf(fd: FormData): Promise<DeskFile[]> {
+  const out: DeskFile[] = [];
+  for (const v of fd.getAll("files")) if (v instanceof File && v.size > 0) out.push({ name: v.name, type: v.type, size: v.size, bytes: new Uint8Array(await v.arrayBuffer()) });
+  return out;
+}
 export async function replyToTicket(fd: FormData) {
-  return consoleAction(SupportDeskService, (s) => s.reply(id(fd), formToObject(fd)), "Reply sent");
+  return consoleAction(SupportDeskService, async (s) => s.reply(id(fd), formToObject(fd), await filesOf(fd)), "Reply sent. The school is told within a minute.");
+}
+export async function addTicketNote(fd: FormData) {
+  return consoleAction(SupportDeskService, (s) => s.addNote(id(fd), formToObject(fd)), "Note added. Only the team sees it.");
 }
 export async function setTicketStatus(fd: FormData) {
   return consoleAction(SupportDeskService, (s) => s.setStatus(id(fd), field(fd, "status") as never), "Status updated");
 }
 export async function setTicketPriority(fd: FormData) {
-  return consoleAction(SupportDeskService, (s) => s.setPriority(id(fd), field(fd, "priority") as never), "Priority updated");
+  const priority = field(fd, "priority") as "low" | "normal" | "high" | "urgent";
+  return consoleAction(SupportDeskService, (s) => s.setPriority(id(fd), priority, (t) => addWorkingHours(t.createdAt, replyHours(priority, t.planKey))), "Priority updated");
+}
+export async function setTicketCategory(fd: FormData) {
+  return consoleAction(SupportDeskService, (s) => s.setCategory(id(fd), field(fd, "category") as never), "Category updated");
+}
+/** Hand the ticket to anyone on the team; "nobody" gives it back to the queue. */
+export async function assignTicket(fd: FormData) {
+  return consoleAction(SupportDeskService, (s) => s.assign(id(fd), field(fd, "staffId") === "none" ? null : field(fd, "staffId")), "Owner changed");
 }
 export async function assignTicketToMe(fd: FormData) {
   return consoleAction(SupportDeskService, (s) => s.assign(id(fd)), "Assigned to you");
+}
+export async function saveSavedReply(fd: FormData) {
+  return consoleAction(SupportDeskService, (s) => s.saveReply(field(fd, "id") || undefined, formToObject(fd)), "Saved reply kept");
+}
+export async function deleteSavedReply(fd: FormData) {
+  return consoleAction(SupportDeskService, (s) => s.deleteReply(id(fd)), "Saved reply deleted");
+}
+
+// ----- notices -----
+
+/** A time typed in the form is India time. */
+const ist = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v) ? `${v}:00+05:30` : v);
+export async function createNotice(fd: FormData) {
+  const o = formToObject(fd);
+  return consoleAction(NoticeService, (s) => s.create({ ...o, startsAt: ist(o.startsAt), endsAt: ist(o.endsAt) }), "Notice posted");
+}
+export async function endNotice(fd: FormData) {
+  return consoleAction(NoticeService, (s) => s.end(id(fd)), "Notice ended");
 }
 export async function moveDesignRequest(fd: FormData) {
   return consoleAction(DesignRequestService, (s) => s.move(id(fd), field(fd, "to") as DesignStatus, fd.get("quotePaise") ? Number(fd.get("quotePaise")) : undefined), "Request updated");

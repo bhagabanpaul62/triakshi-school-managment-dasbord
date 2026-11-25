@@ -3,13 +3,15 @@ import Link from "next/link";
 import { getSession, requireCtx } from "@smw/runtime";
 import { Fact, FactList } from "@smw/ui/kit/FactList";
 import { Inset, Panel } from "@smw/ui/kit/Panel";
+import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { PageHeader, PanelGrid } from "@smw/ui/shell/PageHeader";
 import { dateTime, shortDate } from "@smw/ui/format";
-import { ProfileService } from "../service";
+import { ProfileService, alertsNewDevice } from "../service";
+import { SignInService } from "../signin-service";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
-import { changeMyPassword, confirmMyEmailCode, sendMyVerifyCode, setMyPhoto, updateMyDetails, verifyMyEmailCode } from "./profile-actions";
-import { ROLE_LABELS } from "./labels";
+import { changeMyPassword, confirmMyEmailCode, sendMyVerifyCode, setMyPhoto, setNewDeviceAlert, updateMyDetails, verifyMyEmailCode } from "./profile-actions";
+import { METHOD_LABELS, OUTCOME_LABELS, OUTCOME_TONES, ROLE_LABELS } from "./labels";
 import { detailFields, passwordFields, photoFields } from "./profile-fields";
 import { deviceLabel } from "./profile-device";
 import { ProfileSessions } from "./profile-sessions";
@@ -21,7 +23,7 @@ export const metadata = { title: "My profile" };
 export default async function ProfilePage({ record }: { record?: React.ReactNode } = {}) {
   const ctx = await requireCtx();
   const session = (await getSession())!;
-  const [me, sessions] = await Promise.all([new ProfileService(ctx).me(), new SchoolAuth(ctx.schoolId).listSessions(ctx.userId, session.sessionId)]);
+  const [me, sessions, signIns] = await Promise.all([new ProfileService(ctx).me(), new SchoolAuth(ctx.schoolId).listSessions(ctx.userId, session.sessionId), new SignInService(ctx).history(ctx.userId, 10)]);
   const role = session.user.roleName ?? ROLE_LABELS[me.role] ?? me.role;
   return (
     <>
@@ -51,11 +53,12 @@ export default async function ProfilePage({ record }: { record?: React.ReactNode
           </Panel>
         </div>
         <div className="flex flex-col gap-4 lg:col-span-5">
-          <Panel title="Notifications">
-            <p className="text-sm text-[var(--ds-on-surface)]">Choose what reaches your phone and email, your quiet hours and when you are away.</p>
-            <div className="mt-4">
-              <Link href="/app/notifications/preferences" className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm text-[var(--ds-on-surface)] transition-colors hover:bg-white/[0.14] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Notification settings</Link>
-            </div>
+          <Panel title="Your preferences">
+            <ul className="flex flex-col">
+              {([["/app/notifications/preferences", "Notification settings", "What reaches your phone and email, quiet hours, when you are away"], ["/app/profile/data", "My data", "See what the school holds about you; correct it, delete it or get a copy"]] as const).map(([href, t, hint]) => (
+                <li key={href}><Link href={href} className="block min-h-11 rounded-xl px-3 py-2 transition-colors hover:bg-white/[0.05] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]"><span className="block text-sm text-[var(--ds-on-surface)]">{t}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">{hint}</span></Link></li>
+              ))}
+            </ul>
           </Panel>
           <Panel title="Password">
             <Inset>
@@ -74,6 +77,23 @@ export default async function ProfilePage({ record }: { record?: React.ReactNode
         <div className="lg:col-span-12">
           <Panel title="Devices">
             <ProfileSessions sessions={sessions.map((s) => ({ id: s.id, device: deviceLabel(s.userAgent), ip: s.ip, lastSeenAt: s.lastSeenAt, createdAt: s.createdAt, current: s.current }))} />
+          </Panel>
+        </div>
+        <div className="lg:col-span-12">
+          <Panel title="Your recent sign-ins" action={me.email ? (
+            <ActionButton label={alertsNewDevice(me) ? "Stop new-device emails" : "Email me about new devices"} action={setNewDeviceAlert} values={{ on: alertsNewDevice(me) ? "0" : "1" }} />
+          ) : null}>
+            {signIns.length ? (
+              <ul className="flex flex-col">
+                {signIns.map((h) => (
+                  <li key={h.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-2 py-2 text-sm">
+                    <ToneBadge label={OUTCOME_LABELS[h.outcome] ?? h.outcome} tone={OUTCOME_TONES[h.outcome]} />
+                    <span className="text-[var(--ds-on-surface)]">{h.device}{h.newDevice ? " (new device)" : ""}</span>
+                    <span className="text-xs text-[var(--ds-on-surface-muted)]">{METHOD_LABELS[h.method]} · {h.ip ?? "unknown address"} · {dateTime(h.createdAt)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="text-sm text-[var(--ds-on-surface-muted)]">Nothing recorded yet. Your sign-ins show here from now on. If one is not you, change your password.</p>}
           </Panel>
         </div>
       </PanelGrid>

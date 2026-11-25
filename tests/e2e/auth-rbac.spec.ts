@@ -12,7 +12,7 @@ const STRONG = `Quill-Harbor-${run}7`;
 const STRONG2 = `Maple-Tundra-${run}9`;
 
 const sql = (q: string) =>
-  execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d smw -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
+  execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d ${process.env.E2E_DB ?? "smw"} -tAc "${q.replace(/"/g, '\\"')}"`, { env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
 const sid = () => sql(`select id from schools where slug='${SLUG}'`);
 
 test.describe.configure({ mode: "default" });
@@ -114,14 +114,15 @@ async function activeStaff(browser: Browser, request: APIRequestContext, admin: 
   return { name, email, ...session };
 }
 
-/** Open a person's Manage dialog on Settings, Users. */
+/** Open a person's own page from Settings, Users: every action on the account is on it. `dialog` is the page body, so the old lookups keep working. */
 async function manage(admin: Page, search: string, name = search) {
-  await admin.goto(`${SCHOOL(SLUG)}/app/settings?tab=users`);
+  await admin.goto(`${SCHOOL(SLUG)}/app/settings/users`);
   await admin.getByPlaceholder("Search by name, email or login").fill(search);
   const row = admin.getByRole("row", { name: new RegExp(name) });
   await expect(row).toBeVisible({ timeout: 90_000 });
-  await row.getByRole("button", { name: "Manage" }).click();
-  return { row, dialog: admin.getByRole("dialog").last() };
+  await row.getByRole("link").first().click();
+  await expect(admin).toHaveURL(/\/app\/settings\/users\/[0-9a-f-]{36}/, { timeout: 90_000 });
+  return { row, dialog: admin.locator("body") };
 }
 
 /** A seeded student who has never signed in, picked from the end of the list (the other specs start from the top). */
@@ -139,7 +140,7 @@ let signedIn: ReturnType<typeof pickStudent> | undefined; // set by test 2, read
 test("1. custom Librarian role: access link, set up account, Library yes, Fees no", async ({ browser, request }) => {
   const { ctx, page } = await adminSession(browser);
   const role = `Librarian ${run}`;
-  await page.goto(`${SCHOOL(SLUG)}/app/settings?tab=roles`);
+  await page.goto(`${SCHOOL(SLUG)}/app/settings/roles`);
   await page.getByRole("button", { name: "New role" }).first().click();
   const d = page.getByRole("dialog");
   await d.getByLabel(/role name/i).fill(role);
@@ -368,18 +369,8 @@ test("6. Settings, Users: no self-disable, last admin kept, temporary password s
   await expect(own.dialog.getByText("Sign out everywhere")).toBeVisible();
   await shot(p, "users-own-row-no-disable");
 
-  // the only admin cannot step down (the app blocks changing your own role, which also covers the last-admin rule)
-  const admins = Number(sql(`select count(*) from users where school_id='${sid()}' and role='admin' and status='active'`));
-  if (admins === 1) {
-    await own.dialog.getByRole("button", { name: "Change role" }).click();
-    const d = p.getByRole("dialog").last();
-    const sel = d.getByLabel("Role");
-    await sel.selectOption(await sel.locator("option", { hasText: /^Teacher$/ }).first().getAttribute("value") ?? "teacher");
-    await d.getByRole("button", { name: "Save" }).click();
-    await expect(p.getByText(/cannot change your own role|last admin/i).first()).toBeVisible({ timeout: 60_000 });
-    await shot(p, "users-last-admin-kept");
-    expect(sql(`select role from users where school_id='${sid()}' and login_id='admin'`)).toBe("admin");
-  } else console.log(`SKIP last-admin check: ${admins} active admins`);
+  // nobody changes their own role, so the only admin cannot step down (the server refuses it too: people.test.ts)
+  await expect(own.dialog.getByRole("button", { name: "Change role" })).toHaveCount(0);
 
   // temporary password on a staff user
   const u = await activeStaff(browser, request, p, "Temp Reset");
@@ -437,7 +428,7 @@ test("8. a disabled user cannot sign in and their session stops", async ({ brows
   const m = await manage(admin.page, u.email, u.name);
   await m.dialog.getByRole("button", { name: "Disable", exact: true }).click();
   await admin.page.getByRole("dialog").last().getByRole("button", { name: "Disable", exact: true }).click();
-  await expect(admin.page.getByText("Account is disabled")).toBeVisible({ timeout: 90_000 }); // the open Manage dialog re-renders
+  await expect(admin.page.getByText("Account is disabled")).toBeVisible({ timeout: 90_000 }); // the person's page re-renders
   await u.page.goto(`${SCHOOL(SLUG)}/app`);
   await expect(u.page).toHaveURL(/\/login/, { timeout: 90_000 });
   const ctx = await newCtx(browser);
@@ -493,11 +484,11 @@ test("10. no parent login anywhere", async ({ browser }) => {
   await expect(p.getByRole("dialog").getByLabel("Role")).toBeVisible({ timeout: 90_000 });
   await noParent("Add staff");
   await p.keyboard.press("Escape");
-  await p.goto(`${SCHOOL(SLUG)}/app/settings?tab=users`);
+  await p.goto(`${SCHOOL(SLUG)}/app/settings/users`);
   await expect(p.getByText("Admins", { exact: true })).toBeVisible({ timeout: 90_000 });
   expect(await p.locator("main").innerText()).not.toMatch(/parent/i);
   await noParent("Users");
-  await p.goto(`${SCHOOL(SLUG)}/app/settings?tab=roles`);
+  await p.goto(`${SCHOOL(SLUG)}/app/settings/roles`);
   await expect(p.getByRole("button", { name: "New role" }).first()).toBeVisible({ timeout: 90_000 });
   expect(await p.locator("main").innerText()).not.toMatch(/parent/i);
   await p.getByRole("button", { name: "New role" }).first().click();
@@ -566,7 +557,7 @@ test("12. phone width: no horizontal scroll on the new screens", async ({ browse
   const ac = await newCtx(browser, true);
   const ap = await newPage(ac);
   await login(ap, "admin", "demo12345");
-  await ap.goto(`${SCHOOL(SLUG)}/app/settings?tab=roles`);
+  await ap.goto(`${SCHOOL(SLUG)}/app/settings/roles`);
   await expect(ap.getByRole("button", { name: "New role" }).first()).toBeVisible({ timeout: 90_000 });
   await noScroll(ap, "settings-roles");
   await ap.goto(`${SCHOOL(SLUG)}/app/students/credentials?classId=${s.classId}`);
@@ -581,14 +572,13 @@ test.afterAll(async ({ browser }) => {
   const { ctx, page } = await adminSession(browser);
   for (const name of made) {
     try {
-      await page.goto(`${SCHOOL(SLUG)}/app/settings?tab=users`);
+      await page.goto(`${SCHOOL(SLUG)}/app/settings/users`);
       await page.getByPlaceholder("Search by name, email or login").fill(name);
       const row = page.getByRole("row", { name: new RegExp(name) });
       await row.waitFor({ timeout: 60_000 });
       if (await row.getByText("Disabled").count()) continue;
-      await row.getByRole("button", { name: "Manage" }).click();
-      const d = page.getByRole("dialog").last();
-      await d.getByRole("button", { name: "Disable", exact: true }).click();
+      await row.getByRole("link").first().click();
+      await page.getByRole("button", { name: "Disable", exact: true }).click();
       await page.getByRole("dialog").last().getByRole("button", { name: "Disable", exact: true }).click();
       await page.waitForTimeout(1500);
     } catch (e) { console.log(`cleanup: could not disable ${name}: ${(e as Error).message.split("\n")[0]}`); }

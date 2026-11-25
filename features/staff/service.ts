@@ -5,7 +5,7 @@ import {
   and, asc, count, desc, eq, ilike, inArray, isNull, ne, oneTimeTokens, or, schoolRoles, schools, sessions, sql, users, withSchool, type SchoolRole, type Tx,
 } from "@smw/db";
 import {
-  ConflictError, FeatureOffError, ForbiddenError, NotFoundError, ReadOnlyError, SchoolService, ValidationError, listQuerySchema, rethrowUnique, toPage,
+  ConflictError, FeatureOffError, ForbiddenError, NotFoundError, ReadOnlyError, SchoolService, ValidationError, auditChanges, listQuerySchema, rethrowUnique, toPage,
   type ListQuery, type Page,
 } from "@smw/feature-kit";
 import { academicYears, classes, sections, sectionTeachers, subjects } from "@smw/feature-academics/schema";
@@ -387,6 +387,7 @@ export class StaffService extends SchoolService<Perm> {
   async update(id: string, input: unknown): Promise<StaffRow> {
     this.authorize("write", "write");
     const d = this.parse(staffUpdateInput, input);
+    let changes: ReturnType<typeof auditChanges> = {};
     return this.unique({ login: "email" }, () => this.write("write", async (tx) => {
       const before = await this.findOrThrow(tx, id);
       this.adminOnly(before.role); // the login follows the email, so editing an admin's email is taking the admin over
@@ -399,8 +400,10 @@ export class StaffService extends SchoolService<Perm> {
         ...(emailChanged ? { emailVerifiedAt: null } : {}), ...(followsEmail ? { loginId: d.email ?? before.employeeId } : {}),
       }).where(eq(users.id, id));
       await tx.update(staffProfiles).set(profileValues(d)).where(eq(staffProfiles.userId, id));
-      return this.findOrThrow(tx, id);
-    }, (row) => ({ action: "update", entity: "Staff", entityId: row.id, summary: `Updated ${row.name}` })));
+      const after = await this.findOrThrow(tx, id);
+      changes = auditChanges(before, after, ["emergencyName", "emergencyPhone"]);
+      return after;
+    }, (row) => ({ action: "update", entity: "Staff", entityId: row.id, summary: `Updated ${row.name}`, meta: { changes } })));
   }
 
   /** A built-in or custom role. The last admin cannot step down, and the person's open sessions end. */

@@ -113,6 +113,28 @@ export function listQueryFrom(params: Record<string, string | string[] | undefin
 
 type TenantTable = PgTable & { id: PgColumn; schoolId: PgColumn; createdAt: PgColumn };
 
+/** Never written to the audit log: secrets, sealed values and health text. */
+const AUDIT_HIDDEN = /password|token|secret|_?sealed|hash|medical|allerg|health|conditions|medication|private|blood|diagnos|disabilit|salary|wage|ctc|bank|ifsc|upi|last4|aadhaar|aadhar/i;
+const AUDIT_SKIP = new Set(["id", "schoolId", "createdAt", "updatedAt"]);
+const auditText = (v: unknown): string | number | boolean | null => {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "number" || typeof v === "boolean") return v;
+  const s = v instanceof Date ? v.toISOString() : typeof v === "string" ? v : JSON.stringify(v);
+  return s.length > 200 ? `${s.slice(0, 200)}...` : s;
+};
+
+/** What an update changed, field by field: `{ phone: ["98...", "99..."] }`. Hidden fields (and any in `hidden`) say only that they changed. */
+export function auditChanges(before: Record<string, unknown>, after: Record<string, unknown>, hidden: readonly string[] = []): Record<string, [unknown, unknown]> {
+  const out: Record<string, [unknown, unknown]> = {};
+  for (const k of Object.keys(after)) {
+    if (AUDIT_SKIP.has(k)) continue;
+    const a = auditText(before[k]), b = auditText(after[k]);
+    if (a === b) continue;
+    out[k] = AUDIT_HIDDEN.test(k) || hidden.includes(k) ? ["(hidden)", "(hidden)"] : [a, b];
+  }
+  return out;
+}
+
 /**
  * Generic CRUD for one school-owned table: paginated search list, get, create, update, delete,
  * each permission-checked, RLS-scoped and audited. Subclasses declare the table, schemas and
@@ -140,6 +162,8 @@ export abstract class CrudService<
   protected async scopeClause(_tx: Tx): Promise<SQL | undefined> { return undefined; }
   /** Text for the audit summary. */
   protected describe(row: Row): string { return String(row.name ?? row.title ?? row.id); }
+  /** Columns whose old and new values never go to the audit log (private or sensitive text); the log says only that they changed. */
+  protected auditHidden(): readonly string[] { return []; }
 
   protected async beforeCreate(_tx: Tx, data: Record<string, unknown>): Promise<Record<string, unknown>> { return data; }
   protected async afterCreate(_tx: Tx, _row: Row): Promise<void> {}
@@ -197,12 +221,14 @@ export abstract class CrudService<
   async update(id: string, input: unknown): Promise<Row> {
     this.authorize(this.writePermission, "write");
     const data = this.parse(this.updateSchema, input);
+    let changes: ReturnType<typeof auditChanges> = {};
     return this.write(this.writePermission, async (tx) => {
       const existing = await this.findOrThrow(tx, id);
       const values = await this.beforeUpdate(tx, existing, data);
       const [row] = await tx.update(this.table).set(values as never).where(eq(this.table.id, id)).returning();
+      changes = auditChanges(existing, row as Row, this.auditHidden());
       return row as Row;
-    }, (row) => ({ action: "update", entity: this.entityName, entityId: String(row.id), summary: `Updated ${this.entityName.toLowerCase()} ${this.describe(row)}` }));
+    }, (row) => ({ action: "update", entity: this.entityName, entityId: String(row.id), summary: `Updated ${this.entityName.toLowerCase()} ${this.describe(row)}`, meta: { changes } }));
   }
 
   async remove(id: string): Promise<{ id: string }> {

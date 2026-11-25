@@ -348,6 +348,18 @@ describe("the day", () => {
   }
   const at = (d: Date) => class extends DayService { protected override now() { return d; } };
 
+  it("mineOn: the teacher's booked slots of one day across meetings, in one read; only their own; refused to families and support", async () => {
+    const { m } = await running();
+    const rows = await new DayService(a.as.teacher).mineOn(DAY);
+    expect(rows.filter((r) => r.meetingId === m.id).map((r) => r.studentName)).toEqual(["Aarav Sharma", "Kabir Singh"]);
+    expect(rows[0]).toMatchObject({ meetingTitle: expect.any(String), visit: null });
+    expect(await new DayService(ids.ctx.t3).mineOn(DAY)).toEqual([]);
+    expect(await new DayService(a.as.teacher).mineOn("2001-01-01")).toEqual([]);
+    expect(await new DayService(b.as.teacher).mineOn(DAY)).toEqual([]);
+    await expect(new DayService(a.as.student).mineOn(DAY)).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(new DayService({ ...a.as.teacher, supportStaffId: "00000000-0000-0000-0000-0000000000aa" }).mineOn(DAY)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
   it("lists in order with a now mark; the teacher marks came, late, missed; a mark too early is refused", async () => {
     const { m, s } = await running();
     const t1 = new DayService(a.as.teacher);

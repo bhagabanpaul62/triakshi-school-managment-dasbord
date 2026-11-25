@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import SiteLayout from "./(site)/layout";
 import HomePage from "@smw/feature-website/ui/home-page";
 

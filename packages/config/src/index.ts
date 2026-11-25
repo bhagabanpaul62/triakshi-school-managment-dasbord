@@ -35,6 +35,8 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   MAIL_FROM: z.string().default("Triakshi <no-reply@yourbrand.com>"),
+  /** Where new support tickets and overdue warnings go. Unset: the owners and support staff in the console. */
+  SUPPORT_EMAIL: z.preprocess((v) => v || undefined, z.string().email().optional()),
 
   /** Web push keys (npx web-push generate-vapid-keys). Without them push is hidden and nothing else breaks. */
   VAPID_PUBLIC_KEY: z.preprocess((v) => v || undefined, z.string().optional()),

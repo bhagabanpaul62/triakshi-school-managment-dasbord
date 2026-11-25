@@ -3,8 +3,8 @@ import * as OTPAuth from "otpauth";
 
 export const PASSWORD = "demo12345"; // local seed only (apps/school/scripts/seed.mts)
 export const SCHOOL = (slug: string) => `http://${slug}.localhost:${process.env.SCHOOL_PORT ?? "4100"}`;
-export const CONSOLE = "http://localhost:4102";
-export const MARKETING = "http://localhost:4101";
+export const CONSOLE = `http://localhost:${process.env.CONSOLE_PORT ?? "4102"}`;
+export const MARKETING = `http://localhost:${process.env.MARKETING_PORT ?? "4101"}`;
 const DEV_TOTP_SECRET = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 
 /** Sign in to a school panel and wait for /app. */

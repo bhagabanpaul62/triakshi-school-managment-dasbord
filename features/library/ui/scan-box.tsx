@@ -56,7 +56,7 @@ export function ScanBox({ onIssue }: { onIssue?: (b: ScannedBook) => void }) {
               </>
             ) : found.state === "available" ? (
               onIssue ? <ToneBadge label="On the shelf. Pick the student to issue." tone="success" />
-                : <Link href={`/app/library?scan=${found.book.accessionLabel}`} className="text-[var(--ds-primary)] underline-offset-2 hover:underline">On the shelf. Start issue</Link>
+                : <Link href={`/app/library?scan=${found.book.accessionLabel}`} className="text-[var(--ds-primary-text)] underline-offset-2 hover:underline">On the shelf. Start issue</Link>
             ) : <ToneBadge label={found.state === "lost" ? "Marked lost" : "Marked damaged"} tone="warning" />}
           </div>
         ) : null}

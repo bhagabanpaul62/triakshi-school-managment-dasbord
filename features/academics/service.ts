@@ -1,6 +1,7 @@
+import { z } from "zod";
 import { and, asc, count, eq, inArray, sql, sum } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
-import { ConflictError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
+import { AppError, ConflictError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { AcademicsCrud, by, countIn, currentYear, type AcademicYear, type Option, type Perm } from "./base";
 import academicsFeature from "./feature";
 import {
@@ -286,6 +287,32 @@ export class SectionService extends AcademicsCrud<typeof sections> {
       const [row] = await tx.update(sections).set({ classTeacherId: teacherId ?? null }).where(eq(sections.id, sectionId)).returning();
       return row!;
     }, (r) => ({ action: "update", entity: this.entityName, entityId: r.id, summary: `Updated section ${r.name}` }));
+  }
+
+  /** Many class teachers at once: one transaction, one audit entry, and each row on its own savepoint so a bad row reports its reason and the rest are still saved. */
+  async assignClassTeachers(input: unknown): Promise<{ changed: number; failed: { sectionId: string; error: string }[] }> {
+    this.authorize("manage", "write");
+    const picks = this.parse(z.object({ picks: z.array(classTeacherInput).min(1).max(400) }), input).picks;
+    return this.write("manage", async (tx) => {
+      let changed = 0;
+      const failed: { sectionId: string; error: string }[] = [];
+      for (const p of picks) {
+        try {
+          await tx.transaction(async (sp) => {
+            const s = await this.findOrThrow(sp, p.sectionId);
+            if (s.classTeacherId === (p.teacherId ?? null)) return;
+            await this.assertOpen(sp, s.yearId);
+            await this.assertTeacher(sp, p.teacherId);
+            await sp.update(sections).set({ classTeacherId: p.teacherId ?? null }).where(eq(sections.id, p.sectionId));
+            changed++;
+          });
+        } catch (e) {
+          if (!(e instanceof AppError)) throw e;
+          failed.push({ sectionId: p.sectionId, error: Object.values(e.fieldErrors ?? {})[0] ?? e.message });
+        }
+      }
+      return { changed, failed };
+    }, (r) => ({ action: "update", entity: this.entityName, summary: `Set class teachers for ${r.changed} sections`, meta: { changed: r.changed, failed: r.failed.length } }));
   }
 
   /** "Class 5 - A" style labels for selects, for one year (default: the current one). */

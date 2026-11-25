@@ -30,7 +30,8 @@
     "@smw/site-templates": "workspace:*",
     "@smw/auth": "workspace:*",
     "@smw/config": "workspace:*",
-    "@tabler/icons-react": "^3.52.0"
+    "@tabler/icons-react": "^3.52.0",
+    "@smw/feature-notifications": "workspace:*"
   },
   "peerDependencies": {
     "next": "^16.4.6",

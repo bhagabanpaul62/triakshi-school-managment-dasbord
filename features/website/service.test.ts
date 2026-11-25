@@ -1,20 +1,20 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, eq, plans, schools, withConsole, withSchool } from "@smw/db";
 import { announcements } from "@smw/feature-announcements/schema";
-import { AppError, ForbiddenError, LimitError, NotFoundError, ValidationError } from "@smw/feature-kit";
+import { ForbiddenError, LimitError, NotFoundError, ValidationError } from "@smw/feature-kit";
 import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryStorage, useServices } from "@smw/integrations";
 import { NoticeService } from "@smw/feature-announcements/service";
 import { PRESETS } from "@smw/themes";
 import seed from "./seed";
-import { EnquiryService, PublicSiteService, SiteService, ThemeService, studentLink } from "./service";
+import { EnquiryService, PublicEnquiryService, PublicSiteService, SiteService, SiteSettingsService, ThemeService } from "./service";
 
 const FEATURES = ["announcements", "events", "website"];
 let a: TestSchool, b: TestSchool;
 const storage = new MemoryStorage();
 beforeAll(async () => { ({ a, b } = await createSchoolPair(FEATURES)); useServices({ storage }); });
 afterAll(closeDb);
-beforeEach(() => PublicSiteService.limiter.reset(`${a.id}:1.2.3.4`));
+beforeEach(() => { PublicEnquiryService.limiter.reset(`${a.id}:1.2.3.4`); PublicEnquiryService.schoolLimiter.reset(a.id); });
 
 const setPlan = (s: TestSchool, limits: Record<string, number | boolean>) => withConsole(async (tx) => {
   const [p] = await tx.insert(plans).values({ key: `p-${Math.random().toString(36).slice(2, 8)}`, name: "T", studentCap: 100, priceAnnualPaise: 0, priceMonthlyPaise: 0, limits }).returning();
@@ -127,7 +127,7 @@ describe("SiteService", () => {
 
   it("removes one of its own photos and refuses another school's", async () => {
     const svc = new SiteService(a.as.admin);
-    const { url } = await svc.uploadPhoto({ name: "bus.jpg", type: "image/jpeg", bytes: new Uint8Array([255, 216]) });
+    const { url } = await svc.uploadPhoto({ name: "bus.jpg", type: "image/jpeg", bytes: new Uint8Array([255, 216, 255]) });
     const key = url.replace("/api/files/", "");
     const other = `/api/files/${b.id}/public/site/x.png`;
     await expect(svc.removePhoto(other)).rejects.toBeInstanceOf(NotFoundError);
@@ -168,72 +168,11 @@ describe("PublicSiteService", () => {
     const pub = PublicSiteService.forSchool(a.id, FEATURES);
     const titles = (await pub.news()).map((n) => n.title);
     expect(titles).toEqual(["Open day"]);
+    expect(await pub.staff()).toEqual([]);
+    await new SiteSettingsService(a.as.admin).update({ hiddenStaff: [] });
     expect((await pub.staff()).map((s) => s.name)).toContain("teacher a");
     expect(await pub.events()).toEqual([]);
     expect(await PublicSiteService.forSchool(a.id, ["announcements"]).published()).toBeNull();
-  });
-
-  it("records an enquiry without a login", async () => {
-    const pub = PublicSiteService.forSchool(a.id, FEATURES);
-    await pub.submitEnquiry({ studentName: "Riya Sharma", parentName: "Sunita Sharma", phone: "9876543210", classApplying: "Class 3", dob: "2018-05-02" }, { ip: "1.2.3.4" });
-    const list = await new EnquiryService(a.as.admin).list({ q: "Riya" });
-    expect(list.rows).toHaveLength(1);
-    expect(list.rows[0]).toMatchObject({ status: "new", source: "website", classApplying: "Class 3" });
-    await expect(pub.submitEnquiry({ studentName: "R", parentName: "S", phone: "123" }, { ip: "1.2.3.4" })).rejects.toMatchObject({ fieldErrors: { phone: expect.any(String) } });
-  });
-
-  it("a filled honeypot is accepted but stores nothing", async () => {
-    const before = (await new EnquiryService(a.as.admin).list()).total;
-    const r = await PublicSiteService.forSchool(a.id, FEATURES).submitEnquiry({ studentName: "Bot Kid", parentName: "Bot Parent", phone: "9876543211", website: "http://spam.example" }, { ip: "1.2.3.4" });
-    expect(r).toEqual({ received: true });
-    expect((await new EnquiryService(a.as.admin).list()).total).toBe(before);
-  });
-
-  it("rate limits one visitor after 8 enquiries an hour", async () => {
-    const pub = PublicSiteService.forSchool(a.id, FEATURES);
-    const send = () => pub.submitEnquiry({ studentName: "Kid Name", parentName: "Parent Name", phone: "9876543212" }, { ip: "1.2.3.4" });
-    for (let i = 0; i < 8; i++) await send();
-    const err = await send().catch((e) => e);
-    expect(err).toBeInstanceOf(AppError);
-    expect(err.status).toBe(429);
-    await expect(pub.submitEnquiry({ studentName: "Kid Name", parentName: "Parent Name", phone: "9876543212" }, { ip: "5.6.7.8" })).resolves.toEqual({ received: true });
-  });
-});
-
-describe("EnquiryService", () => {
-  it("moves an enquiry through the pipeline, filters by status and clears notes", async () => {
-    const svc = new EnquiryService(a.as.accountant);
-    const e = await svc.create({ studentName: "Aman Verma", parentName: "Raj Verma", phone: "9811111111", source: "phone" });
-    await svc.update(e.id, { status: "contacted", notes: "Call back Friday" });
-    expect((await svc.get(e.id)).notes).toBe("Call back Friday");
-    expect((await svc.list({ filters: { status: "contacted" } })).rows.map((r) => r.id)).toContain(e.id);
-    expect((await svc.list({ filters: { status: "closed" } })).rows.map((r) => r.id)).not.toContain(e.id);
-    await svc.update(e.id, { status: "visited" });
-    expect((await svc.get(e.id)).notes).toBeNull();
-    expect((await svc.counts()).visited).toBeGreaterThanOrEqual(1);
-    await expect(svc.update(e.id, { status: "bogus" })).rejects.toBeInstanceOf(ValidationError);
-  });
-
-  it("builds the convert-to-student link", async () => {
-    const svc = new EnquiryService(a.as.admin);
-    const e = await svc.create({ studentName: "Meera Nair", parentName: "Anil Nair", phone: "9822222222", classApplying: "Class 1", dob: "2019-01-09" });
-    const link = await svc.convertLink(e.id);
-    expect(link).toMatch(/^\/app\/students\?new=1&name=Meera\+Nair/);
-    expect(studentLink(e)).toBe(link);
-    expect(link).toContain("dob=2019-01-09");
-  });
-
-  it("teachers cannot see enquiries", async () => {
-    await expect(new EnquiryService(a.as.teacher).list()).rejects.toBeInstanceOf(ForbiddenError);
-  });
-
-  it("isolation: school B cannot see or change A's enquiries", async () => {
-    const x = await new EnquiryService(a.as.admin).create({ studentName: "Only In A", parentName: "Parent A", phone: "9833333333" });
-    const bSvc = new EnquiryService(b.as.admin);
-    expect((await bSvc.list()).rows.some((r) => r.id === x.id)).toBe(false);
-    await expect(bSvc.get(x.id)).rejects.toBeInstanceOf(NotFoundError);
-    await expect(bSvc.update(x.id, { status: "closed" })).rejects.toBeInstanceOf(NotFoundError);
-    await expect(bSvc.remove(x.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -282,7 +221,7 @@ describe("ThemeService", () => {
 });
 
 describe("seed", () => {
-  it("publishes a themed site and six enquiries across the pipeline", async () => {
+  it("publishes a themed site and enquiries across every stage", async () => {
     const { a: s } = await createSchoolPair(FEATURES, "seed");
     await seed(s.as.admin, { slug: "sunrise" });
     const live = await PublicSiteService.forSchool(s.id, FEATURES).published();
@@ -290,7 +229,10 @@ describe("seed", () => {
     expect(live?.content.pages[0]!.sections[0]!.type).toBe("hero");
     expect((await new ThemeService(s.as.admin).get()).theme.preset).toBe("maroon");
     const e = new EnquiryService(s.as.admin);
-    expect((await e.list()).total).toBe(6);
-    expect(await e.counts()).toEqual({ new: 2, contacted: 1, visited: 1, admitted: 1, closed: 1 });
+    expect((await e.list()).total).toBe(10);
+    // Kabir is "offered" here: this school has no student to link him to.
+    expect(await e.counts()).toEqual({ new: 3, contacted: 0, visit: 1, visited: 1, applied: 1, offered: 2, waitlist: 1, admitted: 0, closed: 1 });
+    const board = await e.today("all");
+    expect(board.fresh.length).toBe(3);
   });
 });

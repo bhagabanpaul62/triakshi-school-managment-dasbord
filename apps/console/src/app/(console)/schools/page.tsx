@@ -15,6 +15,7 @@ const columns: Column[] = [
   { key: "status", label: "Status", type: "badge", tones: SCHOOL_TONES, labels: SCHOOL_LABELS },
   { key: "planName", label: "Plan", hideOnMobile: true },
   { key: "students", label: "Students" },
+  { key: "setup", label: "Setup", hideOnMobile: true },
   { key: "trialEndsAt", label: "Trial ends", type: "date", hideOnMobile: true },
   { key: "createdAt", label: "Joined", type: "date", hideOnMobile: true },
 ];
@@ -23,7 +24,8 @@ export default async function SchoolsPage({ searchParams }: { searchParams: Prom
   const staff = await requireStaff();
   const [page, plans] = await Promise.all([new SchoolAdminService(staff).list(listQueryFrom(await searchParams)), new PlanAdminService(staff).list()]);
   const latest = plans.filter((p) => p.isLatest);
-  const rows = page.rows.map((s) => ({ ...s, where: [s.slug, s.city].filter(Boolean).join(" · "), students: `${s.studentCount} / ${s.studentCap}` }));
+  const rows = page.rows.map((s) => ({ ...s, where: [s.slug, s.city].filter(Boolean).join(" · "), students: `${s.studentCount} / ${s.studentCap}`,
+    setup: s.setupPercent === null ? "No picture yet" : `${s.setupPercent}%${s.stuck ? ` · stuck${s.setupNext ? `: ${s.setupNext}` : ""}` : ""}` }));
   const create = <FormModal title="New school" icon="class" fields={createSchoolFields(latest.filter((p) => p.isActive).map((p) => ({ id: p.id, label: `${p.name} (up to ${p.studentCap})` })))}
     action={createSchool} submitLabel="Create school" summary="Starts a trial and emails the administrator." />;
 
@@ -35,6 +37,7 @@ export default async function SchoolsPage({ searchParams }: { searchParams: Prom
         filters={[
           { key: "status", label: "Status", options: statusOptions(SCHOOL_LABELS) },
           { key: "plan", label: "Plan", options: latest.map((p) => ({ value: p.key, label: p.name })) },
+          { key: "stuck", label: "Setup", options: [{ value: "1", label: "Stuck (under 50% after 5 days)" }] },
         ]}
         empty={{ title: "No schools match.", description: "Clear the filters or create a school.", action: staff.role === "support" ? undefined : create }} />
     </>

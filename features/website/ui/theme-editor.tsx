@@ -1,11 +1,12 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- the logo is an arbitrary https link, so next/image cannot optimise it */
 
-import { useMemo, useState, useTransition, type CSSProperties } from "react";
+import { useMemo, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { checkContrast, FONTS, RADII, type Theme } from "@smw/themes";
+import { checkContrast, FONTS, RADII, siteRoles, type Theme } from "@smw/themes";
 import { Panel } from "@smw/ui/kit/Panel";
 import { Button } from "@smw/ui/ui/button";
+import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { INPUT, type FormResult, keepValues } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
@@ -18,9 +19,30 @@ const COLORS: { key: keyof Theme["colors"]; label: string; primary?: boolean }[]
   { key: "text", label: "Text" }, { key: "mutedText", label: "Muted text" },
 ];
 
+/** Choose a picture, upload it, and hand back its address (the form saves it). */
+function UploadPicture({ kind, label, onDone, upload }: { kind: "logo" | "favicon"; label: string; onDone: (url: string) => void; upload: (fd: FormData) => Promise<FormResult> }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={async (e) => {
+        const f = e.target.files?.[0]; e.target.value = "";
+        if (!f) return;
+        setBusy(true);
+        const fd = new FormData(); fd.set("kind", kind); fd.set("file", f);
+        const r = await upload(fd);
+        setBusy(false);
+        if (r.ok) { onDone((r.data as { url: string }).url); toast(r.message ?? "Uploaded. Save the theme to use it."); } else toast(r.error, "danger");
+      }} />
+      <Button type="button" size="sm" variant="secondary" className="rounded-full" isLoading={busy} onClick={() => input.current?.click()}>{label}</Button>
+    </>
+  );
+}
+
 /** Theme editor: presets, colours, radius, font, logo, a live mini preview and inline contrast problems. */
-export function ThemeEditor({ initial, presets, limited, schoolName, action }: {
+export function ThemeEditor({ initial, presets, limited, schoolName, action, upload, reset }: {
   initial: Theme; presets: Theme[]; limited: boolean; schoolName: string; action: (fd: FormData) => Promise<FormResult>;
+  upload: (fd: FormData) => Promise<FormResult>; reset: (fd: FormData) => Promise<FormResult>;
 }) {
   const [t, setT] = useState<Theme>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -37,7 +59,8 @@ export function ThemeEditor({ initial, presets, limited, schoolName, action }: {
   });
 
   const c = t.colors;
-  const vars = { "--p": c.primary, "--pl": c.primaryLight, "--s": c.secondary, "--a": c.accent, "--bg": c.background, "--sf": c.surface, "--tx": c.text, "--mt": c.mutedText, "--r": RADII[t.radius] } as CSSProperties;
+  const roles = siteRoles(t);
+  const vars = { "--p": c.primary, "--pf": roles.fill, "--op": roles.onPrimary, "--pt": roles.primaryText, "--pl": c.primaryLight, "--s": c.secondary, "--a": c.accent, "--bg": c.background, "--sf": c.surface, "--tx": c.text, "--mt": c.mutedText, "--r": RADII[t.radius] } as CSSProperties;
 
   return (
     <form onSubmit={keepValues(submit)} className="grid grid-cols-1 gap-3 lg:grid-cols-12">
@@ -50,7 +73,8 @@ export function ThemeEditor({ initial, presets, limited, schoolName, action }: {
       </> : null}
 
       <div className="flex flex-col gap-3 lg:col-span-7">
-        {limited ? <p role="note" className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]">Your plan lets you change the logo and the primary colour. Upgrade to edit every colour, the font and the corner style.</p> : null}
+        <p role="note" className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]">The theme is not part of a publish. When you save, the panel and your live website change at once.</p>
+        {limited ? <p role="note" className="rounded-2xl bg-white/[0.05] px-4 py-3 text-sm text-[var(--ds-on-surface-variant)]">Open on your plan: the logo and the primary colour. Locked: the other colours, the font, the corners and the browser icon. <a href="/app/billing" className="text-[var(--ds-primary-text)] underline underline-offset-2">See plans</a></p> : null}
 
         <Panel title="Starting point">
           <div className="flex flex-wrap gap-2">
@@ -94,11 +118,21 @@ export function ThemeEditor({ initial, presets, limited, schoolName, action }: {
               <select name={limited ? undefined : "font"} value={t.font} disabled={limited} onChange={(e) => setT({ ...t, font: e.target.value as Theme["font"] })} className={INPUT}>
                 {FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
               </select></label>
-            <label className="grid gap-1.5 text-sm sm:col-span-2">Logo link
-              <input name="logoUrl" type="url" inputMode="url" value={t.logoUrl ?? ""} placeholder="https://..." onChange={(e) => setT({ ...t, logoUrl: e.target.value || null })} aria-invalid={errors.logoUrl ? true : undefined} className={INPUT} />
-              <span className="text-xs text-[var(--ds-on-surface-muted)]">{errors.logoUrl ?? "A link to your logo image. It shows in the panel and on the website."}</span></label>
-            {!limited ? <label className="grid gap-1.5 text-sm sm:col-span-2">Browser icon link
-              <input name="faviconUrl" type="url" inputMode="url" value={t.faviconUrl ?? ""} placeholder="https://..." onChange={(e) => setT({ ...t, faviconUrl: e.target.value || null })} className={INPUT} /></label> : null}
+            <div className="grid gap-1.5 text-sm sm:col-span-2">Logo
+              <div className="flex flex-wrap items-center gap-2">
+                {t.logoUrl ? <img src={t.logoUrl} alt="Your logo" className="h-10 w-auto max-w-32 rounded-lg bg-white/[0.06] p-1" /> : null}
+                <UploadPicture kind="logo" label={t.logoUrl ? "Replace logo" : "Upload logo"} upload={upload} onDone={(url) => setT((p) => ({ ...p, logoUrl: url }))} />
+                {t.logoUrl ? <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={() => setT({ ...t, logoUrl: null })}>Remove</Button> : null}
+              </div>
+              <input name="logoUrl" type="text" inputMode="url" pattern="(https://|/api/files/).*" value={t.logoUrl ?? ""} placeholder="or paste a link: https://..." onChange={(e) => setT({ ...t, logoUrl: e.target.value || null })} aria-invalid={errors.logoUrl ? true : undefined} className={INPUT} />
+              <span className="text-xs text-[var(--ds-on-surface-muted)]">{errors.logoUrl ?? "A square or wide PNG, JPEG or WebP. It shows in the panel and on the website."}</span></div>
+            {!limited ? <div className="grid gap-1.5 text-sm sm:col-span-2">Browser icon (favicon)
+              <div className="flex flex-wrap items-center gap-2">
+                {t.faviconUrl ? <img src={t.faviconUrl} alt="Your browser icon" className="h-8 w-8 rounded-lg bg-white/[0.06] p-1" /> : null}
+                <UploadPicture kind="favicon" label={t.faviconUrl ? "Replace icon" : "Upload icon"} upload={upload} onDone={(url) => setT((p) => ({ ...p, faviconUrl: url }))} />
+                {t.faviconUrl ? <Button type="button" size="sm" variant="ghost" className="rounded-full" onClick={() => setT({ ...t, faviconUrl: null })}>Remove</Button> : null}
+              </div>
+              <input name="faviconUrl" type="text" inputMode="url" pattern="(https://|/api/files/).*" value={t.faviconUrl ?? ""} placeholder="or paste a link: https://..." onChange={(e) => setT({ ...t, faviconUrl: e.target.value || null })} className={INPUT} /></div> : null}
           </div>
         </Panel>
       </div>
@@ -115,23 +149,39 @@ export function ThemeEditor({ initial, presets, limited, schoolName, action }: {
               <div style={{ background: "var(--pl)", padding: "28px 20px" }}>
                 <h3 style={{ margin: 0, fontSize: 22, lineHeight: 1.2 }}>Where every child grows</h3>
                 <p style={{ margin: "8px 0 16px", fontSize: 13, color: "var(--mt)" }}>A caring school with small classes and big ideas.</p>
-                <span style={{ display: "inline-block", background: "var(--p)", color: "#fff", padding: "9px 18px", borderRadius: "calc(var(--r) + 6px)", fontSize: 13, fontWeight: 600 }}>Apply now</span>
+                <span style={{ display: "inline-block", background: "var(--pf)", color: "var(--op)", padding: "9px 18px", borderRadius: "calc(var(--r) + 6px)", fontSize: 13, fontWeight: 600 }}>Apply now</span>
               </div>
               <div style={{ background: "var(--sf)", padding: "14px 20px", display: "flex", gap: 12 }}>
                 {["Students", "Teachers"].map((l, i) => (
                   <div key={l} style={{ flex: 1, background: "var(--bg)", borderRadius: "var(--r)", padding: 12 }}>
-                    <b style={{ display: "block", fontSize: 20, color: i ? "var(--s)" : "var(--p)" }}>{i ? "60" : "1,200"}</b><span style={{ fontSize: 12, color: "var(--mt)" }}>{l}</span>
+                    <b style={{ display: "block", fontSize: 20, color: i ? "var(--s)" : "var(--pt)" }}>{i ? "60" : "1,200"}</b><span style={{ fontSize: 12, color: "var(--mt)" }}>{l}</span>
                   </div>
                 ))}
               </div>
               <div style={{ padding: "10px 20px 14px", fontSize: 12 }}><span style={{ background: "var(--a)", color: "#111", padding: "2px 8px", borderRadius: 999 }}>New</span> Annual Day on 20 December</div>
             </div>
           </Panel>
+          <Panel title="In the panel">
+            <div style={{ ...vars, background: "var(--bg)", color: "var(--tx)", borderRadius: "calc(var(--r) + 8px)", display: "grid", gridTemplateColumns: "92px 1fr", overflow: "hidden", fontFamily: `'${t.font}', system-ui, sans-serif` }} aria-label="Preview of your panel">
+              <div style={{ background: "var(--sf)", padding: 10, display: "grid", gap: 6, alignContent: "start", fontSize: 11 }}>
+                <b style={{ fontSize: 11 }}>{schoolName.slice(0, 12)}</b>
+                <span style={{ background: "var(--pf)", color: "var(--op)", borderRadius: "var(--r)", padding: "5px 8px" }}>Home</span>
+                <span style={{ color: "var(--mt)", padding: "5px 8px" }}>Students</span>
+                <span style={{ color: "var(--mt)", padding: "5px 8px" }}>Fees</span>
+              </div>
+              <div style={{ padding: 12, display: "grid", gap: 8 }}>
+                <div style={{ background: "var(--sf)", borderRadius: "var(--r)", padding: 10 }}><b style={{ fontSize: 18, color: "var(--pt)" }}>94%</b><span style={{ display: "block", fontSize: 11, color: "var(--mt)" }}>Present today</span></div>
+                <span style={{ justifySelf: "start", background: "var(--pf)", color: "var(--op)", padding: "6px 12px", borderRadius: "var(--r)", fontSize: 12, fontWeight: 600 }}>Mark attendance</span>
+              </div>
+            </div>
+          </Panel>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <span className="mr-auto text-xs text-[var(--ds-on-surface-muted)]">
-              {issues.length ? "Fix the colours marked hard to read to save." : changed ? "Unsaved changes. The live site updates when you save." : <a href="/" target="_blank" rel="noopener" className="text-[var(--ds-primary)] hover:underline">See it on your website</a>}
+              {issues.length ? "Fix the colours marked hard to read to save." : changed ? "Unsaved changes. The live site updates when you save." : <>Nothing to save yet. <a href="/" target="_blank" rel="noopener" className="text-[var(--ds-primary-text)] hover:underline">See it on your website</a></>}
             </span>
             {changed ? <Button type="button" variant="ghost" className="rounded-full" onClick={() => setT(initial)}>Undo changes</Button> : null}
+            {!limited ? <ActionButton variant="ghost" label="Reset to the default" action={reset} successMessage="Theme reset to the default"
+              confirm={{ title: "Reset the theme?", body: "Colours, font and corners go back to the default look. Your logo and browser icon stay. It applies to the panel and the live website at once.", confirmLabel: "Reset" }} /> : null}
             <Button type="submit" className="rounded-full" isLoading={pending} disabled={issues.length > 0 || !changed}>Save theme</Button>
           </div>
         </div>

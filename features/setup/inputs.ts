@@ -5,6 +5,7 @@ import { schoolProfileInput } from "@smw/feature-settings/inputs";
 import { PRESETS } from "@smw/themes";
 import { TEMPLATE_KEYS } from "@smw/site-templates";
 import { BAND_KEYS } from "./presets";
+import { STEP_KEYS } from "./steps";
 
 const blank = (v: unknown) => (v === "" || v === null ? undefined : v);
 
@@ -43,3 +44,34 @@ export const websiteStepInput = z.object({
   template: z.enum(TEMPLATE_KEYS, { error: "Pick a template" }),
   preset: z.enum(Object.keys(PRESETS) as [string, ...string[]], { error: "Pick a colour theme" }),
 });
+
+/** Students by hand: up to ten rows; blank rows are ignored by the service. */
+export const studentsByHandInput = z.object({
+  rows: z.array(z.object({
+    name: z.string().trim(), sectionId: z.string().trim(), guardianName: z.string().trim(), guardianPhone: z.string().trim(),
+  })).max(10, "Add up to 10 students at a time"),
+});
+
+/** Class teachers: one pick per section; a blank teacher clears the section's class teacher. */
+export const classTeachersInput = z.object({
+  picks: z.array(z.object({ sectionId: z.string().trim().min(1), teacherId: z.string().trim() })).min(1, "Pick at least one class teacher").max(400),
+});
+
+/** A second admin or an office login. */
+export const teamStepInput = z.object({
+  name: z.string().trim().min(2, "Enter the full name").max(120),
+  email: z.string().trim().pipe(z.email("Enter a valid email address")),
+  role: z.enum(["admin", "accountant"], { error: "Pick a role" }),
+});
+
+export const askUsInput = z.object({
+  step: z.enum(STEP_KEYS),
+  body: z.string().trim().min(5, "Tell us what you need help with").max(2000, "Keep it under 2000 characters"),
+});
+
+export const skipStepInput = z.object({ step: z.enum(STEP_KEYS) });
+
+/** Getting started. */
+export const taskKeyInput = z.object({ key: z.string().trim().min(1).max(60) });
+export const assignTaskInput = z.object({ key: z.string().trim().min(1).max(60), userId: z.uuid("Pick a colleague") });
+export const skipTaskInput = z.object({ key: z.string().trim().min(1).max(60), reason: z.string().trim().min(3, "Say why in a few words").max(300, "Keep it under 300 characters") });

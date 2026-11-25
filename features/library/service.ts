@@ -241,11 +241,12 @@ export class LoanService extends SchoolService<Perm> {
   private statusClause(status: string | undefined, today: string): SQL | undefined {
     if (status === "open") return and(isNull(loans.returnedOn), sql`${loans.dueOn} >= ${today}`);
     if (status === "overdue") return and(isNull(loans.returnedOn), lt(loans.dueOn, today));
+    if (status === "due-today") return and(isNull(loans.returnedOn), eq(loans.dueOn, today));
     if (status === "returned") return sql`${loans.returnedOn} is not null`;
     return undefined;
   }
 
-  /** Every loan, newest first. Filters: status (open, overdue, returned), kind (student, staff). */
+  /** Every loan, newest first. Filters: status (open, overdue, due-today, returned), kind (student, staff). */
   async list(query: ListQuery = {}): Promise<Page<LoanRow>> {
     const q = listQuerySchema.parse(query);
     const today = todayIST();

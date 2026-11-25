@@ -4,19 +4,25 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@smw/ui/ui/button";
 import { INPUT, type FormResult } from "@smw/ui/shell/FormModal";
+import { FilesField } from "@smw/ui/comm/FilesField";
 import { toast } from "@smw/ui/shell/toast";
+import { filesTotalProblem } from "@smw/feature-kit/support-sla";
+import { MAX_FILES, MAX_FILE_MB } from "../inputs";
 
-/** Message box under a ticket thread. Posts to a server action, then refreshes the thread. Ctrl/Cmd+Enter sends. */
+/** Message box under a ticket thread, with files. Posts to a server action, then refreshes the thread. Ctrl/Cmd+Enter sends. Typed words stay when it fails. */
 export function ReplyForm({ ticketId, action, label = "Send reply" }: { ticketId: string; action: (fd: FormData) => Promise<FormResult>; label?: string }) {
   const ref = useRef<HTMLFormElement>(null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState(0);
   const router = useRouter();
   const submit = (fd: FormData) => start(async () => {
     fd.set("id", ticketId);
+    const tooMuch = filesTotalProblem(fd.getAll("files").map((f) => (f instanceof File ? f.size : 0)));
+    if (tooMuch) { setError(tooMuch); return; }
     const r = await action(fd);
-    if (r.ok) { ref.current?.reset(); setError(null); toast(r.message ?? "Sent"); router.refresh(); }
-    else setError(r.fieldErrors?.body ?? r.error);
+    if (r.ok) { ref.current?.reset(); setRound((n) => n + 1); setError(null); toast(r.message ?? "Sent"); router.refresh(); }
+    else setError(r.fieldErrors?.body ?? r.fieldErrors?.files ?? r.error);
   });
   return (
     <form ref={ref} action={submit} className="flex flex-col gap-3" noValidate>
@@ -25,6 +31,7 @@ export function ReplyForm({ ticketId, action, label = "Send reply" }: { ticketId
         onChange={() => error && setError(null)}
         onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ref.current?.requestSubmit(); } }}
         className={`${INPUT} h-auto py-2`} />
+      <FilesField key={round} label="Add a picture or PDF (optional)" accept={["application/pdf", "image/*"]} maxCount={MAX_FILES} maxMb={MAX_FILE_MB} />
       {error ? <p id="reply-error" role="alert" className="text-sm text-[var(--ds-color-danger-500)]">{error}</p> : null}
       <div className="flex items-center justify-between gap-3">
         <span className="hidden text-xs text-[var(--ds-on-surface-muted)] sm:block">Ctrl + Enter to send</span>

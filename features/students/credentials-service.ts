@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { Passwords } from "@smw/auth";
-import { schools, sessions, users } from "@smw/db";
+import { schools, sessions, users, withSchool } from "@smw/db";
 import { NotFoundError } from "@smw/feature-kit";
 import { classes, sections } from "@smw/feature-academics/schema";
 import { StudentRecordService } from "./access";
@@ -14,7 +14,7 @@ export class CredentialService extends StudentRecordService {
    * shown while the account still must change it and still has it: after that the office no longer knows it.
    */
   async slips(classId: string) {
-    return this.read("write", async (tx) => {
+    const out = await this.read("write", async (tx) => {
       const [school] = await tx.select({ name: schools.name }).from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
       const rows = await tx.select({
         id: students.id, name: students.name, admissionNo: students.admissionNo, dob: students.dob, rollNo: students.rollNo,
@@ -37,6 +37,9 @@ export class CredentialService extends StudentRecordService {
         })),
       };
     });
+    // Producing slips is logged (it is not a change, so a read-only school can still print): getting started reads it.
+    if (out.slips.length) await withSchool(this.ctx.schoolId, (tx) => this.audit(tx, { action: "print_slips", entity: "Student", summary: `Printed login slips for ${out.slips.length} students` }));
+    return out;
   }
 
   /** Never signed in / last sign-in / disabled, for the record page. */

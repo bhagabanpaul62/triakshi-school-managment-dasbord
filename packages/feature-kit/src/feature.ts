@@ -14,6 +14,8 @@ export interface MenuItem<P extends string> {
   href: string; // under /app
   icon: MenuIcon;
   permission: P;
+  /** The item also shows for anyone holding one of these (a role that may edit sees the screens it edits). */
+  also?: readonly P[];
   group?: MenuGroup;
   order?: number;
 }

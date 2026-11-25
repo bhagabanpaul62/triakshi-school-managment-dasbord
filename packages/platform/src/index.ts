@@ -13,6 +13,8 @@ export * from "./staff";
 export * from "./support-login";
 export * from "./audit";
 export * from "./support-desk";
+export * from "./notices";
 export * from "./design-requests";
 export * from "./domains";
 export * from "./overview";
+export * from "./setup-status";

@@ -637,12 +637,24 @@ importers:
       '@smw/feature-requests':
         specifier: workspace:*
         version: link:../../features/requests
+      '@smw/feature-settings':
+        specifier: workspace:*
+        version: link:../../features/settings
+      '@smw/feature-setup':
+        specifier: workspace:*
+        version: link:../../features/setup
+      '@smw/feature-support':
+        specifier: workspace:*
+        version: link:../../features/support
       '@smw/feature-timetable':
         specifier: workspace:*
         version: link:../../features/timetable
       '@smw/feature-transport':
         specifier: workspace:*
         version: link:../../features/transport
+      '@smw/feature-website':
+        specifier: workspace:*
+        version: link:../../features/website
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -922,6 +934,9 @@ importers:
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -1240,9 +1255,15 @@ importers:
       '@smw/feature-exams':
         specifier: workspace:*
         version: link:../exams
+      '@smw/feature-expenses':
+        specifier: workspace:*
+        version: link:../expenses
       '@smw/feature-fees':
         specifier: workspace:*
         version: link:../fees
+      '@smw/feature-finance':
+        specifier: workspace:*
+        version: link:../finance
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
@@ -1258,6 +1279,9 @@ importers:
       '@smw/feature-notifications':
         specifier: workspace:*
         version: link:../notifications
+      '@smw/feature-payroll':
+        specifier: workspace:*
+        version: link:../payroll
       '@smw/feature-requests':
         specifier: workspace:*
         version: link:../requests
@@ -1695,6 +1719,9 @@ importers:
       '@smw/feature-billing':
         specifier: workspace:*
         version: link:../billing
+      '@smw/feature-fees':
+        specifier: workspace:*
+        version: link:../fees
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
@@ -1875,6 +1902,9 @@ importers:
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
@@ -2034,6 +2064,9 @@ importers:
       '@smw/feature-kit':
         specifier: workspace:*
         version: link:../../packages/feature-kit
+      '@smw/feature-notifications':
+        specifier: workspace:*
+        version: link:../notifications
       '@smw/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations

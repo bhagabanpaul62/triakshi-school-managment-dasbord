@@ -14,6 +14,13 @@ const optPattern = (re: RegExp, msg: string, upper = false) =>
 
 const validZone = (tz: string) => { try { new Intl.DateTimeFormat("en", { timeZone: tz }); return true; } catch { return false; } };
 
+/** Optional web address: "" → undefined; with or without http. */
+const optSite = z.preprocess((v) => (v === "" || v == null ? undefined : typeof v === "string" ? v.trim() : v), z.string().max(200).regex(/^(https?:\/\/)?[^\s/.]+\.[^\s]+$/i, "Enter a web address like www.school.in").optional());
+
+/**
+ * The school profile form. The ten fields marked "new" are left alone when a caller does not send them (see SchoolProfileService.update),
+ * so a form that shows only some of them, or the setup wizard, never wipes the rest.
+ */
 export const schoolProfileInput = z.object({
   name: f.text(2, 120, "Enter the school name"),
   board: f.optText(60),
@@ -26,6 +33,34 @@ export const schoolProfileInput = z.object({
   udiseCode: optPattern(/^\d{11}$/, "UDISE+ code is 11 digits"),
   timezone: f.text(1, 60, "Choose a timezone").refine(validZone, "Choose a valid timezone"),
   academicYearStartMonth: f.int(1, 12),
+  // new
+  affiliationNo: f.optText(40),
+  schoolCode: f.optText(40),
+  schoolType: f.optText(40),
+  medium: f.optText(60),
+  establishedYear: f.optInt(1800, new Date().getFullYear()),
+  district: f.optText(80),
+  pincode: optPattern(/^[1-9]\d{5}$/, "PIN code is 6 digits"),
+  website: optSite,
+  headName: f.optText(100),
+  headQualification: f.optText(120),
+});
+
+/** Columns added later: a key the caller left out is not changed, "" clears it. */
+export const NEW_PROFILE_KEYS = ["affiliationNo", "schoolCode", "schoolType", "medium", "establishedYear", "district", "pincode", "website", "headName", "headQualification"] as const;
+
+/** Add a login: who, how to reach them, which role, and whether the invite goes by email or as a link to hand over. */
+export const loginInput = z.object({
+  name: f.text(2, 100, "Enter their name"),
+  email: f.optEmail(),
+  phone: f.optPhone(),
+  role: z.string().min(1, "Pick a role"),
+  send: z.preprocess((v) => (v === "" || v == null ? "email" : v), z.enum(["email", "link"])),
+}).refine((v) => v.email || v.phone, { message: "Enter an email or a mobile number", path: ["email"] });
+
+export const bulkInput = z.object({
+  ids: z.array(z.uuid()).min(1, "Select at least one person").max(100, "Select up to 100 people at a time"),
+  action: z.enum(["resend", "disable", "signout"]),
 });
 
 export const profileInput = z.object({
@@ -58,6 +93,7 @@ export const customRoleInput = z.preprocess(foldGrants, z.object({
   base: z.enum(CUSTOM_ROLE_BASES, { error: "Choose how this role works" }),
   description: f.optText(200),
   grants: z.array(z.string()),
+  confirmRemoval: f.bool(),
 }));
 
 export const exportStudentInput = z.object({ studentId: f.id("Choose a student") });

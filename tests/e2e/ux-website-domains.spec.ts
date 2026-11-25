@@ -33,6 +33,7 @@ test.describe("website and domains journeys", () => {
         await page.getByLabel(/child's name/i).fill("Test Child UX");
         await page.getByLabel(/parent or guardian/i).fill("Test Parent");
         await page.getByLabel(/mobile number/i).fill("9876543210");
+        await page.getByLabel(/school may contact me/i).check(); // consent is required and kept with the enquiry
         await page.getByRole("button", { name: /send enquiry/i }).click();
         await expect(page.getByRole("status").filter({ hasText: /thank you/i })).toBeVisible({ timeout: 30_000 });
         await shot(page, "visitor-form-done-phone");
@@ -51,21 +52,47 @@ test.describe("website and domains journeys", () => {
     await page.goto(`${SITE}/app/theme`, { timeout: 170_000 });
     await shot(page, "admin-theme-desktop");
 
-    await page.goto(`${SITE}/app/enquiries`, { timeout: 170_000 });
+    // The website area has one tab bar: every room opens and has a heading.
+    await page.goto(`${SITE}/app/website`, { timeout: 170_000 });
+    const rooms = page.getByRole("navigation", { name: "Website" });
+    for (const room of ["Edit", "Pages and menu", "Media", "Versions", "Insights", "Settings"]) {
+      await rooms.getByRole("link", { name: room }).click();
+      await expect(rooms.getByRole("link", { name: room })).toHaveAttribute("aria-current", "page", { timeout: 120_000 });
+      await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+    }
+
+    // Enquiries: Today (new, nobody has called), then List and Board.
+    await page.goto(`${SITE}/app/enquiries?who=all`, { timeout: 170_000 });
+    const fresh = page.locator("li").filter({ hasText: "Test Child UX" }).first();
+    await expect(fresh).toBeVisible();
+    await shot(page, "admin-enquiries-today-desktop");
+    await fresh.getByRole("button", { name: "Log call" }).click();
+    const call = page.getByRole("dialog");
+    await call.getByLabel(/how did the call go/i).selectOption({ label: "Talked" });
+    await call.getByRole("button", { name: "Save" }).click();
+    await expect(call).toBeHidden({ timeout: 30_000 });
+    await page.goto(`${SITE}/app/enquiries?view=list&q=${encodeURIComponent("Test Child UX")}`, { timeout: 170_000 });
     const row = page.getByRole("row", { name: /Test Child UX/ }).first();
     await expect(row).toBeVisible();
-    await row.getByRole("button", { name: "Mark called" }).click();
     await expect(page.getByRole("row", { name: /Test Child UX.*Contacted/ }).first()).toBeVisible();
-    await shot(page, "admin-enquiries-desktop");
+    await shot(page, "admin-enquiries-list-desktop");
+    await page.goto(`${SITE}/app/enquiries?view=board`, { timeout: 170_000 });
+    await expect(page.getByText("Test Child UX").first()).toBeVisible();
+    await shot(page, "admin-enquiries-board-desktop");
     // clean up the enquiry this run created so the list does not fill with duplicates
-    await page.getByRole("row", { name: /Test Child UX/ }).first().getByRole("button", { name: "Delete enquiry" }).click();
+    await page.goto(`${SITE}/app/enquiries?view=list&q=${encodeURIComponent("Test Child UX")}`, { timeout: 170_000 });
+    await page.getByRole("row", { name: /Test Child UX/ }).first().getByRole("link").first().click();
+    await page.waitForURL(/\/app\/enquiries\/[0-9a-f-]{36}/, { timeout: 120_000 });
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "Delete" }).or(page.getByRole("button", { name: "Delete", exact: true })).first().click();
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await page.waitForURL(/\/app\/enquiries(\?|$)/, { timeout: 60_000 });
 
     await page.goto(`${SITE}/app/domains`, { timeout: 170_000 });
     await shot(page, "admin-domains-desktop");
 
     await page.setViewportSize({ width: 390, height: 844 });
-    for (const [n, p] of [["website", "website"], ["theme", "theme"], ["enquiries", "enquiries"], ["domains", "domains"]]) {
+    for (const [n, p] of [["website", "website"], ["edit", "website/edit"], ["pages", "website/pages"], ["theme", "theme"], ["enquiries", "enquiries"], ["domains", "domains"]]) {
       await page.goto(`${SITE}/app/${p}`, { timeout: 170_000 });
       await shot(page, `admin-${n}-phone`);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);

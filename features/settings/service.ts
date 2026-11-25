@@ -1,23 +1,27 @@
 import { randomInt } from "node:crypto";
 import { z } from "zod";
+import type { SQL } from "drizzle-orm";
 import { Passwords, SchoolAuth } from "@smw/auth";
 import { schoolUrl } from "@smw/config";
 import {
-  SCHOOL_ROLES, and, asc, auditLogs, count, desc, eq, ilike, isNull, ne, oneTimeTokens, or, schoolRoles, schools, sessions, sql, users,
+  SCHOOL_ROLES, and, asc, auditLogs, count, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, ne, oneTimeTokens, or, schoolRoles, schools, sessions, sql, users,
   type SchoolRole, type Tx,
 } from "@smw/db";
 import {
-  ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, allows, listQuerySchema, toPage,
+  AppError, ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, auditChanges, listQuerySchema, pgErrorCode, refuseSupport, toPage,
   type ListQuery, type Page,
 } from "@smw/feature-kit";
 import { UploadError, emailHtml, services, uploadKey } from "@smw/integrations";
 import { sendAccountMail } from "@smw/feature-notifications/delivery";
 import settingsFeature from "./feature";
-import { ROLE_TEMPLATES, SYSTEM_ROLES, BASELINE_GRANTS, adminOnlyGrants, allGrants, matrixFor, systemGrants, type Catalogue } from "./catalogue";
-import { STAFF_ROLES, customRoleInput, exportStudentInput, resetInput, roleInput, schoolProfileInput } from "./inputs";
-import { dataExports } from "./schema";
+import { ROLE_TEMPLATES, SYSTEM_ROLES, BASELINE_GRANTS, adminOnlyGrants, allGrants, grantsInWords, matrixFor, permissionLabel, systemGrants, type Catalogue } from "./catalogue";
+import { NEW_PROFILE_KEYS, STAFF_ROLES, bulkInput, customRoleInput, loginInput, resetInput, roleInput, schoolProfileInput } from "./inputs";
+import { toCsv } from "./people-csv";
 
 type Perm = keyof typeof settingsFeature.permissions;
+
+const IST = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", dateStyle: "short", timeStyle: "short" });
+export const istStamp = (d: Date | null) => (d ? IST.format(d) : "");
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -33,7 +37,7 @@ export class FilePolicy {
   static keyOf(url: string | null | undefined) { return url?.startsWith(FilePolicy.ROUTE) ? url.slice(FilePolicy.ROUTE.length) : null; }
 
   /** `role` is null when nobody is signed in. Public files are open to everyone; `private/` files to nobody (their module checks and signs);
-   * exports to admins; a family login gets pictures and document images only, never another area. */
+   * exports to nobody (their own route hands them over); a family login gets pictures and document images only, never another area. */
   static canRead(key: string, caller: { schoolId: string; role: SchoolRole | null }): boolean {
     const parts = key.split("/");
     const [school, area] = parts;
@@ -41,7 +45,8 @@ export class FilePolicy {
     if (area === "public") return true;
     if (!caller.role) return false;
     if (area === "private") return false;
-    if (area === "exports") return caller.role === "admin";
+    // Exports are handed over only by /api/exports/<id>, which checks settings:export, logs the download and knows when the file has expired.
+    if (area === "exports") return false;
     if (caller.role === "student" || caller.role === "parent") return area === "avatars" || area === "finance-docs";
     return true;
   }
@@ -54,13 +59,14 @@ export interface UploadFile { name: string; type: string; size: number; bytes: U
 const userCols = {
   id: users.id, name: users.name, email: users.email, phone: users.phone, role: users.role, loginId: users.loginId,
   status: users.status, lastLoginAt: users.lastLoginAt, createdAt: users.createdAt,
-  roleId: users.roleId, roleName: schoolRoles.name, mustChangePassword: users.mustChangePassword, emailVerifiedAt: users.emailVerifiedAt,
+  roleId: users.roleId, roleName: schoolRoles.name, mustChangePassword: users.mustChangePassword, emailVerifiedAt: users.emailVerifiedAt, alertNewDevice: users.alertNewDevice,
 };
 /** A login as the settings screens see it: never the password hash. `roleName` is set only for custom roles. */
 export interface UserRow {
   id: string; name: string; email: string | null; phone: string | null; role: SchoolRole; loginId: string;
   status: "active" | "invited" | "disabled"; lastLoginAt: Date | null; createdAt: Date;
   roleId: string | null; roleName: string | null; mustChangePassword: boolean; emailVerifiedAt: Date | null;
+  alertNewDevice: boolean | null;
 }
 const selectUsers = (tx: Tx) => tx.select(userCols).from(users).leftJoin(schoolRoles, eq(schoolRoles.id, users.roleId));
 
@@ -79,6 +85,9 @@ const profileCols = {
   slug: schools.slug, name: schools.name, board: schools.board, state: schools.state, city: schools.city, address: schools.address,
   phone: schools.phone, email: schools.email, gstin: schools.gstin, udiseCode: schools.udiseCode, timezone: schools.timezone,
   academicYearStartMonth: schools.academicYearStartMonth, logoUrl: schools.logoUrl,
+  affiliationNo: schools.affiliationNo, schoolCode: schools.schoolCode, schoolType: schools.schoolType, medium: schools.medium,
+  establishedYear: schools.establishedYear, district: schools.district, pincode: schools.pincode, website: schools.website,
+  headName: schools.headName, headQualification: schools.headQualification,
 };
 export type SchoolProfile = Pick<typeof schools.$inferSelect, keyof typeof profileCols>;
 
@@ -100,6 +109,11 @@ abstract class SettingsService extends SchoolService<Perm> {
     if (roles.includes("admin") && this.ctx.role !== "admin") throw new ForbiddenError();
   }
 
+  /** A Triakshi support session may look at logins but never add, change or sign anyone out. */
+  protected noSupport() {
+    if (this.ctx.supportStaffId) throw new ForbiddenError("Support sessions cannot manage users.");
+  }
+
   protected async schoolIdentity(tx: Tx) {
     const [s] = await tx.select({ slug: schools.slug, name: schools.name }).from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
     return s!;
@@ -118,17 +132,23 @@ export class SchoolProfileService extends SettingsService {
     });
   }
 
+  /** Old fields: a key left out clears the column (as before). The ten newer fields: a key left out keeps its value, "" clears it. */
   async update(input: unknown): Promise<SchoolProfile> {
     this.authorize("manage", "write");
     const d = this.parse(schoolProfileInput, input);
+    const raw = (input ?? {}) as Record<string, unknown>;
+    const fresh: Record<string, unknown> = {};
+    for (const k of NEW_PROFILE_KEYS) if (raw[k] !== undefined) fresh[k] = d[k] ?? null;
+    let before: SchoolProfile | undefined;
     return this.write("manage", async (tx) => {
+      [before] = await tx.select(profileCols).from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
       const [row] = await tx.update(schools).set({
         name: d.name, board: d.board ?? null, state: d.state ?? null, city: d.city ?? null, address: d.address ?? null,
         phone: d.phone ?? null, email: d.email ?? null, gstin: d.gstin ?? null, udiseCode: d.udiseCode ?? null,
-        timezone: d.timezone, academicYearStartMonth: d.academicYearStartMonth, updatedAt: new Date(),
+        timezone: d.timezone, academicYearStartMonth: d.academicYearStartMonth, ...fresh, updatedAt: new Date(),
       }).where(eq(schools.id, this.ctx.schoolId)).returning(profileCols);
       return row!;
-    }, () => ({ action: "update", entity: "School", entityId: this.ctx.schoolId, summary: "Updated school details" }));
+    }, (row) => ({ action: "update", entity: "School", entityId: this.ctx.schoolId, summary: "Updated school details", meta: { changes: auditChanges(before ?? {}, row) } }));
   }
 
   /**
@@ -175,7 +195,14 @@ export class UserAdminService extends SettingsService {
       const custom = z.uuid().safeParse(roleFilter).success ? roleFilter : undefined;
       const role = z.enum(SCHOOL_ROLES).safeParse(roleFilter).data;
       const status = z.enum(STATUSES).safeParse(q.filters.status).data;
+      const stale = new Date(Date.now() - 60 * 86_400_000);
+      const shows: Record<string, SQL | undefined> = {
+        never: isNull(users.lastLoginAt), noemail: isNull(users.email), unverified: and(isNotNull(users.email), isNull(users.emailVerifiedAt)),
+        mustchange: eq(users.mustChangePassword, true), custom: isNotNull(users.roleId), stale: and(isNotNull(users.lastLoginAt), lt(users.lastLoginAt, stale)),
+      };
+      const show = q.filters.show && Object.hasOwn(shows, q.filters.show) ? shows[q.filters.show] : undefined;
       const where = and(
+        show,
         like ? or(ilike(users.name, like), ilike(users.email, like), ilike(users.loginId, like)) : undefined,
         role ? and(eq(users.role, role), isNull(users.roleId)) : undefined,
         custom ? eq(users.roleId, custom) : undefined,
@@ -207,10 +234,13 @@ export class UserAdminService extends SettingsService {
   /** Staff logins only; the pick is a built-in role or a custom role. An admin can step down only while another active admin remains. The old sessions end. */
   async changeRole(id: string, input: unknown): Promise<UserRow> {
     this.authorize("manage", "write");
+    this.noSupport();
     const { role: pick } = this.parse(roleInput, input);
     if (id === this.ctx.userId) throw new ConflictError("You cannot change your own role.");
+    let was = "";
     return this.write("manage", async (tx) => {
       const u = await this.findUser(tx, id);
+      was = u.roleName ?? u.role;
       if (!(STAFF_ROLES as readonly string[]).includes(u.role)) throw new ConflictError("Student and parent logins keep their role.");
       const next = await resolveRole(tx, pick, this.ctx.role);
       this.adminOnly(u.role, next.role);
@@ -219,7 +249,7 @@ export class UserAdminService extends SettingsService {
       await tx.update(users).set({ role: next.role, roleId: next.roleId }).where(eq(users.id, id));
       await tx.delete(sessions).where(eq(sessions.userId, id));
       return { ...u, role: next.role, roleId: next.roleId, roleName: next.roleId ? next.label : null };
-    }, (r) => ({ action: "change_role", entity: "User", entityId: r.id, summary: `${r.name} is now ${r.roleName ?? r.role}` }));
+    }, (r) => ({ action: "change_role", entity: "User", entityId: r.id, summary: `${r.name} is now ${r.roleName ?? r.role}`, meta: { changes: { Role: [was, r.roleName ?? r.role] } } }));
   }
 
   /** The roles a login can be given, for the pickers and the role filter. */
@@ -230,8 +260,17 @@ export class UserAdminService extends SettingsService {
     ]);
   }
 
+  /** Roles a new login can take: admin, accountant, and the school's own office roles. Teachers come from Staff. */
+  async loginRoleOptions(): Promise<{ value: string; label: string }[]> {
+    return this.read("manage", async (tx) => [
+      ...SYSTEM_ROLES.filter((r) => r.key === "admin" || r.key === "accountant").filter((r) => r.key !== "admin" || this.ctx.role === "admin").map((r) => ({ value: r.key, label: r.name })),
+      ...(await tx.select({ id: schoolRoles.id, name: schoolRoles.name }).from(schoolRoles).where(eq(schoolRoles.base, "staff")).orderBy(asc(schoolRoles.name))).map((r) => ({ value: r.id, label: r.name })),
+    ]);
+  }
+
   /** End every session of this person on every device. */
   async signOutEverywhere(id: string): Promise<{ id: string }> {
+    this.noSupport();
     await this.write("manage", async (tx) => {
       const u = await this.findUser(tx, id);
       this.adminOnly(u.role);
@@ -243,6 +282,7 @@ export class UserAdminService extends SettingsService {
 
   /** A fresh 7-day link to set a password: an invite while they never signed in, a reset link after. Older links of that kind stop working. */
   async accessLink(id: string): Promise<{ url: string; days: number }> {
+    this.noSupport();
     const made = await this.write("manage", async (tx) => {
       const u = await this.findUser(tx, id);
       this.adminOnly(u.role);
@@ -258,6 +298,7 @@ export class UserAdminService extends SettingsService {
   /** Disable the login, cancel unused links and sign them out everywhere. */
   async disable(id: string): Promise<UserRow> {
     this.authorize("manage", "write");
+    this.noSupport();
     if (id === this.ctx.userId) throw new ConflictError("You cannot disable your own account.");
     const row = await this.write("manage", async (tx) => {
       const u = await this.findUser(tx, id);
@@ -266,23 +307,25 @@ export class UserAdminService extends SettingsService {
       await tx.update(users).set({ status: "disabled" }).where(eq(users.id, id));
       await tx.delete(oneTimeTokens).where(eq(oneTimeTokens.userId, id));
       return { ...u, status: "disabled" as const };
-    }, (r) => ({ action: "disable", entity: "User", entityId: r.id, summary: `Disabled ${r.name}` }));
+    }, (r) => ({ action: "disable", entity: "User", entityId: r.id, summary: `Disabled ${r.name}`, meta: { changes: { Account: ["Active", "Disabled"] } } }));
     await this.auth.logoutEverywhere(id);
     return row;
   }
 
   /** Back to active, or to invited when they never set a password (send a reset link to finish). */
   async enable(id: string): Promise<UserRow> {
+    this.noSupport();
     return this.write("manage", async (tx) => {
       const u = await this.findUser(tx, id);
       this.adminOnly(u.role);
       if (u.role === "parent") throw new ConflictError("Parent logins are retired and cannot be enabled.");
+      if (await this.isErased(tx, id)) throw new ConflictError("This login was erased at the family's request and cannot be switched back on. Add a new login if the student returns.");
       if (u.status !== "disabled") return u;
       const [h] = await tx.select({ hash: users.passwordHash }).from(users).where(eq(users.id, id)).limit(1);
       const status = h?.hash ? "active" as const : "invited" as const;
       await tx.update(users).set({ status }).where(eq(users.id, id));
       return { ...u, status };
-    }, (r) => ({ action: "enable", entity: "User", entityId: r.id, summary: `Enabled ${r.name}` }));
+    }, (r) => ({ action: "enable", entity: "User", entityId: r.id, summary: `Enabled ${r.name}`, meta: { changes: { Account: ["Disabled", r.status === "invited" ? "Invited" : "Active"] } } }));
   }
 
   /**
@@ -291,6 +334,7 @@ export class UserAdminService extends SettingsService {
    */
   async resetPassword(id: string, input: unknown = {}): Promise<{ emailed: true } | { temporaryPassword: string; loginId: string }> {
     const { mode } = this.parse(resetInput, input);
+    this.noSupport();
     if (mode === "temporary") return this.temporaryPassword(id);
     const mail = await this.write("manage", async (tx) => {
       const u = await this.findUser(tx, id);
@@ -331,11 +375,166 @@ export class UserAdminService extends SettingsService {
     return { temporaryPassword, loginId: u.loginId };
   }
 
+  // ----- add a login, bulk actions, CSV, one person's page -----
+
+  /**
+   * A new admin, accountant or custom-role login (teachers come from Staff, so their classes are linked). The person starts "invited" and sets their own password:
+   * by an emailed 7-day link, or by an access link the admin hands over. A failed mail never undoes the login: the link comes back instead.
+   */
+  async createLogin(input: unknown): Promise<{ user: UserRow; emailed: boolean; accessLink: string | null }> {
+    this.authorize("manage", "write");
+    this.noSupport();
+    const d = this.parse(loginInput, input);
+    let made;
+    try {
+      made = await this.write("manage", async (tx) => {
+        const pick = await resolveRole(tx, d.role, this.ctx.role);
+        this.adminOnly(pick.role);
+        if (pick.role === "teacher") throw new ValidationError({ role: "Teachers are added from Staff, so their classes and records are linked." });
+        const email = d.email?.toLowerCase();
+        const clash = await tx.select({ e: users.email, p: users.phone, l: users.loginId }).from(users).where(or(
+          email ? sql`lower(${users.email}) = ${email} or lower(${users.loginId}) = ${email}` : undefined, d.phone ? sql`${users.phone} = ${d.phone} or ${users.loginId} = ${d.phone}` : undefined,
+        )).limit(1);
+        if (clash.length) throw new ValidationError(email && (clash[0]!.e?.toLowerCase() === email || clash[0]!.l.toLowerCase() === email) ? { email: "Someone already signs in with this email" } : { phone: "Someone already signs in with this mobile number" });
+        const [u] = await tx.insert(users).values({
+          schoolId: this.ctx.schoolId, role: pick.role, roleId: pick.roleId, loginId: email ?? d.phone!, name: d.name, email: email ?? null, phone: d.phone ?? null, status: "invited",
+        }).returning({ id: users.id });
+        const token = await this.auth.issueToken(tx, "invite", { userId: u!.id, minutes: ACCESS_LINK_MINUTES, meta: email ? { email } : {} });
+        return { row: await this.findUser(tx, u!.id), token, school: await this.schoolIdentity(tx) };
+      }, (m) => ({ action: "create_login", entity: "User", entityId: m.row.id, summary: `Added a login for ${m.row.name} as ${m.row.roleName ?? m.row.role}` }));
+    } catch (err) {
+      if (pgErrorCode(err) === "23505") throw new ValidationError({ email: "Someone already signs in with this email or mobile number" });
+      throw err;
+    }
+    const url = schoolUrl(made.school.slug, `/reset-password?token=${made.token}`);
+    const emailed = made.row.email && d.send === "email" ? await this.mailInvite(made.row.email, made.row.name, made.school.name, url) : false;
+    return { user: made.row, emailed, accessLink: emailed ? null : url };
+  }
+
+  /** A fresh 7-day invite for someone who has not set a password yet. Mailed when there is an email; the link comes back when there is none or the mail failed. */
+  async resendInvite(id: string): Promise<{ emailed: boolean; accessLink: string | null }> {
+    this.noSupport();
+    const m = await this.write("manage", async (tx) => {
+      const u = await this.findUser(tx, id);
+      this.adminOnly(u.role);
+      if (u.status !== "invited") throw new ConflictError(u.status === "disabled" ? "This account is disabled. Enable it first." : "They already set a password. Send a password reset instead.");
+      await tx.delete(oneTimeTokens).where(and(eq(oneTimeTokens.userId, id), eq(oneTimeTokens.purpose, "invite")));
+      const token = await this.auth.issueToken(tx, "invite", { userId: id, minutes: ACCESS_LINK_MINUTES, meta: u.email ? { email: u.email.toLowerCase() } : {} });
+      return { u, token, school: await this.schoolIdentity(tx) };
+    }, (r) => ({ action: "resend_invite", entity: "User", entityId: id, summary: `Sent a new invite to ${r.u.name}` }));
+    const url = schoolUrl(m.school.slug, `/reset-password?token=${m.token}`);
+    const emailed = m.u.email ? await this.mailInvite(m.u.email, m.u.name, m.school.name, url) : false;
+    return { emailed, accessLink: emailed ? null : url };
+  }
+
+  private async mailInvite(to: string, name: string, school: string, url: string): Promise<boolean> {
+    try {
+      await sendAccountMail(this.ctx.schoolId, {
+        to, subject: `Set your password for ${school}`,
+        text: `Hello ${name},\n\n${school} has added you to its school dashboard. Set your password here (the link works for 7 days):\n${url}\n`,
+        html: emailHtml(`Welcome to ${esc(school)}`, `<p>Hello ${esc(name)}, you have been added to the school dashboard. The link works for 7 days.</p>`, { label: "Set your password", url }),
+      });
+      return true;
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "login invite email failed", err: String(err) }));
+      return false;
+    }
+  }
+
+  /** One action for up to 100 selected people. Each one is checked on its own: the rest go ahead, and the ones that could not are named with the reason. */
+  async bulk(input: unknown): Promise<{ done: number; skipped: { name: string; why: string }[] }> {
+    this.authorize("manage", "write");
+    this.noSupport();
+    const d = this.parse(bulkInput, input);
+    const people = new Map((await this.read("manage", (tx) => selectUsers(tx).where(inArray(users.id, d.ids)))).map((u) => [u.id, u]));
+    const out = { done: 0, skipped: [] as { name: string; why: string }[] };
+    for (const id of d.ids) {
+      const u = people.get(id);
+      if (!u) continue;
+      try {
+        if (d.action === "resend") { const r = await this.resendInvite(id); if (!r.emailed) throw new ConflictError(u.email ? "The email could not be sent. Copy an access link from their page." : "No email on file. Copy an access link from their page."); }
+        else if (d.action === "disable") await this.disable(id);
+        else { if (id === this.ctx.userId) throw new ConflictError("You cannot sign yourself out here."); await this.signOutEverywhere(id); }
+        out.done++;
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        out.skipped.push({ name: u.name, why: err.message });
+      }
+    }
+    return out;
+  }
+
+  /** The current filter as a CSV (people, role, state, last sign-in): never a password or token. */
+  async csv(query: ListQuery = {}): Promise<string> {
+    const rows: UserRow[] = [];
+    for (let page = 1; rows.length < 20_000; page++) {
+      const p = await this.list({ ...query, page, pageSize: 100 });
+      rows.push(...p.rows);
+      if (page >= p.pageCount) break;
+    }
+    return toCsv([["Name", "Login ID", "Email", "Mobile", "Role", "Status", "Email verified", "Last sign-in (IST)", "Added (IST)"],
+      ...rows.map((u) => [u.name, u.loginId, u.email, u.phone, u.roleName ?? u.role, u.status, u.emailVerifiedAt ? "yes" : "no", istStamp(u.lastLoginAt), istStamp(u.createdAt)])]);
+  }
+
+  /** Everything the person's page shows except the sign-in history (that is `SignInService.history`). */
+  async detail(id: string, catalogue: Catalogue) {
+    return this.read("manage", async (tx) => {
+      const user = await this.findUser(tx, id);
+      const [role] = user.roleId ? await tx.select({ grants: schoolRoles.grants }).from(schoolRoles).where(eq(schoolRoles.id, user.roleId)) : [];
+      const grants = user.role === "admin" ? [...allGrants(catalogue)] : role ? role.grants : systemGrants(user.role, catalogue);
+      const [devices, recent, staff, student] = await Promise.all([
+        tx.select({ id: sessions.id, ip: sessions.ip, userAgent: sessions.userAgent, createdAt: sessions.createdAt, lastSeenAt: sessions.lastSeenAt, support: sessions.supportStaffId })
+          .from(sessions).where(and(eq(sessions.userId, id), gt(sessions.expiresAt, new Date()))).orderBy(desc(sessions.lastSeenAt)),
+        // What the person did. Messages and requests are private between the people in them, so they never show here.
+        tx.select({ id: auditLogs.id, createdAt: auditLogs.createdAt, module: auditLogs.module, summary: auditLogs.summary }).from(auditLogs)
+          .where(and(eq(auditLogs.actorUserId, id), sql`${auditLogs.module} not in ('messages', 'requests')`)).orderBy(desc(auditLogs.createdAt)).limit(15),
+        this.recordId(tx, "staff_profiles", id),
+        this.recordId(tx, "students", id),
+      ]);
+      return {
+        user, everything: user.role === "admin", access: grantsInWords(grants, catalogue, this.ctx.features), devices, recent,
+        record: staff ? { kind: "staff" as const, href: `/app/staff/${id}` } : student ? { kind: "student" as const, href: `/app/students/${student}` } : null,
+      };
+    });
+  }
+
+  /** The id of the record in `table` that belongs to this login, when that module is installed. `table` is a code constant. */
+  private async recordId(tx: Tx, table: "staff_profiles" | "students", userId: string): Promise<string | null> {
+    const [has] = await tx.execute<{ t: string | null }>(sql`select to_regclass(${table})::text as t`);
+    if (!has?.t) return null;
+    const [r] = await tx.execute<{ id: string }>(sql`select id::text as id from ${sql.raw(table)} where user_id = ${userId} limit 1`);
+    return r?.id ?? null;
+  }
+
+  /** End one device of one person. */
+  async endSession(userId: string, sessionId: string): Promise<{ id: string }> {
+    this.noSupport();
+    if (!z.uuid().safeParse(sessionId).success) throw new NotFoundError("Session");
+    return this.write("manage", async (tx) => {
+      const u = await this.findUser(tx, userId);
+      this.adminOnly(u.role);
+      const gone = await tx.delete(sessions).where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId))).returning({ id: sessions.id });
+      if (!gone.length) throw new NotFoundError("Session");
+      return u;
+    }, (u) => ({ action: "end_session", entity: "User", entityId: userId, summary: `Ended one device of ${u.name}` })).then(() => ({ id: sessionId }));
+  }
+
   /** Throws when `u` is the only active admin: a school must always have someone who can manage it. */
+  /** An erased login is marked by its login id (set when a student's data was erased); it never comes back. */
+  private async isErased(tx: Tx, id: string) {
+    const [r] = await tx.select({ loginId: users.loginId }).from(users).where(eq(users.id, id)).limit(1);
+    return !!r?.loginId.startsWith("erased-");
+  }
+
+  /**
+   * Locks every active admin row (always in id order, so two of these cannot deadlock) before counting, so two admins disabling each
+   * other at the same moment cannot both pass: the second one sees the first one's result.
+   */
   private async keepAnAdmin(tx: Tx, u: UserRow) {
     if (u.role !== "admin" || u.status !== "active") return;
-    const [others] = await tx.select({ n: count() }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"), ne(users.id, u.id)));
-    if (!Number(others?.n)) throw new ConflictError("This is the last admin. Make someone else an admin first.");
+    const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.role, "admin"), eq(users.status, "active"))).orderBy(users.id).for("update");
+    if (!admins.some((a) => a.id === u.id)) return; // somebody already took this one off the list
+    if (admins.length < 2) throw new ConflictError("This is the last admin. Make someone else an admin first.");
   }
 }
 
@@ -386,6 +585,7 @@ export class RoleService extends SettingsService {
 
   async create(input: unknown, catalogue: Catalogue): Promise<RoleRow> {
     this.authorize("manage", "write");
+    refuseSupport(this.ctx, "roles");
     const d = this.parse(customRoleInput, input);
     return this.write("manage", async (tx) => {
       await this.checkName(tx, d.name);
@@ -393,15 +593,19 @@ export class RoleService extends SettingsService {
         schoolId: this.ctx.schoolId, name: d.name, base: d.base, description: d.description ?? null, grants: this.clean(d.grants, catalogue, true),
       }).returning();
       return this.toRow(r!, 0);
-    }, (r) => ({ action: "create_role", entity: "Role", entityId: r.key, summary: `Created the role ${r.name}` }));
+    }, (r) => ({ action: "create_role", entity: "Role", entityId: r.key, summary: `Created the role ${r.name}`, meta: { changes: { Name: [null, r.name], "Works like": [null, r.base] } } }));
   }
 
   /** Grants for modules that are switched off for the school are kept as they were; the form only shows enabled modules. */
   async update(id: string, input: unknown, catalogue: Catalogue): Promise<RoleRow> {
     this.authorize("manage", "write");
+    refuseSupport(this.ctx, "roles");
     const d = this.parse(customRoleInput, input);
+    const diff = { added: [] as string[], removed: [] as string[] };
+    let before: { name: string; base: string; description: string | null } | null = null;
     return this.write("manage", async (tx) => {
       const old = await this.findRole(tx, id);
+      before = { name: old.name, base: old.base, description: old.description };
       // Nobody widens the role they hold themselves.
       const [mine] = await tx.select({ roleId: users.roleId }).from(users).where(eq(users.id, this.ctx.userId)).limit(1);
       if (mine?.roleId === id) throw new ForbiddenError("You cannot change the role you hold. Ask an admin.");
@@ -409,17 +613,71 @@ export class RoleService extends SettingsService {
       const shown = new Set(matrixFor(catalogue, this.ctx.features).map((m) => m.key));
       const banned = adminOnlyGrants(catalogue);
       const kept = old.grants.filter((g) => !shown.has(featureOf(g)) && !banned.has(g));
+      const grants = this.clean([...kept, ...d.grants], catalogue, true);
+      diff.added = grants.filter((g) => !old.grants.includes(g));
+      diff.removed = old.grants.filter((g) => !grants.includes(g));
+      if (diff.removed.length && !d.confirmRemoval) await this.refuseIfUsed(tx, id, diff.removed, catalogue);
       const [r] = await tx.update(schoolRoles).set({
-        name: d.name, base: d.base, description: d.description ?? null, grants: this.clean([...kept, ...d.grants], catalogue, true), updatedAt: new Date(),
+        name: d.name, base: d.base, description: d.description ?? null, grants, updatedAt: new Date(),
       }).where(eq(schoolRoles.id, id)).returning();
       // users.role follows the role's base kind, which drives what data each person sees.
       if (old.base !== d.base) await tx.update(users).set({ role: d.base }).where(eq(users.roleId, id));
       const [n] = await tx.select({ n: count() }).from(users).where(eq(users.roleId, id));
       return this.toRow(r!, Number(n?.n));
-    }, (r) => ({ action: "update_role", entity: "Role", entityId: id, summary: `Changed the role ${r.name}` }));
+    }, (r) => ({ action: "update_role", entity: "Role", entityId: id, summary: `Changed the role ${r.name}`, meta: { added: diff.added, removed: diff.removed, changes: this.roleChanges(before, { name: d.name, base: d.base, description: d.description ?? null }, diff) } }));
+  }
+
+  /** What a role edit changed, in words: name, how it works, and the permissions added or taken away. */
+  private roleChanges(before: { name: string; base: string; description: string | null } | null, after: { name: string; base: string; description: string | null }, diff: { added: string[]; removed: string[] }) {
+    const words = (grants: string[]) => grants.map((g) => g.replace(":", ": ")).join(", ");
+    const out: Record<string, [unknown, unknown]> = {};
+    if (before?.name !== after.name) out.Name = [before?.name ?? null, after.name];
+    if (before?.base !== after.base) out["Works like"] = [before?.base ?? null, after.base];
+    if ((before?.description ?? null) !== after.description) out.Description = [before?.description ?? null, after.description];
+    if (diff.added.length) out["Permissions added"] = [null, words(diff.added)];
+    if (diff.removed.length) out["Permissions removed"] = [words(diff.removed), null];
+    return out;
+  }
+
+  /**
+   * Before a role loses a permission its people used: counts what they wrote in that module over the last 30 days, from the audit log
+   * (module and who did it). Viewing is not logged, so view permissions are never counted. Ticking "remove anyway" skips this.
+   */
+  private async refuseIfUsed(tx: Tx, roleId: string, removed: string[], catalogue: Catalogue) {
+    const modules = [...new Set(removed.filter((g) => !/:(read|view)$/.test(g)).map(featureOf))];
+    if (!modules.length) return;
+    const rows = await tx.select({ module: auditLogs.module, who: users.name, n: count() }).from(auditLogs).innerJoin(users, eq(users.id, auditLogs.actorUserId))
+      .where(and(eq(users.roleId, roleId), inArray(auditLogs.module, modules), gt(auditLogs.createdAt, new Date(Date.now() - 30 * 86_400_000))))
+      .groupBy(auditLogs.module, users.name);
+    if (!rows.length) return;
+    const lines = [...new Set(rows.map((r) => r.module))].map((m) => {
+      const mine = rows.filter((r) => r.module === m);
+      const names = mine.map((r) => r.who).slice(0, 2).join(" and ") + (mine.length > 2 ? ` and ${mine.length - 2} more` : "");
+      const labels = removed.filter((g) => featureOf(g) === m).map((g) => permissionLabel(g.split(":")[1]!, m)).join(", ");
+      return `${names} made ${mine.reduce((a, r) => a + Number(r.n), 0)} changes in ${catalogue.find((c) => c.key === m)?.name ?? m} in the last 30 days (removing: ${labels})`;
+    });
+    const msg = `${lines.join(". ")}. This is counted from the audit log (what people saved, not what they only looked at). Tick "Remove it anyway" to continue.`;
+    throw new ValidationError({ confirmRemoval: msg }, msg);
+  }
+
+  /** One role's page: who holds it, what changed in it (from the audit log), and what its people did in the last 30 days per module. */
+  async detail(id: string, catalogue: Catalogue) {
+    const role = (await this.list(catalogue)).find((r) => r.key === id);
+    if (!role) throw new NotFoundError("Role");
+    return this.read("manage", async (tx) => {
+      const system = role.kind === "system";
+      const people = await selectUsers(tx).where(system ? and(eq(users.role, role.base), isNull(users.roleId)) : eq(users.roleId, id)).orderBy(asc(users.name)).limit(200);
+      const history = system ? [] : await tx.select({ id: auditLogs.id, createdAt: auditLogs.createdAt, action: auditLogs.action, summary: auditLogs.summary, meta: auditLogs.meta, by: users.name })
+        .from(auditLogs).leftJoin(users, eq(users.id, auditLogs.actorUserId)).where(and(eq(auditLogs.entity, "Role"), eq(auditLogs.entityId, id))).orderBy(desc(auditLogs.createdAt)).limit(20);
+      const ids = people.map((p) => p.id);
+      const used = ids.length ? await tx.select({ module: auditLogs.module, n: count() }).from(auditLogs)
+        .where(and(inArray(auditLogs.actorUserId, ids), gt(auditLogs.createdAt, new Date(Date.now() - 30 * 86_400_000)))).groupBy(auditLogs.module) : [];
+      return { role, people, history, activity: Object.fromEntries(used.map((u) => [u.module, Number(u.n)])) as Record<string, number> };
+    });
   }
 
   async copy(id: string): Promise<RoleRow> {
+    refuseSupport(this.ctx, "roles");
     return this.write("manage", async (tx) => {
       const old = await this.findRole(tx, id);
       const names = new Set((await tx.select({ n: schoolRoles.name }).from(schoolRoles)).map((r) => r.n.toLowerCase()));
@@ -432,6 +690,7 @@ export class RoleService extends SettingsService {
 
   /** Only while nobody holds the role. */
   async remove(id: string): Promise<{ id: string }> {
+    refuseSupport(this.ctx, "roles");
     let name = id;
     return this.write("manage", async (tx) => {
       const role = await this.findRole(tx, id);
@@ -475,236 +734,22 @@ export class RoleService extends SettingsService {
 // ---------- my profile ----------
 
 /** The signed-in person's own account, read-only here: edits go through the profile actions and SchoolAuth. */
+/** Does this person get a mail when a new device signs in? Their own choice, else the default of their role. */
+export const alertsNewDevice = (u: Pick<UserRow, "role" | "alertNewDevice">) => u.alertNewDevice ?? (u.role === "admin" || u.role === "accountant");
+
 export class ProfileService extends SettingsService {
+  async setNewDeviceAlert(on: boolean): Promise<void> {
+    if (this.ctx.supportStaffId) throw new ForbiddenError("Not available in a support session.");
+    await this.write("read", (tx) => tx.update(users).set({ alertNewDevice: on }).where(eq(users.id, this.ctx.userId)),
+      () => ({ action: "update", entity: "User", entityId: this.ctx.userId, summary: `Turned new-device emails ${on ? "on" : "off"}` }));
+  }
+
   async me(): Promise<UserRow> {
     return this.read("read", (tx) => this.findUser(tx, this.ctx.userId));
   }
 }
 
-// ---------- audit log ----------
-
-export interface AuditRow {
-  id: string; createdAt: Date; module: string; action: string; entity: string | null; summary: string | null;
-  /** Who did it: the person's name, "Name (via support)" for a support session, "System" for jobs. */
-  actor: string; ip: string | null;
-}
-
-const isDay = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
-
-/** Read-only view of the append-only audit log. Days are IST. */
-export class AuditService extends SettingsService {
-  async list(query: ListQuery = {}): Promise<Page<AuditRow>> {
-    const q = listQuerySchema.parse(query);
-    return this.read("audit", async (tx) => {
-      const { module, actor, from: f0, to: t0 } = q.filters;
-      const from = isDay(f0), to = isDay(t0);
-      const actorId = z.uuid().safeParse(actor).data;
-      const day = sql`(${auditLogs.createdAt} at time zone 'Asia/Kolkata')::date`;
-      const where = and(
-        q.q ? ilike(auditLogs.summary, `%${q.q}%`) : undefined,
-        module ? eq(auditLogs.module, module) : undefined,
-        actorId ? eq(auditLogs.actorUserId, actorId) : undefined,
-        from ? sql`${day} >= ${from}::date` : undefined,
-        to ? sql`${day} <= ${to}::date` : undefined,
-        // A report or complaint about someone is not theirs to read, not even as a line in the log.
-        sql`not (${auditLogs.module} in ('messages', 'requests') and jsonb_exists(coalesce(${auditLogs.meta}->'aboutUserIds', '[]'::jsonb), ${this.ctx.userId}))`,
-      );
-      const [rows, totals] = await Promise.all([
-        tx.select({
-          id: auditLogs.id, createdAt: auditLogs.createdAt, module: auditLogs.module, action: auditLogs.action, entity: auditLogs.entity,
-          summary: auditLogs.summary, ip: auditLogs.ip, name: users.name, staffId: auditLogs.actorStaffId,
-        }).from(auditLogs).leftJoin(users, eq(users.id, auditLogs.actorUserId)).where(where)
-          .orderBy(desc(auditLogs.createdAt), asc(auditLogs.id)).limit(q.pageSize).offset((q.page - 1) * q.pageSize),
-        tx.select({ n: count() }).from(auditLogs).where(where),
-      ]);
-      const out = rows.map(({ name, staffId, ...r }) => ({ ...r, actor: name ? (staffId ? `${name} (via support)` : name) : staffId ? "Support" : "System" }));
-      return toPage(out, Number(totals[0]?.n ?? 0), q);
-    });
-  }
-
-  /** Modules that have written to the log, for the filter. */
-  async modules(): Promise<string[]> {
-    return this.read("audit", async (tx) => (await tx.selectDistinct({ m: auditLogs.module }).from(auditLogs).orderBy(asc(auditLogs.module))).map((r) => r.m));
-  }
-
-  /** People who appear in the log, for the filter. */
-  async actors(): Promise<{ id: string; name: string }[]> {
-    return this.read("audit", (tx) => tx.selectDistinct({ id: users.id, name: users.name }).from(auditLogs).innerJoin(users, eq(users.id, auditLogs.actorUserId)).orderBy(asc(users.name)));
-  }
-}
-
-// ---------- data export (DPDP) ----------
-
-/** Salaries are left out unless the admin asks for them. Sealed values (PAN, bank numbers) never leave. */
-const isPayroll = (table: string) => table.startsWith("pay_");
-/** Never exported: login secrets, session material, push keys and secret calendar links. */
-const SKIP_TABLES = new Set(["sessions", "one_time_tokens", "data_exports", "push_subscriptions", "calendar_feeds"]);
-const SKIP_COLUMNS = new Set(["password_hash", "token_hash", "unsubscribe_hash"]);
-/** Conversations and requests are private between the people in them: a school-wide file leaves them out unless an admin ticks it with a reason. */
-const PRIVATE_TALK = new Set(["message_threads", "thread_members", "messages", "message_files", "message_reports", "message_reviews", "message_restrictions", "message_batches", "saved_replies", "requests", "request_events"]);
-/** Even with the tick, these need messages:safeguard as well. */
-const SAFEGUARD_ONLY = new Set(["message_reports", "message_reviews"]);
-const SAFEGUARD_FEATURE = { key: "messages", permissions: { safeguard: ["admin"] } } as const;
-/** Notifications on these topics carry private words; their text stays out of a file that was not ticked for private talk. */
-const PRIVATE_TOPICS = new Set(["message.new", "request.update", "request.work", "safety.report"]);
-const REASON_MIN = 10;
-
-export interface ExportResult { id: string; label: string; sizeBytes: number; url: string }
-
-/**
- * One JSON file with the school's data, or one student's, in storage under `<school>/exports/`.
- * Exports go through `read()` on purpose: a read-only or suspended school must still be able to take its data out.
- * shortcut: the whole file is built in memory; stream per table (or zip CSVs) before schools reach tens of thousands of rows per table.
- */
-export class ExportService extends SettingsService {
-  async exportSchool(opts: { includePayroll?: boolean; includePrivate?: boolean; reason?: string } = {}): Promise<ExportResult> {
-    // Payroll is an admin's own choice; a custom role can never hold settings:export anyway.
-    const payroll = !!opts.includePayroll && this.ctx.role === "admin";
-    const talk = !!opts.includePrivate && this.ctx.role === "admin";
-    return this.build("school", async (tx) => {
-      const reason = (opts.reason ?? "").trim();
-      if (talk && reason.length < REASON_MIN) throw new ValidationError({ reason: "Write why you need the private conversations (at least 10 characters)" });
-      const [school] = await tx.select(profileCols).from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
-      const extras = [payroll && "payroll", talk && "private conversations"].filter(Boolean).join(" and ");
-      return {
-        label: extras ? `All school data, with ${extras}` : "All school data", data: { school, tables: await this.dump(tx, "school_id", this.ctx.schoolId, { payroll, talk }) },
-        meta: talk ? { includesPrivateConversations: true, reason } : {},
-      };
-    });
-  }
-
-  /** One student: their row plus every table that has a `student_id` column. */
-  async exportStudent(input: unknown): Promise<ExportResult> {
-    this.authorize("export", "read");
-    const { studentId } = this.parse(exportStudentInput, input);
-    return this.build("student", async (tx) => {
-      const [has] = await tx.execute<{ t: string | null }>(sql`select to_regclass('public.students')::text as t`);
-      const [student] = has?.t ? await tx.execute<Record<string, unknown>>(sql`select * from students where id = ${studentId}`) : [];
-      if (!student) throw new NotFoundError("Student");
-      return { label: `Student: ${student.name ?? studentId}`, data: { student, tables: await this.withoutAboutMe(tx, { ...await this.dump(tx, "student_id", studentId), ...await this.studentTalk(tx, studentId) }) } };
-    });
-  }
-
-  /** The latest exports, newest first. */
-  async recent(limit = 10) {
-    return this.read("export", (tx) => tx.select({
-      id: dataExports.id, scope: dataExports.scope, label: dataExports.label, status: dataExports.status, fileKey: dataExports.fileKey,
-      sizeBytes: dataExports.sizeBytes, createdAt: dataExports.createdAt, requestedByName: users.name,
-    }).from(dataExports).leftJoin(users, eq(users.id, dataExports.requestedBy)).orderBy(desc(dataExports.createdAt)).limit(limit));
-  }
-
-  /** Students to pick from for a single-student export. Empty when the school has no students module. */
-  async studentOptions(): Promise<{ value: string; label: string }[]> {
-    return this.read("export", async (tx) => {
-      const [has] = await tx.execute<{ t: string | null }>(sql`select to_regclass('public.students')::text as t`);
-      if (!has?.t) return [];
-      const rows = await tx.execute<{ id: string; name: string; admission_no: string }>(sql`select id, name, admission_no from students order by name limit 1000`);
-      return rows.map((r) => ({ value: r.id, label: `${r.name} (${r.admission_no})` }));
-    });
-  }
-
-  private async build(scope: "school" | "student", collect: (tx: Tx) => Promise<{ label: string; data: object; meta?: Record<string, unknown> }>): Promise<ExportResult> {
-    if (this.ctx.supportStaffId) throw new ForbiddenError("Data export is not available in a support session.");
-    return this.read("export", async (tx) => {
-      const { label, data, meta } = await collect(tx);
-      const now = new Date();
-      const bytes = Buffer.from(JSON.stringify({ exportedAt: now.toISOString(), scope, ...data }, null, 2));
-      const key = `${this.ctx.schoolId}/exports/${crypto.randomUUID()}-${scope}-export-${now.toISOString().slice(0, 10)}.json`;
-      await services().storage.put(key, bytes, "application/json");
-      const [row] = await tx.insert(dataExports).values({
-        schoolId: this.ctx.schoolId, scope, label, requestedBy: this.ctx.userId, status: "ready", fileKey: key, sizeBytes: bytes.byteLength, finishedAt: now,
-      }).returning();
-      await this.audit(tx, { action: "export", entity: "Data export", entityId: row!.id, summary: `Exported ${label}`, meta: { scope, sizeBytes: bytes.byteLength, ...meta } });
-      return { id: row!.id, label, sizeBytes: bytes.byteLength, url: await services().storage.signedUrl(key) };
-    });
-  }
-
-  /** Every table with `column`, as `{ table: rows[] }` for rows where `column = value`. Table and column names come from the catalog, never from input. */
-  private async dump(tx: Tx, column: string, value: string, { payroll = false, talk = false } = {}): Promise<Record<string, Record<string, unknown>[]>> {
-    const cols = await tx.execute<{ table_name: string; column_name: string }>(sql`
-      select c.table_name, c.column_name from information_schema.columns c
-      join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name and t.table_type = 'BASE TABLE'
-      where c.table_schema = 'public' and c.table_name in (
-        select table_name from information_schema.columns where table_schema = 'public' and column_name = ${column})
-      order by c.table_name, c.ordinal_position`);
-    const byTable = new Map<string, string[]>();
-    for (const c of cols) {
-      if (SKIP_TABLES.has(c.table_name) || (PRIVATE_TALK.has(c.table_name) && !(talk && this.talkAllowed(c.table_name))) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)
-        || (!talk && c.table_name === "meeting_slots" && c.column_name === "private_note")) continue;
-      byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
-    }
-    const out: Record<string, Record<string, unknown>[]> = {};
-    for (const [table, names] of byTable) {
-      const list = sql.join(names.map((n) => sql.identifier(n)), sql`, `);
-      out[table] = [...await tx.execute(sql`select ${list} from ${sql.identifier(table)} where ${sql.identifier(column)} = ${value} order by 1`)];
-    }
-    if (!payroll) await this.withoutPay(tx, out);
-    if (!talk && out.notifications) out.notifications = out.notifications.map((n) => (n.private_body || PRIVATE_TOPICS.has(n.topic as string) ? { ...n, body: null } : n));
-    await this.withoutAboutMe(tx, out);
-    return out;
-  }
-
-  /**
-   * Whoever takes the file out must not read what was written about them: requests and reports that name them, the conversations
-   * those belong to, and the reports and reviews of those conversations are left out.
-   */
-  private async withoutAboutMe(tx: Tx, out: Record<string, Record<string, unknown>[]>): Promise<Record<string, Record<string, unknown>[]>> {
-    if (!["message_threads", "thread_members", "messages", "message_files", "message_reports", "message_reviews", "requests", "request_events"].some((t) => out[t])) return out;
-    const me = this.ctx.userId;
-    const [has] = await tx.execute<{ r: string | null; m: string | null }>(sql`select to_regclass('public.requests')::text as r, to_regclass('public.message_reports')::text as m`);
-    const ids = async (q: ReturnType<typeof sql>) => new Set((await tx.execute<{ id: string }>(q)).map((r) => r.id));
-    const reqs = has?.r ? await ids(sql`select id::text as id from requests where ${me}::uuid = any(about_user_ids)`) : new Set<string>();
-    const threads = new Set([
-      ...(has?.r ? await ids(sql`select thread_id::text as id from requests where ${me}::uuid = any(about_user_ids)`) : []),
-      ...(has?.m ? await ids(sql`select thread_id::text as id from message_reports where ${me}::uuid = any(about_user_ids)`) : []),
-    ]);
-    if (!threads.size && !reqs.size) return out;
-    const msgs = threads.size ? await ids(sql`select id::text as id from messages where thread_id::text in (${sql.join([...threads].map((t) => sql`${t}`), sql`, `)})`) : new Set<string>();
-    const drop = (table: string, gone: (r: Record<string, unknown>) => boolean) => { if (out[table]) out[table] = out[table].filter((r) => !gone(r)); };
-    const inThread = (r: Record<string, unknown>) => threads.has(r.thread_id as string);
-    drop("message_threads", (r) => threads.has(r.id as string));
-    for (const t of ["thread_members", "messages", "message_reviews", "message_reports", "requests"]) drop(t, inThread);
-    drop("message_files", (r) => msgs.has(r.message_id as string));
-    drop("request_events", (r) => reqs.has(r.request_id as string));
-    return out;
-  }
-
-  private talkAllowed(table: string) {
-    return !SAFEGUARD_ONLY.has(table) || allows(this.ctx, SAFEGUARD_FEATURE, "safeguard");
-  }
-
-  /** What one student's file holds of private talk: conversations and requests about them, no staff-only notes, no reports, no stored file paths. */
-  private async studentTalk(tx: Tx, studentId: string): Promise<Record<string, Record<string, unknown>[]>> {
-    const [has] = await tx.execute<{ t: string | null; r: string | null }>(sql`select to_regclass('public.message_threads')::text as t, to_regclass('public.requests')::text as r`);
-    const out: Record<string, Record<string, unknown>[]> = {};
-    const rows = async (q: ReturnType<typeof sql>) => [...await tx.execute<Record<string, unknown>>(q)];
-    const ids = (r: Record<string, unknown>[], key = "id") => sql.join(r.map((x) => sql`${x[key] as string}`), sql`, `);
-    if (has?.r) {
-      out.requests = await rows(sql`select * from requests where student_id = ${studentId} order by created_at`);
-      if (out.requests.length) out.request_events = await rows(sql`select id, request_id, action, detail, by_name, created_at from request_events where request_id in (${ids(out.requests)}) order by created_at`);
-    }
-    if (!has?.t) return out;
-    const threads = await rows(sql`select * from message_threads where student_id = ${studentId} order by created_at`);
-    out.message_threads = threads;
-    if (!threads.length) return out;
-    out.thread_members = await rows(sql`select id, thread_id, user_id, name, role, state, created_at from thread_members where thread_id in (${ids(threads)}) order by created_at`);
-    out.messages = await rows(sql`select id, thread_id, sender_id, sender_name, kind, body, as_office, created_at from messages where thread_id in (${ids(threads)}) and not internal and removed_at is null order by created_at`);
-    if (out.messages.length) out.message_files = await rows(sql`select id, message_id, file_name, content_type, size, created_at from message_files where message_id in (${ids(out.messages)}) order by created_at`);
-    return out;
-  }
-
-  /**
-   * The ledger carries pay too: per-person lines and memos of salary, loan and payout entries, and the requests for them.
-   * Without the payroll tick they go; the entries stay (so the books still add up) with their totals and no names.
-   */
-  private async withoutPay(tx: Tx, out: Record<string, Record<string, unknown>[]>) {
-    if (!out.fin_journals && !out.fin_journal_lines && !out.fin_approvals) return;
-    const ids = new Set((await tx.execute<{ id: string }>(sql`select id from fin_journals where source_type like 'payroll\_%'`)).map((r) => r.id));
-    if (out.fin_journals) out.fin_journals = out.fin_journals.map((j) => (ids.has(j.id as string) ? { ...j, memo: null } : j));
-    if (out.fin_journal_lines) {
-      out.fin_journal_lines = out.fin_journal_lines.filter((l) => !(ids.has(l.journal_id as string) && l.party_type === "staff"))
-        .map((l) => (ids.has(l.journal_id as string) ? { ...l, memo: null } : l));
-    }
-    if (out.fin_approvals) out.fin_approvals = out.fin_approvals.filter((a) => !String(a.kind).startsWith("payroll."));
-  }
-}
+export * from "./audit-service";
+export * from "./export-service";
+export * from "./hub-service";
+export * from "./signin-service";
