@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { closeDb, withSchool } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@smw/feature-kit";
+import { MemoryStorage, useServices } from "@smw/integrations";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import notificationsFeature from "@smw/feature-notifications/feature";
 import { commGroups, notifications } from "@smw/feature-notifications/schema";
@@ -17,6 +18,7 @@ import { asUser, FEATURES, fixture, type Fixture } from "./test-fixture";
 
 let a: TestSchool, b: TestSchool, fx: Fixture;
 beforeAll(async () => {
+  useServices({ storage: new MemoryStorage() });
   await registerFeatures([eventsFeature, notificationsFeature]);
   ({ a, b } = await createSchoolPair(FEATURES));
   fx = await fixture(a);
