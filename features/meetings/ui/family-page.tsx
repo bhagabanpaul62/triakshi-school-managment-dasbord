@@ -5,9 +5,10 @@ import { ToneBadge } from "@smw/ui/widgets/WidgetPrimitives";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { BookingService, type BookedView, type BookingView, type KidView, type TeacherView } from "../service";
-import { clock, dayLong, dayOf, when } from "../format";
+import { dayLong, dayOf, when } from "../format";
 import { bookSlot, cancelSlot, changeSlot, joinWait, leaveWait } from "./actions";
 import { BackLink, Notice, STATE_LABEL } from "./shared";
+import { clock } from "@smw/feature-kit/words";
 
 /** Times of one teacher, grouped by day, each one a single tap that books it. */
 function Times({ slots, run }: { slots: TeacherView["slots"]; run: (slotId: string, label: string) => React.ReactNode }) {

@@ -10,13 +10,14 @@ import { KpiRow, PageHeader } from "@smw/ui/shell/PageHeader";
 import { FormModal, type Field } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { DayService, MeetingService, BookingService, type MeetingDetail, type WindowView } from "../service";
-import { clock, dayOf, when } from "../format";
-import { toIstInput } from "../rules";
+import { dayOf, when } from "../format";
 import { addWindows, cancelMeeting, closeMeeting, deleteMeeting, duplicateMeeting, openMeeting, reopenMeeting } from "./actions";
 import { FamilyPage } from "./family-page";
 import { MeetingForm } from "./meeting-form";
 import { WindowEditor } from "./window-editor";
-import { BackLink, FollowUp, LinkButton, MoreMenu, Notice, STATE_LABEL } from "./shared";
+import { MoreMenu } from "@smw/ui/shell/MoreMenu";
+import { BackLink, FollowUp, LinkButton, Notice, STATE_LABEL } from "./shared";
+import { clock, toIstInput } from "@smw/feature-kit/words";
 
 export const metadata = { title: "Meeting" };
 type Query = Record<string, string | string[] | undefined>;

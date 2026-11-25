@@ -208,6 +208,18 @@ export async function teacherSections(tx: Tx, userId: string): Promise<string[]>
   return found.map((r) => r.id);
 }
 
+/** The class teacher and the subject teachers of a student's section this year (active people only): the one answer to "who teaches this child". */
+export interface StudentTeacher { id: string; name: string; role: string; classTeacher: boolean; subjects: string | null }
+export async function teachersOfStudent(tx: Tx, studentId: string): Promise<StudentTeacher[]> {
+  return rows<StudentTeacher>(tx, sql`
+    select u.id::text as id, u.name, u.role, bool_or(sec.class_teacher_id = u.id) as "classTeacher", string_agg(distinct subj.name, ', ') as subjects
+    from students s join sections sec on sec.id = s.section_id and sec.year_id in (select id from academic_years where is_current)
+    join users u on u.status = 'active' and (u.id = sec.class_teacher_id or exists (select 1 from section_teachers t where t.section_id = sec.id and t.teacher_id = u.id))
+    left join section_teachers st on st.section_id = sec.id and st.teacher_id = u.id
+    left join subjects subj on subj.id = st.subject_id
+    where s.id = ${studentId}::uuid group by u.id, u.name, u.role order by u.name`);
+}
+
 export interface AudienceOptions {
   classes: { id: string; name: string }[];
   sections: { id: string; classId: string; name: string }[];

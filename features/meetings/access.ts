@@ -1,6 +1,7 @@
 // Who is a family, who teaches a child, who counts as a sibling. Raw SQL on other features' tables, so no feature imports.
 import { sql, type SQL } from "drizzle-orm";
 import type { Tx } from "@smw/db";
+import { teachersOfStudent } from "@smw/feature-notifications/audience";
 import type { meetingDays } from "./schema";
 
 export type Meeting = typeof meetingDays.$inferSelect;
@@ -27,16 +28,9 @@ export async function kidById(tx: Tx, id: string): Promise<Kid | null> {
   return (await rows<Kid>(tx, sql`${KID} and s.id = ${id}::uuid limit 1`))[0] ?? null;
 }
 
-/** The class teacher and the subject teachers of the child's section this year. */
+/** Who teaches this child, with why ("Class teacher, Maths"). */
 export async function teachersOf(tx: Tx, studentId: string): Promise<Teacher[]> {
-  const found = await rows<{ teacherId: string; name: string; classTeacher: boolean; subjects: string | null }>(tx, sql`
-    select u.id as "teacherId", u.name, bool_or(sec.class_teacher_id = u.id) as "classTeacher", string_agg(distinct subj.name, ', ') as subjects
-    from students s join sections sec on sec.id = s.section_id and sec.year_id in (select id from academic_years where is_current)
-    join users u on u.status = 'active' and (u.id = sec.class_teacher_id or exists (select 1 from section_teachers t where t.section_id = sec.id and t.teacher_id = u.id))
-    left join section_teachers st on st.section_id = sec.id and st.teacher_id = u.id
-    left join subjects subj on subj.id = st.subject_id
-    where s.id = ${studentId}::uuid group by u.id, u.name order by u.name`);
-  return found.map((t) => ({ teacherId: t.teacherId, name: t.name, why: [t.classTeacher ? "Class teacher" : null, t.subjects].filter(Boolean).join(", ") }));
+  return (await teachersOfStudent(tx, studentId)).map((t) => ({ teacherId: t.id, name: t.name, why: [t.classTeacher ? "Class teacher" : null, t.subjects].filter(Boolean).join(", ") }));
 }
 
 /** Active brothers and sisters: children who share a guardian with this one. */

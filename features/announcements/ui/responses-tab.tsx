@@ -43,13 +43,15 @@ export async function Responses({ ctx, v, sp }: { ctx: Ctx; v: NoticeView; sp: Q
   const filtered = !!(query.q || query.filter || query.sectionId);
   return (
     <div className="flex flex-col gap-4">
-      <Panel title={asks ? "Answers" : "Who has opened it"} action={<>
-        {open && !ctx.readOnly ? <RunButton action={nudgeAll} values={{ id }} label="Remind everyone who has not answered" says="nudge" primary /> : null}
-        {n.state === "published" && !ctx.readOnly ? <RunButton action={resendNotice} values={{ id, to: "unseen" }} label="Send again to those who have not opened it" says="resend" /> : null}
-        <LinkButton href={`/api/notices/${id}/report.csv`} download>CSV</LinkButton>
-        <LinkButton href={`/api/notices/${id}/sign-sheet`}>Sign sheet</LinkButton>
-      </>}>
-        <div className="flex flex-col gap-3">
+      <Panel title={asks ? "Answers" : "Who has opened it"}>
+        <div className="flex min-w-0 flex-col gap-3">
+          {/* Wraps on a phone: four buttons in the panel's title row made the page wider than the screen. */}
+          <div className="flex min-w-0 flex-wrap gap-2 [&>*]:max-w-full">
+            {open && !ctx.readOnly ? <RunButton action={nudgeAll} values={{ id }} label="Remind those who have not answered" says="nudge" primary /> : null}
+            {n.state === "published" && !ctx.readOnly ? <RunButton action={resendNotice} values={{ id, to: "unseen" }} label="Send to those who have not opened it" says="resend" /> : null}
+            <LinkButton href={`/api/notices/${id}/report.csv`} download>CSV</LinkButton>
+            <LinkButton href={`/api/notices/${id}/sign-sheet`}>Sign sheet</LinkButton>
+          </div>
           {n.type === "urgent" && n.state === "published" ? <LiveFunnel id={id} initial={funnel} asks={asks} consent={consent} />
             : <ResponseFunnel parts={funnelParts(funnel, asks, consent)} progress={asks ? { done: funnel.answered, total: funnel.recipients } : undefined} />}
           <p className="text-sm text-[var(--ds-on-surface-variant)]">Reached {funnel.reached} of {funnel.recipients}, opened by {funnel.seen}.{funnel.onPaper ? ` ${funnel.onPaper} answered on paper.` : ""}{funnel.late ? ` ${funnel.late} did not answer in time.` : ""}{n.type === "urgent" ? " This count refreshes every 10 seconds." : ""}</p>

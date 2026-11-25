@@ -10,6 +10,7 @@ import { cancelInput, changeWindowInput, confirmInput, duplicateInput, meetingIn
 import { atIst, breaksOf, buildGrid, istDay, reconcile, type Existing, type Plan, type Span } from "./rules";
 import { meetingDays, meetingSlots, meetingWindows } from "./schema";
 import { when } from "./format";
+import { plural } from "@smw/feature-kit/words";
 
 type Window = typeof meetingWindows.$inferSelect;
 const DAY_MS = 86_400_000;
@@ -133,7 +134,7 @@ export class MeetingService extends MeetingBase {
     if (!families.length) problems.push("The audience reaches no families. Choose who the meeting is for.");
     if (m.closesAt <= this.now()) problems.push("Booking closes in the past. Move the closing time.");
     if (t?.noSlots) warnings.push(`${t.noSlots} teacher time${t.noSlots === 1 ? " has" : "s have"} no free slot.`);
-    if (lone?.n) warnings.push(`${lone.n} ${lone.n === 1 ? "family has" : "families have"} no teacher in this meeting, so they cannot book anything.`);
+    if (lone?.n) warnings.push(`${plural(lone.n, "family has", "families have")} no teacher in this meeting, so they cannot book anything.`);
     return { families: families.length, withoutTeacher: lone?.n ?? 0, problems, warnings };
   }
 

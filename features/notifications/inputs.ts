@@ -2,7 +2,7 @@ import { z } from "zod";
 import { EMAIL_MODES } from "./constants";
 import { TOPIC_GROUPS, type TopicKey } from "./topics";
 
-/** What a module hands the writer. Exactly one of `topic` or the temporary `kind`. */
+/** What a module hands the writer. */
 interface RowBase {
   userId: string;
   title: string;
@@ -18,13 +18,7 @@ interface RowBase {
   deliverAfter?: Date;
 }
 
-// TEMPORARY: the 19 older callers still send `kind`. Remove this table when every call names a topic.
-export const LEGACY_KIND_TOPIC = {
-  announcement: "notice.published", fee_due: "fees.due", result: "exam.result", assignment: "homework.new", message: "message.new", system: "work.update",
-} as const satisfies Record<string, TopicKey>;
-export type LegacyKind = keyof typeof LEGACY_KIND_TOPIC;
-
-export type NotificationRow = RowBase & ({ topic: TopicKey; kind?: never } | { kind: LegacyKind; topic?: never });
+export type NotificationRow = RowBase & { topic: TopicKey };
 
 const group = z.enum(Object.keys(TOPIC_GROUPS) as [keyof typeof TOPIC_GROUPS, ...(keyof typeof TOPIC_GROUPS)[]]);
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a time like 20:00");

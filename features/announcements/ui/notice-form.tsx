@@ -16,13 +16,13 @@ import { AudiencePicker } from "@smw/feature-notifications/ui/audience-picker";
 import type { AudienceOptions } from "@smw/feature-notifications/audience";
 import { quietUntil } from "@smw/feature-notifications/quiet";
 import type { Audience } from "@smw/feature-notifications/audience-rules";
-import { MAX_FILES, NO_URGENT_CATEGORY, type NoticeType, type Reminders, type ResponseSpec } from "../constants";
+import { MAX_FILES, NEEDS_APPROVAL, NO_URGENT_CATEGORY, type NoticeType, type Reminders, type ResponseSpec } from "../constants";
 import { publicAudience, readyErrors, RESPONSE_WORDS, type NoticeContent } from "../content";
-import { checkNotice, correctNotice, addNoticeFile, publishNotice, removeNoticeFile, saveNotice, scheduleNotice, submitNotice } from "./actions";
+import { checkNotice, correctNotice, saveCorrectionAsNew, addNoticeFile, publishNotice, removeNoticeFile, saveNotice, scheduleNotice, submitNotice } from "./actions";
 import { NoticeCard } from "./card";
-import { clockIst, fromIstInput } from "./dates";
 import { cleanSpec, ResponseBuilder } from "./response-builder";
 import { TYPE_LABEL } from "./shared";
+import { fromIstInput, istHm, plural } from "@smw/feature-kit/words";
 
 export type WebsiteChoice = "app" | "site" | "only";
 export interface FormInitial {
@@ -97,6 +97,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [notifyAgain, setNotifyAgain] = useState(false);
+  const [needsApproval, setNeedsApproval] = useState(false);
 
   const id = useRef(initial.id);
   const rev = useRef(0), savedRev = useRef(0), nextTry = useRef(0), tries = useRef(0);
@@ -106,7 +107,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
   latest.current = f;
   const dirty = rev.current !== savedRev.current || status.kind === "failed";
 
-  const set = (patch: Partial<F>) => { rev.current++; setF((p) => ({ ...p, ...patch })); setErrors((e) => { const n = { ...e }; for (const k of Object.keys(patch)) delete n[k]; return n; }); };
+  const set = (patch: Partial<F>) => { rev.current++; if ("audience" in patch) setNeedsApproval(false); setF((p) => ({ ...p, ...patch })); setErrors((e) => { const n = { ...e }; for (const k of Object.keys(patch)) delete n[k]; return n; }); };
   const urgent = f.type === "urgent";
   const onlyWebsite = f.website === "only";
   const publicOk = onlyWebsite || publicAudience(f.audience);
@@ -245,7 +246,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
   const doSchedule = () => go(async (n) => {
     if (mode === "approval") { rev.current++; const r = await saveNotice(withSchedule(n)); return r.ok ? submitNotice(form(n)) : r; }
     const r = await scheduleNotice(form(n, { at: fromIstInput(scheduleAt) ?? "" }));
-    if (r.ok && r.data.quietUntil) toast(`It goes at the end of quiet hours, ${clockIst(new Date(r.data.quietUntil))}.`);
+    if (r.ok && r.data.quietUntil) toast(`It goes at the end of quiet hours, ${istHm(new Date(r.data.quietUntil))}.`);
     return r;
   }, (n) => `/app/announcements/${n}`);
   const withSchedule = (n: string) => { const fd = new FormData(); fd.set("payload", JSON.stringify({ id: n, scheduledAt: fromIstInput(scheduleAt) })); return fd; };
@@ -255,7 +256,16 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
     const { id: _i, type: _t, ...edits } = payload(f, { id: id.current, correcting: true });
     const fd = new FormData();
     fd.set("id", id.current!); fd.set("payload", JSON.stringify(edits)); fd.set("note", note); fd.set("notifyAgain", notifyAgain ? "1" : "0");
-    await go(() => correctNotice(fd), (n) => `/app/announcements/${n}`);
+    await go(async () => { const r = await correctNotice(fd); if (!r.ok && r.error === NEEDS_APPROVAL) setNeedsApproval(true); return r; }, (n) => `/app/announcements/${n}`);
+  };
+  const doSaveAsNew = async () => {
+    const { id: _i, type: _t, ...edits } = payload(f, { id: id.current, correcting: true });
+    const fd = new FormData();
+    fd.set("id", id.current!); fd.set("payload", JSON.stringify(edits));
+    setBusy(true);
+    const r = await saveCorrectionAsNew(fd).catch(() => ({ ok: false as const, error: "No connection. Nothing was saved." }));
+    setBusy(false);
+    if (r.ok) { savedRev.current = rev.current; router.push(`/app/announcements/${r.data.id}/edit`); } else toast(r.error, "danger");
   };
   const saveAndClose = async () => {
     setBusy(true);
@@ -268,14 +278,14 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
   const quietNote = (() => {
     const at = fromIstInput(scheduleAt);
     const until = at ? quietUntil(new Date(at), { from: quiet.from, to: quiet.to, sundays: quiet.sundays }) : null;
-    return until ? `That time is inside quiet hours. People get the message at ${clockIst(until)}.` : null;
+    return until ? `That time is inside quiet hours. People get the message at ${istHm(until)}.` : null;
   })();
   const primary = urgent ? "Send alert" : mode === "approval" ? "Send for approval" : "Publish";
   const second = f.lang2 && lang === "second";
   const previewFiles = files.map((x) => ({ name: x.name, size: x.size }));
   const cat = categories.find((c) => c.id === f.categoryId) ?? null;
   const websiteWhy = !may.website ? "Only an admin or an approver can put a notice on the website." : !publicAudience(f.audience) ? "Only a notice for everyone can go on the website. Choose Everyone above." : null;
-  const statusText = readOnly ? "This school is read only" : correcting ? "A correction is saved when you press Save correction" : status.kind === "saving" ? "Saving" : status.kind === "saved" ? `Saved ${clockIst(status.at)}` : status.kind === "failed" ? status.message : dirty ? "Not saved yet" : initial.id ? "All changes saved" : "Nothing written yet";
+  const statusText = readOnly ? "This school is read only" : correcting ? "A correction is saved when you press Save correction" : status.kind === "saving" ? "Saving" : status.kind === "saved" ? `Saved ${istHm(status.at)}` : status.kind === "failed" ? status.message : dirty ? "Not saved yet" : initial.id ? "All changes saved" : "Nothing written yet";
 
   return (
     <div ref={root} className="flex min-w-0 flex-col gap-4">
@@ -293,7 +303,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
               <div className="flex flex-col gap-2">
                 <AudiencePicker name="audience" value={f.audience} onChange={(a) => set({ audience: a })} options={options} labels={labels} />
                 {errors.audience ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{errors.audience}</p> : null}
-                {checkError ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{checkError}</p> : null}
+                {checkError && rev.current > 0 ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{checkError}</p> : null}
                 {check?.mode === "approval" && may.publish ? <p className="text-sm text-[var(--ds-color-warning-400)]">This reaches beyond your own classes, so it goes for approval first{check.approvers.length ? ` to ${check.approvers.join(", ")}` : ""}.</p> : null}
               </div>
             )}
@@ -313,7 +323,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
                 </select>
               </Row>
             </div>
-            {f.type === "circular" ? <p className="text-xs text-[var(--ds-on-surface-muted)]">A circular gets its number when it is published, and a PDF on the school letterhead.</p> : null}
+            {f.type === "circular" ? <p className="text-xs text-[var(--ds-on-surface-muted)]">A circular gets its number when it goes out, after the 30 seconds to undo, and a PDF on the school letterhead.</p> : null}
             {urgent ? <p className="text-xs text-[var(--ds-color-danger-400)]">An urgent alert reaches everyone on every channel at once, even at night. It cannot be undone or scheduled.</p> : null}
             {f.lang2 ? (
               <div role="tablist" aria-label="Language" className="flex gap-1 self-start rounded-full bg-white/[0.05] p-1">
@@ -390,7 +400,7 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
         <aside className={cn("min-w-0", tab === "write" && "max-lg:hidden")}>
           <div className="lg:sticky lg:top-4">
             <PhonePreview caption={f.lang2 ? `How families will see it (${second ? f.lang2 : "main language"})` : "How families will see it"}>
-              <NoticeCard type={f.type} category={cat} number={f.type === "circular" ? "Number given when published" : null} title={second ? f.title2 : f.title} body={second ? f.body2 : f.body} files={previewFiles} response={urgent ? { kind: "ack" } : f.response} dueAt={f.dueAt ? fromIstInput(f.dueAt) : null} />
+              <NoticeCard type={f.type} category={cat} number={f.type === "circular" ? "Number given when it goes out" : null} title={second ? f.title2 : f.title} body={second ? f.body2 : f.body} files={previewFiles} response={urgent ? { kind: "ack" } : f.response} dueAt={f.dueAt ? fromIstInput(f.dueAt) : null} />
             </PhonePreview>
           </div>
         </aside>
@@ -404,7 +414,8 @@ export function NoticeForm({ initial, categories, options, labels, languages, at
         {correcting ? (
           <>
             <button type="button" className={PILL_BTN} onClick={() => router.push(`/app/announcements/${id.current}`)}>Cancel</button>
-            <button type="button" className={PRIMARY_BTN} disabled={busy || readOnly} onClick={doCorrect}>Save correction</button>
+            {needsApproval ? <button type="button" className={PRIMARY_BTN} disabled={busy || readOnly} onClick={doSaveAsNew}>Save as a new notice for approval</button>
+              : <button type="button" className={PRIMARY_BTN} disabled={busy || readOnly} onClick={doCorrect}>Save correction</button>}
           </>
         ) : (
           <>
@@ -446,7 +457,7 @@ function CheckSummary({ check, error, websiteOnly, mode, urgent, content }: { ch
           : error ? <p role="alert" className="text-[var(--ds-color-danger-400)]">{error}</p>
           : !reach ? <p className="text-[var(--ds-on-surface-muted)]">Counting people</p>
           : <>
-              <p className="text-[var(--ds-on-surface-variant)]">{reach.total === 0 ? "Nobody. Change the audience first." : [reach.families ? `${reach.families} ${reach.families === 1 ? "family" : "families"}` : "", reach.staff ? `${reach.staff} staff` : ""].filter(Boolean).join(" and ")}{reach.text ? `: ${reach.text}` : ""}</p>
+              <p className="text-[var(--ds-on-surface-variant)]">{reach.total === 0 ? "Nobody. Change the audience first." : [reach.families ? `${plural(reach.families, "family", "families")}` : "", reach.staff ? `${reach.staff} staff` : ""].filter(Boolean).join(" and ")}{reach.text ? `: ${reach.text}` : ""}</p>
               {reach.sample.length ? <p className="text-xs text-[var(--ds-on-surface-muted)]">{reach.sample.join(", ")}{reach.total > reach.sample.length ? " and others" : ""}</p> : null}
             </>}
       </div>

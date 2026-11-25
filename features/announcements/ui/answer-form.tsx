@@ -31,7 +31,7 @@ const toAnswer = (spec: ResponseSpec, d: Draft): Answer | null => {
 };
 
 /** The inputs for one kind of answer. Shared by the family's form and staff writing down a paper answer. */
-export function AnswerFields({ spec, draft, onChange, errors, urgent }: { spec: ResponseSpec; draft: Draft; onChange: (d: Draft) => void; errors: Record<string, string>; urgent?: boolean }) {
+export function AnswerFields({ spec, draft, onChange, errors, urgent, paper }: { spec: ResponseSpec; draft: Draft; onChange: (d: Draft) => void; errors: Record<string, string>; urgent?: boolean; paper?: boolean }) {
   const set = (p: Partial<Draft>) => onChange({ ...draft, ...p });
   if (spec.kind === "ack") return <p className="text-sm text-[var(--ds-on-surface-variant)]">{urgent ? "Press the button to tell the school you are safe and have received this." : "Press the button to say you have read this."}</p>;
   if (spec.kind === "consent") return (
@@ -75,6 +75,7 @@ export function AnswerFields({ spec, draft, onChange, errors, urgent }: { spec: 
               : q.kind === "date" ? <input type="date" value={v} onChange={(e) => put(e.target.value)} className={INPUT} aria-invalid={!!err || undefined} />
               : q.kind === "choice" ? <select value={v} onChange={(e) => put(e.target.value)} className={INPUT} aria-invalid={!!err || undefined}><option value="">Choose</option>{q.options?.map((o) => <option key={o} value={o}>{o}</option>)}</select>
               : q.kind === "yesno" ? <select value={v} onChange={(e) => put(e.target.value)} className={INPUT} aria-invalid={!!err || undefined}><option value="">Choose</option><option value="yes">Yes</option><option value="no">No</option></select>
+              : paper ? <span className="text-sm font-normal text-[var(--ds-on-surface-variant)]">The photo of the slip below answers this.</span>
               : <input type="file" name={`file:${q.id}`} accept="application/pdf,image/png,image/jpeg,image/webp" className={INPUT} />}
             {err ? <span role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{err}</span> : null}
           </label>
@@ -197,10 +198,10 @@ export function PaperForm({ noticeId, recipientId, spec, onDone }: { noticeId: s
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-4 pt-2" noValidate>
-      <AnswerFields spec={spec} draft={draft} onChange={setDraft} errors={errors} />
+      <AnswerFields spec={spec} draft={draft} onChange={setDraft} errors={errors} paper />
       {errors.answer ? <p role="alert" className="text-xs text-[var(--ds-color-danger-400)]">{errors.answer}</p> : null}
       <ByFields name={name} relation={relation} onName={setName} onRelation={setRelation} errors={errors} />
-      <label className="flex flex-col gap-1.5 text-sm font-medium">Photo of the slip (optional)
+      <label className="flex flex-col gap-1.5 text-sm font-medium">Photo of the slip{spec.kind === "form" && spec.questions.some((q) => q.kind === "file" && q.required) ? "" : " (optional)"}
         <input type="file" name="slip" accept="application/pdf,image/png,image/jpeg,image/webp" className={`${INPUT} font-normal`} />
       </label>
       <div className="flex justify-end gap-2"><button type="button" className={PILL_BTN} onClick={onDone}>Cancel</button><button type="submit" disabled={busy} className={PRIMARY_BTN}>Write it down</button></div>

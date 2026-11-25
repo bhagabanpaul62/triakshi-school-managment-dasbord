@@ -1,5 +1,5 @@
 // iCalendar (RFC 5545) as plain text. Pure: no database, no framework. Times are written in UTC, all-day items as dates.
-import { createHash } from "node:crypto";
+import { sha256 } from "@smw/feature-kit/secret";
 import { addDays, istDay } from "./dates";
 
 export interface IcsItem {
@@ -94,4 +94,4 @@ export function layerItem(i: { id: string; layer: string; title: string; startsA
 }
 
 /** A short fingerprint of the file. Same bytes, same ETag, so a phone that already has them is told "not modified". */
-export const calendarEtag = (body: string) => `"${createHash("sha256").update(body).digest("hex").slice(0, 32)}"`;
+export const calendarEtag = (body: string) => `"${sha256(body).slice(0, 32)}"`;

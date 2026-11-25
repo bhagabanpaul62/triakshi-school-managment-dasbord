@@ -5,7 +5,7 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { NOTICE_TABS, NOTICE_TYPES, type NoticeTab } from "../constants";
 import { listInput } from "../inputs";
 import { AnnouncementCategoryService, NoticeService, TemplateService } from "../service";
-import { MenuLink, MoreMenu } from "./more-menu";
+import { MenuLink, MoreMenu } from "@smw/ui/shell/MoreMenu";
 import { NewMenu } from "./new-menu";
 import { LIST_COLUMNS, listRow, rowStep } from "./staff-columns";
 import { HOME, LinkButton, Notice, one, STATE_LABEL, STATE_TONE, TYPE_LABEL, type Query } from "./shared";

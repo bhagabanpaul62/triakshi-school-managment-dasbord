@@ -13,8 +13,10 @@ import { BODY_MAX, FAMILY_KINDS, MAX_FILES, NEW_PER_DAY, PER_MINUTE, REVIEW_HOUR
 import messagesFeature from "./feature";
 import { filePrefix, type StoredFile } from "./files";
 import { messageFiles, messageReports, messageRestrictions, messageReviews, messages, messageThreads, threadMembers } from "./schema";
+import { istDay } from "@smw/feature-kit/words";
 
-export { fileResponse, filePrefix, readStored, removeStored, signedLink, storeFiles, type StoredBytes, type StoredFile, type UploadedFile } from "./files";
+export { fileResponse } from "@smw/integrations";
+export { filePrefix, readStored, removeStored, signedLink, storeFiles, type StoredBytes, type StoredFile, type UploadedFile } from "./files";
 
 export type Message = typeof messages.$inferSelect;
 export type ThreadRow = typeof messageThreads.$inferSelect;
@@ -28,7 +30,6 @@ export interface Viewer { userId: string; role: string; supportStaffId?: string 
 
 export const isFamily = (role: string) => role === "student" || role === "parent";
 /** Today in IST as YYYY-MM-DD. */
-export const istToday = (now = Date.now()) => new Date(now + 330 * 60_000).toISOString().slice(0, 10);
 const clock = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" });
 const lockOn = (tx: Tx, key: string) => tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 
@@ -73,7 +74,7 @@ export async function assertOneFamily(tx: Tx, threadId: string): Promise<void> {
 /** A restriction that is in force today. Blocked wins over reply only. */
 export async function activeRestriction(tx: Tx, userId: string) {
   const rows = await tx.select({ kind: messageRestrictions.kind, until: messageRestrictions.until }).from(messageRestrictions)
-    .where(and(eq(messageRestrictions.userId, userId), isNull(messageRestrictions.liftedAt), sql`${messageRestrictions.until} >= ${istToday()}::date`));
+    .where(and(eq(messageRestrictions.userId, userId), isNull(messageRestrictions.liftedAt), sql`${messageRestrictions.until} >= ${istDay(new Date())}::date`));
   return rows.find((r) => r.kind === "blocked") ?? rows[0];
 }
 
@@ -352,7 +353,7 @@ export async function loadThread(tx: Tx, threadId: string, viewer: Viewer, o: { 
     tx.select().from(notificationPrefs).where(inArray(notificationPrefs.userId, members.map((x) => x.m.userId).filter((u): u is string => !!u))),
   ]);
 
-  const today = istToday(), now = new Date();
+  const today = istDay(new Date()), now = new Date();
   const prefOf = (id: string | null) => prefs.find((p) => p.userId === id);
   const active = members.filter((x) => x.m.state === "active");
   // A person who read a message in quiet hours is shown as having seen it only when their morning comes.

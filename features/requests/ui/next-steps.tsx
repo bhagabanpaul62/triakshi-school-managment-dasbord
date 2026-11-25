@@ -2,7 +2,7 @@ import { Fragment, type ReactNode } from "react";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import type { RequestView } from "../reads";
-import { MoreMenu } from "./more-menu";
+import { MoreMenu } from "@smw/ui/shell/MoreMenu";
 import { assignRequest, changeCategory, claimRequest, closeRequest, escalateRequest, giveFeedback, mergeRequest, reopenRequest, resolveRequest, startRequest } from "./actions";
 
 interface Props {

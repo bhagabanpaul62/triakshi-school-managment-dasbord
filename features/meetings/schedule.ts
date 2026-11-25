@@ -5,6 +5,7 @@ import { rows, ts } from "./access";
 import { MeetingBase } from "./base";
 import { when } from "./format";
 import { istDay } from "./rules";
+import { plural } from "@smw/feature-kit/words";
 
 const HOUR_MS = 3_600_000;
 
@@ -39,7 +40,7 @@ export class MeetingSchedule extends MeetingBase {
         if (d.userId) await this.notices.reminder(tx, { id: d.meetingId }, d.userId, `Meeting with ${d.teacherName} ${d.kind === "hour" ? "in about an hour" : "tomorrow"}`, `${d.studentName}, ${when(d.startsAt)}.`);
         if (d.kind === "day") perTeacher.set(d.teacherId, { n: (perTeacher.get(d.teacherId)?.n ?? 0) + 1, meetingId: d.meetingId });
       }
-      for (const [teacherId, t] of perTeacher) await this.notices.reminder(tx, { id: t.meetingId }, teacherId, `${t.n} ${t.n === 1 ? "family is" : "families are"} booked with you tomorrow`, "Open the meeting for your list.");
+      for (const [teacherId, t] of perTeacher) await this.notices.reminder(tx, { id: t.meetingId }, teacherId, `${plural(t.n, "family is", "families are")} booked with you tomorrow`, "Open the meeting for your list.");
       return picked.length;
     });
   }

@@ -115,7 +115,7 @@ describe("the owner's side", () => {
     expect(list.counts).toMatchObject({ invited: 60, going: 1, noReply: 59, checkedIn: 1 });
     const csv = await rsvp(s.users.admin, "admin").csv(e.id);
     expect(csv.name).toBe("annual-day-answers.csv");
-    expect(csv.text.split("\n")[0]).toBe("Name,Class or role,Answer,Guests,On the waiting list,Answered at,Arrived at");
+    expect(csv.text.split("\r\n")[0]).toBe("Name,Class or role,Answer,Guests,On the waiting list,Answered at,Arrived at");
     await expect(rsvp(logins[0]!).list(e.id)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(rsvp(logins[0]!).checkIn(e.id, nolo.personKey)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(rsvp(s.users.admin, "admin").checkIn(e.id, nolo.personKey, false)).resolves.toEqual({ checkedIn: false });

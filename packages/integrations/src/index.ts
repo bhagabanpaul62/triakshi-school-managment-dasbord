@@ -12,6 +12,7 @@ import { FakePaymentGateway, type PaymentGateway } from "./payments";
 
 export * from "./storage";
 export * from "./files";
+export * from "./http";
 export * from "./mail";
 export * from "./push";
 export * from "./sms";

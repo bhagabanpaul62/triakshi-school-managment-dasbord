@@ -6,7 +6,7 @@ import type { NoticeRow } from "../notice-service";
 
 /** Five columns fit a 1366 px screen without clipping. The kind and number sit under the title; the author sits under the date. */
 export const LIST_COLUMNS: Column[] = [
-  { key: "title", label: "Notice", type: "person", metaKey: "meta" },
+  { key: "title", label: "Notice", type: "text", metaKey: "meta" },
   { key: "audience", label: "For" },
   { key: "state", label: "State", type: "badge" },
   { key: "answers", label: "Answered" },

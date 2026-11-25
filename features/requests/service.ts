@@ -2,11 +2,11 @@ import { and, asc, eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { financialYear, nextSequence, users, type Tx } from "@smw/db";
 import { ForbiddenError, ValidationError } from "@smw/feature-kit";
 import { currentYear } from "@smw/feature-academics/base";
-import { sections, sectionTeachers } from "@smw/feature-academics/schema";
 import { createThread, type UploadedFile } from "@smw/feature-messages/core";
+import { teachersOfStudent } from "@smw/feature-notifications/audience";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { students } from "@smw/feature-students/schema";
-import { taughtSections, viewerOf } from "./access";
+import { viewerOf } from "./access";
 import { ensureCategories } from "./categories";
 import { dueFor } from "./clock";
 import type { RequestField } from "./constants";
@@ -33,8 +33,8 @@ function cleanValues(fields: RequestField[], given: Record<string, string>): Rec
   return out;
 }
 
-/** The students this teacher teaches: their own sections, as class teacher or subject teacher. */
-const taughtBy = (tx: Tx, userId: string): SQL => inArray(students.sectionId, taughtSections(tx, userId));
+/** The students a teacher teaches: those in their sections, as class teacher or subject teacher. */
+const taughtBy = (v: { sections: string[] }): SQL => inArray(students.sectionId, v.sections);
 
 export class RequestService extends RequestWorkflow {
   /** The school's request number: "REQ/2026-27/0007" by the school's format, gap-free per session. */
@@ -46,11 +46,7 @@ export class RequestService extends RequestWorkflow {
 
   /** Teachers of a child, for "this is about a person". */
   private async teachersOf(tx: Tx, studentId: string) {
-    const [s] = await tx.select({ sectionId: students.sectionId }).from(students).where(eq(students.id, studentId));
-    if (!s?.sectionId) return [];
-    const [sec] = await tx.select({ ct: sections.classTeacherId }).from(sections).where(eq(sections.id, s.sectionId));
-    const ids = [sec?.ct, ...(await tx.select({ id: sectionTeachers.teacherId }).from(sectionTeachers).where(eq(sectionTeachers.sectionId, s.sectionId))).map((t) => t.id)].filter((x): x is string => !!x);
-    return ids.length ? tx.select({ id: users.id, name: users.name, role: users.role }).from(users).where(and(inArray(users.id, [...new Set(ids)]), eq(users.status, "active"))).orderBy(asc(users.name)) : [];
+    return (await teachersOfStudent(tx, studentId)).map(({ id, name, role }) => ({ id, name, role }));
   }
 
   /** What the Ask form needs: the family's own child (or, for the office, a search), and the people a complaint may be about. */
@@ -71,7 +67,7 @@ export class RequestService extends RequestWorkflow {
       if (v.family || !(v.office || v.teacher)) throw new ForbiddenError("Ask the school office to write this down for the family.");
       const t = `%${q.trim().slice(0, 60).replace(/[%_\\]/g, "\\$&")}%`;
       return tx.select({ id: students.id, name: students.name, admissionNo: students.admissionNo }).from(students)
-        .where(and(eq(students.status, "active"), v.office ? undefined : taughtBy(tx, v.userId), or(ilike(students.name, t), ilike(students.admissionNo, t)))).orderBy(asc(students.name)).limit(8);
+        .where(and(eq(students.status, "active"), v.office ? undefined : taughtBy(v), or(ilike(students.name, t), ilike(students.admissionNo, t)))).orderBy(asc(students.name)).limit(8);
     });
   }
 
@@ -88,7 +84,7 @@ export class RequestService extends RequestWorkflow {
 
       if (!v.family && !d.studentId) throw new ValidationError({ studentId: "Choose the student" });
       const [child] = await tx.select({ id: students.id, name: students.name, userId: students.userId }).from(students)
-        .where(and(eq(students.status, "active"), v.family ? eq(students.userId, this.ctx.userId) : eq(students.id, d.studentId!), v.family || v.office ? undefined : taughtBy(tx, v.userId)));
+        .where(and(eq(students.status, "active"), v.family ? eq(students.userId, this.ctx.userId) : eq(students.id, d.studentId!), v.family || v.office ? undefined : taughtBy(v)));
       if (!child && v.teacher && !v.office && d.studentId) throw new ForbiddenError("You can write a request only for a student you teach.");
       if (!child) throw new ValidationError({ studentId: v.family ? "Your login is not linked to a student yet. Please call the school office." : "Choose the student" });
       if (v.family && d.studentId && d.studentId !== child.id) throw new ValidationError({ studentId: "You can ask only about your own child." });

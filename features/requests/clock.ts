@@ -1,5 +1,6 @@
 // The clock of a request, pure: target days are calendar days; waiting for the family stops it.
 import { CLOSE_AFTER_DAYS, OPEN_STATES, REOPEN_DAYS, type EscalationLevel, type RequestState } from "./constants";
+import { plural } from "@smw/feature-kit/words";
 
 export const DAY = 86_400_000;
 export const addDays = (from: Date, days: number) => new Date(from.getTime() + days * DAY);
@@ -30,4 +31,4 @@ export function median(xs: number[]): number | null {
 export const hoursWords = (h: number | null) => (h === null ? "Not yet" : h < 1 ? "Under an hour" : h < 48 ? `${Math.round(h * 10) / 10} hours` : `${Math.round((h / 24) * 10) / 10} days`);
 
 /** How long a request has existed, with its unit: "Today", "1 day", "5 days". */
-export const ageWords = (days: number) => (days < 1 ? "Today" : `${days} ${days === 1 ? "day" : "days"}`);
+export const ageWords = (days: number) => (days < 1 ? "Today" : `${plural(days, "day")}`);

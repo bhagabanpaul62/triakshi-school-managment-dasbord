@@ -9,10 +9,11 @@ import { ActionButton } from "@smw/ui/shell/ActionButton";
 import type { Tone } from "@smw/ui/tone";
 import { DayService, type DayRow, type DayView } from "../service";
 import type { VisitState } from "../constants";
-import { clock, dayLong, dayOf, when } from "../format";
+import { dayLong, dayOf, when } from "../format";
 import { atIst } from "../rules";
 import { addWalkIn, markVisit, saveNotes } from "./actions";
 import { BackLink, FollowUp, LinkButton, Notice } from "./shared";
+import { clock } from "@smw/feature-kit/words";
 
 export const metadata = { title: "My meeting day" };
 

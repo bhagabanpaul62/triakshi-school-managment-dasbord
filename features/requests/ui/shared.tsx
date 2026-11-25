@@ -6,6 +6,7 @@ import { cn } from "@smw/ui/utils";
 import { ageWords } from "../clock";
 import type { RequestState } from "../constants";
 import requestsFeature from "../feature";
+import { plural } from "@smw/feature-kit/words";
 
 export type Search = Promise<Record<string, string | string[] | undefined>>;
 export const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
@@ -64,8 +65,8 @@ export function dueWords(r: { dueAt: Date; paused: boolean; overdue: boolean; st
   if (r.state === "resolved" || r.state === "closed") return "";
   if (r.paused) return "Waiting for the family";
   const days = Math.round((r.dueAt.getTime() - Date.now()) / 86_400_000);
-  if (r.overdue) return `${Math.max(1, -days)} ${Math.max(1, -days) === 1 ? "day" : "days"} late`;
-  return days <= 0 ? "Due today" : `Due in ${days} ${days === 1 ? "day" : "days"}`;
+  if (r.overdue) return `${plural(Math.max(1, -days), "day")} late`;
+  return days <= 0 ? "Due today" : `Due in ${plural(days, "day")}`;
 }
 
 /** The queue's last column: when it is due and how long it has existed, "2 days late, 5 days old". */

@@ -3,8 +3,6 @@ const TIME = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: 
 const DAY = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short" });
 const DAY_LONG = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long" });
 
-/** "10:30 am". */
-export const clock = (d: Date) => TIME.format(new Date(d));
 /** "Fri, 5 Dec". */
 export const dayOf = (d: Date) => DAY.format(new Date(d));
 export const dayLong = (d: Date) => DAY_LONG.format(new Date(d));

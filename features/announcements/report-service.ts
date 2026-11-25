@@ -2,7 +2,7 @@ import { and, asc, count, eq, gte, ilike, inArray, isNull, lt, or, sql, type SQL
 import { schools, type Tx } from "@smw/db";
 import { ConflictError } from "@smw/feature-kit";
 import { commDeliveries, notifications } from "@smw/feature-notifications/schema";
-import { PdfBuilder, services } from "@smw/integrations";
+import { csvText, PdfBuilder, services, slugOf } from "@smw/integrations";
 import { dateTime } from "@smw/ui/format";
 import { answerText } from "./answer";
 import { NoticeBase } from "./base";
@@ -22,10 +22,6 @@ export interface PersonRow {
 }
 export interface SectionRow { sectionId: string | null; label: string; recipients: number; seen: number; answered: number }
 
-const cell = (v: string | number | null | undefined) => {
-  const s = v == null ? "" : String(v);
-  return `"${(/^[=+\-@\t\r]/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`;
-};
 /** People we know a push or email reached. One uncorrelated set, built once and hashed, so the report stays linear in the recipients. */
 const sentTo = (noticeId: string) => sql`coalesce(${announcementRecipients.userId} in (select n.user_id from notifications n join comm_deliveries d on d.notification_id = n.id
   where n.subject_type = 'notice' and n.subject_id = ${noticeId} and d.state = 'sent'), false)`;
@@ -137,19 +133,18 @@ export class ReportService extends NoticeBase {
         }
         if (part.length < 1000) break;
       }
-      const slug = n.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "notice";
-      return { csv: lines.map((l) => l.map(cell).join(",")).join("\r\n") + "\r\n", fileName: `notice-${slug}.csv` };
+      return { csv: csvText(lines), fileName: `notice-${slugOf(n.title, "notice")}.csv` };
     });
   }
 
-  /** A 60-second link to the picture of a paper slip. */
-  async slipUrl(id: string, recipientId: string): Promise<string> {
+  /** The picture of a paper slip. */
+  async slip(id: string, recipientId: string): Promise<Uint8Array> {
     return this.read("read", async (tx) => {
       const n = await this.notice(tx, id);
       const [a] = await tx.select({ k: announcementResponses.fileKey }).from(announcementResponses).innerJoin(announcementRecipients, eq(announcementRecipients.id, announcementResponses.recipientId))
         .where(and(eq(announcementRecipients.id, recipientId), eq(announcementRecipients.announcementId, n.id)));
       if (!a?.k) throw new ConflictError("There is no slip for this person.");
-      return services().storage.signedUrl(a.k, 60);
+      return services().storage.get(a.k);
     });
   }
 

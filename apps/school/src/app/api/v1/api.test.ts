@@ -134,7 +134,7 @@ describe("handlers, two schools", () => {
 
   it("a push device can be registered once and removed by its owner only", async () => {
     const h = `${a.slug}.localhost`;
-    const body = { endpoint: "https://push.example/abc", p256dh: "k", auth: "a", device: "Pixel" };
+    const body = { endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "k", auth: "a", device: "Pixel" };
     expect((await call(R("push/devices"), "POST", h, tokenStudent, { body })).status).toBe(200);
     expect((await call(R("push/devices"), "POST", h, tokenStudent, { body })).status).toBe(200);
     const list = (await call(R("push/devices"), "GET", h, tokenStudent)).json.rows as { id: string }[];

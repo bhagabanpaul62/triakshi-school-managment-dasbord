@@ -49,3 +49,10 @@ export async function addBulkFamilies(fx: Fx, n: number) {
     await tx.execute(sql`insert into students (id, school_id, admission_no, name, class_id, section_id, status, user_id) select gen_random_uuid(), ${fx.school.id}::uuid, 'B-' || u.login_id, u.name, ${fx.ids.c6}::uuid, ${fx.ids.s6a}::uuid, 'active', u.id from users u where u.school_id = ${fx.school.id}::uuid and u.login_id like 'bulk%'`);
   });
 }
+
+/** The first bytes of real files, so an upload passes the check of what it really is. */
+export const BYTES = {
+  pdf: new TextEncoder().encode("%PDF-1.4\n%test\n"),
+  jpg: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+  png: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+};

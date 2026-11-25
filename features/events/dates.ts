@@ -1,9 +1,8 @@
 // Pure date helpers. Schools run on Indian Standard Time, so "a day" always means a day in IST.
 // No framework imports: used by the service, the seed and the calendar UI.
-const TZ = "Asia/Kolkata";
+import { istDay, toIstInput } from "@smw/feature-kit/words";
+
 const DAY_MS = 86_400_000;
-const day = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" });
-const clock = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
 /** "2026-11-18" or "2026-11-18T09:30" (IST wall time) to an instant. Null when it is not a date. */
 export function parseIst(v: string): Date | null {
@@ -12,11 +11,8 @@ export function parseIst(v: string): Date | null {
   return d && !Number.isNaN(d.getTime()) ? d : null;
 }
 
-/** The IST calendar day of an instant: "YYYY-MM-DD". */
-export const istDay = (d: Date | string) => day.format(new Date(d));
 
-/** Value for an `<input type="datetime-local">`, in IST. */
-export const toInputValue = (d: Date | string | null | undefined) => (d ? `${istDay(d)}T${clock.format(new Date(d))}` : "");
+export { istDay, toIstInput as toInputValue };
 
 /** An all-day span covers whole IST days: start of the first day to the last instant of the last. */
 export function allDaySpan(startsAt: Date, endsAt?: Date | null) {

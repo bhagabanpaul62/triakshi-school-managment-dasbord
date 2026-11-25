@@ -1,4 +1,5 @@
 import { AppError } from "@smw/feature-kit";
+import { csvResponse, pdfResponse } from "@smw/integrations";
 import { actionCtx } from "@smw/runtime";
 import { DayService } from "./day";
 
@@ -7,7 +8,6 @@ const fail = (e: unknown) => {
   if (e instanceof AppError) return Response.json({ error: e.message }, { status: e.status });
   throw e;
 };
-const PDF = (bytes: Uint8Array, fileName: string) => new Response(Buffer.from(bytes), { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename="${fileName}"`, "cache-control": "private, no-store" } });
 
 /** GET /api/meetings/{id}/sheet?teacher=&date=: one teacher's list on paper. */
 export async function sheet(req: Request, { params }: Params) {
@@ -15,7 +15,7 @@ export async function sheet(req: Request, { params }: Params) {
     const { id } = await params;
     const q = new URL(req.url).searchParams;
     const r = await new DayService(await actionCtx()).teacherSheetPdf(id, q.get("teacher") ?? undefined, q.get("date") ?? undefined);
-    return PDF(r.bytes, r.fileName);
+    return pdfResponse(r.bytes, r.fileName);
   } catch (e) { return fail(e); }
 }
 
@@ -23,7 +23,7 @@ export async function sheet(req: Request, { params }: Params) {
 export async function room(_req: Request, { params }: Params) {
   try {
     const r = await new DayService(await actionCtx()).roomSheetPdf((await params).id);
-    return PDF(r.bytes, r.fileName);
+    return pdfResponse(r.bytes, r.fileName);
   } catch (e) { return fail(e); }
 }
 
@@ -31,6 +31,6 @@ export async function room(_req: Request, { params }: Params) {
 export async function notCame(_req: Request, { params }: Params) {
   try {
     const r = await new DayService(await actionCtx()).notCameCsv((await params).id);
-    return new Response(r.csv, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${r.fileName}"`, "cache-control": "private, no-store" } });
+    return csvResponse(r.csv, r.fileName);
   } catch (e) { return fail(e); }
 }

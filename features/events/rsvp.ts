@@ -1,6 +1,7 @@
 import { and, asc, eq, isNotNull, sql } from "drizzle-orm";
 import { SchoolService, ConflictError, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import type { Tx } from "@smw/db";
+import { csvText, slugOf } from "@smw/integrations";
 import { resolveAudience } from "@smw/feature-notifications/audience";
 import { isEveryone, personKey } from "@smw/feature-notifications/audience-rules";
 import { canRun, mustRun, noSupport } from "./access";
@@ -154,10 +155,9 @@ export class RsvpService extends SchoolService<Perm> {
   /** The list as CSV. A cell that starts like a formula is made harmless. */
   async csv(eventId: string): Promise<{ name: string; text: string }> {
     const { event, rows } = await this.list(eventId);
-    const cell = (v: string | number | null) => { let s = v === null ? "" : String(v); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const stamp = (d: Date | null) => (d ? d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "");
     const lines = [["Name", "Class or role", "Answer", "Guests", "On the waiting list", "Answered at", "Arrived at"],
       ...rows.map((p) => [p.name, p.label, p.answer ?? "No answer", p.guests, p.waitingSince ? "Yes" : "", stamp(p.answeredAt), stamp(p.checkedInAt)])];
-    return { name: `${event.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "event"}-answers.csv`, text: lines.map((l) => l.map(cell).join(",")).join("\n") + "\n" };
+    return { name: `${slugOf(event.title, "event", 200)}-answers.csv`, text: csvText(lines) };
   }
 }

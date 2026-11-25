@@ -15,12 +15,13 @@ import type { ResponseSpec } from "../constants";
 import { funnelNow, nudgeChosen, releaseNotice, undoNotice } from "./actions";
 import { PaperForm } from "./answer-form";
 import { funnelParts } from "./funnel";
+import { plural } from "@smw/feature-kit/words";
 
 type Action = (fd: FormData) => Promise<ActionResult<unknown>>;
 /** What to say after an action whose answer carries numbers. */
 const SAYS: Record<string, (d: Record<string, number>) => string> = {
-  nudge: (d) => (d.sent ? `Reminded ${d.sent} ${d.sent === 1 ? "person" : "people"}${d.alreadyToday ? `. ${d.alreadyToday} were reminded in the last day, so they were left.` : ""}` : d.alreadyToday ? "Everyone who has not answered was already reminded in the last day." : "Everyone has answered."),
-  resend: (d) => `Sent again to ${d.sent} ${d.sent === 1 ? "person" : "people"}${d.noLogin ? `. ${d.noLogin} have no login: use the sign sheet.` : ""}`,
+  nudge: (d) => (d.sent ? `Reminded ${plural(d.sent, "person", "people")}${d.alreadyToday ? `. ${d.alreadyToday} were reminded in the last day, so they were left.` : ""}` : d.alreadyToday ? "Everyone who has not answered was already reminded in the last day." : "Everyone has answered."),
+  resend: (d) => `Sent again to ${plural(d.sent ?? 0, "person", "people")}${d.noLogin ? `. ${d.noLogin} have no login: use the sign sheet.` : ""}`,
 };
 
 export interface RunButtonProps {

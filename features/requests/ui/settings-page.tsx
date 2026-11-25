@@ -8,6 +8,7 @@ import { NATURE_WORDS } from "../constants";
 import { CategoryForm } from "./category-form";
 import { deleteCategory, moveCategory, saveCategory, setCategoryActive } from "./actions";
 import { NoAccess, SectionNav, can } from "./shared";
+import { plural } from "@smw/feature-kit/words";
 
 export const metadata = { title: "Request categories" };
 
@@ -32,7 +33,7 @@ export default async function CategoriesPage() {
                   <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">
                     Answered by {roleName(c.ownerRole)} within {c.targetDays} {c.targetDays === 1 ? "day" : "days"}
                     {c.escalation.length ? `. Then ${c.escalation.map((l) => `${l.label} (${l.afterDays}d)`).join(", then ")}` : ". Never goes higher"}
-                    {c.fields.length ? `. Asks: ${c.fields.map((f) => f.label).join(", ")}` : ""}.{c.used === null ? "" : ` ${c.used} ${c.used === 1 ? "request" : "requests"} so far.`}
+                    {c.fields.length ? `. Asks: ${c.fields.map((f) => f.label).join(", ")}` : ""}.{c.used === null ? "" : ` ${plural(c.used, "request")} so far.`}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">

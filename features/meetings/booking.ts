@@ -8,6 +8,7 @@ import type { MeetingState, VisitState } from "./constants";
 import { bookInput, changeBookingInput, waitInput } from "./inputs";
 import { when } from "./format";
 import { meetingSlots, meetingWaits } from "./schema";
+import { plural } from "@smw/feature-kit/words";
 
 export const TAKEN = "Someone just took this time. Pick another.";
 
@@ -173,7 +174,7 @@ export class BookingService extends MeetingBase {
     }
     const held = await rows<{ id: string; teacherId: string }>(tx, sql`select id, teacher_id as "teacherId" from meeting_slots where meeting_id = ${m.id}::uuid and state = 'booked' and student_id = ${kid.id}::uuid`);
     if (held.some((h) => h.teacherId === slot.teacherId)) throw new ConflictError(`${kid.name} already has a time with ${slot.teacherName}. Change or cancel it instead.`);
-    if (held.length >= m.perFamily) throw new ConflictError(`You can book ${m.perFamily} ${m.perFamily === 1 ? "teacher" : "teachers"} for one child. Cancel one to pick another.`);
+    if (held.length >= m.perFamily) throw new ConflictError(`You can book ${plural(m.perFamily, "teacher")} for one child. Cancel one to pick another.`);
     const [clash] = await clashFor(tx, [kid.id, ...(await siblingIds(tx, kid.id))], slot);
     if (clash) throw new ConflictError(clash.studentId === kid.id
       ? `${kid.name} already has a meeting with ${clash.teacherName} at that time. Pick another time.`

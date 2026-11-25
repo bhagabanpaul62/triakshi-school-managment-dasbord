@@ -13,6 +13,7 @@ import { cn } from "@smw/ui/utils";
 import { previewBatch, sendBatch } from "./actions";
 import { PILL_BTN, PRIMARY_BTN } from "./styles";
 import type { BatchPreview } from "../batch";
+import { plural } from "@smw/feature-kit/words";
 
 const STEPS = ["Who", "What", "Check"] as const;
 const newId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
@@ -27,8 +28,6 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
   const [body, setBody] = useState("");
   const [preview, setPreview] = useState<BatchPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The picker says "Choose who it is for" in red whenever the list is empty; before the person has touched it, that is a form shouting at someone who has not started.
-  const [touched, setTouched] = useState(false);
   const [clientId] = useState(newId);
   const [pending, run] = useTransition();
 
@@ -45,7 +44,7 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
     f.set("subject", subject); f.set("body", body); f.set("clientId", clientId);
     const r = await sendBatch(f);
     if (!r.ok) { setError(r.error); return toast(r.error, "danger"); }
-    toast(`Sent to ${r.data.threads} ${r.data.threads === 1 ? "family" : "families"}`);
+    toast(`Sent to ${plural(r.data.threads, "family", "families")}`);
     router.push(`/app/messages/families/${r.data.batchId}`);
   });
 
@@ -60,9 +59,7 @@ export function FamiliesFlow({ options }: { options: AudienceOptions }) {
         {step === 0 ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-[var(--ds-on-surface-variant)]">Choose a section, a subject group or chosen students. Each family gets its own private conversation; families never see each other.</p>
-            <div className={cn(!touched && !audience.include.length && "[&_[aria-live=polite]]:hidden")}>
-              <AudiencePicker name="audience" value={audience} onChange={(a) => { setTouched(true); setAudience(a); }} options={options} allow={[...RULES]} />
-            </div>
+            <AudiencePicker name="audience" value={audience} onChange={setAudience} options={options} allow={[...RULES]} />
           </div>
         ) : null}
         {step === 1 ? (

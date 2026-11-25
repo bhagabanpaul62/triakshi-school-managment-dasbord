@@ -7,7 +7,7 @@ import { audienceField, type Audience } from "@smw/feature-notifications/audienc
 import { quietUntil } from "@smw/feature-notifications/quiet";
 import { publicAudience, contentOf, snapshotOf, readyErrors, plain, EMPTY, NO_AUDIENCE, CONTENT_KEYS, isWebsiteOnly, type Notice, type NoticeContent } from "./content";
 import { NoticeBase } from "./base";
-import { TAB_STATES, type NoticeCan, type NoticeState, type NoticeTab } from "./constants";
+import { NEEDS_APPROVAL, TAB_STATES, type NoticeCan, type NoticeState, type NoticeTab } from "./constants";
 import { fanOut, reconcile, subjectOf, tell } from "./fan-out";
 import { approveInput, correctInput, draftInput, editInput, listInput, noteInput, reasonInput, type DraftInput, type NoticeListQuery } from "./inputs";
 import { labelOf, startSending } from "./lifecycle";
@@ -182,7 +182,7 @@ export class NoticeService extends NoticeBase {
     const after = await expandGroups(tx, c.audience);
     if (sameJson(before, after)) { c.audience = before; return; }
     if (after.include.length && (!this.can("publish") || (await this.reach(tx, c.audience, "publish")) === "approval")) {
-      throw new ForbiddenError("Ask an approver: this changes who it reaches beyond your own classes. Save it as a new draft and send that for approval.");
+      throw new ForbiddenError(NEEDS_APPROVAL);
     }
     c.audience = after;
   }

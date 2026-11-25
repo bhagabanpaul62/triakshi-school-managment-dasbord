@@ -1,24 +1,11 @@
 // Pure rules (no database, no framework): India time, slot grids and what a window change does to existing slots.
 import type { SlotState } from "./constants";
 
-const IST_MS = 330 * 60_000;
 const MINUTE = 60_000;
 
 /** "2026-12-05" + "10:30" in India time. */
 export const atIst = (day: string, hm: string) => new Date(`${day}T${hm}:00+05:30`);
-export const istDay = (d: Date) => new Date(d.getTime() + IST_MS).toISOString().slice(0, 10);
-export const istHm = (d: Date) => new Date(d.getTime() + IST_MS).toISOString().slice(11, 16);
-
-/** A form's "2026-12-05T10:30" is India wall-clock time; anything with a zone is taken as is. */
-export function parseIstInput(v: unknown): Date | null {
-  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
-  if (typeof v !== "string" || !v.trim()) return null;
-  const s = v.trim();
-  const zoned = /T/.test(s) && /(Z|[+-]\d{2}:?\d{2})$/i.test(s);
-  const d = new Date(zoned ? s : `${s}${/T\d{2}:\d{2}$/.test(s) ? ":00" : ""}+05:30`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-export const toIstInput = (d: Date | string | null | undefined) => (d ? new Date(new Date(d).getTime() + IST_MS).toISOString().slice(0, 16) : "");
+export { istDay, istHm, parseIstInput, toIstInput } from "@smw/feature-kit/words";
 
 export interface Span { startsAt: Date; endsAt: Date }
 export interface Cell extends Span { state: "open" | "break" }

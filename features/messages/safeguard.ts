@@ -6,11 +6,12 @@ import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { REPORT_STATE_WORDS, RESTRICTION_WORDS, REVIEW_HOURS, type ReportCategory, type ReportState, type RestrictionKind } from "./constants";
 import { conversationPdf } from "./conversation-pdf";
-import { hasActiveReview, isFamily, istToday, loadThread, noSupport, postSystem, type ThreadData } from "./core";
+import { hasActiveReview, isFamily, loadThread, noSupport, postSystem, type ThreadData } from "./core";
 import messagesFeature from "./feature";
 import { handleReportInput, restrictInput, reviewInput } from "./inputs";
 import { hasOpenReport, isNamed, namedIn } from "./leads";
 import { messageRestrictions, messageReports, messageReviews, messageThreads, threadMembers } from "./schema";
+import { istDay } from "@smw/feature-kit/words";
 
 type Perm = keyof typeof messagesFeature.permissions;
 
@@ -181,7 +182,7 @@ export class SafeguardService extends SchoolService<Perm> {
 
   async restrictions(): Promise<RestrictionRow[]> {
     return this.read("safeguard", async (tx) => {
-      const today = istToday();
+      const today = istDay(new Date());
       const rows = await tx.select({ r: messageRestrictions, name: users.name, role: users.role }).from(messageRestrictions).innerJoin(users, eq(users.id, messageRestrictions.userId)).orderBy(desc(messageRestrictions.createdAt)).limit(200);
       return rows.map(({ r, name, role }) => ({ id: r.id, userId: r.userId, name, role, kind: r.kind, reason: r.reason, until: r.until, createdAt: r.createdAt, active: !r.liftedAt && r.until >= today }));
     });
@@ -191,7 +192,7 @@ export class SafeguardService extends SchoolService<Perm> {
   async restrict(input: unknown): Promise<void> {
     this.authorize("safeguard", "write");
     const data = this.parse(restrictInput, input);
-    if (data.until < istToday()) throw new ValidationError({ until: "Pick today or a later day" });
+    if (data.until < istDay(new Date())) throw new ValidationError({ until: "Pick today or a later day" });
     if (data.userId === this.ctx.userId) throw new ForbiddenError("You cannot limit your own messages.");
     await this.write("safeguard", async (tx) => {
       const [p] = await tx.select({ id: users.id, role: users.role }).from(users).where(and(eq(users.id, data.userId), eq(users.status, "active")));

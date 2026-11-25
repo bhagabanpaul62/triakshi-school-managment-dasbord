@@ -5,10 +5,10 @@ import { cn } from "@smw/ui/utils";
 import { AGENDA_DAYS, addDays, daysOf, shiftMonth, weekStart, type CalendarView } from "../dates";
 import { LAYERS, LAYER_TONE, TYPE_TONE, type CalendarItem } from "../constants";
 import { LINK, MUTED, PILL } from "./styles";
+import { clock, plural } from "@smw/feature-kit/words";
+import { FOCUS } from "@smw/ui/finance/ui";
 
 export type UrlFor = (o: Record<string, string | undefined>) => string;
-const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]";
-const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 const label = (day: string, o: Intl.DateTimeFormatOptions) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en-IN", { ...o, timeZone: "UTC" });
 const toneOf = (i: CalendarItem) => TONE[i.type ? TYPE_TONE[i.type] : LAYER_TONE[i.layer]];
 
@@ -77,7 +77,7 @@ export function Month({ items, anchor, today, url }: { items: CalendarItem[]; an
         {cells.map((d) => {
           const list = days.get(d) ?? [], inMonth = d.startsWith(ym);
           return (
-            <Link key={d} role="gridcell" href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${list.length} ${list.length === 1 ? "item" : "items"}`}
+            <Link key={d} role="gridcell" href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${plural(list.length, "item")}`}
               className={cn("flex min-h-14 min-w-0 flex-col gap-0.5 rounded-lg bg-white/[0.03] p-1 hover:bg-white/[0.07] sm:min-h-24 sm:p-1.5", FOCUS, !inMonth && "opacity-40")}>
               <span className={cn("flex h-6 w-6 items-center justify-center rounded-full text-xs tabular-nums", d === today && "bg-[var(--ds-primary)] font-medium text-[var(--ds-on-primary)]")}>{Number(d.slice(8))}</span>
               <span className="flex flex-wrap gap-0.5 sm:hidden" aria-hidden>{list.slice(0, 4).map((i) => <span key={`${i.layer}-${i.id}`} className={cn("h-1.5 w-1.5 rounded-full", toneOf(i).dot)} />)}</span>
@@ -124,7 +124,7 @@ export function Year({ items, anchor, today, url }: { items: CalendarItem[]; anc
                 if (!d.startsWith(ym)) return <span key={d} />;
                 const n = days.get(d)?.length ?? 0;
                 return (
-                  <Link key={d} href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${n} ${n === 1 ? "item" : "items"}`}
+                  <Link key={d} href={url({ view: "week", date: d })} aria-label={`${label(d, { day: "numeric", month: "long" })}, ${plural(n, "item")}`}
                     className={cn("flex h-7 items-center justify-center rounded-md tabular-nums hover:bg-white/[0.12]", FOCUS, n ? "bg-white/[0.12] font-medium" : "text-[var(--ds-on-surface-variant)]", d === today && "ring-1 ring-[var(--ds-primary)]")}>{Number(d.slice(8))}</Link>
                 );
               })}

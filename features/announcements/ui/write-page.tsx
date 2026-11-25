@@ -8,9 +8,9 @@ import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { NOTICE_TYPES, type NoticeType } from "../constants";
 import { isWebsiteOnly } from "../content";
 import { AnnouncementCategoryService, NoticeService, TemplateService, type NoticeView } from "../service";
-import { toIstInput } from "./dates";
 import { NoticeForm, type FormInitial } from "./notice-form";
 import { BackLink, HOME, LinkButton, Notice, one, type Query } from "./shared";
+import { toIstInput } from "@smw/feature-kit/words";
 
 export const metadata = { title: "Write a notice" };
 const NONE: Audience = { include: [], exclude: [] };
@@ -19,13 +19,14 @@ async function Screen({ ctx, initial, title, back, banner }: { ctx: Ctx; initial
   const svc = new NoticeService(ctx);
   const may = svc.mayDo();
   const [options, categories, settings] = await Promise.all([new AudienceService(ctx).options(), new AnnouncementCategoryService(ctx).options(), new CommSettingsService(ctx).get()]);
+  const labels = await svc.labelsFor(initial.audience);
   const defaultMode = may.publish && (!initial.audience.include.length || (await svc.reachFor(initial.audience).then((r) => r.mode, () => "approval" as const)) === "free") ? "free" : "approval";
   return (
     <>
       <BackLink href={back.href}>{back.label}</BackLink>
       <PageHeader eyebrow="Communication" title={title} description={initial.mode === "correct" ? "People see the new version with an Updated stamp. The old one is kept." : "Saved as you type. Nothing is sent until you press the button at the bottom."} />
       {banner}
-      <NoticeForm initial={initial} categories={categories} options={options} labels={{}} languages={settings.languages} attachments={settings.attachments} may={may}
+      <NoticeForm initial={initial} categories={categories} options={options} labels={labels} languages={settings.languages} attachments={settings.attachments} may={may}
         defaultMode={defaultMode} quiet={{ from: settings.quietFrom, to: settings.quietTo, sundays: settings.quietSundays }} readOnly={ctx.readOnly} />
     </>
   );

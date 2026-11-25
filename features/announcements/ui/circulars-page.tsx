@@ -5,6 +5,7 @@ import { SavedViews } from "@smw/ui/comm/SavedViews";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { dateTime } from "@smw/ui/format";
+import { plural } from "@smw/feature-kit/words";
 import type { Tone } from "@smw/ui/tone";
 import { AnnouncementCategoryService, CircularService, type RegisterRow } from "../service";
 import { BackLink, HOME, LinkButton, Notice, one, STATE_LABEL, STATE_TONE, type Query } from "./shared";
@@ -43,7 +44,7 @@ export default async function CircularsPage({ searchParams }: { searchParams: Pr
   return (
     <>
       <BackLink href={HOME}>Notices</BackLink>
-      <PageHeader eyebrow="Communication" title="Circular register" description={`Session ${reg.session}: ${reg.rows.length} ${reg.rows.length === 1 ? "number" : "numbers"}.`}
+      <PageHeader eyebrow="Communication" title="Circular register" description={`Session ${reg.session}: ${plural(reg.rows.length, "number")}.`}
         actions={<><LinkButton href={`/api/notices/register?session=${encodeURIComponent(reg.session)}`}>Print the register</LinkButton>{ctx.readOnly ? null : write}</>} />
       <div className="flex flex-col gap-3">
         <SavedViews views={sessions.map((s) => ({ key: s, label: s }))} active={session} basePath="/app/circulars" param="session" label="Session" params={{ q: one(sp.q) }} />

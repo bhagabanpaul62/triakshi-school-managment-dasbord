@@ -1,6 +1,7 @@
 // From "published" to people: recipients (set based, safe to rerun) and one notification each. Also corrections and late joiners.
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { withSchool, type Tx } from "@smw/db";
+import { chunks } from "@smw/feature-notifications/constants";
 import { resolveAudience } from "@smw/feature-notifications/audience";
 import { personKey, type Reached } from "@smw/feature-notifications/audience-rules";
 import { commDeliveries, notifications } from "@smw/feature-notifications/schema";
@@ -9,8 +10,6 @@ import { plain, type Notice } from "./content";
 import { giveNumber } from "./lifecycle";
 import { announcementRecipients, announcements } from "./schema";
 
-const CHUNK = 1000;
-const chunks = <T>(xs: T[], n = CHUNK) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 export const subjectOf = (id: string) => ({ type: "notice", id });
 export const noticeHref = (id: string) => `/app/announcements/${id}`;
 

@@ -1,14 +1,13 @@
 // Who an event is for, frozen when it goes live (event_people). One place for freezing, re-syncing and telling people.
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
+import { chunks } from "@smw/feature-notifications/constants";
 import { resolveAudience } from "@smw/feature-notifications/audience";
 import { personKey, type Audience, type Reached } from "@smw/feature-notifications/audience-rules";
 import type { TopicKey } from "@smw/feature-notifications/topics";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { eventPeople, events } from "./schema";
 
-const CHUNK = 1000;
-const chunks = <T>(xs: T[], n = CHUNK) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, (i + 1) * n));
 const row = (schoolId: string, eventId: string, r: Reached) => ({ schoolId, eventId, personKey: personKey(r), userId: r.userId, studentId: r.studentId, name: r.name, label: r.label });
 
 /**

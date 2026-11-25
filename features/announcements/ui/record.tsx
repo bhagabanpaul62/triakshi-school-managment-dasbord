@@ -20,6 +20,7 @@ import { approveNotice, approveWithEdits, askChanges, deleteDraft, duplicateNoti
 import { NoticeCard } from "./card";
 import { diffLines } from "./diff";
 import { FamilyRecord } from "./family-record";
+import { MenuLink, MoreMenu } from "@smw/ui/shell/MoreMenu";
 import { RunButton, UndoSending } from "./notice-actions";
 import { Responses } from "./responses-tab";
 import { BackLink, HOME, LinkButton, Notice, one, STATE_KEY, TYPE_LABEL, type Query } from "./shared";
@@ -31,6 +32,15 @@ const text = (name: string, label: string, extra: object = {}) => ({ name, label
 function Steps({ v, canTemplate }: { v: NoticeView; canTemplate: boolean }) {
   const n = v.notice, id = n.id, c = v.can, own = `${HOME}/${id}`;
   const quiet = { variant: "secondary" as const, plus: false };
+  const menu = { variant: "ghost" as const, plus: false };
+  // The rare steps. The page keeps one main button.
+  const more = [
+    c.correct ? <MenuLink key="correct" href={`${own}/edit`}>Correct</MenuLink> : null,
+    c.withdraw ? <FormModal key="withdraw" title="Withdraw this notice" description="People see Withdrawn by the school and your reason. The words are hidden from them. A circular keeps its number in the register." icon="megaphone" fields={[text("reason", "Why it is withdrawn, as people will read it")]} hidden={{ id }} action={withdrawNotice} submitLabel="Withdraw" trigger={{ label: "Withdraw", ...menu }} summary="You can copy it to a new notice afterwards." /> : null,
+    c.duplicate ? <RunButton key="duplicate" action={duplicateNotice} values={{ id }} label="Duplicate" to={`${HOME}/{id}/edit`} /> : null,
+    canTemplate && SENT.includes(n.state) ? <FormModal key="template" title="Save as a template" icon="megaphone" fields={[{ name: "name", label: "Template name", required: true, wide: true }]} hidden={{ id }} action={saveAsTemplate} submitLabel="Save" trigger={{ label: "Save as template", ...menu }} /> : null,
+    c.delete ? <ActionButton key="delete" variant="ghost" label="Delete draft" action={deleteDraft} values={{ id }} redirectTo={HOME} confirm={{ title: "Delete this draft?", body: `"${n.title || "This draft"}" and its files are deleted. This cannot be undone.`, confirmLabel: "Delete", danger: true }} /> : null,
+  ].filter(Boolean);
   return (
     <>
       {c.edit ? <LinkButton href={`${own}/edit`} primary>{v.review ? "Edit and send again" : "Keep writing"}</LinkButton> : null}
@@ -44,12 +54,8 @@ function Steps({ v, canTemplate }: { v: NoticeView; canTemplate: boolean }) {
       {c.sendNow ? <RunButton action={sendScheduledNow} values={{ id }} label="Send now" primary confirm="It goes to everyone it is for right now, ahead of its time." /> : null}
       {c.unschedule ? <RunButton action={unscheduleNotice} values={{ id }} label="Take off the schedule" /> : null}
       {c.report && n.state === "published" && n.response.kind !== "none" ? <LinkButton href={`${own}?tab=responses`} primary>Who has answered</LinkButton> : null}
-      {c.correct ? <LinkButton href={`${own}/edit`}>Correct</LinkButton> : null}
-      {c.withdraw ? <FormModal title="Withdraw this notice" description="People see Withdrawn by the school and your reason. The words are hidden from them. A circular keeps its number in the register." icon="megaphone" fields={[text("reason", "Why it is withdrawn, as people will read it")]} hidden={{ id }} action={withdrawNotice} submitLabel="Withdraw" trigger={{ label: "Withdraw", ...quiet }} summary="You can copy it to a new notice afterwards." /> : null}
       {n.type === "circular" && n.number && SENT.includes(n.state) ? <LinkButton href={`/api/notices/${id}/circular`}>PDF</LinkButton> : null}
-      {c.duplicate ? <RunButton action={duplicateNotice} values={{ id }} label="Duplicate" to={`${HOME}/{id}/edit`} /> : null}
-      {canTemplate && SENT.includes(n.state) ? <FormModal title="Save as a template" icon="megaphone" fields={[{ name: "name", label: "Template name", required: true, wide: true }]} hidden={{ id }} action={saveAsTemplate} submitLabel="Save" trigger={{ label: "Save as template", ...quiet }} /> : null}
-      {c.delete ? <ActionButton variant="ghost" label="Delete draft" action={deleteDraft} values={{ id }} redirectTo={HOME} confirm={{ title: "Delete this draft?", body: `"${n.title || "This draft"}" and its files are deleted. This cannot be undone.`, confirmLabel: "Delete", danger: true }} /> : null}
+      {more.length ? <MoreMenu>{more}</MoreMenu> : null}
     </>
   );
 }
@@ -107,7 +113,7 @@ export async function StaffRecord({ ctx, id, sp }: { ctx: Ctx; id: string; sp: Q
         description={<span className="flex flex-wrap items-center gap-2">
           <StateChip kind="notice" state={STATE_KEY[n.state]} />
           {v.category ? <ToneBadge label={v.category.name} tone={v.category.tone as Tone} /> : null}
-          {n.number ? <CopyValue value={n.number} label="circular number" /> : null}
+          {n.number ? <CopyValue value={n.number} label="circular number" /> : n.type === "circular" ? <span className="text-xs">Number given when it goes out</span> : null}
           {n.correctedAt ? <span className="text-xs">Updated {dateTime(n.correctedAt)}</span> : null}
         </span>}
         actions={ctx.readOnly ? null : <Steps v={v} canTemplate={svc.can("manage")} />} />

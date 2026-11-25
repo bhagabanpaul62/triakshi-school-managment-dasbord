@@ -3,7 +3,7 @@ import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm"
 import { users, type Tx } from "@smw/db";
 import { channelsFor, priorityOf, type GroupPrefs } from "./channels";
 import { chunks } from "./constants";
-import { LEGACY_KIND_TOPIC, type NotificationRow } from "./inputs";
+import type { NotificationRow } from "./inputs";
 import { commDeliveries, commSettings, notificationPrefs, notifications } from "./schema";
 
 export type { NotificationRow };
@@ -47,7 +47,7 @@ export class NotificationWriter {
       const k = row.groupKey ? `${row.userId}\u0000${row.groupKey}` : `#${i}`;
       merged.set(k, { row, n: (merged.get(k)?.n ?? 0) + 1 });
     }
-    const items = [...merged.values()].map(({ row, n }) => ({ row, n, id: randomUUID() as string, topic: row.topic ?? LEGACY_KIND_TOPIC[row.kind] }));
+    const items = [...merged.values()].map(({ row, n }) => ({ row, n, id: randomUUID() as string, topic: row.topic }));
 
     const saved = await tx.insert(notifications).values(items.map(({ row, n, id, topic }) => ({
       id, schoolId, userId: row.userId, topic, title: row.title.slice(0, 160), body: row.body?.slice(0, 1000) ?? null, href: safeHref(row.href),

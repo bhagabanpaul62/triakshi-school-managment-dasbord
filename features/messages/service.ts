@@ -7,7 +7,7 @@ import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { REMOVE_MINUTES, PAGE_SIZE, type ReportCategory, type ReportState, type ThreadKind } from "./constants";
 import { Starters, type Contact, type StudentContact } from "./contact-rules";
 import {
-  activeRestriction, addMember, canOpenThread, createThread, isFamily, istToday, loadThread, markThreadRead, noSupport, postMessage, postSystem, removeStored, requireMember,
+  activeRestriction, addMember, canOpenThread, createThread, isFamily, loadThread, markThreadRead, noSupport, postMessage, postSystem, removeStored, requireMember,
   reportedBy, readStored, signedLink, openThread, storeFiles, unreadByThread, type Message, type StoredBytes, type StoredFile, type ThreadData, type UploadedFile,
 } from "./core";
 import { conversationPdf } from "./conversation-pdf";
@@ -17,6 +17,7 @@ import { reportInput, savedReplyInput, sendInput, startInput } from "./inputs";
 import { isNamed, leadIds } from "./leads";
 import { students } from "@smw/feature-students/schema";
 import { messageFiles, messageReports, messages, messageThreads, savedReplies, threadMembers } from "./schema";
+import { clock, istDay } from "@smw/feature-kit/words";
 
 type Perm = keyof typeof messagesFeature.permissions;
 export type { Contact, Message, StudentContact, ThreadData };
@@ -50,7 +51,6 @@ export interface MyReport { id: string; subject: string; category: ReportCategor
 export interface SavedReply { id: string; title: string; body: string; shared: boolean }
 
 const like = (q?: string) => (q?.trim() ? `%${q.trim().slice(0, 100).replace(/[\\%_]/g, "\\$&")}%` : null);
-const clock = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 const dayWords = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
 
 /**
@@ -458,6 +458,6 @@ export class MessageService extends SchoolService<Perm> {
   async awayOf(userIds: string[]): Promise<{ id: string; until: string; text: string | null }[]> {
     if (!userIds.length) return [];
     return this.read("use", async (tx) => (await tx.select({ id: notificationPrefs.userId, until: notificationPrefs.awayUntil, text: notificationPrefs.awayText }).from(notificationPrefs)
-      .where(and(inArray(notificationPrefs.userId, userIds), sql`${notificationPrefs.awayUntil} >= ${istToday()}::date`))).map((r) => ({ id: r.id, until: r.until!, text: r.text })));
+      .where(and(inArray(notificationPrefs.userId, userIds), sql`${notificationPrefs.awayUntil} >= ${istDay(new Date())}::date`))).map((r) => ({ id: r.id, until: r.until!, text: r.text })));
   }
 }

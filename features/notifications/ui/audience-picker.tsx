@@ -8,9 +8,10 @@ import { ModalField } from "@smw/ui/kit/Modal";
 import type { AudiencePreview, AudienceOptions, PersonHit } from "../audience";
 import type { Audience, AudienceRule } from "../audience-rules";
 import { previewAudience, searchPeople } from "./audience-actions";
+import { plural } from "@smw/feature-kit/words";
+import { FOCUS } from "@smw/ui/finance/ui";
 
 type RuleType = AudienceRule["type"];
-const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]";
 const PILL = `inline-flex min-h-10 items-center justify-center gap-2 rounded-full px-4 text-sm font-medium transition-colors ${FOCUS}`;
 
 export interface AudiencePickerProps {
@@ -113,7 +114,7 @@ export function AudiencePicker({ name, value, onChange, options, allow, labels =
   }, [json, retry]);
 
   const count = state.kind === "ok" ? state.p : null;
-  const sentence = count ? (count.total === 0 ? "Nobody will get this" : [count.families ? `${count.families} ${count.families === 1 ? "family" : "families"}` : "", count.staff ? `${count.staff} staff` : ""].filter(Boolean).join(", ")) : "";
+  const sentence = count ? (count.total === 0 ? "Nobody will get this" : [count.families ? `${plural(count.families, "family", "families")}` : "", count.staff ? `${count.staff} staff` : ""].filter(Boolean).join(", ")) : "";
 
   const chip = (side: "include" | "exclude", r: AudienceRule) => (
     <li key={keyOf(r)} className="flex min-h-10 max-w-full items-center gap-2 rounded-full bg-white/[0.07] py-1 pl-4 pr-1 text-sm">

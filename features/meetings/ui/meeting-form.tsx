@@ -12,8 +12,8 @@ import { toast } from "@smw/ui/shell/toast";
 import { AudiencePicker } from "@smw/feature-notifications/ui/audience-picker";
 import type { AudienceOptions } from "@smw/feature-notifications/audience";
 import type { Audience } from "@smw/feature-notifications/audience-rules";
-import { toIstInput } from "../rules";
 import { saveMeeting } from "./actions";
+import { toIstInput } from "@smw/feature-kit/words";
 
 export interface MeetingValues { id: string; title: string; note: string | null; audience: Audience; slotMinutes: number; perFamily: number; opensAt: Date; closesAt: Date; locked: boolean }
 

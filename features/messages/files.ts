@@ -1,5 +1,5 @@
 // Message files: checked by content, kept in the private area, opened only through the module's own route with a 60 second link.
-import { assertFileContent, downloadDisposition, services, uploadKey, UploadError } from "@smw/integrations";
+import { assertFileContent, services, uploadKey, UploadError } from "@smw/integrations";
 import { ValidationError } from "@smw/feature-kit";
 import { FILE_TYPES, MAX_FILES } from "./constants";
 
@@ -39,10 +39,5 @@ export async function removeStored(keys: string[]) {
 /** A file read back for the module's route: the bytes with the name and type they were checked as. */
 export interface StoredBytes { bytes: Uint8Array; name: string; type: string }
 export const readStored = (fileKey: string) => services().storage.get(fileKey);
-
-/** The answer of the module's own file route: the bytes with the headers a private file needs. */
-export const fileResponse = (f: StoredBytes) => new Response(Buffer.from(f.bytes), {
-  headers: { "Content-Type": f.type, "Content-Disposition": downloadDisposition(f.type, f.name), "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store" },
-});
 
 export const signedLink = (fileKey: string, seconds: number) => services().storage.signedUrl(fileKey, seconds);

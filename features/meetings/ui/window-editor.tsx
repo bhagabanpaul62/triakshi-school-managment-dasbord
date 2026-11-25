@@ -10,6 +10,7 @@ import { MenuIconView } from "@smw/ui/shell/icons";
 import { toast } from "@smw/ui/shell/toast";
 import { when } from "../format";
 import { changeWindow, removeWindow } from "./actions";
+import { plural } from "@smw/feature-kit/words";
 
 interface Dropped { slotId: string; studentName: string; startsAt: Date | string; teacherName: string }
 interface Change { applied: boolean; dropped: Dropped[] }
@@ -51,7 +52,7 @@ export function WindowEditor({ window: w, mode }: { window: WindowValues; mode: 
   });
 
   const close = () => { setOpen(false); setDrops(null); setErrors({}); };
-  const confirmLabel = drops ? `Drop ${drops.length} ${drops.length === 1 ? "booking" : "bookings"} and tell the families` : "";
+  const confirmLabel = drops ? `Drop ${plural(drops.length, "booking")} and tell the families` : "";
 
   return (
     <>

@@ -4,12 +4,15 @@ import { and, eq, sql } from "drizzle-orm";
 import { closeDb, withSchool } from "@smw/db";
 import { ForbiddenError } from "@smw/feature-kit";
 import { notifications } from "@smw/feature-notifications/schema";
-import { MemoryStorage, useServices } from "@smw/integrations";
-import { AnnouncementCategoryService, FeedService, NoticeService, ReportService, ResponseService, TemplateService, fanOut } from "./service";
-import { build, type Fx } from "./fixtures";
+import { fileResponse, MemoryStorage, useServices } from "@smw/integrations";
+import { AnnouncementCategoryService, FeedService, NoticeFileService, NoticeService, ReportService, ResponseService, TemplateService, fanOut } from "./service";
+import announcementsFeature from "./feature";
+import { build, BYTES, type Fx } from "./fixtures";
 import { lateJoiners, publishDue, responseReminders } from "./jobs";
 import { publishNow } from "./quick";
 import { announcementRecipients, announcements } from "./schema";
+
+const stored = (bytes: Uint8Array, type: string, name: string) => fileResponse({ bytes, type, name });
 import { CircularService } from "./service";
 import { verifyToken } from "./verify";
 import type { Ctx } from "@smw/feature-kit";
@@ -211,5 +214,45 @@ describe("10: the circular's QR key", () => {
       expect((await row(keyed)).verifyHash).toMatch(/^[0-9a-f]{64}$/);
       expect((await new CircularService(A().admin).pdf(keyed)).bytes.length).toBeGreaterThan(plain.bytes.length);
     } finally { key.value = "test-key"; }
+  });
+});
+
+describe("10: files are what their bytes say", () => {
+  it("a file whose bytes are not its type is refused; a pdf or picture opens, anything else downloads", async () => {
+    const files = new NoticeFileService(A().admin);
+    const { id } = await new NoticeService(A().admin).saveDraft({ title: "With files", body: "x", audience: section(fx.ids.s5a!) });
+    await expect(files.add(id, { name: "menu.pdf", type: "application/pdf", size: 8, bytes: BYTES.png })).rejects.toMatchObject({ fieldErrors: { file: expect.any(String) } });
+    await expect(files.add(id, { name: "menu.pdf", type: "application/pdf", size: 9, bytes: new TextEncoder().encode("<html></html>") })).rejects.toMatchObject({ fieldErrors: { file: expect.any(String) } });
+    const ok = await files.add(id, { name: "menu.pdf", type: "application/pdf", size: 15, bytes: BYTES.pdf });
+    expect((await files.bytes(ok.id)).bytes).toEqual(BYTES.pdf);
+    expect(stored(BYTES.pdf, "application/pdf", "menu.pdf").headers.get("content-disposition")).toMatch(/^inline/);
+    expect(stored(BYTES.png, "image/png", "a.png").headers.get("content-disposition")).toMatch(/^inline/);
+    const docx = stored(BYTES.pdf, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "form.docx");
+    expect(docx.headers.get("content-disposition")).toMatch(/^attachment/);
+    expect(docx.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+});
+
+describe("19: a required file question on paper", () => {
+  it("the slip answers it; without a slip it is refused", async () => {
+    const spec = { kind: "form", questions: [{ id: "note", label: "Signed note", kind: "file", required: true }] };
+    const { id } = await publishNow(A().admin, { title: "Signed note", body: "Send a signed note", audience: section(fx.ids.s6a!), response: spec });
+    const nolo = (await new ReportService(A().admin).people(id)).rows.find((r) => r.name === "Nolo")!;
+    const paper = { noticeId: id, recipientId: nolo.recipientId, answer: { kind: "form", values: {} }, byName: "Nolo Mother", byRelation: "Mother" };
+    const svc = new ResponseService(A().admin);
+    await expect(svc.recordPaper(paper)).rejects.toMatchObject({ fieldErrors: { "values.note": expect.any(String) } });
+    await svc.recordPaper(paper, { name: "slip.jpg", type: "image/jpeg", size: 10, bytes: BYTES.jpg });
+    expect((await new ReportService(A().admin).people(id)).rows.find((r) => r.name === "Nolo")).toMatchObject({ onPaper: true, hasSlip: true });
+  });
+});
+
+describe("4, 18: permissions and names", () => {
+  it("the whole-school permission is the admin's alone", () => {
+    expect(announcementsFeature.permissions.whole).toEqual(["admin"]);
+  });
+
+  it("18: a draft for one student names the student", async () => {
+    const labels = await new NoticeService(A().admin).labelsFor({ include: [{ type: "student", id: fx.ids.ann! }], exclude: [] });
+    expect(labels).toEqual({ [`student:${fx.ids.ann}`]: "Ann" });
   });
 });

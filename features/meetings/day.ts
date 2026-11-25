@@ -1,15 +1,16 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, NotFoundError, pgErrorCode } from "@smw/feature-kit";
-import { PdfBuilder } from "@smw/integrations";
+import { csvText, PdfBuilder, slugOf } from "@smw/integrations";
 import { teacherSections } from "@smw/feature-notifications/audience";
 import { idList, rows, ts, type Meeting } from "./access";
 import { MeetingBase } from "./base";
 import type { MeetingState, VisitState } from "./constants";
 import { noteInput, visitInput, walkInInput } from "./inputs";
-import { clock, dayOf, when } from "./format";
+import { dayOf, when } from "./format";
 import { istDay } from "./rules";
 import { meetingSlots } from "./schema";
+import { clock } from "@smw/feature-kit/words";
 
 export interface DayRow {
   slotId: string; startsAt: Date; endsAt: Date; studentId: string; studentName: string; studentLabel: string | null; walkIn: boolean;
@@ -31,13 +32,6 @@ export interface DayView {
   privateNotesHidden: boolean;
 }
 export interface NotCameRow { slotId: string; studentId: string; studentName: string; studentLabel: string | null; phone: string | null; teacherName: string; startsAt: Date; status: "Did not come" | "Not marked" }
-
-const cell = (v: string | number | null | undefined) => {
-  const s = v == null ? "" : String(v);
-  const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
-  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-};
-const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 
 /** The teacher's day: who is next, who came, notes. A teacher sees only their own list; a manager sees every teacher's. */
 export class DayService extends MeetingBase {
@@ -187,7 +181,7 @@ export class DayService extends MeetingBase {
     const list = await this.notCame(meetingId);
     const title = await this.read("use", async (tx) => (await this.meeting(tx, meetingId)).title);
     const lines = [["Child", "Class", "Phone", "Teacher", "Time", "Status"], ...list.map((r) => [r.studentName, r.studentLabel, r.phone, r.teacherName, when(r.startsAt), r.status])];
-    return { csv: lines.map((l) => l.map(cell).join(",")).join("\r\n") + "\r\n", fileName: `not-came-${slug(title)}.csv` };
+    return { csv: csvText(lines), fileName: `not-came-${slugOf(title, "meeting")}.csv` };
   }
 
   /** One teacher's list on paper: time, child, class, a box to tick. No private notes. */
@@ -203,7 +197,7 @@ export class DayService extends MeetingBase {
       rows: v.rows.map((r) => [`${clock(r.startsAt)}${r.walkIn ? " (walk-in)" : ""}`, r.studentName, r.studentLabel ?? "", r.visit === "came" ? "Yes" : r.visit === "late" ? "Late" : r.visit === "missed" ? "No" : "[  ]", ""]),
     });
     pdf.space(6).text(`${v.counts.booked} booked, ${v.free} free times left.`, { size: 9, color: [0.4, 0.4, 0.45] });
-    return { bytes: await pdf.save(), fileName: `meeting-list-${slug(v.teacher.name)}.pdf` };
+    return { bytes: await pdf.save(), fileName: `meeting-list-${slugOf(v.teacher.name, "teacher")}.pdf` };
   }
 
   /** Where each teacher sits and when: for the door of the hall. Managers only. */
@@ -226,6 +220,6 @@ export class DayService extends MeetingBase {
       columns: [{ label: "Day", width: 80 }, { label: "Room", width: 120 }, { label: "Teacher", width: 150 }, { label: "Time", width: 100 }, { label: "Booked", width: 49, align: "right" }],
       rows: list.map((r) => [r.day, r.place ?? "-", r.teacher, `${clock(r.startsAt)} to ${clock(r.endsAt)}`, `${r.booked}/${r.total}`]),
     });
-    return { bytes: await pdf.save(), fileName: `room-sheet-${slug(title)}.pdf` };
+    return { bytes: await pdf.save(), fileName: `room-sheet-${slugOf(title, "meeting")}.pdf` };
   }
 }

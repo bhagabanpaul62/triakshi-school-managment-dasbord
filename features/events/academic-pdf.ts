@@ -2,10 +2,10 @@
 import { PdfBuilder } from "@smw/integrations";
 import { LAYERS, type CalendarItem } from "./constants";
 import { daysOf } from "./dates";
+import { clock } from "@smw/feature-kit/words";
 
 const month = (ym: string) => new Date(`${ym}-01T00:00:00Z`).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" });
 const short = (ymd: string) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
-const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 
 export interface AcademicPdfInput { school: string; year: string; from: string; to: string; items: CalendarItem[] }
 

@@ -1,4 +1,7 @@
 // Client-safe constants and shapes for notices.
+/** The refusal of a correction that widens the audience beyond what the writer may send alone. The correction screen offers a new notice for approval when it sees this. */
+export const NEEDS_APPROVAL = "Ask an approver: this changes who it reaches beyond your own classes. Save it as a new draft and send that for approval.";
+
 export const NOTICE_TYPES = ["notice", "circular", "urgent"] as const;
 export type NoticeType = (typeof NOTICE_TYPES)[number];
 export const TYPE_LABEL: Record<NoticeType, string> = { notice: "Notice", circular: "Circular", urgent: "Urgent alert" };

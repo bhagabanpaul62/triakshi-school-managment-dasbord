@@ -2,7 +2,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { withSchool, type Tx } from "@smw/db";
 import { ConflictError, ValidationError } from "@smw/feature-kit";
-import { services, uploadKey, UploadError } from "@smw/integrations";
+import { assertFileContent, services, uploadKey, UploadError } from "@smw/integrations";
 import { NoticeBase } from "./base";
 import { MAX_FILES } from "./constants";
 import { announcementFiles, announcementResponses } from "./schema";
@@ -14,11 +14,11 @@ const ALLOWED = ["application/pdf", "image/png", "image/jpeg", "image/webp",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
 export const LINK_SECONDS = 60;
 
-/** Check and store one file under `<school>/private/announcements/<owner>/`. */
+/** Check and store one file under `<school>/private/announcements/<owner>/`. The bytes decide what it is, not its name or declared type. */
 export async function storeFile(schoolId: string, owner: string, file: UploadedFile, types = ALLOWED): Promise<string> {
   if (!types.includes(file.type)) throw new ValidationError({ file: "Upload a PDF, a picture, a Word or an Excel file" });
   let key: string;
-  try { key = uploadKey(schoolId, `private/announcements/${owner}`, file, "document"); }
+  try { assertFileContent(file, types); key = uploadKey(schoolId, `private/announcements/${owner}`, file, "document"); }
   catch (e) { if (e instanceof UploadError) throw new ValidationError({ file: e.message }); throw e; }
   await services().storage.put(key, file.bytes, file.type);
   return key;
@@ -94,13 +94,24 @@ export class NoticeFileService extends NoticeBase {
    * Never in a support session. Families use it too: the same check finds only notices sent to them.
    */
   async url(fileId: string): Promise<{ url: string; name: string; contentType: string }> {
+    const f = await this.locate(fileId);
+    return { url: await services().storage.signedUrl(f.fileKey, LINK_SECONDS), name: f.fileName, contentType: f.contentType };
+  }
+
+  /** The file itself, for the download route, which sets how the browser treats it (a pdf or picture opens, anything else downloads). */
+  async bytes(fileId: string): Promise<{ bytes: Uint8Array; name: string; contentType: string }> {
+    const f = await this.locate(fileId);
+    return { bytes: await services().storage.get(f.fileKey), name: f.fileName, contentType: f.contentType };
+  }
+
+  private async locate(fileId: string) {
     this.noSupport();
     return this.read("read", async (tx) => {
       const [f] = await tx.select().from(announcementFiles).where(eq(announcementFiles.id, fileId));
       if (!f) throw new ConflictError("That file is already gone.");
       const n = await this.find(tx, f.announcementId); // a draft is its writer's; a sent notice, its recipients'
       if (n.state === "withdrawn" && n.createdBy !== this.ctx.userId && !this.isManager) throw new ConflictError("This notice was withdrawn.");
-      return { url: await services().storage.signedUrl(f.fileKey, LINK_SECONDS), name: f.fileName, contentType: f.contentType };
+      return f;
     });
   }
 }

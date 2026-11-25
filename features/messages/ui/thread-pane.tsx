@@ -15,6 +15,7 @@ import { cn } from "@smw/ui/utils";
 import { MAX_FILE_MB, MAX_FILES, REMOVE_MINUTES, REPORT_CATEGORIES, REVIEW_BANNER, ROLE_WORDS } from "../constants";
 import { markThread, markUnread, moveToTeacher, removeMessage, reportConcern, sendMessage } from "./actions";
 import { SavedReplyPicker, type ReplyOption } from "./saved-replies";
+import { clock } from "@smw/feature-kit/words";
 
 export interface PaneMessage {
   id: string; kind: "text" | "system" | "note"; sender: string; mine: boolean; body: string; at: string; deliverAfter: string | null; removed: boolean; removedByName: string | null;
@@ -33,7 +34,6 @@ export interface PaneProps {
   safetyContacts: { name: string; phone: string }[];
 }
 
-const clock = (at: string) => new Date(at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 const SMALL = cn("rounded-full px-2 py-1 text-xs text-[var(--ds-on-surface-muted)] underline-offset-2 hover:text-[var(--ds-on-surface)] hover:underline", FOCUS);
 
 export function ThreadPane(p: PaneProps) {

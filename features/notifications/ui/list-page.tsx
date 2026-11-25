@@ -4,6 +4,7 @@ import { requireCtx } from "@smw/runtime";
 import { Panel } from "@smw/ui/kit/Panel";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { shortDate } from "@smw/ui/format";
+import { clock, istDay } from "@smw/feature-kit/words";
 import { NotificationService } from "../service";
 import { TOPIC_GROUPS, TOPICS, type TopicGroup } from "../topics";
 import { NotificationDays, type Day } from "./notification-item";
@@ -11,9 +12,6 @@ import { TypeFilter } from "./type-filter";
 
 export const metadata = { title: "Notifications" };
 
-const IST = "Asia/Kolkata";
-const dayKey = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: IST });
-const timeOf = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: IST });
 const pill = (active: boolean) => `inline-flex h-10 items-center rounded-full px-4 text-sm ${active ? "bg-white/[0.1] text-[var(--ds-on-surface)]" : "text-[var(--ds-on-surface-muted)] hover:bg-white/[0.04]"}`;
 
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -26,12 +24,12 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   const unreadOnly = query.filters.unread === "1";
   const page = await svc.list(query);
 
-  const today = dayKey(new Date());
-  const yesterday = dayKey(new Date(Date.now() - 86_400_000));
+  const today = istDay(new Date());
+  const yesterday = istDay(new Date(Date.now() - 86_400_000));
   const days: Day[] = [];
   for (const n of page.rows) {
-    const key = dayKey(n.createdAt);
-    const row = { id: n.id, title: n.title, body: n.body, href: n.href, read: !!n.readAt, count: n.count, urgent: n.urgent, todo: n.action && !n.doneAt, time: timeOf(n.createdAt) };
+    const key = istDay(n.createdAt);
+    const row = { id: n.id, title: n.title, body: n.body, href: n.href, read: !!n.readAt, count: n.count, urgent: n.urgent, todo: n.action && !n.doneAt, time: clock(n.createdAt) };
     if (days.at(-1)?.key === key) days.at(-1)!.rows.push(row);
     else days.push({ key, label: key === today ? "Today" : key === yesterday ? "Yesterday" : shortDate(n.createdAt), rows: [row] });
   }

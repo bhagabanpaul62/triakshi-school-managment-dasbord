@@ -9,6 +9,7 @@ import { isAddressRefusal, suppress } from "./email-health";
 import { PreferenceService } from "./prefs";
 import { commDeliveries, notificationPrefs, type Delivery, type Notification } from "./schema";
 import { lockedGroup, TOPIC_GROUPS, topicOf, type TopicGroup } from "./topics";
+import { plural } from "@smw/feature-kit/words";
 
 const MAX_LINES = 15;
 const DEFAULT_HOUR = 18;
@@ -121,8 +122,8 @@ function compose(school: { name: string; slug: string }, lines: Line[], unsubscr
   });
   const n = lines.length;
   const text = [...sections.map((s) => `${s.label}\n${s.lines.map((l) => `- ${l}`).join("\n")}${s.more ? `\n...and ${s.more} more` : ""}${s.stop ? `\nStop these emails: ${s.stop}` : ""}`), `Open everything: ${open}`, ...(unsubscribe ? [] : [SETTINGS_LINE])].join("\n\n");
-  const html = emailHtml(`${n} ${n === 1 ? "update" : "updates"} from ${escapeHtml(school.name)}`,
+  const html = emailHtml(`${plural(n, "update")} from ${escapeHtml(school.name)}`,
     sections.map((s) => `<h3 style="font-weight:600;margin:18px 0 6px">${escapeHtml(s.label)}</h3><ul>${s.lines.map((l) => `<li>${escapeHtml(l)}</li>`).join("")}</ul>${s.more ? `<p>...and ${s.more} more.</p>` : ""}${s.stop ? `<p style="font-size:12px"><a href="${escapeHtml(s.stop)}">Stop these emails</a></p>` : ""}`).join("") + (unsubscribe ? "" : `<p style="font-size:12px">${SETTINGS_LINE}</p>`),
     { label: "Open notifications", url: open });
-  return { subject: `${n} ${n === 1 ? "update" : "updates"} · ${school.name}`, text, html };
+  return { subject: `${plural(n, "update")} · ${school.name}`, text, html };
 }

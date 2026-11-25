@@ -7,9 +7,10 @@ import { INPUT } from "@smw/ui/shell/FormModal";
 import { toast } from "@smw/ui/shell/toast";
 import type { RsvpAnswer } from "../constants";
 import { answerEvent } from "./actions";
+import { plural } from "@smw/feature-kit/words";
+import { FOCUS } from "@smw/ui/finance/ui";
 
 const CHOICES: { value: RsvpAnswer; label: string }[] = [{ value: "yes", label: "Yes, I will come" }, { value: "maybe", label: "Maybe" }, { value: "no", label: "No" }];
-const FOCUS = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-primary)]";
 
 export interface RsvpBarProps { eventId: string; answer: RsvpAnswer | null; waiting: boolean; guests: number; maxGuests: number; /** Why answering is not possible: closed, full is not a reason (the waiting list takes over). */ closedReason?: string }
 
@@ -18,7 +19,7 @@ function say(answer: RsvpAnswer | null, waiting: boolean, guests: number) {
   if (answer === "no") return "You said you cannot come.";
   if (answer === "maybe") return "You said maybe.";
   if (waiting) return "The event is full. You are on the waiting list, and you will be told if a place opens.";
-  return guests ? `You are coming, with ${guests} ${guests === 1 ? "guest" : "guests"}.` : "You are coming.";
+  return guests ? `You are coming, with ${plural(guests, "guest")}.` : "You are coming.";
 }
 
 /** The answer buttons come first for an invited person. The change shows at once and snaps back, with the reason, if it fails. */

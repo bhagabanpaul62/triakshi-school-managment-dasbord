@@ -5,7 +5,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ReadOnlyError, Validation
 import { notifications } from "@smw/feature-notifications/schema";
 import { MemoryStorage, useServices } from "@smw/integrations";
 import { AnnouncementService, CircularService, FeedService, NoticeService, ReportService, ResponseService, fanOut, announcementsVerifyLookups, AnnouncementCategoryService, TemplateService, NoticeFileService } from "./service";
-import { build, type Fx } from "./fixtures";
+import { build, BYTES, type Fx } from "./fixtures";
 import { expireNotices, lateJoiners, publishDue, responseReminders } from "./jobs";
 import { publishNow } from "./quick";
 import { announcementRecipients, announcementVersions, announcements } from "./schema";
@@ -428,14 +428,14 @@ describe("answers (8, 9)", () => {
     const before = await report.people(id);
     const nolo = before.rows.find((r) => r.name === "Nolo")!;
     expect(nolo).toMatchObject({ hasLogin: false, reached: false, answer: null });
-    const slip = { name: "slip.jpg", type: "image/jpeg", size: 4, bytes: new Uint8Array([1, 2, 3, 4]) };
+    const slip = { name: "slip.jpg", type: "image/jpeg", size: 4, bytes: BYTES.jpg };
     const service = new ResponseService(A().admin);
     await expect(service.recordPaper({ noticeId: id, recipientId: nolo.recipientId, answer: { kind: "consent", yes: true }, byName: "Nolo Mother", byRelation: "Mother" }, { ...slip, type: "text/html" })).rejects.toBeInstanceOf(ValidationError);
     await service.recordPaper({ noticeId: id, recipientId: nolo.recipientId, answer: { kind: "consent", yes: true }, byName: "Nolo Mother", byRelation: "Mother" }, slip);
     const after = (await report.people(id)).rows.find((r) => r.name === "Nolo")!;
     expect(after).toMatchObject({ onPaper: true, hasSlip: true, answerText: "Yes", byName: "Nolo Mother" });
     expect(await report.funnel(id)).toMatchObject({ recipients: 1, answered: 1, yes: 1, onPaper: 1, notAnswered: 0, reached: 1 }); // a paper answer shows the family has it
-    expect(await report.slipUrl(id, nolo.recipientId)).toMatch(/^memory:\/\//);
+    expect(await report.slip(id, nolo.recipientId)).toEqual(BYTES.jpg);
     // a teacher who is not on it cannot write on it, a family cannot record paper
     await expect(new ResponseService(fx.as(fx.ids.teacher2!, "teacher")).recordPaper({ noticeId: id, recipientId: nolo.recipientId, answer: { kind: "consent", yes: false }, byName: "Nolo Mother", byRelation: "Mother" })).rejects.toBeInstanceOf(NotFoundError);
     await expect(new ResponseService(A().student).recordPaper({ noticeId: id, recipientId: nolo.recipientId, answer: { kind: "consent", yes: false }, byName: "Nolo Mother", byRelation: "Mother" })).rejects.toBeInstanceOf(ForbiddenError);
@@ -467,7 +467,7 @@ describe("answers (8, 9)", () => {
     const spec = { kind: "form", questions: [{ id: "size", label: "T-shirt size", kind: "choice", required: true, options: ["S", "M", "L"] }, { id: "pic", label: "Photo", kind: "file", required: false }] };
     const { id } = await publishNow(A().admin, { title: "Sports kit", body: "Sizes", audience: section(fx.ids.s5b!), response: spec });
     const svc = new ResponseService(fx.as(fx.ids.cyUser!));
-    await svc.respond({ noticeId: id, answer: { kind: "form", values: { size: "M" } }, byName: "Cy Parent", byRelation: "Mother" }, { pic: { name: "me.png", type: "image/png", size: 2, bytes: new Uint8Array([1, 2]) } });
+    await svc.respond({ noticeId: id, answer: { kind: "form", values: { size: "M" } }, byName: "Cy Parent", byRelation: "Mother" }, { pic: { name: "me.png", type: "image/png", size: 2, bytes: BYTES.png } });
     const stored = (await sql_(sql`select answer from announcement_responses r join announcement_recipients p on p.id = r.recipient_id where p.announcement_id = ${id}::uuid`))[0]!.answer as { values: Record<string, string> };
     expect(stored.values.pic).toMatch(new RegExp(`^${fx.school.id}/private/announcements/`));
   });
@@ -567,8 +567,8 @@ describe("the family feed and the report", () => {
     expect((await report.people(id, { filter: "answered", q: "an" })).rows.map((r) => r.name)).toEqual(["Ann"]);
     expect((await report.bySection(id)).map((s) => [s.label, s.recipients, s.seen, s.answered])).toEqual([["Class 5 A", 2, 1, 1], ["Class 5 B", 2, 1, 1], ["Class 6 A", 1, 0, 0]]);
     const csv = (await report.csv(id)).csv;
-    expect(csv.split("\r\n")[0]).toContain('"Name","Class"');
-    expect(csv).toContain('"Ann","Class 5 A","Yes","Yes"');
+    expect(csv.split("\r\n")[0]).toContain("Name,Class");
+    expect(csv).toContain("Ann,Class 5 A,Yes,Yes");
     expect(csv.split("\r\n").filter(Boolean)).toHaveLength(6);
     // resend: Bob and Dia have not opened it, Nolo has no login
     expect(await report.resend(id, "unseen")).toEqual({ sent: 2, noLogin: 1 });
@@ -660,7 +660,7 @@ describe("scheduling, lists, copies", () => {
     await new TemplateService(A().admin).remove(own.id);
 
     const files = new NoticeFileService(A().teacher);
-    const pdf = { name: "Menu List.pdf", type: "application/pdf", size: 5, bytes: new Uint8Array([1, 2, 3, 4, 5]) };
+    const pdf = { name: "Menu List.pdf", type: "application/pdf", size: 5, bytes: BYTES.pdf };
     const f1 = await files.add(id, pdf);
     await expect(files.add(id, { ...pdf, type: "text/html" })).rejects.toBeInstanceOf(ValidationError);
     const v = await new NoticeService(A().teacher).get(id);
@@ -678,7 +678,7 @@ describe("scheduling, lists, copies", () => {
 
   it("a file on a sent notice is reachable by its recipients only", async () => {
     const { id: draft } = await new NoticeService(A().admin).saveDraft({ title: "With paper", body: "x", audience: section(fx.ids.s5b!) });
-    const file = await new NoticeFileService(A().admin).add(draft, { name: "a.pdf", type: "application/pdf", size: 3, bytes: new Uint8Array([1, 2, 3]) });
+    const file = await new NoticeFileService(A().admin).add(draft, { name: "a.pdf", type: "application/pdf", size: 3, bytes: BYTES.pdf });
     await new NoticeService(A().admin).publish(draft);
     await sql_(sql`update announcements set send_at = now() - interval '1 second' where id = ${draft}::uuid`);
     await publishDue(new Date());

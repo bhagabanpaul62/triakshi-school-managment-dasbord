@@ -3,7 +3,8 @@ import { NotFoundError } from "@smw/feature-kit";
 import { requireCtx } from "@smw/runtime";
 import { PageHeader } from "@smw/ui/shell/PageHeader";
 import { Panel } from "@smw/ui/kit/Panel";
-import { shortDate, relative } from "@smw/ui/format";
+import { relative, shortDate } from "@smw/ui/format";
+import { plural } from "@smw/feature-kit/words";
 import { BatchService, type BatchView } from "../batch";
 import { UnreadFallback } from "./empty";
 import { PILL_BTN } from "./styles";
@@ -24,7 +25,7 @@ export default async function BatchPage({ params }: { params: Promise<{ id: stri
         <div role="img" aria-label={`${b.replied} replied, ${Math.max(0, b.seen - b.replied)} seen without a reply, ${waiting} not seen`} className="flex h-3 overflow-hidden rounded-full bg-white/[0.08]">
           {[[b.replied, "bg-[var(--ds-color-success-400)]"], [Math.max(0, b.seen - b.replied), "bg-white/55"]].map(([n, c], i) => <span key={i} className={String(c)} style={{ width: `${b.total ? (Number(n) / b.total) * 100 : 0}%` }} />)}
         </div>
-        <p className="mt-2 text-xs text-[var(--ds-on-surface-muted)]">{waiting ? `${waiting} ${waiting === 1 ? "family has" : "families have"} not opened it yet.` : "Every family has opened it."} Seen marks wait while a family is in quiet hours.</p>
+        <p className="mt-2 text-xs text-[var(--ds-on-surface-muted)]">{waiting ? `${plural(waiting, "family has", "families have")} not opened it yet.` : "Every family has opened it."} Seen marks wait while a family is in quiet hours.</p>
       </Panel>
       {/* On a phone each family is a card: a 28 rem table would push the page 48 px past a 375 px screen. */}
       <ul className="mt-3 flex flex-col gap-2 sm:hidden" aria-label="Families and where each conversation stands">

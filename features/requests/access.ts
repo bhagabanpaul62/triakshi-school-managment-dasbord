@@ -3,7 +3,8 @@ import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { allows, ForbiddenError, type Ctx } from "@smw/feature-kit";
 import { may, noSupport, isFamily } from "@smw/feature-messages/core";
-import { sections, sectionTeachers } from "@smw/feature-academics/schema";
+import { sections } from "@smw/feature-academics/schema";
+import { teacherSections } from "@smw/feature-notifications/audience";
 import { students } from "@smw/feature-students/schema";
 import requestsFeature from "./feature";
 import { requestCategories, requests } from "./schema";
@@ -17,6 +18,8 @@ export interface Viewer {
   safeguard: boolean;
   /** Role keys a request may be owned by that this person answers for: their role and their custom role id. */
   roles: string[];
+  /** The sections a teacher teaches (empty for anyone else). */
+  sections: string[];
 }
 
 /** Who is looking. A support session sees nothing, ever. */
@@ -27,12 +30,9 @@ export async function viewerOf(tx: Tx, ctx: Ctx): Promise<Viewer> {
   return {
     userId: ctx.userId, family: isFamily(ctx.role), office: allows(ctx, requestsFeature, "office"), teacher: ctx.role === "teacher", safeguard: may(ctx, "safeguard"),
     roles: [ctx.role, ...(u?.roleId ? [u.roleId] : [])],
+    sections: ctx.role === "teacher" ? await teacherSections(tx, ctx.userId) : [],
   };
 }
-
-/** The sections this teacher teaches: as class teacher or as a subject teacher. */
-export const taughtSections = (tx: Tx, userId: string) => tx.select({ id: sections.id }).from(sections)
-  .where(or(eq(sections.classTeacherId, userId), inArray(sections.id, tx.select({ id: sectionTeachers.sectionId }).from(sectionTeachers).where(eq(sectionTeachers.teacherId, userId)))));
 
 const safetyCategories = (tx: Tx) => tx.select({ id: requestCategories.id }).from(requestCategories).where(eq(requestCategories.nature, "safety"));
 
@@ -49,7 +49,7 @@ export function scope(tx: Tx, v: Viewer): SQL {
   // Safety concerns stay with safeguarding holders, not the general queue.
   const safetyOk = v.safeguard ? undefined : or(raisedByMe, sql`${requests.categoryId} not in (${safetyCategories(tx)})`);
   // A category owned by "any teacher" is not every teacher's business: a teacher sees such a request only for a student they teach, whatever the category says.
-  const taught = inArray(requests.studentId, tx.select({ id: students.id }).from(students).where(inArray(students.sectionId, taughtSections(tx, me))));
+  const taught = inArray(requests.studentId, tx.select({ id: students.id }).from(students).where(inArray(students.sectionId, v.sections)));
   const mine = v.office ? undefined : or(
     eq(requests.ownerId, me), raisedByMe, v.teacher ? and(inArray(requests.ownerRole, v.roles), taught) : inArray(requests.ownerRole, v.roles),
     sql`${requests.ownerRole} = 'class_teacher' and exists (select 1 from ${students} inner join ${sections} on ${sections.id} = ${students.sectionId} where ${students.id} = ${requests.studentId} and ${sections.classTeacherId} = ${me})`,

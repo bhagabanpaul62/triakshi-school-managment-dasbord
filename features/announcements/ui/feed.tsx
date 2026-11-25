@@ -57,15 +57,15 @@ export async function Feed({ ctx, sp }: { ctx: Ctx; sp: Query }) {
       <PageHeader eyebrow="Communication" title="Notices" description="What the school has told you. Anything that needs an answer is first." />
       <div className="flex flex-col gap-4">
         <SavedViews views={[{ key: "inbox", label: "Inbox", count: feed.unread }, { key: "archive", label: "Archive" }]} active={query.tab} basePath={HOME} param="tab" label="Notices" params={{ q: query.q, category: query.category }} />
-        <form method="get" action={HOME} role="search" className="flex flex-wrap items-center gap-2">
+        <form method="get" action={HOME} role="search" className="flex items-center gap-2">
           {query.tab === "archive" ? <input type="hidden" name="tab" value="archive" /> : null}
-          <label className="flex h-10 min-w-44 flex-1 items-center gap-2 rounded-full bg-white/[0.05] px-4 sm:max-w-xs"><IconSearch className="h-4 w-4 shrink-0 text-[var(--ds-on-surface-muted)]" aria-hidden /><span className="sr-only">Search notices</span>
+          <label className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full bg-white/[0.05] px-4 sm:max-w-xs sm:flex-none sm:basis-64"><IconSearch className="h-4 w-4 shrink-0 text-[var(--ds-on-surface-muted)]" aria-hidden /><span className="sr-only">Search notices</span>
             <input name="q" defaultValue={query.q} placeholder="Search notices" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--ds-on-surface-muted)]" /></label>
-          <label className="w-44"><span className="sr-only">Category</span>
+          <label className="w-32 shrink-0 sm:w-44"><span className="sr-only">Category</span>
             <select name="category" defaultValue={query.category ?? ""} className={INPUT}><option value="">All categories</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-          <button type="submit" className="inline-flex h-10 items-center rounded-full bg-white/[0.07] px-4 text-sm font-medium hover:bg-white/[0.12]">Search</button>
-          {filtered ? <Link href={link(1).split("?")[0]! + (query.tab === "archive" ? "?tab=archive" : "")} className="text-sm underline">Clear</Link> : null}
-        </form>
+          <button type="submit" aria-label="Search" title="Search" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/[0.07] hover:bg-white/[0.12] sm:w-auto sm:px-4"><IconSearch className="h-4 w-4 sm:hidden" aria-hidden /><span className="max-sm:sr-only text-sm font-medium">Search</span></button>
+          </form>
+        {filtered ? <Link href={link(1).split("?")[0]! + (query.tab === "archive" ? "?tab=archive" : "")} className="-mt-2 self-start text-sm underline">Clear the search</Link> : null}
         {feed.rows.length === 0 ? (
           filtered ? <EmptyLine title="Nothing matches." hint="Try other words, or clear the search." />
             : query.tab === "archive" ? <EmptyLine title="The archive is empty." hint="Notices that have ended move here." />

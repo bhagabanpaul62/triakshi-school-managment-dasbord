@@ -36,7 +36,7 @@ describe("channelsFor", () => {
 
 describe("NotificationWriter.insert", () => {
   it("accepts a topic or the temporary kind, trims, and drops off-app links", async () => {
-    expect(await put({ userId: student(), kind: "fee_due", title: "Fee due", href: "/app/fees" }, { userId: student(), topic: "exam.result", title: "Result", href: "//evil.example/app" })).toBe(2);
+    expect(await put({ userId: student(), topic: "fees.due", title: "Fee due", href: "/app/fees" }, { userId: student(), topic: "exam.result", title: "Result", href: "//evil.example/app" })).toBe(2);
     const rows = await rowsOf(student());
     expect(rows.find((r) => r.title === "Fee due")).toMatchObject({ topic: "fees.due", href: "/app/fees", count: 1 });
     expect(rows.find((r) => r.title === "Result")).toMatchObject({ topic: "exam.result", href: null });

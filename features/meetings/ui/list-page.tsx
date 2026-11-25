@@ -10,6 +10,7 @@ import { dayOf } from "../format";
 import { AudienceService } from "@smw/feature-notifications/audience";
 import { MeetingForm } from "./meeting-form";
 import { LinkButton, Notice, STATE_LABEL, STATE_TONE } from "./shared";
+import { plural } from "@smw/feature-kit/words";
 
 export const metadata = { title: "Meetings" };
 
@@ -75,7 +76,7 @@ async function FamilyList({ ctx }: { ctx: Ctx }) {
             <li key={m.id} className="flex flex-col gap-3 rounded-3xl bg-[var(--ds-surface-container-low)] p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-medium">{m.title}</h2>
-                <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">{span(m)}{m.mine ? ` · you have ${m.mine} ${m.mine === 1 ? "time" : "times"}` : ""}</p>
+                <p className="mt-1 text-sm text-[var(--ds-on-surface-muted)]">{span(m)}{m.mine ? ` · you have ${plural(m.mine, "time")}` : ""}</p>
                 <div className="mt-2"><ToneBadge label={STATE_LABEL[m.state]} tone={STATE_TONE[m.state]} /></div>
               </div>
               <LinkButton href={`/app/meetings/${m.id}`} primary={m.state === "open"}>{m.state === "open" ? (m.mine ? "See my times" : "Book a time") : m.state === "done" ? "See notes" : "Open"}</LinkButton>

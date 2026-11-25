@@ -1,6 +1,7 @@
 import type { FeatureSeed, Ctx } from "@smw/feature-kit";
 import { withSchool } from "@smw/db";
 import { addDays, addMonths, monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
+import { closedSet } from "@smw/feature-attendance/holidays";
 import { staffAttendance } from "@smw/feature-attendance/schema";
 import { approveRun } from "./ledger";
 import { payLoans } from "./schema";
@@ -51,9 +52,10 @@ const seed: FeatureSeed = async (ctx) => {
 
   // This month: attendance for everyone except two people, so the draft has two blockers to fix.
   if (ctx.features.has("attendance")) {
-    const days: string[] = [];
-    for (let d = thisMonth; d <= today; d = addDays(d, 1)) if (new Date(`${d}T00:00:00Z`).getUTCDay() !== 0) days.push(d);
     await withSchool(ctx.schoolId, async (tx) => {
+      const closed = await closedSet(tx, thisMonth, today, { staff: true });
+      const days: string[] = [];
+      for (let d = thisMonth; d <= today; d = addDays(d, 1)) if (!closed.has(d)) days.push(d);
       const rows = staff.flatMap((p, i) => (i < 2 ? days.slice(0, -2) : days).map((date) => ({ schoolId: ctx.schoolId, userId: p.id, date, status: "present" as const })));
       for (let i = 0; i < rows.length; i += 500) await tx.insert(staffAttendance).values(rows.slice(i, i + 500)).onConflictDoNothing();
     });

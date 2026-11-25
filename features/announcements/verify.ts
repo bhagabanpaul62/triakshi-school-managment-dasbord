@@ -1,25 +1,25 @@
 // The public "this circular is genuine" check. Follows features/fees/verify.ts: the app merges every module's lookups.
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
+import { sha256 } from "@smw/feature-kit/secret";
 import { eq } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { tokenKey } from "@smw/feature-notifications/prefs";
 import { publicAudience } from "./content";
 import { announcements } from "./schema";
+import { istDay } from "@smw/feature-kit/words";
 
 /** Same shape as the finance check page expects (no import: features stay independent). */
 interface VerifyFound { status: string; ok: boolean; number: string; date: string; studentName: string | null; title: string; text: string | null }
 type VerifyLookup = (tx: Tx, token: string) => Promise<VerifyFound | null>;
 
-const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 /** Derived, not stored: a reprint of the PDF carries the same QR. Only its hash is kept in the database. */
 /** Null when the server has no key: a circular then goes out without a QR, never with one made from a key everyone knows. */
 export const verifyToken = (schoolId: string, noticeId: string): string | null => {
   const key = tokenKey();
   return key ? createHmac("sha256", key).update(`circular:${schoolId}:${noticeId}`).digest("hex").slice(0, 32) : null;
 };
-export const verifyHash = (token: string) => sha(token);
+export const verifyHash = sha256;
 
-const istDay = (d: Date) => new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);
 const STATUS: Record<string, { status: string; ok: boolean }> = {
   published: { status: "Genuine", ok: true }, expired: { status: "Genuine, no longer current", ok: true }, withdrawn: { status: "Withdrawn by the school", ok: false },
 };

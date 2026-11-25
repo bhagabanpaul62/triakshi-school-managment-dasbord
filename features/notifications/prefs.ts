@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { sha256 } from "@smw/feature-kit/secret";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { env, isLocal, schoolUrl } from "@smw/config";
 import { withSchool, type Tx } from "@smw/db";
@@ -29,7 +30,6 @@ const LOCKED = "These are always sent, so they cannot be turned off.";
 export const tokenKeyFor = (dataKey: string | undefined, local: boolean): string | null => dataKey ?? (local ? "local-only-data-key" : null);
 export const tokenKey = () => tokenKeyFor(env().DATA_KEY, isLocal());
 const tokenFor = (key: string, schoolId: string, userId: string) => createHmac("sha256", createHash("sha256").update(key).digest()).update(`unsubscribe:${schoolId}:${userId}`).digest("base64url");
-const hashOf = (token: string) => createHash("sha256").update(token).digest("hex");
 
 const GROUPS = Object.keys(TOPIC_GROUPS) as TopicGroup[];
 
@@ -115,7 +115,7 @@ export class PreferenceService extends SchoolService<Perm> {
     if (group && !GROUPS.includes(group)) return null;
     if (group && lockedGroup(group)) throw new ValidationError({ group: LOCKED });
     return withSchool(schoolId, async (tx) => {
-      const [p] = await tx.select().from(notificationPrefs).where(and(eq(notificationPrefs.schoolId, schoolId), eq(notificationPrefs.unsubscribeHash, hashOf(token)))).limit(1);
+      const [p] = await tx.select().from(notificationPrefs).where(and(eq(notificationPrefs.schoolId, schoolId), eq(notificationPrefs.unsubscribeHash, sha256(token)))).limit(1);
       if (!p) return null;
       const school = await NotificationWriter.schoolDefaults(tx);
       const hit = group ? [group] : GROUPS.filter((g) => !lockedGroup(g));
@@ -130,8 +130,8 @@ export class PreferenceService extends SchoolService<Perm> {
     const key = tokenKey();
     if (!key) return null;
     const token = tokenFor(key, schoolId, userId);
-    await tx.insert(notificationPrefs).values({ schoolId, userId, unsubscribeHash: hashOf(token) })
-      .onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set: { unsubscribeHash: hashOf(token) } });
+    await tx.insert(notificationPrefs).values({ schoolId, userId, unsubscribeHash: sha256(token) })
+      .onConflictDoUpdate({ target: [notificationPrefs.schoolId, notificationPrefs.userId], set: { unsubscribeHash: sha256(token) } });
     return schoolUrl(slug, `/unsubscribe?${new URLSearchParams({ t: token, ...(group ? { g: group } : {}) })}`);
   }
 }

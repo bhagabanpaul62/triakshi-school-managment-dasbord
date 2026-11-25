@@ -68,6 +68,8 @@ export async function rejectNotice(fd: FormData) { return serviceAction(NoticeSe
 // ---- after it is out ----
 export async function withdrawNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.withdraw(id(fd), text(fd, "reason")), "Withdrawn. People now see that the school withdrew it."); }
 export async function duplicateNotice(fd: FormData) { return serviceAction(NoticeService, (s) => s.duplicate(id(fd)), "Copied to a new draft"); }
+/** A correction the writer may not make alone: the same edits, saved as a new draft to send for approval. */
+export async function saveCorrectionAsNew(fd: FormData) { return serviceAction(NoticeService, (s) => s.duplicate(id(fd), json(fd)), "Saved as a new notice. Send it for approval."); }
 export async function saveAsTemplate(fd: FormData) { return serviceAction(TemplateService, (s) => s.saveFrom(id(fd), text(fd, "name")), "Saved as a template"); }
 
 // ---- the report ----
