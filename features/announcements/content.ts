@@ -1,21 +1,21 @@
 // What a notice says (the part a version keeps), and the rules that say it is ready to send. Pure.
 import { markdownToText } from "@smw/ui/markdown";
 import { isEveryone, type Audience } from "@smw/feature-notifications/audience-rules";
-import type { NoticeType, ResponseSpec } from "./constants";
+import type { NoticeType, Reminders, ResponseSpec } from "./constants";
 import type { announcements } from "./schema";
 
 export type Notice = typeof announcements.$inferSelect;
 
 export interface NoticeContent {
   type: NoticeType; categoryId: string | null; title: string; body: string; lang2: string | null; title2: string | null; body2: string | null;
-  audience: Audience; response: ResponseSpec; dueAt: Date | null; remind: boolean; website: boolean; scheduledAt: Date | null; expiresAt: Date | null; pinnedUntil: Date | null;
+  audience: Audience; response: ResponseSpec; dueAt: Date | null; reminders: Reminders; website: boolean; scheduledAt: Date | null; expiresAt: Date | null; pinnedUntil: Date | null;
 }
-export const CONTENT_KEYS = ["type", "categoryId", "title", "body", "lang2", "title2", "body2", "audience", "response", "dueAt", "remind", "website", "scheduledAt", "expiresAt", "pinnedUntil"] as const;
+export const CONTENT_KEYS = ["type", "categoryId", "title", "body", "lang2", "title2", "body2", "audience", "response", "dueAt", "reminders", "website", "scheduledAt", "expiresAt", "pinnedUntil"] as const;
 
 export const NO_AUDIENCE: Audience = { include: [], exclude: [] };
 export const EMPTY: NoticeContent = {
   type: "notice", categoryId: null, title: "", body: "", lang2: null, title2: null, body2: null, audience: NO_AUDIENCE, response: { kind: "none" },
-  dueAt: null, remind: true, website: false, scheduledAt: null, expiresAt: null, pinnedUntil: null,
+  dueAt: null, reminders: { before: true, onDay: true, after: true }, website: false, scheduledAt: null, expiresAt: null, pinnedUntil: null,
 };
 
 export const contentOf = (n: Notice): NoticeContent => Object.fromEntries(CONTENT_KEYS.map((k) => [k, n[k]])) as unknown as NoticeContent;

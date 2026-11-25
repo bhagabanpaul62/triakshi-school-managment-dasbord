@@ -1,11 +1,9 @@
 import { withSchool } from "@smw/db";
 import type { Ctx, FeatureSeed } from "@smw/feature-kit";
 import { BatchService } from "./batch";
-import { postSystem } from "./core";
+import { closeThread, postSystem } from "./core";
 import { MessageService } from "./service";
 import { SafeguardService } from "./safeguard";
-import { messageThreads } from "./schema";
-import { eq } from "drizzle-orm";
 
 type Teacher = { userId: string; name: string };
 type Student = { id: string; name: string; sectionId?: string; userId?: string | null };
@@ -80,7 +78,7 @@ const seed: FeatureSeed = async (admin, state) => {
     const id = await converse(admin, { subject: "Library book return", studentId: f2.student.id, recipientIds: [t2.userId] }, `Please remind ${f2.student.name} to return the library book by Friday.`, [[f2.ctx, "We will send it tomorrow."]]);
     const reason = `${t2.name} no longer teaches ${f2.student.name}.`;
     await withSchool(admin.schoolId, async (tx) => {
-      await tx.update(messageThreads).set({ state: "closed", closedReason: reason }).where(eq(messageThreads.id, id));
+      await closeThread(tx, id, reason);
       await postSystem(tx, admin.schoolId, id, `Closed: ${reason} An admin can move it to the new teacher.`);
     });
   }

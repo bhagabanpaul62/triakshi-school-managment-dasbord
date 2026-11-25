@@ -206,19 +206,20 @@ export class ExamService extends CrudService<typeof exams, Perm> {
         if (missing > 0 && !force) throw new ConflictError(`${missing} marks are still missing. Finish marks entry, or publish anyway to show them as pending.`);
       }
       const [row] = await tx.update(exams).set({ status: to }).where(eq(exams.id, id)).returning();
-      if (to === "published") await this.notifyPublished(tx, row!);
+      if (to === "published") await this.tellSitting(tx, row!, "exam.result", "result", (k) => ({ title: `${row!.name} results are out`, href: `/app/results/${row!.id}/${k.id}` }));
+      // Scheduling is when students can see their date sheet and take their admit card.
+      if (to === "scheduled") await this.tellSitting(tx, row!, "exam.schedule", "exam-schedule", (k) => ({ title: `${row!.name}: dates and admit card are ready`, href: `/app/exams/${row!.id}/admit-card/${k.id}` }));
       return row!;
     }, (r) => ({ action: "status", entity: this.entityName, entityId: r.id, summary: `${r.name} is now ${STATUS_NAME[r.status]}`, meta: { force } }));
   }
 
-  /** Tell every student sitting the exam that results are out (the student login is the family login). */
-  private async notifyPublished(tx: Tx, exam: Exam) {
+  /** Tell every student sitting the exam (the student login is the family login). One row per child, so a repeat for the same exam and child does not stack. */
+  private async tellSitting(tx: Tx, exam: Exam, topic: "exam.result" | "exam.schedule", type: string, words: (k: { id: string }) => { title: string; href: string }) {
     const kids = await tx.selectDistinct({ id: students.id, name: students.name, userId: students.userId }).from(students)
       .innerJoin(examPapers, and(eq(examPapers.classId, students.classId), eq(examPapers.examId, exam.id))).where(eq(students.status, "active"));
-    if (!kids.length) return;
     const rows = kids.flatMap((k) => (k.userId && k.userId !== this.ctx.userId
-      ? [{ userId: k.userId, topic: "exam.result" as const, subject: { type: "result", id: `${exam.id}:${k.id}` }, title: `${exam.name} results are out`, body: k.name, href: `/app/results/${exam.id}/${k.id}` }] : []));
-    await NotificationWriter.insert(tx, this.ctx.schoolId, rows);
+      ? [{ userId: k.userId, topic, subject: { type, id: `${exam.id}:${k.id}` }, body: k.name, ...words(k) }] : []));
+    if (rows.length) await NotificationWriter.insert(tx, this.ctx.schoolId, rows);
   }
 
   /** One exam with its papers and how far marks entry has got. */

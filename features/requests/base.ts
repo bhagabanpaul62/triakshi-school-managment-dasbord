@@ -4,7 +4,7 @@ import { z } from "zod";
 import { users, type Tx } from "@smw/db";
 import { allows, ConflictError, ForbiddenError, NotFoundError, SchoolService, type Ctx } from "@smw/feature-kit";
 import { addMember, postMessage, postSystem, removeStored, storeFiles, type Message, type UploadedFile } from "@smw/feature-messages/core";
-import { messageThreads, threadMembers } from "@smw/feature-messages/schema";
+import { threadMembers } from "@smw/feature-messages/schema";
 import { NotificationWriter, type NotificationRow } from "@smw/feature-notifications/writer";
 import { students } from "@smw/feature-students/schema";
 import { viewerOf, scope, type Viewer } from "./access";
@@ -97,10 +97,6 @@ export abstract class RequestBase extends SchoolService<Perm> {
     const stored = o.files?.length ? await storeFiles(this.ctx.schoolId, r.threadId, o.files) : undefined;
     try { return await postMessage(tx, this.ctx, { threadId: r.threadId, body, files: stored, internal: o.internal, asOffice: o.asOffice, notify: false }); }
     catch (e) { if (stored) await removeStored(stored.map((s) => s.fileKey)); throw e; }
-  }
-
-  protected setThread(tx: Tx, r: Pick<Req, "threadId">, state: "open" | "closed", reason?: string) {
-    return tx.update(messageThreads).set({ state, closedReason: state === "closed" ? reason ?? null : null }).where(eq(messageThreads.id, r.threadId));
   }
 
   /** Staff who are in the conversation, for telling them the family wrote back. */

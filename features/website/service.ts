@@ -225,7 +225,8 @@ export class PublicSiteService extends WebsiteService {
 
   async news(limit = 6) {
     if (!this.ctx.features.has("announcements")) return [];
-    return new AnnouncementService(this.ctx).publicNews(limit);
+    // A published notice always has its time; the filter only tells the types so.
+    return (await new AnnouncementService(this.ctx).publicNews(limit)).flatMap((a) => (a.publishedAt ? [{ ...a, publishedAt: a.publishedAt }] : []));
   }
 
   /** Public events, through the events feature's own service when it offers them. */
@@ -273,11 +274,14 @@ export class PublicSiteService extends WebsiteService {
 /** Public events through the events feature's own service. [] when the module is off for this school. */
 async function loadPublicEvents(ctx: Ctx, limit: number): Promise<PublicEvent[]> {
   if (!ctx.features.has("events")) return [];
-  const rows = await new EventService(ctx).publicEvents(limit);
-  return rows.map((r) => ({
+  const svc = new EventService(ctx);
+  const [rows, holidays] = await Promise.all([svc.publicEvents(limit), svc.publicHolidays(limit)]);
+  const shown = rows.map((r) => ({
     id: r.id, title: r.title, location: r.location, description: r.description,
     startsOn: new Date(r.startsAt).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }),
   }));
+  const days = holidays.map((h) => ({ id: `holiday-${h.startsOn}`, title: h.title, location: null, description: null, startsOn: h.startsOn }));
+  return [...shown, ...days].sort((a, b) => a.startsOn.localeCompare(b.startsOn)).slice(0, limit);
 }
 
 // ---------- enquiries ----------

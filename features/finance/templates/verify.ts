@@ -9,9 +9,14 @@ export interface VerifyFound {
   number: string;
   /** "YYYY-MM-DD" */
   date: string;
-  amountPaise: number;
+  /** Money documents only; the page hides the row when it is missing. */
+  amountPaise?: number;
   /** Full name; masked here before it reaches the page. */
   studentName: string | null;
+  /** What the document is called, when it has a title (a circular). */
+  title?: string;
+  /** Text the page may print as is: only when the document's owner made it public. */
+  text?: string | null;
 }
 /** Finds one document by its random token inside the school's own scope. The app passes one per kind, so this module never imports fees or payroll. */
 export type VerifyLookup = (tx: Tx, token: string) => Promise<VerifyFound | null>;

@@ -319,6 +319,87 @@ describe("ExportService", () => {
     expect(await new ExportService(b.as.admin).studentOptions()).toEqual([]);
   });
 
+  describe("private conversations", () => {
+    const [s1, s2, th1, th2, m1, m2, m3, cat, rq] = Array.from({ length: 9 }, () => uuidv7());
+    beforeAll(async () => {
+      await withSchool(a.id, async (tx) => {
+        await tx.execute(sql`insert into students (id, school_id, admission_no, name) values (${s1}, ${a.id}, 'T-1', 'Talk Kid'), (${s2}, ${a.id}, 'T-2', 'Other Kid')`);
+        await tx.execute(sql`insert into message_threads (id, school_id, kind, subject, student_id) values (${th1}, ${a.id}, 'student', 'About Talk Kid', ${s1}), (${th2}, ${a.id}, 'student', 'About Other Kid', ${s2})`);
+        await tx.execute(sql`insert into messages (id, school_id, thread_id, sender_name, body, internal) values
+          (${m1}, ${a.id}, ${th1}, 'Teacher', 'hello family secret-visible', false), (${m2}, ${a.id}, ${th1}, 'Office', 'staff-only note', true), (${m3}, ${a.id}, ${th2}, 'Teacher', 'other kid talk', false)`);
+        await tx.execute(sql`insert into message_files (id, school_id, message_id, file_key, file_name, content_type, size) values (${uuidv7()}, ${a.id}, ${m1}, 'private/messages/x/key.pdf', 'note.pdf', 'application/pdf', 10)`);
+        await tx.execute(sql`insert into message_reports (id, school_id, thread_id, category, note, reporter_name) values (${uuidv7()}, ${a.id}, ${th1}, 'safety', 'report-text', 'Teacher')`);
+        await tx.execute(sql`insert into request_categories (id, school_id, name) values (${cat}, ${a.id}, 'Certificates')`);
+        await tx.execute(sql`insert into message_threads (id, school_id, kind, subject, student_id) values (${rq}, ${a.id}, 'request', 'Request for Talk Kid', ${s1})`);
+        await tx.execute(sql`insert into requests (id, school_id, thread_id, number, category_id, student_id, raised_by_name, owner_role, due_at) values (${uuidv7()}, ${a.id}, ${rq}, 'REQ/1', ${cat}, ${s1}, 'Family', 'admin', now())`);
+      });
+    });
+    const PRIVATE = ["message_threads", "thread_members", "messages", "message_files", "message_reports", "message_reviews", "message_restrictions", "message_batches", "saved_replies", "requests", "request_events"];
+
+    it("a school export has none of it unless the admin ticks it with a reason", async () => {
+      const svc = new ExportService(a.as.admin);
+      const plain = await asJson((await svc.exportSchool()).url);
+      for (const t of PRIVATE) expect(plain.tables[t]).toBeUndefined();
+      expect(JSON.stringify(plain)).not.toContain("secret-visible");
+      await expect(svc.exportSchool({ includePrivate: true })).rejects.toMatchObject({ fieldErrors: { reason: expect.any(String) } });
+      await expect(svc.exportSchool({ includePrivate: true, reason: "short" })).rejects.toBeInstanceOf(ValidationError);
+    });
+
+    it("with the tick and a reason it carries the conversations, and the reason is in the audit log", async () => {
+      const r = await new ExportService({ ...a.as.admin, features: new Set(["settings", "messages"]) }).exportSchool({ includePrivate: true, reason: "Court order 14/2026" });
+      expect(r.label).toBe("All school data, with private conversations");
+      const file = await asJson(r.url);
+      expect(file.tables.messages).toHaveLength(3);
+      expect(file.tables.requests).toHaveLength(1);
+      expect(file.tables.message_reports).toHaveLength(1);
+      const rows = await withSchool(a.id, (tx) => tx.execute<{ meta: { reason?: string; includesPrivateConversations?: boolean } }>(sql`select meta from audit_logs where action = 'export'`));
+      expect(rows.map((x) => x.meta)).toContainEqual(expect.objectContaining({ includesPrivateConversations: true, reason: "Court order 14/2026" }));
+    });
+
+    it("reports and reviews also need the safeguarding permission", async () => {
+      const noSafeguard = { ...a.as.admin, grants: new Set(["settings:export", "settings:read", "messages:use"]), features: new Set(["settings", "messages"]) };
+      const file = await asJson((await new ExportService(noSafeguard).exportSchool({ includePrivate: true, reason: "Parent asked for a copy" })).url);
+      expect(file.tables.messages).toHaveLength(3);
+      expect(file.tables.message_reports).toBeUndefined();
+      expect(file.tables.message_reviews).toBeUndefined();
+    });
+
+    it("never in a support session, even with the tick", async () => {
+      await expect(new ExportService({ ...a.as.admin, supportStaffId: uuidv7() }).exportSchool({ includePrivate: true, reason: "Support wants to look" })).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it("a student's export has their conversations and requests, without staff notes, reports or file paths", async () => {
+      const file = await asJson((await new ExportService(a.as.admin).exportStudent({ studentId: s1 })).url);
+      expect(file.tables.message_threads.map((t: { id: string }) => t.id).sort()).toEqual([th1, rq].sort());
+      expect(file.tables.messages.map((m: { body: string }) => m.body)).toEqual(["hello family secret-visible"]);
+      expect(file.tables.message_files).toEqual([expect.objectContaining({ file_name: "note.pdf" })]);
+      expect(file.tables.requests).toHaveLength(1);
+      expect(file.tables.message_reports).toBeUndefined();
+      const text = JSON.stringify(file);
+      for (const gone of ["staff-only note", "other kid talk", "report-text", "private/messages", "Other Kid"]) expect(text).not.toContain(gone);
+    });
+
+    it("isolation: school B's file never holds school A's talk", async () => {
+      const file = await asJson((await new ExportService(b.as.admin).exportSchool({ includePrivate: true, reason: "Checking isolation" })).url);
+      expect(file.tables.messages ?? []).toEqual([]);
+      expect(JSON.stringify(file)).not.toContain("secret-visible");
+    });
+  });
+
+  it("never exports push keys, calendar links or unsubscribe hashes", async () => {
+    await withSchool(a.id, async (tx) => {
+      await tx.execute(sql`insert into push_subscriptions (id, school_id, user_id, endpoint, p256dh, auth) values (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'https://push.test/endpoint-secret', 'k', 'auth-secret')`);
+      await tx.execute(sql`insert into calendar_feeds (id, school_id, user_id, token_hash) values (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'feed-hash-secret')`);
+      await tx.execute(sql`insert into notification_prefs (id, school_id, user_id, unsubscribe_hash) values (${uuidv7()}, ${a.id}, ${a.users.teacher}, 'unsub-hash-secret')`);
+    });
+    const file = await asJson((await new ExportService(a.as.admin).exportSchool()).url);
+    expect(file.tables.push_subscriptions).toBeUndefined();
+    expect(file.tables.calendar_feeds).toBeUndefined();
+    expect(file.tables.notification_prefs).toHaveLength(1);
+    const text = JSON.stringify(file);
+    for (const secret of ["endpoint-secret", "auth-secret", "feed-hash-secret", "unsub-hash-secret"]) expect(text).not.toContain(secret);
+  });
+
   it("still works when the school is read-only, but not in a support session", async () => {
     await expect(new ExportService({ ...a.as.admin, readOnly: true }).exportSchool()).resolves.toBeTruthy();
     await expect(new ExportService({ ...a.as.admin, supportStaffId: uuidv7() }).exportSchool()).rejects.toBeInstanceOf(ForbiddenError);

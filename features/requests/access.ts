@@ -12,6 +12,8 @@ export interface Viewer {
   userId: string;
   family: boolean;
   office: boolean;
+  /** A teacher may write a request down only for a student they teach. */
+  teacher: boolean;
   safeguard: boolean;
   /** Role keys a request may be owned by that this person answers for: their role and their custom role id. */
   roles: string[];
@@ -23,7 +25,7 @@ export async function viewerOf(tx: Tx, ctx: Ctx): Promise<Viewer> {
   if (!allows(ctx, requestsFeature, "use") && !allows(ctx, requestsFeature, "office")) throw new ForbiddenError();
   const [u] = await tx.select({ roleId: users.roleId }).from(users).where(eq(users.id, ctx.userId));
   return {
-    userId: ctx.userId, family: isFamily(ctx.role), office: allows(ctx, requestsFeature, "office"), safeguard: may(ctx, "safeguard"),
+    userId: ctx.userId, family: isFamily(ctx.role), office: allows(ctx, requestsFeature, "office"), teacher: ctx.role === "teacher", safeguard: may(ctx, "safeguard"),
     roles: [ctx.role, ...(u?.roleId ? [u.roleId] : [])],
   };
 }

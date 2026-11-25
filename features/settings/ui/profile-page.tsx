@@ -1,4 +1,5 @@
 import { SchoolAuth } from "@smw/auth";
+import Link from "next/link";
 import { getSession, requireCtx } from "@smw/runtime";
 import { Fact, FactList } from "@smw/ui/kit/FactList";
 import { Inset, Panel } from "@smw/ui/kit/Panel";
@@ -49,7 +50,13 @@ export default async function ProfilePage({ record }: { record?: React.ReactNode
             <EmailCodeBox action={confirmMyEmailCode} />
           </Panel>
         </div>
-        <div className="lg:col-span-5">
+        <div className="flex flex-col gap-4 lg:col-span-5">
+          <Panel title="Notifications">
+            <p className="text-sm text-[var(--ds-on-surface)]">Choose what reaches your phone and email, your quiet hours and when you are away.</p>
+            <div className="mt-4">
+              <Link href="/app/notifications/preferences" className="inline-flex h-10 items-center rounded-full bg-white/[0.08] px-4 text-sm text-[var(--ds-on-surface)] transition-colors hover:bg-white/[0.14] focus-visible:outline-2 focus-visible:outline-[var(--ds-primary)]">Notification settings</Link>
+            </div>
+          </Panel>
           <Panel title="Password">
             <Inset>
               <p className="text-sm text-[var(--ds-on-surface)]">Use a password only you know, at least 8 characters.</p>

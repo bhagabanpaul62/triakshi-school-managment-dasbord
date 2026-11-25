@@ -8,7 +8,7 @@ import { REMOVE_MINUTES, PAGE_SIZE, type ReportCategory, type ReportState, type 
 import { Starters, type Contact, type StudentContact } from "./contact-rules";
 import {
   activeRestriction, addMember, canOpenThread, createThread, isFamily, istToday, loadThread, markThreadRead, noSupport, postMessage, postSystem, removeStored, requireMember,
-  signedLink, storeFiles, unreadByThread, type Message, type StoredFile, type ThreadData, type UploadedFile,
+  signedLink, openThread, storeFiles, unreadByThread, type Message, type StoredFile, type ThreadData, type UploadedFile,
 } from "./core";
 import { conversationPdf } from "./conversation-pdf";
 import messagesFeature from "./feature";
@@ -81,6 +81,7 @@ export class MessageService extends SchoolService<Perm> {
       const t = like(query.q);
       const cursor = query.cursor?.split("|");
       const mineWhere = and(
+        ne(messageThreads.kind, "request"),
         eq(threadMembers.userId, this.ctx.userId), eq(threadMembers.state, "active"), eq(threadMembers.archived, view === "archived"),
         query.studentId ? eq(messageThreads.studentId, query.studentId) : undefined,
         view === "unread" ? inArray(messageThreads.id, [...unread.keys()]) : undefined,
@@ -125,7 +126,7 @@ export class MessageService extends SchoolService<Perm> {
   async inboxStudents(): Promise<{ id: string; name: string }[]> {
     return this.read("use", (tx) => tx.selectDistinct({ id: students.id, name: students.name }).from(threadMembers)
       .innerJoin(messageThreads, eq(messageThreads.id, threadMembers.threadId)).innerJoin(students, eq(students.id, messageThreads.studentId))
-      .where(and(eq(threadMembers.userId, this.ctx.userId), eq(threadMembers.state, "active"))).orderBy(asc(students.name)).limit(200));
+      .where(and(eq(threadMembers.userId, this.ctx.userId), eq(threadMembers.state, "active"), ne(messageThreads.kind, "request"))).orderBy(asc(students.name)).limit(200));
   }
 
   /** Total unread across the caller's conversations (the sidebar badge): the same numbers the inbox shows. */
@@ -431,7 +432,7 @@ export class MessageService extends SchoolService<Perm> {
       if (!teacher) throw new ValidationError({ teacherId: "Choose an active teacher" });
       await addMember(tx, this.ctx, threadId, { userId: teacher.id }, { trusted: true });
       await tx.update(threadMembers).set({ state: "left" }).where(and(eq(threadMembers.threadId, threadId), eq(threadMembers.role, "teacher"), ne(threadMembers.userId, teacher.id)));
-      await tx.update(messageThreads).set({ state: "open", closedReason: null }).where(eq(messageThreads.id, threadId));
+      await openThread(tx, threadId);
       await postSystem(tx, this.ctx.schoolId, threadId, `${teacher.name} is now the teacher in this conversation.`);
     }, () => ({ action: "reassign", entity: "Conversation", entityId: threadId, summary: "Moved a conversation to another teacher" }));
   }

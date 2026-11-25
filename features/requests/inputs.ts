@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { f } from "@smw/feature-kit";
 import { BODY_MAX } from "@smw/feature-messages/constants";
-import { MAX_ABOUT, NATURES, VIEWS } from "./constants";
+import { MAX_ABOUT, MAX_LEVELS, MAX_QUESTIONS, NATURES, VIEWS } from "./constants";
 
 const body = f.text(1, BODY_MAX, "Write a few words");
 /** A link inside the app only. */
@@ -35,8 +35,8 @@ export const categoryInput = z.object({
   ownerUserId: f.optId(),
   ownerRole: f.text(1, 60, "Choose who answers"),
   targetDays: f.int(1, 60),
-  escalation: z.array(levelInput).max(4).default([]),
-  fields: z.array(fieldInput).max(8).default([]),
+  escalation: z.array(levelInput).max(MAX_LEVELS).default([]),
+  fields: z.array(fieldInput).max(MAX_QUESTIONS).default([]),
 }).superRefine((c, ctx) => {
   c.fields.forEach((fl, i) => {
     if (fl.kind === "choice" && !fl.options?.length) ctx.addIssue({ code: "custom", path: ["fields", i, "options"], message: "Add the choices" });

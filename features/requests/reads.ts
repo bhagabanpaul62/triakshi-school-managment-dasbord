@@ -3,7 +3,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
 import { listQuerySchema, NotFoundError, toPage, type ListQuery, type Page } from "@smw/feature-kit";
-import { loadThread, markThreadRead, signedLink, type ThreadData } from "@smw/feature-messages/core";
+import { loadThread, markThreadRead, signedLink, unreadByThread, type ThreadData } from "@smw/feature-messages/core";
 import { LINK_SECONDS } from "@smw/feature-messages/constants";
 import { messageFiles, messages, messageThreads, threadMembers } from "@smw/feature-messages/schema";
 import { leadIds } from "@smw/feature-messages/leads";
@@ -101,6 +101,11 @@ export abstract class RequestReads extends RequestBase {
       ]);
       return toPage(rows.map((x) => this.row(x, v, now)), Number(total?.n ?? 0), q);
     });
+  }
+
+  /** Unread messages in my requests (the Requests badge). Requests are never in the Messages count, so no message is counted twice. */
+  async unreadCount(): Promise<number> {
+    return this.read("use", async (tx) => [...(await unreadByThread(tx, this.ctx, undefined, true)).values()].reduce((a, b) => a + b, 0));
   }
 
   /** How many are in each saved view, for the tabs. Same visibility as the list. */

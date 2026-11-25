@@ -12,7 +12,10 @@ import { ExamService, ResultService } from "@smw/feature-exams/service";
 import { TimetableService, type TodayRow } from "@smw/feature-timetable/service";
 import { AssignmentService, SelfService } from "@smw/feature-assignments/service";
 import { dueHint } from "@smw/feature-assignments/rules";
-import { AnnouncementService, type Announcement } from "@smw/feature-announcements/service";
+import { AnnouncementService, FeedService } from "@smw/feature-announcements/service";
+import { NotificationService } from "@smw/feature-notifications/service";
+import { RequestService } from "@smw/feature-requests/service";
+import { DayService, MeetingService } from "@smw/feature-meetings/service";
 import { EventService, type SchoolEvent } from "@smw/feature-events/service";
 import { EnquiryService } from "@smw/feature-website/service";
 import homeFeature from "./feature";
@@ -31,9 +34,9 @@ export interface AttentionItem { key: string; label: string; count: number; href
 export interface SectionToMark { id: string; label: string; students: number; marked: boolean }
 export interface SectionsToMark { dayOff: string | null; rows: SectionToMark[] }
 export interface PendingPaper { examId: string; examName: string; paperId: string; className: string; subjectName: string; date: string; students: number; entered: number }
-export interface AttendanceToday { date: string; pct: number | null; present: number; absent: number; late: number; leave: number; marked: number; students: number }
+export interface AttendanceToday { date: string; /** Why school is closed today (Sunday, a holiday), or null on a working day. */ dayOff: string | null; pct: number | null; present: number; absent: number; late: number; leave: number; marked: number; students: number }
 export interface FeeSummary { collectedThisMonth: number; receiptsThisMonth: number; outstanding: number; overdueAmount: number; overdueCount: number; studentsWithDues: number }
-export interface TodayTimetable { day: number | null; now: string; rows: (TodayRow & { state: PeriodState })[] }
+export interface TodayTimetable { day: number | null; /** Why school is closed today, or null. A working Sunday has no periods but is not a day off. */ dayOff: string | null; now: string; rows: (TodayRow & { state: PeriodState })[] }
 export interface AssignmentRow { assignmentId: string; title: string; subjectName: string; dueAt: Date; hint: string; overdue: boolean; studentId: string }
 export interface AssignmentsDue { rows: AssignmentRow[]; todo: number; overdue: number }
 export interface LatestResult { studentId: string; examId: string; examName: string; percent: number | null; grade: string | null; result: string; rank: number | null; sectionSize: number }
@@ -44,19 +47,27 @@ export interface RecentPayment { id: string; student: string; amountPaise: numbe
 export interface OverdueList { total: number; amountPaise: number; rows: Pick<DueRow, "id" | "name" | "classLabel" | "overdue" | "nextDueDate">[] }
 export interface ClassDue { classId: string; name: string; duePaise: number }
 
-export interface Common { header: HomeHeader; announcements: Slot<Announcement[]> }
+/** A notice as the home page lists it. `needsAnswer` is for families: an answer is wanted and not given. */
+export interface HomeNotice { id: string; title: string; excerpt: string; publishedAt: Date | null; pinned: boolean; needsAnswer: boolean; href: string }
+export interface ActionItem { id: string; title: string; body: string | null; href: string | null; createdAt: Date }
+export interface RequestsSummary { mine: number; unassigned: number; overdue: number }
+export interface MeetingSlotToday { slotId: string; meetingId: string; meetingTitle: string; startsAt: Date; studentName: string; studentLabel: string | null; visit: string | null }
+
+export interface Common { header: HomeHeader; announcements: Slot<HomeNotice[]>; /** The top 5 things waiting on this person. */ needsAction: Slot<ActionItem[]> }
 export interface AdminHome extends Common {
   capacity: Slot<StudentCapacity>;
   attendance: Slot<AttendanceToday>;
   fees: Slot<{ summary: FeeSummary; trend: TrendPoint[] }>;
   events: Slot<SchoolEvent[]>;
   attention: Slot<{ items: AttentionItem[]; unchecked: string[] }>;
+  requests: Slot<RequestsSummary>;
 }
 export interface AccountantHome extends Common {
   money: Slot<{ todayPaise: number; todayCount: number; summary: FeeSummary }>;
   dueByClass: Slot<ClassDue[]>;
   recent: Slot<RecentPayment[]>;
   overdue: Slot<OverdueList>;
+  requests: Slot<RequestsSummary>;
 }
 export interface TeacherHome extends Common {
   today: Slot<TodayTimetable>;
@@ -64,6 +75,7 @@ export interface TeacherHome extends Common {
   grading: Slot<{ toGrade: number; rows: GradingRow[] }>;
   marks: Slot<PendingPaper[]>;
   classMonth: Slot<ClassMonth[]>;
+  meetings: Slot<MeetingSlotToday[]>;
 }
 export interface LearnerPanels {
   attendance: Slot<AttendanceMonth>;
@@ -139,7 +151,26 @@ export class HomeService extends SchoolService<Perm> {
     }
   }
 
-  private announcements(limit = 5) { return this.slot("announcements", () => new AnnouncementService(this.ctx).latest(limit)); }
+  /** A family sees what needs their answer first, then pinned, then the newest; staff see the latest sent. */
+  private announcements(limit = 5): Promise<Slot<HomeNotice[]>> {
+    return this.slot("announcements", async () => {
+      if (this.ctx.role === "student") {
+        const { rows } = await new FeedService(this.ctx).feed({ pageSize: limit * 2 });
+        const seen = new Set<string>();
+        return rows.filter((r) => !r.withdrawn && !seen.has(r.noticeId) && seen.add(r.noticeId))
+          .map((r) => ({ id: r.noticeId, title: r.title, excerpt: r.excerpt, publishedAt: r.publishedAt, pinned: r.pinned, needsAnswer: r.needsAnswer, href: `/app/announcements/${r.noticeId}` })).slice(0, limit);
+      }
+      return (await new AnnouncementService(this.ctx).latest(limit)).map((a) => ({ id: a.id, title: a.title, excerpt: a.excerpt, publishedAt: a.publishedAt, pinned: a.pinned, needsAnswer: false, href: `/app/announcements/${a.id}` }));
+    });
+  }
+  private needsAction(): Promise<Slot<ActionItem[]>> {
+    return this.slot("notifications", async () => (await new NotificationService(this.ctx).list({ page: 1, pageSize: 5, filters: { tab: "action" } })).rows
+      .map((n) => ({ id: n.id, title: n.title, body: n.body, href: n.href, createdAt: n.createdAt })));
+  }
+  /** The office's view of requests: what is mine, what nobody has taken, what is late. */
+  private requests(): Promise<Slot<RequestsSummary>> {
+    return this.slot("requests", async () => { const c = await new RequestService(this.ctx).counts(); return { mine: c.mine, unassigned: c.unassigned, overdue: c.overdue }; });
+  }
   private events(limit = 5) { return this.slot("events", () => new EventService(this.ctx).upcoming(limit)); }
 
   // ---------- shared panels ----------
@@ -148,7 +179,8 @@ export class HomeService extends SchoolService<Perm> {
   protected attendanceToday(): Promise<Slot<AttendanceToday>> {
     return this.slot("attendance", async () => {
       const s = await new StudentAttendanceService(this.ctx).todaySchoolSummary();
-      return { date: s.date, pct: s.pct, present: s.present, absent: s.absent, late: s.late, leave: s.leave, marked: s.marked, students: s.students };
+      const off = await this.read("view", (tx) => isClosed(tx, this.today, { classId: null }));
+      return { date: s.date, dayOff: off?.name ?? null, pct: s.pct, present: s.present, absent: s.absent, late: s.late, leave: s.leave, marked: s.marked, students: s.students };
     });
   }
 
@@ -194,7 +226,8 @@ export class HomeService extends SchoolService<Perm> {
   protected async timetableToday(): Promise<TodayTimetable> {
     const now = this.clock();
     const t = await new TimetableService(this.ctx).today(now);
-    return { day: t.day, now: clockIST(now), rows: markPeriods(t.rows, clockIST(now)) };
+    const off = await this.read("view", (tx) => isClosed(tx, this.today, { classId: null }));
+    return { day: t.day, dayOff: off?.name ?? null, now: clockIST(now), rows: markPeriods(t.rows, clockIST(now)) };
   }
 
   // ---------- admin ----------
@@ -205,7 +238,7 @@ export class HomeService extends SchoolService<Perm> {
       const [summary, trend] = await Promise.all([this.feeSummary(), d.trend("month", 6)]);
       return { summary, trend };
     });
-    const [header, capacity, attendance, feesDone, events, announcements, attention] = await Promise.all([
+    const [header, capacity, attendance, feesDone, events, announcements, attention, needsAction, requests] = await Promise.all([
       this.header(),
       this.slot("students", () => new StudentService(this.ctx).capacity()),
       this.attendanceToday(),
@@ -213,8 +246,10 @@ export class HomeService extends SchoolService<Perm> {
       this.events(5),
       this.announcements(5),
       this.attention(fees),
+      this.needsAction(),
+      this.requests(),
     ]);
-    return { header, capacity, attendance, fees: feesDone, events, announcements, attention };
+    return { header, capacity, attendance, fees: feesDone, events, announcements, attention, needsAction, requests };
   }
 
   /** "Needs attention": only things with a count above zero, each with the page that fixes it. `unchecked` names sources that failed, so "all clear" is never claimed blindly. */
@@ -252,7 +287,7 @@ export class HomeService extends SchoolService<Perm> {
 
   async accountant(): Promise<AccountantHome> {
     const dues = new DuesService(this.ctx);
-    const [header, money, dueByClass, recent, overdue, announcements] = await Promise.all([
+    const [header, money, dueByClass, recent, overdue, announcements, needsAction, requests] = await Promise.all([
       this.header(),
       this.slot("fees", async () => {
         const [summary, t] = await Promise.all([this.feeSummary(), this.collectedOn(this.today)]);
@@ -270,8 +305,10 @@ export class HomeService extends SchoolService<Perm> {
         return { total: r.total, amountPaise: r.totals.overdue, rows: r.rows.map((x) => ({ id: x.id, name: x.name, classLabel: x.classLabel, overdue: x.overdue, nextDueDate: x.nextDueDate })) };
       }),
       this.announcements(4),
+      this.needsAction(),
+      this.requests(),
     ]);
-    return { header, money, dueByClass, recent, overdue, announcements };
+    return { header, money, dueByClass, recent, overdue, announcements, needsAction, requests };
   }
 
   /** Money received on one day: live receipts only (a reversed or bounced one is not money). */
@@ -286,7 +323,7 @@ export class HomeService extends SchoolService<Perm> {
   // ---------- teacher ----------
 
   async teacher(): Promise<TeacherHome> {
-    const [header, today, toMark, grading, marks, classMonth, announcements] = await Promise.all([
+    const [header, today, toMark, grading, marks, classMonth, announcements, needsAction, meetings] = await Promise.all([
       this.header(),
       this.slot("timetable", () => this.timetableToday()),
       this.slot("attendance", () => this.sectionsToMark(true)),
@@ -300,8 +337,22 @@ export class HomeService extends SchoolService<Perm> {
       this.slot("exams", () => this.pendingMarks()),
       this.slot("attendance", () => this.classMonth()),
       this.announcements(4),
+      this.needsAction(),
+      this.slot("meetings", () => this.meetingsToday()),
     ]);
-    return { header, today, toMark, grading, marks, classMonth, announcements };
+    return { header, today, toMark, grading, marks, classMonth, announcements, needsAction, meetings };
+  }
+
+  /** This teacher's booked parent-meeting slots today, in time order, from every meeting that runs today. */
+  protected async meetingsToday(): Promise<MeetingSlotToday[]> {
+    const day = this.today;
+    const istDay = (d: Date) => todayIST(d);
+    const list = (await new MeetingService(this.ctx).list({ page: 1, pageSize: 50, filters: {} })).rows
+      .filter((m) => (m.state === "open" || m.state === "closed") && m.firstAt && m.lastAt && istDay(m.firstAt) <= day && day <= istDay(m.lastAt));
+    const days = await Promise.all(list.map((m) => new DayService(this.ctx).day(m.id).catch(() => null)));
+    return days.flatMap((d) => (d ? d.rows.filter((r) => istDay(r.startsAt) === day).map((r) => ({
+      slotId: r.slotId, meetingId: d.meeting.id, meetingTitle: d.meeting.title, startsAt: r.startsAt, studentName: r.studentName, studentLabel: r.studentLabel, visit: r.visit,
+    })) : [])).sort((x, y) => x.startsAt.getTime() - y.startsAt.getTime());
   }
 
   /** Attendance % this month for each section this teacher is class teacher of. */
@@ -321,8 +372,8 @@ export class HomeService extends SchoolService<Perm> {
   // ---------- staff ----------
 
   async staff(): Promise<StaffHome> {
-    const [header, announcements] = await Promise.all([this.header(), this.announcements(4)]);
-    return { header, announcements, links: staffLinks(this.ctx) };
+    const [header, announcements, needsAction] = await Promise.all([this.header(), this.announcements(4), this.needsAction()]);
+    return { header, announcements, needsAction, links: staffLinks(this.ctx) };
   }
 
   // ---------- student ----------
@@ -366,7 +417,7 @@ export class HomeService extends SchoolService<Perm> {
 
   async student(): Promise<StudentHome> {
     const [child] = await this.children();
-    const [header, timetable, announcements] = await Promise.all([this.header(), this.slot("timetable", () => this.timetableToday()), this.announcements(4)]);
-    return { header, child: child ?? null, timetable, announcements, ...(await this.learnerPanels(child ?? null)) };
+    const [header, timetable, announcements, needsAction] = await Promise.all([this.header(), this.slot("timetable", () => this.timetableToday()), this.announcements(4), this.needsAction()]);
+    return { header, child: child ?? null, timetable, announcements, needsAction, ...(await this.learnerPanels(child ?? null)) };
   }
 }

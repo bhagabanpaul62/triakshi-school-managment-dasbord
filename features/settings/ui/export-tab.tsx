@@ -7,7 +7,7 @@ import { PanelGrid } from "@smw/ui/shell/PageHeader";
 import { ToneBadge, WidgetEmptyState } from "@smw/ui/widgets/WidgetPrimitives";
 import { ExportService, FilePolicy } from "../service";
 import { exportSchoolData, exportStudentData } from "./actions";
-import { studentExportFields } from "./fields";
+import { exportSchoolFields, studentExportFields } from "./fields";
 
 const size = (bytes: number | null) => (bytes == null ? "" : bytes < 1_048_576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`);
 
@@ -25,10 +25,10 @@ export async function ExportTab({ ctx }: { ctx: Ctx }) {
                 <IconChip><MenuIconView name="class" className="h-4 w-4" /></IconChip>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-[var(--ds-on-surface)]">Whole school</p>
-                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Students, parents, staff, classes, attendance, fees, marks, messages and settings: everything the school has stored.</p>
+                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Students, parents, staff, classes, attendance, fees, marks and settings. Private conversations and requests are left out unless you tick them.</p>
                   <div className="mt-3">
-                    <FormModal title="Export all school data" icon="upload" description="One file with every student, fee, mark and message. It holds personal data, so keep it safe. The export is logged."
-                      fields={[{ name: "includePayroll", label: "Payroll", type: "checkbox", placeholder: "Include salaries and payslips", hint: "PAN and bank numbers are never exported.", wide: true }]}
+                    <FormModal title="Export all school data" icon="upload" description="One file with every student, fee and mark. It holds personal data, so keep it safe. The export is logged."
+                      fields={exportSchoolFields}
                       action={exportSchoolData} submitLabel="Export" successMessage="Export ready. Download it under Your exports." trigger={{ label: "Export all school data", variant: "default" }} />
                   </div>
                 </div>
@@ -39,7 +39,7 @@ export async function ExportTab({ ctx }: { ctx: Ctx }) {
                 <IconChip><MenuIconView name="user" className="h-4 w-4" /></IconChip>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-[var(--ds-on-surface)]">One student</p>
-                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Their profile, attendance, fees and marks. Use it when a parent asks for their child&apos;s records.</p>
+                  <p className="mt-1 text-xs text-[var(--ds-on-surface-muted)]">Their profile, attendance, fees, marks, and the conversations and requests about them. Use it when a parent asks for their child&apos;s records.</p>
                   <div className="mt-3">
                     {students.length ? (
                       <FormModal title="Export one student" icon="upload" fields={studentExportFields(students)} action={exportStudentData} submitLabel="Export"
@@ -49,7 +49,7 @@ export async function ExportTab({ ctx }: { ctx: Ctx }) {
                 </div>
               </div>
             </Inset>
-            <p className="text-xs text-[var(--ds-on-surface-muted)]">Never included: passwords and sign-in tokens. Files are JSON, readable in any text editor, and only admins can download them.</p>
+            <p className="text-xs text-[var(--ds-on-surface-muted)]">Never included: passwords, sign-in tokens, phone push keys and calendar links. Files are JSON, readable in any text editor, and only admins can download them.</p>
           </div>
         </Panel>
       </div>

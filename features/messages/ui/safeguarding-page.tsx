@@ -43,7 +43,7 @@ export default async function SafeguardingPage({ searchParams }: { searchParams:
                   <td className="px-3 py-3">{r.subject}{r.studentName ? <span className="block text-xs text-[var(--ds-on-surface-muted)]">About {r.studentName}</span> : null}</td>
                   <td className="px-3 py-3 text-[var(--ds-on-surface-variant)]">{r.reporter}</td>
                   <td className="px-3 py-3 text-[var(--ds-on-surface-muted)]" title={r.createdAt.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>{relative(r.createdAt)}</td>
-                  <td className="px-3 py-3"><StateChip kind="report" state={REPORT_CHIP[r.state]} /></td>
+                  <td className="px-3 py-3"><StateChip kind="report" state={r.state} /></td>
                 </tr>
               ))}
             </tbody>

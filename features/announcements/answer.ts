@@ -38,13 +38,4 @@ export function checkAnswer(spec: ResponseSpec, a: Answer): Answer {
   throw new ValidationError({ answer: "That is not the answer this notice asks for" });
 }
 
-/** A short line for lists and the CSV: "Yes", "No: not well", "Option A, Option B". */
-export function answerText(a: Answer | null | undefined): string {
-  if (!a) return "";
-  switch (a.kind) {
-    case "ack": return "Read";
-    case "consent": return a.yes ? "Yes" : a.reason ? `No: ${a.reason}` : "No";
-    case "poll": return a.choices.join(", ");
-    case "form": return Object.values(a.values).join(" | ");
-  }
-}
+export { answerText } from "./answer-text";

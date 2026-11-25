@@ -8,6 +8,9 @@ export const MAX_FILES = 10;
 export const MAX_QUESTIONS = 10;
 export const RELATIONS = ["Father", "Mother", "Guardian", "Student", "Staff"] as const;
 
+/** Reminders to people who have not answered: two days before the last date, on it, the day after. Each can be off. */
+export interface Reminders { before: boolean; onDay: boolean; after: boolean }
+
 export const QUESTION_KINDS = ["text", "number", "date", "choice", "yesno", "file"] as const;
 export interface Question { id: string; label: string; kind: (typeof QUESTION_KINDS)[number]; required: boolean; options?: string[] }
 export type ResponseSpec =

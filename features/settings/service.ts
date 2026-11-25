@@ -7,7 +7,7 @@ import {
   type SchoolRole, type Tx,
 } from "@smw/db";
 import {
-  ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, listQuerySchema, toPage,
+  ConflictError, ForbiddenError, NotFoundError, SchoolService, ValidationError, allows, listQuerySchema, toPage,
   type ListQuery, type Page,
 } from "@smw/feature-kit";
 import { UploadError, emailHtml, services, uploadKey } from "@smw/integrations";
@@ -534,11 +534,15 @@ export class AuditService extends SettingsService {
 
 /** Salaries are left out unless the admin asks for them. Sealed values (PAN, bank numbers) never leave. */
 const isPayroll = (table: string) => table.startsWith("pay_");
-/** Never exported: login secrets and session material. */
-const SKIP_TABLES = new Set(["sessions", "one_time_tokens", "data_exports"]);
-const SKIP_COLUMNS = new Set(["password_hash", "token_hash"]);
-/** Conversations are private between the people in them, so a school-wide file never carries them. */
-const PRIVATE_TALK = new Set(["message_threads", "thread_members", "messages"]);
+/** Never exported: login secrets, session material, push keys and secret calendar links. */
+const SKIP_TABLES = new Set(["sessions", "one_time_tokens", "data_exports", "push_subscriptions", "calendar_feeds"]);
+const SKIP_COLUMNS = new Set(["password_hash", "token_hash", "unsubscribe_hash"]);
+/** Conversations and requests are private between the people in them: a school-wide file leaves them out unless an admin ticks it with a reason. */
+const PRIVATE_TALK = new Set(["message_threads", "thread_members", "messages", "message_files", "message_reports", "message_reviews", "message_restrictions", "message_batches", "saved_replies", "requests", "request_events"]);
+/** Even with the tick, these need messages:safeguard as well. */
+const SAFEGUARD_ONLY = new Set(["message_reports", "message_reviews"]);
+const SAFEGUARD_FEATURE = { key: "messages", permissions: { safeguard: ["admin"] } } as const;
+const REASON_MIN = 10;
 
 export interface ExportResult { id: string; label: string; sizeBytes: number; url: string }
 
@@ -548,12 +552,19 @@ export interface ExportResult { id: string; label: string; sizeBytes: number; ur
  * shortcut: the whole file is built in memory; stream per table (or zip CSVs) before schools reach tens of thousands of rows per table.
  */
 export class ExportService extends SettingsService {
-  async exportSchool(opts: { includePayroll?: boolean } = {}): Promise<ExportResult> {
+  async exportSchool(opts: { includePayroll?: boolean; includePrivate?: boolean; reason?: string } = {}): Promise<ExportResult> {
     // Payroll is an admin's own choice; a custom role can never hold settings:export anyway.
     const payroll = !!opts.includePayroll && this.ctx.role === "admin";
+    const talk = !!opts.includePrivate && this.ctx.role === "admin";
     return this.build("school", async (tx) => {
+      const reason = (opts.reason ?? "").trim();
+      if (talk && reason.length < REASON_MIN) throw new ValidationError({ reason: "Write why you need the private conversations (at least 10 characters)" });
       const [school] = await tx.select(profileCols).from(schools).where(eq(schools.id, this.ctx.schoolId)).limit(1);
-      return { label: payroll ? "All school data, with payroll" : "All school data", data: { school, tables: await this.dump(tx, "school_id", this.ctx.schoolId, payroll) } };
+      const extras = [payroll && "payroll", talk && "private conversations"].filter(Boolean).join(" and ");
+      return {
+        label: extras ? `All school data, with ${extras}` : "All school data", data: { school, tables: await this.dump(tx, "school_id", this.ctx.schoolId, { payroll, talk }) },
+        meta: talk ? { includesPrivateConversations: true, reason } : {},
+      };
     });
   }
 
@@ -565,7 +576,7 @@ export class ExportService extends SettingsService {
       const [has] = await tx.execute<{ t: string | null }>(sql`select to_regclass('public.students')::text as t`);
       const [student] = has?.t ? await tx.execute<Record<string, unknown>>(sql`select * from students where id = ${studentId}`) : [];
       if (!student) throw new NotFoundError("Student");
-      return { label: `Student: ${student.name ?? studentId}`, data: { student, tables: await this.dump(tx, "student_id", studentId) } };
+      return { label: `Student: ${student.name ?? studentId}`, data: { student, tables: { ...await this.dump(tx, "student_id", studentId), ...await this.studentTalk(tx, studentId) } } };
     });
   }
 
@@ -587,10 +598,10 @@ export class ExportService extends SettingsService {
     });
   }
 
-  private async build(scope: "school" | "student", collect: (tx: Tx) => Promise<{ label: string; data: object }>): Promise<ExportResult> {
+  private async build(scope: "school" | "student", collect: (tx: Tx) => Promise<{ label: string; data: object; meta?: Record<string, unknown> }>): Promise<ExportResult> {
     if (this.ctx.supportStaffId) throw new ForbiddenError("Data export is not available in a support session.");
     return this.read("export", async (tx) => {
-      const { label, data } = await collect(tx);
+      const { label, data, meta } = await collect(tx);
       const now = new Date();
       const bytes = Buffer.from(JSON.stringify({ exportedAt: now.toISOString(), scope, ...data }, null, 2));
       const key = `${this.ctx.schoolId}/exports/${crypto.randomUUID()}-${scope}-export-${now.toISOString().slice(0, 10)}.json`;
@@ -598,13 +609,13 @@ export class ExportService extends SettingsService {
       const [row] = await tx.insert(dataExports).values({
         schoolId: this.ctx.schoolId, scope, label, requestedBy: this.ctx.userId, status: "ready", fileKey: key, sizeBytes: bytes.byteLength, finishedAt: now,
       }).returning();
-      await this.audit(tx, { action: "export", entity: "Data export", entityId: row!.id, summary: `Exported ${label}`, meta: { scope, sizeBytes: bytes.byteLength } });
+      await this.audit(tx, { action: "export", entity: "Data export", entityId: row!.id, summary: `Exported ${label}`, meta: { scope, sizeBytes: bytes.byteLength, ...meta } });
       return { id: row!.id, label, sizeBytes: bytes.byteLength, url: await services().storage.signedUrl(key) };
     });
   }
 
   /** Every table with `column`, as `{ table: rows[] }` for rows where `column = value`. Table and column names come from the catalog, never from input. */
-  private async dump(tx: Tx, column: string, value: string, payroll = false): Promise<Record<string, Record<string, unknown>[]>> {
+  private async dump(tx: Tx, column: string, value: string, { payroll = false, talk = false } = {}): Promise<Record<string, Record<string, unknown>[]>> {
     const cols = await tx.execute<{ table_name: string; column_name: string }>(sql`
       select c.table_name, c.column_name from information_schema.columns c
       join information_schema.tables t on t.table_schema = c.table_schema and t.table_name = c.table_name and t.table_type = 'BASE TABLE'
@@ -613,7 +624,7 @@ export class ExportService extends SettingsService {
       order by c.table_name, c.ordinal_position`);
     const byTable = new Map<string, string[]>();
     for (const c of cols) {
-      if (SKIP_TABLES.has(c.table_name) || PRIVATE_TALK.has(c.table_name) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
+      if (SKIP_TABLES.has(c.table_name) || (PRIVATE_TALK.has(c.table_name) && !(talk && this.talkAllowed(c.table_name))) || SKIP_COLUMNS.has(c.column_name) || c.column_name.endsWith("_sealed") || (isPayroll(c.table_name) && !payroll)) continue;
       byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
     }
     const out: Record<string, Record<string, unknown>[]> = {};
@@ -622,6 +633,30 @@ export class ExportService extends SettingsService {
       out[table] = [...await tx.execute(sql`select ${list} from ${sql.identifier(table)} where ${sql.identifier(column)} = ${value} order by 1`)];
     }
     if (!payroll) await this.withoutPay(tx, out);
+    return out;
+  }
+
+  private talkAllowed(table: string) {
+    return !SAFEGUARD_ONLY.has(table) || allows(this.ctx, SAFEGUARD_FEATURE, "safeguard");
+  }
+
+  /** What one student's file holds of private talk: conversations and requests about them, no staff-only notes, no reports, no stored file paths. */
+  private async studentTalk(tx: Tx, studentId: string): Promise<Record<string, Record<string, unknown>[]>> {
+    const [has] = await tx.execute<{ t: string | null; r: string | null }>(sql`select to_regclass('public.message_threads')::text as t, to_regclass('public.requests')::text as r`);
+    const out: Record<string, Record<string, unknown>[]> = {};
+    const rows = async (q: ReturnType<typeof sql>) => [...await tx.execute<Record<string, unknown>>(q)];
+    const ids = (r: Record<string, unknown>[], key = "id") => sql.join(r.map((x) => sql`${x[key] as string}`), sql`, `);
+    if (has?.r) {
+      out.requests = await rows(sql`select * from requests where student_id = ${studentId} order by created_at`);
+      if (out.requests.length) out.request_events = await rows(sql`select id, request_id, action, detail, by_name, created_at from request_events where request_id in (${ids(out.requests)}) order by created_at`);
+    }
+    if (!has?.t) return out;
+    const threads = await rows(sql`select * from message_threads where student_id = ${studentId} order by created_at`);
+    out.message_threads = threads;
+    if (!threads.length) return out;
+    out.thread_members = await rows(sql`select id, thread_id, user_id, name, role, state, created_at from thread_members where thread_id in (${ids(threads)}) order by created_at`);
+    out.messages = await rows(sql`select id, thread_id, sender_id, sender_name, kind, body, as_office, created_at from messages where thread_id in (${ids(threads)}) and not internal and removed_at is null order by created_at`);
+    if (out.messages.length) out.message_files = await rows(sql`select id, message_id, file_name, content_type, size, created_at from message_files where message_id in (${ids(out.messages)}) order by created_at`);
     return out;
   }
 

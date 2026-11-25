@@ -1,6 +1,6 @@
 // The one door to conversations. Every module that talks to a family (messages, requests) goes through here, so the rules live once:
 // only members read or write, a conversation has one family, limits, restrictions, quiet hours and the review banner.
-import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { users, type Tx } from "@smw/db";
 import { allows, ConflictError, ForbiddenError, pgErrorCode, NotFoundError, ReadOnlyError, ValidationError, type Ctx } from "@smw/feature-kit";
@@ -156,10 +156,14 @@ export async function addMember(tx: Tx, ctx: Ctx, threadId: string, who: Who, op
 
 // ---------- unread ----------
 
-/** Messages from others the person has not opened, per conversation. The inbox and the sidebar badge both read this, so they always agree. */
-export async function unreadByThread(tx: Tx, who: { userId: string; role: string }, threadIds?: string[]): Promise<Map<string, number>> {
+/**
+ * Messages from others the person has not opened, per conversation. The inbox and the sidebar badge both read this, so they always agree.
+ * Requests have their own badge: `requests: false` (the default) counts every other kind, `true` only requests, so no message is counted twice.
+ */
+export async function unreadByThread(tx: Tx, who: { userId: string; role: string }, threadIds?: string[], requests = false): Promise<Map<string, number>> {
   const rows = await tx.select({ threadId: messages.threadId, n: count() }).from(messages)
     .innerJoin(threadMembers, and(eq(threadMembers.threadId, messages.threadId), eq(threadMembers.userId, who.userId), eq(threadMembers.state, "active")))
+    .innerJoin(messageThreads, and(eq(messageThreads.id, messages.threadId), requests ? eq(messageThreads.kind, "request") : ne(messageThreads.kind, "request")))
     .where(and(
       sql`${messages.senderId} is distinct from ${who.userId}`, isNull(messages.removedAt), eq(messages.kind, "text"),
       isFamily(who.role) ? eq(messages.internal, false) : undefined,
@@ -271,6 +275,10 @@ export async function postMessage(tx: Tx, ctx: Ctx, input: PostInput): Promise<M
   return msg;
 }
 
+/** The only writers of a conversation's open or closed state; closed is read only. */
+export const closeThread = (tx: Tx, threadId: string, reason: string) => tx.update(messageThreads).set({ state: "closed", closedReason: reason }).where(eq(messageThreads.id, threadId));
+export const openThread = (tx: Tx, threadId: string) => tx.update(messageThreads).set({ state: "open", closedReason: null }).where(eq(messageThreads.id, threadId));
+
 /** A line from the system itself ("Closed: Mr Rao no longer teaches Riya"). No member, no notification: for jobs and admin actions. */
 export async function postSystem(tx: Tx, schoolId: string, threadId: string, text: string): Promise<void> {
   const [m] = await tx.insert(messages).values({ schoolId, threadId, senderId: null, senderName: "School", kind: "system", body: text.slice(0, 500) }).returning();
@@ -312,13 +320,17 @@ export async function loadThread(tx: Tx, threadId: string, viewer: Viewer, o: { 
   const family = isFamily(viewer.role);
   const limit = o.limit ?? THREAD_WINDOW;
   const settings = await loadCommSettings(tx);
-  const [members, recent, [stu]] = await Promise.all([
+  const [allMembers, recent, [stu], noteOnly] = await Promise.all([
     tx.select({ m: threadMembers, status: users.status }).from(threadMembers).leftJoin(users, eq(users.id, threadMembers.userId)).where(eq(threadMembers.threadId, thread.id)).orderBy(asc(threadMembers.createdAt)),
     tx.select({ m: messages, at: sql<string>`${messages.createdAt}::text` }).from(messages)
       .where(and(eq(messages.threadId, thread.id), family ? eq(messages.internal, false) : undefined, o.before ? sql`${messages.createdAt} < ${o.before}::timestamptz` : undefined))
       .orderBy(desc(messages.createdAt), desc(messages.id)).limit(limit + 1),
     thread.studentId ? tx.select({ name: students.name }).from(students).where(eq(students.id, thread.studentId)) : Promise.resolve([] as { name: string }[]),
+    // A family never learns that office staff were here: people who wrote only internal notes are not shown as members.
+    family ? tx.select({ id: messages.senderId }).from(messages).where(and(eq(messages.threadId, thread.id), eq(messages.kind, "text"), isNotNull(messages.senderId))).groupBy(messages.senderId).having(sql`bool_and(${messages.internal})`) : Promise.resolve([] as { id: string | null }[]),
   ]);
+  const hidden = new Set(noteOnly.map((n) => n.id));
+  const members = allMembers.filter((x) => !(x.m.userId && hidden.has(x.m.userId) && !isFamily(x.m.role)));
   const hasOlder = recent.length > limit;
   const page = recent.slice(0, limit).reverse();
   const ids = page.map((p) => p.m.id);

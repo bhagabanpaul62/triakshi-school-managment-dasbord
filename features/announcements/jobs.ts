@@ -34,8 +34,8 @@ class NoticeJobs extends SchoolService<Perm> {
   remind(now: Date): Promise<number> {
     return this.write("manage", async (tx) => {
       const day = (d: unknown) => sql`((${d}) at time zone 'Asia/Kolkata')::date`;
-      const open = await tx.select().from(announcements).where(and(eq(announcements.state, "published"), eq(announcements.remind, true), isNotNull(announcements.dueAt), sql`${announcements.response}->>'kind' <> 'none'`,
-        sql`${day(announcements.dueAt)} - ${day(sql`${now.toISOString()}::timestamptz`)} in (2, 0, -1)`));
+      const open = await tx.select().from(announcements).where(and(eq(announcements.state, "published"), isNotNull(announcements.dueAt), sql`${announcements.response}->>'kind' <> 'none'`,
+        sql`(case ${day(announcements.dueAt)} - ${day(sql`${now.toISOString()}::timestamptz`)} when 2 then ${announcements.reminders}->>'before' when 0 then ${announcements.reminders}->>'onDay' when -1 then ${announcements.reminders}->>'after' end) = 'true'`));
       let sent = 0;
       for (const n of open) sent += (await remindUnanswered(tx, this.ctx.schoolId, n, now)).sent;
       return sent;

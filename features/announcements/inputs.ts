@@ -47,7 +47,7 @@ export const draftInput = z.object({
   websiteOnly: flag,
   response: json(responseSpecSchema),
   dueAt: when,
-  remind: flag,
+  reminders: json(z.object({ before: z.boolean(), onDay: z.boolean(), after: z.boolean() })),
   website: flag,
   scheduledAt: when,
   expiresAt: when,

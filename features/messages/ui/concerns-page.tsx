@@ -21,7 +21,7 @@ export default async function ConcernsPage() {
           {rows.map((r) => (
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white/[0.04] p-4">
               <span className="min-w-0"><span className="block truncate text-sm text-[var(--ds-on-surface)]">{r.subject}</span><span className="block text-xs text-[var(--ds-on-surface-muted)]">{REPORT_CATEGORIES[r.category] ?? r.category}, {shortDate(r.createdAt)}</span></span>
-              <span className="flex items-center gap-2"><StateChip kind="report" state={REPORT_CHIP[r.state]} /><span className="sr-only">{REPORT_STATE_WORDS[r.state]}</span></span>
+              <span className="flex items-center gap-2"><StateChip kind="report" state={r.state} /></span>
             </li>
           ))}
         </ul>

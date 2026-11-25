@@ -1,7 +1,8 @@
 // Every communication state in one map, with no React, so services can use the labels in emails and exports.
 import type { Tone } from "../../lib/tone";
 
-export type CommKind = "notice" | "request" | "report" | "event" | "rsvp" | "slot" | "delivery";
+// Each kind lists exactly the states its module stores or derives (NOTICE_STATES, REQUEST_STATES, REPORT_STATES, MEETING_STATES, DELIVERY_STATES, events and slots).
+export type CommKind = "notice" | "request" | "family_request" | "report" | "event" | "rsvp" | "meeting" | "slot" | "delivery";
 export type CommIcon = "pencil" | "hourglass" | "clock" | "calendar" | "send" | "check" | "checks" | "eye" | "x" | "alert" | "ban" | "undo" | "archive" | "mailoff" | "question" | "dot";
 export type CommState = { label: string; tone: Tone; icon: CommIcon };
 
@@ -10,30 +11,35 @@ const s = (label: string, tone: Tone, icon: CommIcon): CommState => ({ label, to
 export const COMM_STATES: Record<CommKind, Record<string, CommState>> = {
   notice: {
     draft: s("Draft", "default", "pencil"),
-    pending_approval: s("Waiting for approval", "warning", "hourglass"),
+    waiting: s("Waiting for approval", "warning", "hourglass"),
     scheduled: s("Scheduled", "info", "clock"),
+    sending: s("Sending", "info", "send"),
     published: s("Published", "success", "check"),
     expired: s("Expired", "default", "clock"),
-    rejected: s("Sent back", "danger", "x"),
     withdrawn: s("Withdrawn", "default", "undo"),
-    archived: s("Archived", "default", "archive"),
   },
   request: {
-    submitted: s("Submitted", "info", "send"),
-    in_review: s("Being looked at", "warning", "eye"),
-    info_needed: s("Needs more details", "warning", "question"),
-    approved: s("Approved", "success", "check"),
-    done: s("Done", "success", "checks"),
-    rejected: s("Not approved", "danger", "x"),
-    withdrawn: s("Withdrawn", "default", "undo"),
-    cancelled: s("Cancelled", "default", "ban"),
-  },
-  report: {
-    new: s("New", "warning", "alert"),
-    in_review: s("Being looked at", "info", "eye"),
-    escalated: s("Escalated", "danger", "alert"),
+    new: s("New", "info", "send"),
+    assigned: s("Assigned", "info", "eye"),
+    in_progress: s("In progress", "warning", "clock"),
+    waiting: s("Waiting for family", "warning", "question"),
     resolved: s("Resolved", "success", "check"),
     closed: s("Closed", "default", "archive"),
+  },
+  /** The same request states in the family's words. */
+  family_request: {
+    new: s("Received", "info", "send"),
+    assigned: s("With the school", "info", "eye"),
+    in_progress: s("Being looked at", "warning", "clock"),
+    waiting: s("Waiting for you", "warning", "question"),
+    resolved: s("Answered", "success", "check"),
+    closed: s("Closed", "default", "archive"),
+  },
+  report: {
+    new: s("Received", "warning", "alert"),
+    reviewing: s("Being looked at", "info", "eye"),
+    action: s("Action taken", "success", "check"),
+    no_action: s("Looked at, no action needed", "default", "archive"),
   },
   event: {
     draft: s("Draft", "default", "pencil"),
@@ -41,7 +47,6 @@ export const COMM_STATES: Record<CommKind, Record<string, CommState>> = {
     today: s("Today", "warning", "calendar"),
     ongoing: s("Happening now", "success", "clock"),
     done: s("Over", "default", "check"),
-    postponed: s("Postponed", "warning", "clock"),
     cancelled: s("Cancelled", "danger", "ban"),
   },
   rsvp: {
@@ -50,25 +55,28 @@ export const COMM_STATES: Record<CommKind, Record<string, CommState>> = {
     not_going: s("Not going", "default", "x"),
     no_reply: s("No reply yet", "default", "clock"),
   },
+  meeting: {
+    draft: s("Draft", "default", "pencil"),
+    open: s("Open for booking", "info", "calendar"),
+    closed: s("Booking closed", "warning", "ban"),
+    done: s("Done", "default", "checks"),
+    cancelled: s("Cancelled", "danger", "ban"),
+  },
   slot: {
     open: s("Open", "info", "calendar"),
-    held: s("Held for you", "warning", "hourglass"),
+    break: s("Break", "default", "clock"),
     booked: s("Booked", "success", "check"),
-    confirmed: s("Confirmed", "success", "checks"),
-    completed: s("Completed", "default", "checks"),
-    missed: s("Did not happen", "danger", "alert"),
-    cancelled: s("Cancelled", "default", "ban"),
+    removed: s("Removed", "default", "ban"),
+    came: s("Came", "success", "checks"),
+    late: s("Came late", "warning", "clock"),
+    missed: s("Did not come", "danger", "alert"),
   },
   delivery: {
-    queued: s("Waiting to send", "default", "clock"),
-    held: s("Held for quiet hours", "warning", "hourglass"),
-    sent: s("Sent", "info", "send"),
-    delivered: s("Delivered", "success", "check"),
-    seen: s("Seen", "success", "eye"),
+    pending: s("Waiting to send", "default", "clock"),
+    sent: s("Sent", "success", "send"),
     failed: s("Failed", "danger", "alert"),
     bounced: s("Email bounced", "danger", "mailoff"),
-    suppressed: s("Not sent: turned off", "default", "mailoff"),
-    skipped: s("Skipped", "default", "ban"),
+    skipped: s("Not sent", "default", "ban"),
   },
 };
 

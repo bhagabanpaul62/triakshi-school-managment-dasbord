@@ -5,7 +5,10 @@ import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import { commSettings, notifications } from "@smw/feature-notifications/schema";
+import { MessageService } from "@smw/feature-messages/service";
 import { requestCategories, requests } from "./schema";
+import { REQUEST_STATES } from "./constants";
+import { COMM_STATES } from "@smw/ui/comm/states";
 import { CategoryService, ReportService, RequestService } from "./service";
 
 let a: TestSchool, b: TestSchool;
@@ -225,8 +228,49 @@ describe("acceptance 26: the life of a request", () => {
   it("staff write a request down for a family that has a login, and the family is told", async () => {
     const r = await svc(a.as.accountant).raise({ categoryId: cat.Fees, studentId: kid1, subject: "Fee talk", details: "Parent called about fees." });
     expect((await bell(a.as.student.userId, r.id))[0]).toMatchObject({ topic: "request.update" });
-    await expect(svc(a.as.teacher).raise({ categoryId: cat.Fees, studentId: kid1, subject: "x y", details: "z" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(svc(outsider).raise({ categoryId: cat.Fees, studentId: kid1, subject: "x y", details: "z" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(svc(a.as.student).raise({ categoryId: cat.Fees, studentId: kid2, subject: "Not mine", details: "z" })).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+describe("a teacher writes a request down", () => {
+  it("only for a student they teach, and only finds their own students", async () => {
+    const r = await svc(classTeacher).raise({ categoryId: cat.Academics, studentId: kid2, subject: "Phone call", details: "Parent called the class teacher." });
+    expect((await row(r.id)).raisedBy).toBe(classTeacher.userId);
+    expect((await bell(family2.userId, r.id))[0]).toMatchObject({ topic: "request.update" });
+    await expect(svc(outsider).raise({ categoryId: cat.Academics, studentId: kid2, subject: "Not mine", details: "z" })).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await svc(classTeacher).findStudents("Diya")).map((s) => s.id)).toEqual([kid2]);
+    expect(await svc(outsider).findStudents("Diya")).toEqual([]);
+    await expect(svc(a.as.student).findStudents("Diya")).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await svc(a.as.accountant).findStudents("Diya")).toHaveLength(1);
+  });
+});
+
+describe("one conversation, two badges", () => {
+  it("a request message is counted by Requests only, never by Messages, and never twice", async () => {
+    const { id, who } = await ask("Academics");
+    await svc(classTeacher).answer(id, "We looked into it.");
+    expect(await svc(who).unreadCount()).toBe(1);
+    expect(await new MessageService(who).unreadCount()).toBe(0);
+    expect((await new MessageService(who).inbox()).rows.some((r) => r.kind === "request")).toBe(false);
+    expect((await new MessageService(who).inbox({ view: "unread" })).rows).toHaveLength(0);
+    await svc(who).get(id);
+    expect(await svc(who).unreadCount()).toBe(0);
+  });
+
+  it("the family never sees office staff who only wrote internal notes", async () => {
+    const { id, who } = await ask("Academics");
+    await svc(a.as.admin).internalNote(id, "Be careful with this one.");
+    const names = async () => (await svc(who).get(id)).thread.members.map((m) => m.userId);
+    expect(await names()).not.toContain(a.as.admin.userId);
+    expect(await names()).toContain(classTeacher.userId);
+    expect((await svc(a.as.admin).get(id)).thread.members.map((m) => m.userId)).toContain(a.as.admin.userId);
+    await svc(a.as.admin).answer(id, "Answering openly now.");
+    expect(await names()).toContain(a.as.admin.userId);
+  });
+
+  it("every request state has words in the shared chip, for staff and for families", () => {
+    for (const s of REQUEST_STATES) for (const kind of ["request", "family_request"] as const) expect(COMM_STATES[kind][s]).toBeDefined();
   });
 });
 

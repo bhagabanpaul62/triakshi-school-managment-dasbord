@@ -2,7 +2,7 @@
 import { and, asc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, ValidationError, type Ctx } from "@smw/feature-kit";
-import { isFamily, type UploadedFile } from "@smw/feature-messages/core";
+import { closeThread, isFamily, openThread, type UploadedFile } from "@smw/feature-messages/core";
 import { leadIds } from "@smw/feature-messages/leads";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { type Viewer, scope } from "./access";
@@ -203,7 +203,7 @@ export abstract class RequestWorkflow extends RequestReads {
 
   private async closeRow(tx: Tx, r: Req, reason: string, set: Partial<typeof requests.$inferInsert> = {}) {
     await this.patch(tx, r.id, { state: "closed", closedAt: new Date(), pausedAt: null, ...set });
-    await this.setThread(tx, r, "closed", reason);
+    await closeThread(tx, r.threadId, reason);
     await NotificationWriter.done(tx, this.ctx.schoolId, subjectOf(r));
   }
 
@@ -240,7 +240,7 @@ export abstract class RequestWorkflow extends RequestReads {
   private async reopenRow(tx: Tx, r: Req, cat: Category, o: { reason?: string; solved?: boolean; feedback?: string | null }) {
     const state = this.go(r, "reopen");
     const v = isFamily(this.ctx.role);
-    await this.setThread(tx, r, "open");
+    await openThread(tx, r.threadId);
     if (!v) await this.joinThread(tx, r);
     await this.patch(tx, r.id, { state, resolvedAt: null, closedAt: null, pausedAt: null, dueAt: dueFor(new Date(), cat.targetDays), reopenedCount: r.reopenedCount + 1, ...(o.solved === undefined ? {} : { solved: o.solved, feedback: o.feedback ?? null }) });
     if (o.reason) await this.say(tx, r, o.reason, { asOffice: !v });
@@ -269,7 +269,7 @@ export abstract class RequestWorkflow extends RequestReads {
     if (!target) throw new ConflictError("There is no higher level to send this to.");
     const state = this.go(r, "escalate"), now = new Date(), fromFamily = r.state === "resolved";
     const route = await this.routeOf(tx, { ownerUserId: null, ownerRole: target.role, nature: cat.nature }, r);
-    if (fromFamily) await this.setThread(tx, r, "open");
+    if (fromFamily) await openThread(tx, r.threadId);
     if (route.ownerId) { const p = await this.person(tx, route.ownerId); if (p) await this.joinThread(tx, r, p); }
     await this.patch(tx, r.id, {
       state: fromFamily && !route.ownerId ? "new" : state, level: r.level + 1, ownerId: route.ownerId, ownerRole: route.ownerRole, dueAt: dueFor(now, target.afterDays),

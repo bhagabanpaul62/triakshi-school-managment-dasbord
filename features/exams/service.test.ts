@@ -327,6 +327,20 @@ describe("GradeScaleService", () => {
   });
 });
 
+describe("schedule notifications", () => {
+  it("scheduling tells each student login once, with a link to the admit card", async () => {
+    const svc = new ExamService(a.as.admin);
+    const { exam: e } = await svc.createWithPapers(exam("Unit Test Dates"));
+    const notes = () => withSchool(a.id, (tx) => tx.select().from(notifications).where(and(eq(notifications.userId, a.users.student), eq(notifications.topic, "exam.schedule"), eq(notifications.title, "Unit Test Dates: dates and admit card are ready"))));
+    expect(await notes()).toHaveLength(0); // a draft tells nobody
+    await svc.transition({ id: e.id, to: "scheduled" });
+    const [kid] = await notes();
+    expect(kid).toMatchObject({ subjectType: "exam-schedule", href: `/app/exams/${e.id}/admit-card/${fa.s1}` });
+    await svc.transition({ id: e.id, to: "scheduled" }); // a repeat is a no-op
+    expect(await notes()).toHaveLength(1);
+  });
+});
+
 describe("result notifications", () => {
   it("publishing tells each student login of the exam once, never the publisher", async () => {
     const { id, svc } = await openExam("Unit Test Notify");

@@ -19,7 +19,9 @@ const seed: FeatureSeed = async (admin, state) => {
   const office = new RequestService(admin);
   const late = (id: string) => withSchool(admin.schoolId, (tx) => tx.update(requests).set({ dueAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(requests.id, id)));
 
-  await raise(family(0), "Fees", "Fee receipt not received", "We paid the second instalment last week but have no receipt yet.");
+  // Waiting in the team queue: nobody has claimed it yet.
+  const fresh = await raise(family(0), "Fees", "Fee receipt not received", "We paid the second instalment last week but have no receipt yet.");
+  await withSchool(admin.schoolId, (tx) => tx.update(requests).set({ ownerId: null, state: "new" }).where(eq(requests.id, fresh)));
 
   const answered = await raise(family(1), "Academics", "Extra help in Maths", "Could he get some extra help for the unit test next week?");
   await office.answer(answered, "Yes. The Maths teacher will give an extra class on Thursday after school.");

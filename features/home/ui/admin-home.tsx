@@ -9,10 +9,10 @@ import { KpiRow } from "@smw/ui/shell/PageHeader";
 import { MenuIconView } from "@smw/ui/shell/icons";
 import { tilePaise as tile } from "@smw/ui/format";
 import type { AdminHome } from "../home-service";
-import { attendanceTone, isSunday, plural, planTone } from "../rules";
+import { attendanceTone, plural, planTone } from "../rules";
 import { FeeTrend } from "./fee-trend";
 import { PanelRow, Rows, SlotPanel } from "./layout";
-import { AnnouncementsBody, EventsBody, NextStep, open } from "./parts";
+import { AnnouncementsBody, EventsBody, NeedsActionBody, NextStep, RequestsBody, open } from "./parts";
 
 const ICON = { attendance: "check", fees: "money", marks: "exam", support: "support", enquiries: "inbox" } as const;
 
@@ -25,11 +25,15 @@ export function AdminHomeView({ d }: { d: AdminHome }) {
     <>
       <KpiRow>
         {cap ? <StatCard label="Students" value={String(cap.active)} icon={<MenuIconView name="users" />} meta={`of ${cap.cap} on your plan`} href="/app/students" /> : null}
-        {att ? <StatCard label="Attendance today" value={att.pct === null ? "-" : `${Math.round(att.pct)}%`} icon={<MenuIconView name="check" />} meta={att.marked ? `${plural(att.absent, "student")} absent` : isSunday(att.date) ? "Sunday, no classes" : "Not marked yet"} href="/app/attendance" /> : null}
+        {att ? <StatCard label="Attendance today" value={att.pct === null ? "-" : `${Math.round(att.pct)}%`} icon={<MenuIconView name="check" />} meta={att.marked ? `${plural(att.absent, "student")} absent` : att.dayOff ? `${att.dayOff}, no classes` : "Not marked yet"} href="/app/attendance" /> : null}
         {fees ? <StatCard label="Collected this month" value={tile(fees.collectedThisMonth)} icon={<MenuIconView name="money" />} meta={plural(fees.receiptsThisMonth, "receipt")} href="/app/fees" /> : null}
         {fees ? <StatCard label="Outstanding" value={tile(fees.outstanding)} icon={<MenuIconView name="receipt" />} meta={fees.overdueCount ? `${plural(fees.overdueCount, "student")} overdue` : "Nobody is overdue"} href="/app/fees/dues?overdue=1" /> : null}
       </KpiRow>
       <Rows>
+        <PanelRow cells={[
+          { slot: d.needsAction, size: 7, node: <SlotPanel slot={d.needsAction} title="Needs action" action={open("/app/notifications?tab=action", "All that needs action")}>{(rows) => <NeedsActionBody rows={rows} />}</SlotPanel> },
+          { slot: d.requests, size: 5, node: <SlotPanel slot={d.requests} title="Requests" action={open("/app/requests", "Open requests")}>{(r) => <RequestsBody r={r} />}</SlotPanel> },
+        ]} />
         <PanelRow cells={[
           { slot: d.attention, size: 7, node: (
             <SlotPanel slot={d.attention} title="Needs attention">
@@ -47,8 +51,8 @@ export function AdminHomeView({ d }: { d: AdminHome }) {
           ) },
           { slot: d.attendance, size: 5, node: (
             <SlotPanel slot={d.attendance} title="Attendance today" action={open("/app/attendance", "Open attendance")}>
-              {(a) => a.marked === 0 && isSunday(a.date) ? (
-                <WidgetEmptyState title="No classes today." description="It is Sunday. Attendance starts again on Monday." />
+              {(a) => a.marked === 0 && a.dayOff ? (
+                <WidgetEmptyState title="No classes today." description={`${a.dayOff}. Attendance starts again on the next school day.`} />
               ) : a.marked === 0 ? (
                 <>
                   <WidgetEmptyState title="Attendance is not marked yet." description="Class teachers mark it from the Attendance page. It shows here as they save." />

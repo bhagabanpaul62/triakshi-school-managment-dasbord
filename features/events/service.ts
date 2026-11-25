@@ -3,14 +3,14 @@ import { and, asc, eq, gte, inArray, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { ConflictError, CrudService, ForbiddenError, NotFoundError, ValidationError, type Ctx } from "@smw/feature-kit";
 import { users, type Tx } from "@smw/db";
-import { closedSet } from "@smw/feature-attendance/holidays";
+import { closedDays, closedSet } from "@smw/feature-attendance/holidays";
 import { describeAudience } from "@smw/feature-notifications/audience";
 import { isEveryone, type Audience } from "@smw/feature-notifications/audience-rules";
 import { AudiencePolicy } from "@smw/feature-notifications/policy";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
 import { canRun, mustRun } from "./access";
 import { MAX_REPEAT, type Scope } from "./constants";
-import { allDaySpan, istDay, monthRange } from "./dates";
+import { addDays, allDaySpan, istDay, monthRange } from "./dates";
 import eventsFeature from "./feature";
 import { EventFiles, MAX_FILES, type StoredFile, type UploadedFile } from "./files";
 import { cancelInput, createInput, scopeInput, updateInput, type CreateInput, type UpdateInput } from "./inputs";
@@ -89,6 +89,21 @@ export class EventService extends CrudService<typeof events, Perm> {
   /** Public events for the school website (no login). Only events for everyone ever appear, whoever asks. */
   async publicEvents(limit = 6) {
     return this.read("read", (tx) => tx.select().from(events).where(and(eq(events.isPublic, true), eq(events.state, "live"), forEveryone, gte(endOf, sql`now()`))).orderBy(asc(events.startsAt), asc(events.id)).limit(limit));
+  }
+
+  /** Coming whole-school holidays for the website, one entry per break. */
+  async publicHolidays(limit = 6): Promise<{ title: string; startsOn: string }[]> {
+    const today = istDay(new Date());
+    return this.read("read", async (tx) => {
+      const out: { title: string; startsOn: string; last: string }[] = [];
+      for (const [date, c] of await closedDays(tx, today, addDays(today, 180), { staff: true })) {
+        if (c.kind === "sunday") continue;
+        const prev = out.at(-1);
+        if (prev && prev.title === c.name && addDays(prev.last, 2) >= date) prev.last = date;
+        else out.push({ title: c.name, startsOn: date, last: date });
+      }
+      return out.slice(0, limit).map(({ title, startsOn }) => ({ title, startsOn }));
+    });
   }
 
   /** The event page: the event, its files, its place in a series, the caller's answer, and counts for the person who runs it. Opening it clears its bell row. */

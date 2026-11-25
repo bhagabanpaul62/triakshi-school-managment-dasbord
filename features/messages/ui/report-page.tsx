@@ -19,7 +19,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   return (
     <>
       <PageHeader eyebrow="Safeguarding" title={REPORT_CATEGORIES[r.category] ?? r.category} description={`${r.subject}${r.studentName ? `, about ${r.studentName}` : ""}. Reported by ${r.reporter}, ${dateTime(r.createdAt)}.`}
-        actions={<><StateChip kind="report" state={REPORT_CHIP[r.state]} /><Link href="/app/safeguarding" className="text-sm text-[var(--ds-on-surface-muted)] underline">All concerns</Link></>} />
+        actions={<><StateChip kind="report" state={r.state} /><Link href="/app/safeguarding" className="text-sm text-[var(--ds-on-surface-muted)] underline">All concerns</Link></>} />
       <div className="grid gap-3 lg:grid-cols-2">
         <Panel title="What was reported">
           <p className="whitespace-pre-wrap text-sm text-[var(--ds-on-surface)]">{r.note}</p>

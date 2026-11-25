@@ -1246,12 +1246,18 @@ importers:
       '@smw/feature-library':
         specifier: workspace:*
         version: link:../library
+      '@smw/feature-meetings':
+        specifier: workspace:*
+        version: link:../meetings
       '@smw/feature-messages':
         specifier: workspace:*
         version: link:../messages
       '@smw/feature-notifications':
         specifier: workspace:*
         version: link:../notifications
+      '@smw/feature-requests':
+        specifier: workspace:*
+        version: link:../requests
       '@smw/feature-settings':
         specifier: workspace:*
         version: link:../settings

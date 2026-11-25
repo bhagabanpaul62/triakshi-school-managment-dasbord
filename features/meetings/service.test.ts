@@ -450,3 +450,15 @@ describe("jobs", () => {
     await expect(admin().cancel(m.id, { reason: "late" })).rejects.toBeInstanceOf(ConflictError);
   });
 });
+
+describe("Add to calendar (slotForCalendar)", () => {
+  it("shows a booked time to its family, its teacher and a manager, and to nobody else", async () => {
+    const m = await openMeeting();
+    const slot = (await freeOf(m.id, ids.t1))[0]!.id;
+    await new BookingService(a.as.student).book(m.id, { slotId: slot });
+    const get = (ctx: Ctx) => new BookingService(ctx).slotForCalendar(slot);
+    for (const ctx of [a.as.student, a.as.teacher, a.as.admin]) expect(await get(ctx)).toMatchObject({ id: slot, teacher: expect.any(String), student: "Aarav Sharma" });
+    for (const ctx of [ids.ctx.riya, ids.ctx.t2, b.as.admin]) await expect(get(ctx)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(get(a.as.student).then(() => new BookingService(a.as.student).slotForCalendar("not-a-slot"))).rejects.toBeInstanceOf(NotFoundError);
+  });
+});

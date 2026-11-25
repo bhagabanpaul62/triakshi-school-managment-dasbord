@@ -8,7 +8,7 @@ import { shortDate } from "@smw/ui/format";
 import type { TeacherHome } from "../home-service";
 import { attendanceTone, clock12, plural } from "../rules";
 import { PanelRow, Rows, SlotPanel } from "./layout";
-import { AnnouncementsBody, TimetableBody, open } from "./parts";
+import { AnnouncementsBody, MeetingsTodayBody, NeedsActionBody, TimetableBody, open } from "./parts";
 
 export function TeacherHomeView({ d }: { d: TeacherHome }) {
   const periods = d.today.state === "ok" ? d.today.data : null;
@@ -22,13 +22,17 @@ export function TeacherHomeView({ d }: { d: TeacherHome }) {
     <>
       <KpiRow>
         {periods ? <StatCard label="Periods today" value={String(teaching.length)} icon={<MenuIconView name="clock" />} href="/app/timetable"
-          meta={periods.day === null ? "No classes on Sunday" : next ? `${next.state === "now" ? "Now" : "Next"}: ${next.subject ?? next.name} at ${clock12(next.startsAt)}` : teaching.length ? "All done for today" : "Nothing scheduled"} /> : null}
+          meta={periods.dayOff ? `No classes: ${periods.dayOff}` : periods.day === null ? "No periods set for today" : next ? `${next.state === "now" ? "Now" : "Next"}: ${next.subject ?? next.name} at ${clock12(next.startsAt)}` : teaching.length ? "All done for today" : "Nothing scheduled"} /> : null}
         {unmarked ? <StatCard label="Attendance to mark" value={String(unmarked.length)} icon={<MenuIconView name="check" />} href="/app/attendance"
           meta={d.toMark.state === "ok" && d.toMark.data.dayOff ? `No attendance: ${d.toMark.data.dayOff}` : unmarked.length ? plural(unmarked.reduce((n, r) => n + r.students, 0), "student") : "All marked"} /> : null}
         {grading ? <StatCard label="To grade" value={String(grading.toGrade)} icon={<MenuIconView name="assignment" />} href="/app/assignments" meta={grading.toGrade ? "Submissions waiting" : "Nothing waiting"} /> : null}
         {marks ? <StatCard label="Marks to enter" value={String(marks.length)} icon={<MenuIconView name="exam" />} href="/app/exams" meta={marks.length ? "Exam papers with missing marks" : "Nothing pending"} /> : null}
       </KpiRow>
       <Rows>
+        <PanelRow cells={[
+          { slot: d.needsAction, size: 7, node: <SlotPanel slot={d.needsAction} title="Needs action" action={open("/app/notifications?tab=action", "All that needs action")}>{(rows) => <NeedsActionBody rows={rows} />}</SlotPanel> },
+          { slot: d.meetings, size: 5, node: <SlotPanel slot={d.meetings} title="Parent meetings today" action={open("/app/meetings", "Open meetings")}>{(rows) => <MeetingsTodayBody rows={rows} />}</SlotPanel> },
+        ]} />
         <PanelRow cells={[
           { slot: d.today, size: 8, node: <SlotPanel slot={d.today} title="Today's periods" action={open("/app/timetable", "Open timetable")}>{(t) => <TimetableBody t={t} emptyHint="Ask the office to add you to the timetable." />}</SlotPanel> },
           { slot: d.toMark, size: 4, node: (

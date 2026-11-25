@@ -1,5 +1,5 @@
 import { and, asc, count, eq, sql } from "drizzle-orm";
-import type { Tx } from "@smw/db";
+import { schoolRoles, type Tx } from "@smw/db";
 import { ConflictError, NotFoundError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import type { EscalationLevel, RequestField } from "./constants";
 import requestsFeature from "./feature";
@@ -50,6 +50,14 @@ export class CategoryService extends SchoolService<Perm> {
     return this.seeded("use", async (tx) => {
       const rows = await tx.select().from(requestCategories).where(eq(requestCategories.active, true)).orderBy(asc(requestCategories.sort), asc(requestCategories.name));
       return rows.map((c) => ({ id: c.id, name: c.name, nature: c.nature, fields: c.fields }));
+    });
+  }
+
+  /** Who a category may be given to: the built-in roles, the class teacher of the child, and the school's own roles. */
+  async roleOptions(): Promise<{ value: string; label: string }[]> {
+    return this.read("manage", async (tx) => {
+      const own = await tx.select({ id: schoolRoles.id, name: schoolRoles.name }).from(schoolRoles).orderBy(asc(schoolRoles.name));
+      return [{ value: "class_teacher", label: "Class teacher of the child" }, { value: "admin", label: "Admin" }, { value: "accountant", label: "Accountant" }, { value: "teacher", label: "Any teacher" }, ...own.map((r) => ({ value: r.id, label: r.name }))];
     });
   }
 

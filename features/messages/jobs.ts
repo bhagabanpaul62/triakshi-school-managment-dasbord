@@ -3,7 +3,7 @@ import { eq, schools, sql, users, withConsole, withSchool } from "@smw/db";
 import { and } from "drizzle-orm";
 import { loadCommSettings } from "@smw/feature-notifications/settings";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
-import { postSystem, removeStored } from "./core";
+import { closeThread, postSystem, removeStored } from "./core";
 
 type Row = Record<string, unknown>;
 const rows = async <T extends Row>(tx: Parameters<Parameters<typeof withSchool>[1]>[0], q: ReturnType<typeof sql>) => [...(await tx.execute(q))] as unknown as T[];
@@ -24,7 +24,7 @@ export async function lapse(schoolId: string): Promise<{ closed: number }> {
               or exists (select 1 from section_teachers st where st.section_id = sec.id and st.teacher_id = u.id))))))`);
     for (const t of found) {
       const reason = t.left ? `${t.student} has left the school.` : `${t.teachers.length ? t.teachers.join(" and ") : "The teacher"} no longer teaches ${t.student}.`;
-      await tx.execute(sql`update message_threads set state = 'closed', closed_reason = ${reason} where id = ${t.id}::uuid`);
+      await closeThread(tx, t.id, reason);
       await postSystem(tx, schoolId, t.id, `Closed: ${reason} An admin can move it to the new teacher.`);
     }
     if (found.length) {

@@ -7,8 +7,6 @@ export const REPORT_STATES = ["new", "reviewing", "action", "no_action"] as cons
 export type ReportState = (typeof REPORT_STATES)[number];
 export const REPORT_CATEGORIES = { unsafe: "Someone may be unsafe", abusive: "Rude or abusive", inappropriate: "Inappropriate for a child", pressure: "Pressure, threat or money", other: "Something else" } as const;
 export type ReportCategory = keyof typeof REPORT_CATEGORIES;
-/** What the shared StateChip calls each report state. */
-export const REPORT_CHIP: Record<ReportState, string> = { new: "new", reviewing: "in_review", action: "resolved", no_action: "closed" };
 export const REPORT_STATE_WORDS: Record<ReportState, string> = { new: "Received", reviewing: "Being looked at", action: "Action taken", no_action: "Looked at, no action needed" };
 export type RestrictionKind = "reply_only" | "blocked";
 export const RESTRICTION_WORDS: Record<RestrictionKind, string> = { reply_only: "Can reply, cannot start new conversations", blocked: "Cannot send any message" };

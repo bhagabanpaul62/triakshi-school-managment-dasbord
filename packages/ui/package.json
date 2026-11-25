@@ -12,6 +12,7 @@
     "./money": "./src/lib/hooks/useCurrency.ts",
     "./finance/document-types": "./src/components/finance/document-types.ts",
     "./finance/logic": "./src/components/finance/logic.ts",
+    "./finance/ui": "./src/components/finance/ui.ts",
     "./finance/*": "./src/components/finance/*.tsx",
     "./comm/states": "./src/components/comm/states.ts",
     "./comm/*": "./src/components/comm/*.tsx",

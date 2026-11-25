@@ -452,7 +452,10 @@ describe("sending: client id, quiet hours, away, files, removal (M6, M8, M9, M17
     const t = await sql_((tx) => createThread(tx, w.a.as.admin, { kind: "request", subject: "Certificate", studentId: w.st1.id, members: [{ userId: w.a.as.student.userId }] }));
     await sql_((tx) => postMessage(tx, w.a.as.admin, { threadId: t.id, body: "Please bring the old one.", asOffice: true }));
     await sql_((tx) => postMessage(tx, w.a.as.admin, { threadId: t.id, body: "Parent is hard to reach, call twice.", internal: true }));
-    expect((await svc(w.a.as.student).inbox()).rows.find((r) => r.id === t.id)!.unread).toBe(1);
+    // requests have their own list and badge: never in the Messages inbox or count, counted once by the request counter
+    expect((await svc(w.a.as.student).inbox()).rows.some((r) => r.id === t.id)).toBe(false);
+    expect((await sql_((tx) => unreadByThread(tx, w.a.as.student))).has(t.id)).toBe(false);
+    expect((await sql_((tx) => unreadByThread(tx, w.a.as.student, undefined, true))).get(t.id)).toBe(1);
     const fam = await svc(w.a.as.student).thread(t.id);
     expect(fam.messages.map((m) => m.body)).toEqual(["Please bring the old one."]);
     expect(fam.messages[0]!.sender).toMatch(/^School office \(/);

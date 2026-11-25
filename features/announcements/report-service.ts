@@ -28,6 +28,7 @@ const cell = (v: string | number | null | undefined) => {
 };
 const sentFor = (noticeId: string) => sql`exists (select 1 from notifications n join comm_deliveries d on d.notification_id = n.id
   where n.subject_type = 'notice' and n.subject_id = ${noticeId} and n.user_id = ${announcementRecipients.userId} and d.state = 'sent')`;
+const NO_ONE = "00000000-0000-0000-0000-000000000000";
 const SENT_STATES = ["sending", "published", "expired", "withdrawn"];
 
 /**
@@ -161,6 +162,18 @@ export class ReportService extends NoticeBase {
     });
   }
 
+  /** Remind only these people (the ones ticked in the table), under the same once-a-day rule. */
+  async nudgeSome(id: string, recipientIds: string[]): Promise<{ sent: number; alreadyToday: number }> {
+    return this.write("read", async (tx) => {
+      const n = await this.notice(tx, id);
+      if (n.state !== "published" || n.response.kind === "none") throw new ConflictError("There is nothing to answer on this notice.");
+      if (n.dueAt && n.dueAt.getTime() < Date.now()) throw new ConflictError("The last date has passed, so answers are locked.");
+      const out = await remindUnanswered(tx, this.ctx.schoolId, n, new Date(), recipientIds);
+      await this.audit(tx, { action: "nudge", entity: "Notice", entityId: n.id, summary: `Reminded ${out.sent} chosen people to answer "${n.title}"` });
+      return out;
+    });
+  }
+
   /** Tell again the people who have not opened it (`unseen`) or who we cannot show was delivered (`unreached`). People with no login need the sign sheet. */
   async resend(id: string, to: "unseen" | "unreached"): Promise<{ sent: number; noLogin: number }> {
     return this.write("read", async (tx) => {
@@ -201,9 +214,10 @@ export class ReportService extends NoticeBase {
 }
 
 /** Remind everyone who has not answered and was not reminded in the last 24 hours. Shared by the button and the job. */
-export async function remindUnanswered(tx: Tx, schoolId: string, n: Notice, now = new Date()): Promise<{ sent: number; alreadyToday: number }> {
+export async function remindUnanswered(tx: Tx, schoolId: string, n: Notice, now = new Date(), only?: string[]): Promise<{ sent: number; alreadyToday: number }> {
   const gap = new Date(now.getTime() - NUDGE_GAP_MS);
   const unanswered = and(eq(announcementRecipients.announcementId, n.id), isNull(announcementRecipients.removedAt), sql`${announcementRecipients.userId} is not null`,
+    only ? inArray(announcementRecipients.id, only.length ? only : [NO_ONE]) : undefined,
     sql`not exists (select 1 from announcement_responses a where a.recipient_id = ${announcementRecipients.id})`);
   const due = await tx.update(announcementRecipients).set({ nudgedAt: now }).where(and(unanswered, or(isNull(announcementRecipients.nudgedAt), lt(announcementRecipients.nudgedAt, gap))))
     .returning({ userId: announcementRecipients.userId });

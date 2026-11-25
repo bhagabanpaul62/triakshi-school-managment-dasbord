@@ -264,8 +264,13 @@ describe("circular numbers (11)", () => {
     await expect(new CircularService(A().admin).pdf((await publishNow(A().admin, { title: "Plain", body: "x", audience: ALL })).id)).rejects.toBeInstanceOf(ConflictError);
     const { verifyToken } = await import("./verify");
     const found = await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)));
-    expect(found).toMatchObject({ number, ok: true, status: "Genuine", studentName: null });
+    expect(found).toMatchObject({ number, ok: true, status: "Genuine", studentName: null, title: "Uniform change", text: null });
+    expect(found).not.toHaveProperty("amountPaise");
     expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, "0".repeat(32)))).toBeNull();
+    const web = await publishNow(A().admin, { type: "circular", title: "On the website", body: "Open to all", audience: ALL, website: true });
+    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, web.id)))).toMatchObject({ text: "Open to all" });
+    await new NoticeService(A().admin).withdraw(web.id, "Wrong circular");
+    expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, web.id)))).toMatchObject({ ok: false, status: "Withdrawn by the school", text: null });
     await new NoticeService(A().admin).withdraw(id, "Wrong circular");
     expect(await withSchool(fx.school.id, (tx) => announcementsVerifyLookups.circular!(tx, verifyToken(fx.school.id, id)))).toMatchObject({ ok: false, status: "Withdrawn by the school" });
     // another school's lookup never finds it
@@ -481,8 +486,8 @@ describe("answers (8, 9)", () => {
   });
 
   it("9: the reminder job picks notices due in two days, today or yesterday, and skips ones with reminders off", async () => {
-    const mk = (title: string, days: number, remind = true) => publishNow(A().admin, { title, body: "x", audience: section(fx.ids.s5b!), response: { kind: "ack" }, dueAt: new Date(Date.now() + days * 864e5).toISOString(), remind });
-    const two = await mk("Due in two", 2), far = await mk("Due far", 9), off = await mk("Reminders off", 2, false);
+    const mk = (title: string, days: number, reminders = { before: true, onDay: true, after: true }) => publishNow(A().admin, { title, body: "x", audience: section(fx.ids.s5b!), response: { kind: "ack" }, dueAt: new Date(Date.now() + days * 864e5).toISOString(), reminders });
+    const two = await mk("Due in two", 2), far = await mk("Due far", 9), off = await mk("Reminders off", 2, { before: false, onDay: true, after: true });
     await responseReminders(new Date());
     const got = async (id: string) => (await notes(fx.ids.cyUser!, id))[0]!.count;
     expect(await got(two.id)).toBe(2);
@@ -751,5 +756,36 @@ describe("AnnouncementService for home, the website and the API", () => {
     await new NoticeService(A().admin).withdraw(pub.id, "Wrong date");
     expect(await news()).not.toContain("Shown at first");
     expect(quiet.id).toBeTruthy();
+  });
+});
+
+describe("what the screens need", () => {
+  it("the write page knows what a person may do; a teacher in their own section goes free, beyond it needs approval", async () => {
+    const teacher = new NoticeService(A().teacher);
+    expect(teacher.mayDo()).toEqual({ draft: true, publish: true, urgent: false, website: false });
+    expect(await teacher.reachFor(section(fx.ids.s5a!))).toMatchObject({ mode: "free" });
+    expect(await teacher.reachFor(ALL)).toMatchObject({ mode: "approval" });
+  });
+
+  it("release sends a notice during its 30 seconds; the author filter lists writers; nudge reaches only the chosen", async () => {
+    const svc = new NoticeService(A().admin);
+    const { id } = await svc.saveDraft({ title: "Go now", body: "x", audience: section(fx.ids.s5b!), response: { kind: "ack" } });
+    await svc.publish(id);
+    await svc.release(id);
+    expect((await row(id)).state).toBe("published");
+    await expect(svc.release(id)).rejects.toBeInstanceOf(ConflictError);
+    expect((await svc.authors()).map((a) => a.id)).toContain(fx.school.users.admin);
+    const report = new ReportService(A().admin);
+    const people = await report.people(id, {});
+    expect(await report.nudgeSome(id, [])).toEqual({ sent: 0, alreadyToday: 0 });
+    expect(await report.nudgeSome(id, [people.rows[0]!.recipientId])).toMatchObject({ sent: 1 });
+    expect(await new FeedService(A().admin).urgentUnopened()).toEqual([]);
+  });
+
+  it("the register lists the sessions and the id of each circular", async () => {
+    const c = await publishNow(A().admin, { type: "circular", title: "For the register", body: "x", audience: ALL });
+    const reg = new CircularService(A().admin);
+    expect((await reg.sessions()).length).toBeGreaterThan(0);
+    expect((await reg.register()).rows.map((r) => r.id)).toContain(c.id);
   });
 });

@@ -5,6 +5,8 @@ import { ConflictError, NotFoundError } from "@smw/feature-kit";
 import { monthEnd, todayIST } from "@smw/feature-kit/money";
 import { nextNumber, postJournal, reverseJournal, type PostLine, type Poster } from "@smw/feature-finance/posting";
 import { finJournals, finTemplates } from "@smw/feature-finance/schema";
+import { NotificationWriter } from "@smw/feature-notifications/writer";
+import { monthLabel } from "./csv";
 import { defaultSources, type Sources } from "./sources";
 import { ratesOf, repaid, type ItemRow, type LineRow } from "./compute";
 import { bankOf } from "./bank";
@@ -118,10 +120,17 @@ export async function approveRun(tx: Tx, poster: Poster, runId: string, approved
   if (blockers.length) throw new ConflictError(`${blockers.length} thing${blockers.length === 1 ? "" : "s"} must be fixed first: ${blockers[0]!.message} Withdraw the request and reopen the run to fix it.`);
   const today = todayIST(), date = run.kind === "monthly" && monthEnd(run.month) < today ? monthEnd(run.month) : today;
   const [tpl] = await tx.select({ v: finTemplates.version }).from(finTemplates).where(and(eq(finTemplates.kind, "payslip"), eq(finTemplates.isCurrent, true)));
+  const numbered: typeof live = [];
   for (const i of live) {
     if (i.payslipNo) continue;
+    numbered.push(i);
     await tx.update(payItems).set({ payslipNo: await nextNumber(tx, run.schoolId, "payslip", date), templateVersion: tpl?.v ?? 0 }).where(eq(payItems.id, i.id));
   }
+  // A payslip is the person's own the moment it gets a number (a re-approved run keeps its numbers and tells nobody twice). The words never say the amount.
+  await NotificationWriter.insert(tx, run.schoolId, numbered.map((i) => ({
+    userId: i.userId, topic: "payroll.payslip" as const, title: `Your payslip for ${monthLabel(run.month)} is ready`, body: "Sign in to open it.", href: "/app/payroll/me",
+    subject: { type: "payslip", id: i.id }, privateBody: true,
+  })));
   // Freeze how each person is paid: payouts and the bank file use this, whatever the profile says later.
   for (const i of live) await tx.update(payItems).set({ snapshot: { ...i.snapshot, bank: bankOf(profiles.find((p) => p.userId === i.userId)) } }).where(eq(payItems.id, i.id));
   const liveIds = new Set(live.map((i) => i.id));

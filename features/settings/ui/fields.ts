@@ -70,3 +70,10 @@ export const passwordFields: Field[] = [
 export const studentExportFields = (options: { value: string; label: string }[]): Field[] => [
   { name: "studentId", label: "Student", type: "select", required: true, wide: true, options },
 ];
+
+export const exportSchoolFields: Field[] = [
+  { name: "includePayroll", label: "Payroll", type: "checkbox", placeholder: "Include salaries and payslips", hint: "PAN and bank numbers are never exported.", wide: true },
+  { name: "includePrivate", label: "Private conversations", type: "checkbox", placeholder: "Include private conversations and requests", wide: true,
+    hint: "Messages between staff and families, and requests. Reports and reviews also need the safeguarding permission." },
+  { name: "reason", label: "Why do you need them?", type: "textarea", wide: true, hint: "Only needed if you ticked private conversations. It is saved in the audit log." },
+];

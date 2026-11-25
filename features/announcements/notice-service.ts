@@ -3,6 +3,7 @@ import { users, type Tx } from "@smw/db";
 import { ConflictError, ForbiddenError, ValidationError, toPage, type Page } from "@smw/feature-kit";
 import { audiencePreview, describeAudience } from "@smw/feature-notifications/audience";
 import { NotificationWriter } from "@smw/feature-notifications/writer";
+import { audienceField } from "@smw/feature-notifications/audience-rules";
 import { quietUntil } from "@smw/feature-notifications/quiet";
 import { publicAudience, contentOf, snapshotOf, readyErrors, plain, EMPTY, NO_AUDIENCE, CONTENT_KEYS, isWebsiteOnly, type Notice, type NoticeContent } from "./content";
 import { NoticeBase } from "./base";
@@ -75,6 +76,28 @@ export class NoticeService extends NoticeBase {
         recipients: agg.get(n.id)?.recipients ?? 0, seen: agg.get(n.id)?.seen ?? 0, answered: agg.get(n.id)?.answered ?? 0,
       })), Number(total[0]?.n ?? 0), { page: q.page, pageSize: q.pageSize, dir: "desc", filters: {} });
     });
+  }
+
+  /** What this person may do before any notice exists: the write page shows or hides its choices from this. */
+  mayDo(): { draft: boolean; publish: boolean; urgent: boolean; website: boolean } {
+    this.staffOnly();
+    return { draft: this.can("draft"), publish: this.can("publish"), urgent: this.can("urgent"), website: this.websiteAllowed() };
+  }
+
+  /** Whether this audience goes out at once or needs approval, and who would approve. Same rule as publish. */
+  async reachFor(input: unknown): Promise<{ mode: "free" | "approval"; approvers: string[] }> {
+    this.staffOnly();
+    const audience = this.parse(audienceField, input);
+    return this.read("draft", async (tx) => ({
+      mode: this.can("publish") ? await this.reach(tx, audience, "publish") : "approval",
+      approvers: (await this.approvers(tx)).filter((a) => a.id !== this.ctx.userId).map((a) => a.name),
+    }));
+  }
+
+  /** The people who wrote the notices this person can see, for the author filter. */
+  async authors(): Promise<{ id: string; name: string }[]> {
+    this.staffOnly();
+    return this.read("read", (tx) => tx.selectDistinct({ id: users.id, name: users.name }).from(announcements).innerJoin(users, eq(users.id, announcements.createdBy)).where(this.visible()).orderBy(asc(users.name)));
   }
 
   /** Numbers for the tabs, over what this person may see. */
@@ -334,6 +357,21 @@ export class NoticeService extends NoticeBase {
       await this.audit(tx, { action: "undo", entity: "Notice", entityId: n.id, summary: `Undid sending "${n.title}"` });
       return { id: n.id };
     });
+  }
+
+  /** "Send now" during the 30 seconds: it goes out at once, the undo is gone. */
+  async release(id: string): Promise<{ id: string }> {
+    this.staffOnly();
+    await this.write("publish", async (tx) => {
+      const n = await this.find(tx, id, true);
+      this.own(n);
+      if (n.state !== "sending" || n.fannedOutAt) throw new ConflictError("It is already on its way.");
+      transition(n.state, "fanOut");
+      await tx.update(announcements).set({ sendAt: new Date(), updatedAt: new Date() }).where(eq(announcements.id, n.id));
+      await this.audit(tx, { action: "publish", entity: "Notice", entityId: n.id, summary: `Sent "${n.title}" without waiting` });
+    });
+    await fanOut(this.ctx.schoolId, id);
+    return { id };
   }
 
   /** A scheduled notice goes now. */

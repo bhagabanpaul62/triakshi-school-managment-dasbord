@@ -12,6 +12,7 @@ import { staffProfiles } from "@smw/feature-staff/schema";
 import { students } from "@smw/feature-students/schema";
 import { SiteService, ThemeService } from "@smw/feature-website/service";
 import { schoolSites } from "@smw/feature-website/schema";
+import { communicationSteps, type CommStep } from "./communication";
 import setupFeature from "./feature";
 import { classesStepInput, profileStepInput, subjectsStepInput, teachersStepInput, websiteStepInput, yearStepInput } from "./inputs";
 import { BANDS, aprilToMarch, bandOf, boardPreset, sectionNames, splitTerms, yearNameOn, type BandKey } from "./presets";
@@ -124,6 +125,11 @@ export class SetupService extends SchoolService<Perm> {
       classes: classCount, sections: sectionCount, subjects: subjectCount, assignments: assignmentCount, students: studentCount,
       teachers: teacherCount, sitePublishedAt: site?.at ?? null, completedAt: school?.completedAt ?? null,
     };
+  }
+
+  /** The first-day communication steps, each ticked from the data. */
+  async communication(): Promise<CommStep[]> {
+    return this.read("run", (tx) => communicationSteps(tx, (f) => this.on(f)));
   }
 
   /** Finish setup: stamps `setup_completed_at` once. Needs the academic year and classes (steps 2 and 3). Calling it again changes nothing. */

@@ -12,7 +12,7 @@ import { sessionName } from "./lifecycle";
 import { announcementCategories, announcements } from "./schema";
 import { verifyToken } from "./verify";
 
-export interface RegisterRow { number: string; title: string; state: NoticeState; date: Date | null; authorName: string | null; categoryName: string | null; withdrawReason: string | null }
+export interface RegisterRow { id: string; number: string; title: string; state: NoticeState; date: Date | null; authorName: string | null; categoryName: string | null; withdrawReason: string | null }
 const SENT = ["sending", "published", "expired", "withdrawn"];
 const SLUG = (s: string) => s.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -68,7 +68,17 @@ export class CircularService extends NoticeBase {
         .leftJoin(announcementCategories, eq(announcementCategories.id, announcements.categoryId)).leftJoin(users, eq(users.id, announcements.createdBy))
         .where(and(sql`${announcements.number} is not null`, year ? sql`${when} between ${year.a}::date and ${year.b}::date` : undefined))
         .orderBy(asc(announcements.publishedAt), asc(announcements.number));
-      return { session: name, rows: rows.map(({ n, cat, author }) => ({ number: n.number!, title: n.title, state: n.state, date: n.publishedAt, authorName: author, categoryName: cat, withdrawReason: n.withdrawReason })) };
+      return { session: name, rows: rows.map(({ n, cat, author }) => ({ id: n.id, number: n.number!, title: n.title, state: n.state, date: n.publishedAt, authorName: author, categoryName: cat, withdrawReason: n.withdrawReason })) };
+    });
+  }
+
+  /** Session names that have a circular, newest first, with the current one always first. */
+  async sessions(): Promise<string[]> {
+    this.staffOnly();
+    this.canSeeRegister();
+    return this.read("read", async (tx) => {
+      const names = [...(await tx.execute(sql`select name from academic_years order by starts_on desc`))] as { name: string }[];
+      return [...new Set([await sessionName(tx), ...names.map((y) => y.name)])];
     });
   }
 

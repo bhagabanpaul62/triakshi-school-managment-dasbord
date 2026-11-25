@@ -162,6 +162,10 @@ describe("run lifecycle", () => {
     const done = await runs.get(run.id);
     expect(done.run.status).toBe("approved");
     expect(done.items.every((i) => i.payslipNo)).toBe(true);
+    // Each person is told once their payslip has a number, privately,.
+    const slips = await withSchool(a.id, (tx) => tx.select().from(notifications).where(eq(notifications.topic, "payroll.payslip")));
+    expect(slips.length).toBe(done.items.filter((i) => !i.skippedReason).length);
+    expect(slips.every((n) => n.privateBody && n.href === "/app/payroll/me" && !/\d{3}/.test(n.body ?? ""))).toBe(true);
     const items = await nets(run.id), net = items.reduce((s, i) => s + i.net, 0);
     expect(await bal("salary_payable")).toBe(-net);
     expect(await bal("pf_payable")).toBe(-(await lineSum(items.map((i) => i.id), "pf_employee") + await lineSum(items.map((i) => i.id), "pf_employer") + await lineSum(items.map((i) => i.id), "eps_employer") + await lineSum(items.map((i) => i.id), "edli") + await lineSum(items.map((i) => i.id), "pf_admin") + (done.totals.pfAdminTopUp ?? 0)));

@@ -113,7 +113,7 @@ export class SafeguardService extends SchoolService<Perm> {
       const [recent] = [...(await tx.execute(sql`select exists (select 1 from message_reviews where thread_id = ${thread.id}::uuid and reviewer_id = ${this.ctx.userId}::uuid and created_at > now() - make_interval(hours => ${REVIEW_HOURS})) as r`))] as { r: boolean }[];
       await tx.insert(messageReviews).values({ schoolId: this.ctx.schoolId, threadId: thread.id, reportId: data.reportId ?? null, reviewerId: this.ctx.userId, reviewerName: this.ctx.name, reason: data.reason, action: "opened" });
       if (data.reportId) await tx.update(messageReports).set({ state: "reviewing", handledBy: this.ctx.userId, handledAt: new Date() }).where(and(eq(messageReports.id, data.reportId), eq(messageReports.state, "new"), eq(messageReports.threadId, thread.id)));
-      if (!recent?.r) await this.tellBothSides(tx, thread.id, thread.subject);
+      if (!recent?.r) await this.tellBothSides(tx, thread.id);
       return loadThread(tx, thread.id, { userId: this.ctx.userId, role: this.ctx.role, review: true }, { limit: 500 });
     }, () => ({ action: "review", entity: "Conversation", entityId: data.threadId, summary: "Opened a conversation for review" }));
   }
@@ -126,13 +126,12 @@ export class SafeguardService extends SchoolService<Perm> {
     return t;
   }
 
-  private async tellBothSides(tx: Tx, threadId: string, subject: string) {
+  private async tellBothSides(tx: Tx, threadId: string) {
     await postSystem(tx, this.ctx.schoolId, threadId, "The school reviewed this conversation to check it is safe.");
     const members = await tx.select({ id: threadMembers.userId }).from(threadMembers).where(and(eq(threadMembers.threadId, threadId), eq(threadMembers.state, "active")));
     await NotificationWriter.insert(tx, this.ctx.schoolId, members.filter((m) => m.id && m.id !== this.ctx.userId).map((m) => ({
       userId: m.id!, topic: "work.update" as const, title: "The school reviewed a conversation you are in", body: "A safeguarding lead opened it to check it is safe.", href: `/app/messages?thread=${threadId}`, subject: { type: "thread", id: threadId },
     })));
-    void subject;
   }
 
   /** The conversation again, while the review that was logged is still open (8 hours). Null when there is none: the screen then asks for a reason. */
