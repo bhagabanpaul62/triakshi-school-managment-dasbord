@@ -277,8 +277,8 @@ describe("speed", () => {
       expect(all.length).toBeGreaterThanOrEqual(12000);
       expect(p.families).toBeGreaterThanOrEqual(12000);
       console.info(`12,000 people: resolve + preview in ${Math.round(ms)} ms`);
-      // About 60 ms alone, 150 ms in a full run. The wide limit is for a busy CI machine and still catches a query per person.
-      expect(ms).toBeLessThan(10_000);
+      // About 60 ms alone. The limit leaves room for a busy CI machine and still catches students compared with every login (5 to 19 s).
+      expect(ms).toBeLessThan(4_000);
     });
   });
 });

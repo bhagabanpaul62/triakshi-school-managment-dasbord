@@ -514,7 +514,9 @@ describe("mail webhook and the delivery screen", () => {
     await put(a, a.users.teacher, { priority: 3 });
     await run(a, t);
     const svc = new DeliveryService(a.as.admin);
-    const s = await svc.summary();
+    // The screen is about "today", so the clock stands on the day the mails were sent.
+    vi.useFakeTimers({ now: DAY, toFake: ["Date"] });
+    const s = await svc.summary().finally(() => vi.useRealTimers());
     expect(s.byChannel).toEqual(expect.arrayContaining([{ channel: "email", state: "failed", n: 1 }, { channel: "email", state: "sent", n: 1 }]));
     expect(s.problems[0]).toMatchObject({ state: "failed", n: 1 });
     expect(s.problems[0]!.reason).toContain("smtp down");
