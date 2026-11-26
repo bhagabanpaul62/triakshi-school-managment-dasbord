@@ -513,9 +513,9 @@ test.describe("J14 first day at an empty school", () => {
     await d.getByLabel(/full name/i).fill(name);
     await d.getByLabel(/date of birth/i).fill("2015-01-01");
     await d.getByLabel(/class and section/i).selectOption({ index: 1 });
-    await d.getByLabel(/guardian name/i).fill("Anil Das");
-    await d.getByLabel(/guardian phone/i).fill("9876500011");
-    await d.getByLabel(/relation/i).selectOption({ label: "Father" });
+    await d.getByLabel("Guardian name", { exact: true }).fill("Anil Das");
+    await d.getByLabel("Guardian phone", { exact: true }).fill("9876500011");
+    await d.getByLabel("Relation", { exact: true }).selectOption({ label: "Father" });
     await d.getByRole("button", { name: /^admit$/i }).click();
     await expect(admin.getByText(name).first()).toBeVisible({ timeout: 30_000 });
     const adm = sql(`select login_id from users where name='${name}' and school_id='${rid}'`);

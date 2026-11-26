@@ -56,7 +56,7 @@ export function studentFields(sections: Option[], mode: "admit" | "edit", joinin
       { name: "guardianRelation", label: "Relation", type: "select", options: RELATION_OPTIONS, section: "Guardian (contact only)" },
       { name: "guardian2Name", label: "Second guardian name", section: "Second guardian", hint: "The same phone as the first is saved once" },
       { name: "guardian2Phone", label: "Second guardian phone", type: "tel", section: "Second guardian" },
-      { name: "guardian2Relation", label: "Relation", type: "select", options: RELATION_OPTIONS, section: "Second guardian" },
+      { name: "guardian2Relation", label: "Second guardian relation", type: "select", options: RELATION_OPTIONS, section: "Second guardian" },
     ];
   }
   return [

@@ -75,15 +75,15 @@ test.describe("students journeys", () => {
     // Minimal first: name, class and section, guardian are on screen; the rest hides behind "More details".
     await expect(dialog.getByLabel(/full name/i)).toBeVisible();
     await expect(dialog.getByLabel(/class and section/i)).toBeVisible();
-    await expect(dialog.getByLabel(/guardian name/i)).toBeVisible();
+    await expect(dialog.getByLabel("Guardian name", { exact: true })).toBeVisible();
     await expect(dialog.getByLabel(/blood group/i)).toBeHidden();
     await shot(page, "admit-open");
     await dialog.getByRole("button", { name: /admit/i }).last().click();
     await expect(dialog.getByText(/required|enter|choose/i).first()).toBeVisible();
     await dialog.getByLabel(/full name/i).fill(name);
     await dialog.getByLabel(/class and section/i).selectOption({ index: 1 });
-    await dialog.getByLabel(/guardian name/i).fill("Test Parent");
-    await dialog.getByLabel(/guardian phone/i).fill(`98${String(Date.now()).slice(-8)}`);
+    await dialog.getByLabel("Guardian name", { exact: true }).fill("Test Parent");
+    await dialog.getByLabel("Guardian phone", { exact: true }).fill(`98${String(Date.now()).slice(-8)}`);
     await dialog.getByRole("button", { name: /^admit/i }).last().click();
     await expect(dialog).toBeHidden({ timeout: 120_000 }); // the toast is too brief to assert; the lookup below proves it saved
 

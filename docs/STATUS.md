@@ -107,7 +107,7 @@ On local branch `feat/admissions-core` (on top of `fix/ci-main`): **not pushed, 
 | Past months keep a child who left; live lists do not | built |
 | Migration `0014_admissions_core.sql` | built; hand-written data steps, never regenerate; not run on a copy of live data |
 
-**Tested 2026-11-26, local, production build:** 13 journeys (23 checks) pass from a fresh database, and twice in a row on one database; they include links at two widths and axe for the student screens. Older browser specs: rerun in progress (the first run was stopped by a restart; academics 7 of 7 passed on the final build). Unit: 2,772 in 39 packages in a clean copy without `.env`. Typecheck 42/42, lint 0 errors. One separate review, 20 findings, all fixed.
+**Tested 2026-11-26, local, production build:** 13 journeys (23 checks) pass from a fresh database, and twice in a row on one database; they include links at two widths and axe for the student screens. Older browser specs from a fresh database: 195 passed, 1 skipped; the 2 signup checks hit the marketing server's 5-signups-an-hour limit after repeated runs and pass (3 of 3) after a restart. Six older specs were fixed: four were stale tests, one a real contrast fault on the family meeting page, one a label that two guardians made ambiguous. Unit: 2,772 in 39 packages in a clean copy without `.env`. Typecheck 42/42, lint 0 errors. One separate review, 20 findings, all fixed.
 
 **Not verified:** migration 0014 on a copy of live data; the demo server; a real year switch on 1 April; a real phone.
 

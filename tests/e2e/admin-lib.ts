@@ -19,6 +19,7 @@ const ctxFor = (browser: Browser, w = 1440, h = 900) => browser.newContext({ vie
 async function canSignIn(browser: Browser, email: string) {
   const ctx = await ctxFor(browser);
   const page = await ctx.newPage();
+  page.setDefaultTimeout(30_000); // a cached login that a fresh database no longer has must fail fast, not wait out the test
   try { await login(page, SLUG, email, PASSWORD); return true; } catch { return false; } finally { await ctx.close(); }
 }
 
