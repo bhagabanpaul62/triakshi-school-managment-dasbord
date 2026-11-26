@@ -205,16 +205,16 @@ export abstract class EnquiryReads extends EnquiryBase {
       .where(and(eq(enquiries.phoneKey, e.phoneKey), ne(enquiries.id, e.id), isNull(enquiries.mergedInto))).orderBy(asc(enquiries.createdAt)).limit(10);
   }
 
-  /** Students whose guardian has this phone. The students module is optional: [] without it. */
+  /** Students whose guardian has this phone: enrolled or accepted and waiting to start (a family already admitted is a sibling), never one who left. The students module is optional: [] without it. */
   protected async siblingsIn(tx: Tx, phoneKey: string): Promise<Sibling[]> {
     if (!phoneKey || !(await hasTable(tx, "guardians")) || !(await hasTable(tx, "student_guardians")) || !(await hasTable(tx, "students"))) return [];
     const classes = (await hasTable(tx, "classes")) && (await hasTable(tx, "sections"));
     const rows = [...(await tx.execute(classes
       ? sql`select distinct s.id, s.name, c.name as class_name, sec.name as section_name from guardians g join student_guardians sg on sg.guardian_id = g.id join students s on s.id = sg.student_id
             left join classes c on c.id = s.class_id left join sections sec on sec.id = s.section_id
-            where right(regexp_replace(coalesce(g.phone, ''), '\D', '', 'g'), 10) = ${phoneKey} and s.status = 'active' order by s.name limit 5`
+            where right(regexp_replace(coalesce(g.phone, ''), '\D', '', 'g'), 10) = ${phoneKey} and s.status in ('active', 'joining') order by s.name limit 5`
       : sql`select distinct s.id, s.name, null as class_name, null as section_name from guardians g join student_guardians sg on sg.guardian_id = g.id join students s on s.id = sg.student_id
-            where right(regexp_replace(coalesce(g.phone, ''), '\D', '', 'g'), 10) = ${phoneKey} and s.status = 'active' order by s.name limit 5`))] as { id: string; name: string; class_name: string | null; section_name: string | null }[];
+            where right(regexp_replace(coalesce(g.phone, ''), '\D', '', 'g'), 10) = ${phoneKey} and s.status in ('active', 'joining') order by s.name limit 5`))] as { id: string; name: string; class_name: string | null; section_name: string | null }[];
     return rows.map((r) => ({ id: r.id, name: r.name, classSection: r.class_name ? `${r.class_name}${r.section_name ? `-${r.section_name}` : ""}` : null }));
   }
 
@@ -257,7 +257,7 @@ export abstract class EnquiryReads extends EnquiryBase {
       const text = q.trim();
       if (text.length < 2 || !(await hasTable(tx, "students"))) return [];
       const like = `%${text.replace(/[%_\\]/g, "\\$&")}%`;
-      return ([...(await tx.execute(sql`select id, name, admission_no from students where status = 'active' and (name ilike ${like} or admission_no ilike ${like}) order by name limit 8`))] as { id: string; name: string; admission_no: string }[])
+      return ([...(await tx.execute(sql`select id, name, admission_no from students where status in ('active', 'joining') and (name ilike ${like} or admission_no ilike ${like}) order by name limit 8`))] as { id: string; name: string; admission_no: string }[])
         .map((r) => ({ id: r.id, label: r.name, meta: r.admission_no }));
     });
   }

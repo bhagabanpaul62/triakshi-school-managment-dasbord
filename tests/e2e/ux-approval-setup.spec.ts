@@ -121,20 +121,26 @@ test.describe("approval and setup journey", () => {
     await page.waitForURL(/setup\/subjects/);
     await shot(page, "08-subjects-desktop");
     await page.getByRole("button", { name: /save and continue/i }).click();
-    // students: skip
-    await page.waitForURL(/setup\/students/);
-    await shot(page, "09-students-desktop");
-    await page.getByRole("link", { name: /skip for now/i }).click();
-    // staff
+    // staff comes before students in the wizard
     await page.waitForURL(/setup\/staff/);
     await page.getByLabel("Teacher 1 name").fill("Ravi Kumar");
     await page.getByLabel("Teacher 1 email").fill(`ravi.${slug}@example.test`);
     await shot(page, "10-staff-desktop");
     await page.getByRole("button", { name: /invite 1 teacher/i }).click();
+    // students: skip
+    await page.waitForURL(/setup\/students/);
+    await shot(page, "09-students-desktop");
+    await page.getByRole("button", { name: /^do later$/i }).click();
+    // class teachers: nobody to pick yet, so skip it too
+    await page.waitForURL(/setup\/classteachers/);
+    await page.getByRole("button", { name: /^do later$/i }).click();
     // website
     await page.waitForURL(/setup\/website/);
     await shot(page, "11-website-desktop");
     await page.getByRole("button", { name: /publish my website/i }).click();
+    // your team: a second login can wait
+    await page.waitForURL(/setup\/team/);
+    await page.getByRole("button", { name: /^do later$/i }).click();
     // review + finish
     await page.waitForURL(/setup\/done/);
     await shot(page, "12-review-desktop");
@@ -198,7 +204,7 @@ test.describe("approval and setup journey", () => {
     await page.getByLabel(/^password$/i).fill(PASSWORD);
     await page.getByRole("button", { name: /sign in/i }).click();
     await page.waitForURL(/\/app/);
-    for (const step of ["profile", "year", "classes", "subjects", "students", "staff", "website", "done"]) {
+    for (const step of ["profile", "year", "classes", "subjects", "staff", "students", "website", "done"]) {
       await page.goto(`${SCHOOL("sunrise")}/app/setup/${step}`, { timeout: 240_000 });
       await shot(page, `30-phone-${step}`);
       await noSideScroll(page);

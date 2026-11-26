@@ -41,7 +41,7 @@ export class LeaveService extends SchoolService<Perm> {
   constructor(ctx: Ctx) { super(ctx); }
 
   private myStudentIds(tx: Tx) {
-    return tx.select({ id: students.id, name: students.name }).from(students).where(eq(students.userId, this.ctx.userId)).orderBy(students.name);
+    return tx.select({ id: students.id, name: students.name }).from(students).where(and(eq(students.userId, this.ctx.userId), eq(students.status, "active"))).orderBy(students.name);
   }
 
   /** For a student login: the students it may apply for. Empty for staff. */
@@ -339,8 +339,9 @@ export class LeaveService extends SchoolService<Perm> {
 
   /** Mark each school day of the request as leave: skips holidays and Sundays, fills only days that are unmarked or marked absent, so present, late and half-day marks stay. */
   private async markDays(tx: Tx, r: typeof leaveRequests.$inferSelect): Promise<number> {
-    const kid = r.kind === "staff" ? null : (await tx.select({ sectionId: students.sectionId, classId: students.classId }).from(students).where(eq(students.id, r.studentId!)).limit(1))[0];
-    const days = workingDays(r.fromDate, r.toDate, await closedSet(tx, r.fromDate, r.toDate, kid ? { classId: kid.classId } : { staff: true }));
+    const kid = r.kind === "staff" ? null : (await tx.select({ sectionId: students.sectionId, classId: students.classId, leftOn: students.leftOn }).from(students).where(eq(students.id, r.studentId!)).limit(1))[0];
+    // Nothing is marked after the last day of a child who has left.
+    const days = workingDays(r.fromDate, r.toDate, await closedSet(tx, r.fromDate, r.toDate, kid ? { classId: kid.classId } : { staff: true })).filter((d) => !kid?.leftOn || d <= kid.leftOn);
     if (days.length === 0) return 0;
     const status = r.halfDay ? "half_day" as const : "leave" as const;
     const note = LEAVE_NOTE;

@@ -15,7 +15,7 @@ beforeAll(async () => {
   ({ a, b } = await createSchoolPair(["settings", "students"], "-prv"));
   useServices({ storage: new MemoryStorage(), email: new MemoryEmailSender() });
   kid = uuidv7();
-  await withSchool(a.id, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status) values (${kid}, ${a.id}, 'PR-1', 'Privacy Kid', ${a.users.student}, 'left')`));
+  await withSchool(a.id, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, access_until) values (${kid}, ${a.id}, 'PR-1', 'Privacy Kid', ${a.users.student}, 'left', current_date + 30)`));
 });
 afterAll(closeDb);
 

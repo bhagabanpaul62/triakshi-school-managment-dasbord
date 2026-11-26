@@ -123,7 +123,7 @@ export class FeeMover extends FeesBase {
         const charges = (chargesBy.get(`${s.id}:${y.id}`) ?? []).map((c): OldCharge => ({ id: c.id, kind: c.kind, label: c.label, dueDate: c.dueDate, amountPaise: c.amountPaise, sourceKey: c.sourceKey }));
         if (!structure && !charges.length) continue;
         const concessions = (concsBy.get(`${s.id}:${y.id}`) ?? []).map((c): OldConcession => ({ id: c.id, headId: c.headId, kind: c.kind, value: c.value }));
-        const plan = planStudentYear({ structure, concessions, charges, payments: validOf.get(s.id) ?? [], active: s.status === "active", leftOn: s.leftOn, today });
+        const plan = planStudentYear({ structure, concessions, charges, payments: validOf.get(s.id) ?? [], active: s.status === "active" || s.status === "joining", leftOn: s.leftOn, today });
         cases.push({ studentId: s.id, yearId: y.id, plan, structure, concessions, charges, classId: where.classId, sectionId: where.sectionId, classLabel: label(where.classId, where.sectionId) });
       }
     }

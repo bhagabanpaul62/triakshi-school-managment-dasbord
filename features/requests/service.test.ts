@@ -248,6 +248,24 @@ describe("a teacher writes a request down", () => {
   });
 });
 
+describe("children who have not started or have left", () => {
+  it("are not found, asked about or written down for; a left child's old request stays", async () => {
+    const old = await ask("Academics");
+    const kidOf = (userId: string) => withSchool(a.id, async (tx) => (await tx.select({ id: students.id }).from(students).where(eq(students.userId, userId)))[0]!.id);
+    const leftId = await kidOf(old.who.userId);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "left", leftOn: "2026-09-10" }).where(eq(students.id, leftId)));
+    const [joiningId] = await withSchool(a.id, (tx) => tx.insert(students).values({ schoolId: a.id, admissionNo: "JN1", name: "Kid Joining", classId, status: "joining", joinsSectionId: sectionId }).returning().then((r) => r.map((x) => x.id)));
+    const names = (await svc(a.as.admin).findStudents("Kid")).map((s) => s.id);
+    expect(names).not.toContain(leftId);
+    expect(names).not.toContain(joiningId);
+    for (const id of [leftId, joiningId!]) {
+      await expect(svc(a.as.admin).raise({ categoryId: cat.Academics, studentId: id, subject: "Call", details: "Parent called the office." })).rejects.toBeInstanceOf(ValidationError);
+    }
+    expect((await svc(old.who).askContext()).child).toBeNull();
+    expect((await svc(old.who).get(old.id)).id).toBe(old.id);
+  });
+});
+
 describe("one conversation, two badges", () => {
   it("a request message is counted by Requests only, never by Messages, and never twice", async () => {
     const { id, who } = await ask("Academics");

@@ -1,5 +1,5 @@
 import { AppError } from "@smw/feature-kit";
-import { LoginError, SchoolAuth, deviceFamily } from "@smw/auth";
+import { LoginError, SchoolAuth, deviceFamily, loginRefusal } from "@smw/auth";
 import { mailNewDevice } from "@/lib/new-device";
 import { apiHandler, readJson, schoolFromRequest } from "@smw/runtime/bearer";
 import { loginBody } from "../../_schemas";
@@ -21,6 +21,8 @@ export const POST = apiHandler(async (req) => {
   } catch (e) {
     if (e instanceof LoginError) {
       if (e.reason === "rate_limited") throw new AppError("Too many attempts. Wait 15 minutes and try again.", "rate_limited", 429);
+      const refusal = loginRefusal(e);
+      if (refusal) throw new AppError(refusal, e.reason === "closed" ? "login_closed" : "login_not_started", 403);
       if (e.reason === "disabled") throw new AppError("This account is disabled. Ask your school office.", "account_disabled", 403);
       throw new AppError("That login ID or password is not right.", "invalid_credentials", 401);
     }

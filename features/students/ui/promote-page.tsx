@@ -14,13 +14,15 @@ export const metadata = { title: "Promote students" };
 
 export default async function PromotePage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await requireCtx();
-  if (!new StudentService(ctx).can("write")) redirect("/app/students");
+  if (!new StudentService(ctx).can("write") || ctx.readOnly) redirect("/app/students");
   const svc = new PromotionService(ctx);
   const raw = (await searchParams).from;
   const from = Array.isArray(raw) ? raw[0] : raw;
 
   const sources = await svc.sources();
   const plan = from ? await svc.preview(from).catch((e: unknown) => (e instanceof NotFoundError || e instanceof ValidationError ? null : Promise.reject(e))) : null;
+  const withStrength = (t: { id: string; label: string; now: number; joining: number }) =>
+    ({ value: t.id, label: `${t.label}: ${t.now} now${t.joining ? `, ${t.joining} joining planned` : ""}` });
   const people = plan?.students.map((s) => ({ value: s.id, label: `${s.name} (${s.admissionNo})` })) ?? [];
 
   return (
@@ -51,7 +53,7 @@ export default async function PromotePage({ searchParams }: { searchParams: Prom
             <Panel title={`Promote ${plan.from.label} (${plan.from.yearName})`}
               action={plan.students.length === 0 ? null : (!plan.graduating && plan.promoteTargets.length === 0) ? null : (
                 <FormModal title={plan.graduating ? "Graduate this class" : "Promote this section"} icon="users" size="lg" submitLabel={plan.graduating ? "Graduate" : "Promote"}
-                  fields={promoteFields({ graduating: plan.graduating, promoteTargets: plan.promoteTargets.map((t) => ({ value: t.id, label: t.label })), retainTargets: plan.retainTargets.map((t) => ({ value: t.id, label: t.label })), students: people })}
+                  fields={promoteFields({ graduating: plan.graduating, promoteTargets: plan.promoteTargets.map(withStrength), retainTargets: plan.retainTargets.map(withStrength), students: people })}
                   hidden={{ fromSectionId: plan.from.id }} action={promoteSection} redirectTo="/app/students"
                   summary={`${plan.students.length} students in this section`} trigger={{ label: plan.graduating ? "Graduate class" : "Promote section", plus: false }} />
               )}>

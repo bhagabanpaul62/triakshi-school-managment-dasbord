@@ -38,11 +38,14 @@ export default async function AdmitPage({ params }: { params: Promise<{ id: stri
 
   const [look, cap, seats] = await Promise.all([students.lookups(), students.capacity(), enq.seatsFor(id)]);
   const sectionOptions = look.sections.map((s) => ({ value: s.id, label: s.label }));
+  const j = look.joining;
+  const joinOptions = { classes: j.classes.map((c) => ({ value: c.id, label: c.name })), years: j.years.map((y) => ({ value: y.id, label: y.isCurrent ? `${y.name} (this year)` : y.name })), sections: j.sections.map((x) => ({ value: x.id, label: x.label, yearId: x.yearId })) };
+  const age = { classes: Object.fromEntries(j.classes.map((c) => [c.id, { name: c.name, grade: c.grade }])), sectionClass: Object.fromEntries([...look.sections, ...j.sections].map((x) => [x.id, x.classId])) };
   const wanted = e.classApplying?.toLowerCase();
   const klass = wanted ? look.classes.find((c) => c.name.toLowerCase() === wanted) : undefined;
   const section = klass ? look.sections.find((s) => s.classId === klass.id) : undefined;
   const relation = RELATIONS.includes((e.relation ?? "").toLowerCase()) ? e.relation!.toLowerCase() : "guardian";
-  const values = { name: e.studentName, dob: e.dob ?? undefined, gender: e.gender === "male" || e.gender === "female" ? e.gender : undefined, sectionId: section?.id, guardianName: e.parentName, guardianPhone: e.phone, guardianRelation: relation };
+  const values = { name: e.studentName, dob: e.dob ?? undefined, gender: e.gender === "male" || e.gender === "female" ? e.gender : undefined, sectionId: section?.id, guardianName: e.parentName, guardianPhone: e.phone, guardianRelation: relation, guardian2Relation: "mother" };
 
   return (
     <>
@@ -54,10 +57,11 @@ export default async function AdmitPage({ params }: { params: Promise<{ id: stri
       </KpiRow>
       {cap.message ? <p className={`pb-3 text-sm ${cap.blocked ? "text-[var(--ds-color-danger-400)]" : "text-[var(--ds-on-surface-variant)]"}`}>{cap.message}{cap.blocked ? <> <Link className="underline" href="/app/billing">Upgrade the plan</Link></> : null}</p> : null}
       {seats && seats.left <= 0 ? <p className="pb-3 text-sm text-[var(--ds-color-warning-400)]">No seat is left in {seats.className} on your own count. You can still admit; change the seats in the enquiry settings if this is wrong.</p> : null}
+      {j.notice ? <p className="pb-3 text-sm text-[var(--ds-on-surface-variant)]">{j.notice} <Link className="underline" href={j.years.every((y) => y.isCurrent) ? "/app/academics/years" : "/app/academics/classes"}>{j.years.every((y) => y.isCurrent) ? "Add next year" : "Set up classes and sections"}</Link></p> : null}
       <div className="flex max-w-3xl flex-col gap-3">
         {cap.blocked ? <EmptyLine title="Your plan is full, so new students cannot be admitted." hint="Upgrade the plan, or link this enquiry to a student who is already in the school below." /> : (
           <Panel title="Admit as a new student">
-            <AdmitForm enquiryId={id} fields={studentFields(sectionOptions, "admit")} values={values} action={admitFromEnquiryAction} />
+            <AdmitForm enquiryId={id} fields={studentFields(sectionOptions, "admit", joinOptions)} values={values} age={age} action={admitFromEnquiryAction} />
           </Panel>
         )}
         <div id="link"><Panel title="Or link to an existing student">{mayLook ? <><p className="pb-3 text-sm text-[var(--ds-on-surface-muted)]">If the child is already a student (admitted before this enquiry was entered), link them. Nobody new is created.</p>

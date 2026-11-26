@@ -91,7 +91,6 @@ export class OpeningImport extends FeesBase {
   async approveIn(tx: Tx, id: string, invoices: InvoiceService) {
     const b = await this.lockBatchIn(tx, id);
     if (b.status !== "pending") throw new ConflictError("This batch was already decided.");
-    const year = await this.currentYear(tx);
     const ids = b.rows.map((r) => r.studentId);
     const alive = new Set((await tx.select({ id: students.id }).from(students).where(inArray(students.id, ids))).map((s) => s.id));
     const { done, waiting } = await this.takenIn(tx, id);
@@ -102,7 +101,7 @@ export class OpeningImport extends FeesBase {
     await this.lockStudents(tx, ids);
     for (const r of b.rows) {
       if (r.dues > 0) {
-        const bill = await invoices.createDraft(tx, { studentId: r.studentId, yearId: year.id, kind: "opening", label: "Opening balance", dueDate: r.asOf, sourceKey: `opening:${r.studentId}`, lines: [{ kind: "opening", label: "Opening balance", amountPaise: r.dues }] });
+        const bill = await invoices.createDraft(tx, { studentId: r.studentId, yearId: (await this.billYearOf(tx, r.studentId)).id, kind: "opening", label: "Opening balance", dueDate: r.asOf, sourceKey: `opening:${r.studentId}`, lines: [{ kind: "opening", label: "Opening balance", amountPaise: r.dues }] });
         await invoices.issueIn(tx, [bill], r.asOf);
       }
       for (const [kind, amount, account, label] of [["opening", r.advance, "student_advances", "Opening advance"], ["deposit", r.deposit, "deposits_payable", "Opening deposit"]] as const) {

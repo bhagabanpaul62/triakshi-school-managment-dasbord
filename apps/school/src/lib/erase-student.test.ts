@@ -6,7 +6,7 @@ import { createSchoolPair, type TestSchool } from "@smw/feature-kit/testing";
 import { MemoryStorage, useServices } from "@smw/integrations";
 import { PrivacyService } from "@smw/feature-settings/privacy-service";
 import { UserAdminService } from "@smw/feature-settings/service";
-import { StudentService } from "@smw/feature-students/service";
+import { LifecycleService, StudentService } from "@smw/feature-students/service";
 import { EnquiryService } from "@smw/feature-website/service";
 import { admitFromEnquiry } from "./admit-flow";
 import { eraseStudentForRequest } from "./erase-student";
@@ -28,7 +28,7 @@ async function leftStudent(name: string) {
     await tx.execute(sql`insert into push_subscriptions (id, school_id, user_id, endpoint, p256dh, auth) values (${uuidv7()}, ${a.id}, ${s.userId}, ${`https://push.test/${s.id}`}, 'k', 'a')`);
     await tx.execute(sql`insert into calendar_feeds (id, school_id, user_id, token_hash) values (${uuidv7()}, ${a.id}, ${s.userId}, ${`feed-${s.id}`})`);
   });
-  await svc.update(s.id, { status: "left" });
+  await new LifecycleService(a.as.admin).markLeft(s.id, { reason: "moved_city" });
   const request = await new PrivacyService(a.as.admin).create({ kind: "erasure", details: "Please delete my child's data", subjectType: "student", subjectId: s.id, subjectName: name, raisedByName: "Mrs Parent" });
   return { s, enq: enq.id, request };
 }

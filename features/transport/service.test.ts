@@ -226,3 +226,28 @@ describe("TransportFeeHelper", () => {
 
 import { eq } from "drizzle-orm";
 function eqId(id: string) { return eq(students.id, id); }
+
+describe("joining and left students", () => {
+  it("a joining child cannot be given a route, with a clear message", async () => {
+    const { r, s1 } = await route(a, 5);
+    const kid = await makeStudent(a);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "joining" }).where(eqId(kid.id)));
+    await expect(new StudentTransportService(a.as.admin).assign({ studentId: kid.id, routeId: r.id, stopId: s1.id, pickup: "true" }))
+      .rejects.toMatchObject({ fieldErrors: { studentId: expect.stringMatching(/has not joined yet/) } });
+    expect((await new StudentTransportService(a.as.admin).unassigned(500)).some((x) => x.id === kid.id)).toBe(false);
+  });
+
+  it("a student who left (section kept) keeps no seat, is not on the roster or in any count, and their stop can go", async () => {
+    const { r, s1, s2 } = await route(a, 2);
+    const svc = new StudentTransportService(a.as.admin);
+    const [stay, gone] = [await makeStudent(a), await makeStudent(a)];
+    for (const k of [stay, gone]) await svc.assign({ studentId: k.id, routeId: r.id, stopId: s1.id, pickup: "true", drop: "true" });
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "left", leftOn: "2026-01-01" }).where(eqId(gone.id)));
+    expect((await svc.roster(r.id)).map((x) => x.studentId)).toEqual([stay.id]);
+    expect((await new RouteService(a.as.admin).overview()).find((x) => x.route.id === r.id)).toMatchObject({ riders: 1 });
+    expect((await new RouteService(a.as.admin).detail(r.id)).stops.find((x) => x.id === s1.id)).toMatchObject({ riders: 1 });
+    // The seat is free: a third rider fits on a two-seat vehicle.
+    await svc.assign({ studentId: (await makeStudent(a)).id, routeId: r.id, stopId: s2.id, pickup: "true", drop: "true" });
+    expect(await new TransportFeeHelper(a.as.admin).monthlyFee(gone.id)).toBe(0);
+  });
+});

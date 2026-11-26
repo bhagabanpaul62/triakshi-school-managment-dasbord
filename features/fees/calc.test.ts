@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocatePlan, concessionsOn, dueState, invoiceLateFee, lateFee, openOf, previewInvoice, slicesOf, type CalcLine } from "./calc";
+import { allocatePlan, concessionsOn, dueState, invoiceLateFee, lateFee, moveLabelYears, openOf, previewInvoice, slicesOf, type CalcLine } from "./calc";
 
 const line = (id: string, amountPaise: number, over: Partial<CalcLine> = {}): CalcLine => ({ id, kind: "fee", amountPaise, concessionPaise: 0, creditedPaise: 0, paidPaise: 0, sort: 0, ...over });
 const rule = (r: object) => ({ graceDays: 0, ...r }) as never;
@@ -80,5 +80,25 @@ describe("concessions", () => {
     expect(p.concessionPaise).toBe(1_000);
     expect(p.duePaise).toBe(9_000);
     expect(p.lines.reduce((s, l) => s + openOf(line("x", l.amountPaise, { concessionPaise: l.concessionPaise })), 0)).toBe(9_000);
+  });
+});
+
+describe("moveLabelYears", () => {
+  const d = { billOn: "2026-04-01", dueOn: "2026-04-10" };
+  it("moves a month and year, and a year range, with the year", () => {
+    expect(moveLabelYears("April 2026", 1, d)).toBe("April 2027");
+    expect(moveLabelYears("Apr 2026 fee", 1, d)).toBe("Apr 2027 fee");
+    expect(moveLabelYears("Term 1 2026-27", 1, d)).toBe("Term 1 2027-28");
+    expect(moveLabelYears("2026-2027", 2, d)).toBe("2028-2029");
+    expect(moveLabelYears("Jan-Mar 2026", 1, { billOn: "2026-01-01", dueOn: "2026-01-10" })).toBe("Jan-Mar 2027");
+  });
+  it("leaves free text, a year with no month, and a copy into the same year alone", () => {
+    expect(moveLabelYears("Admission fee", 1, d)).toBe("Admission fee");
+    expect(moveLabelYears("Class of 2026", 1, d)).toBe("Class of 2026");
+    expect(moveLabelYears("April 2026", 0, d)).toBe("April 2026");
+  });
+  it("does not rewrite a label that is already wrong for its dates", () => {
+    expect(moveLabelYears("April 2024", 1, d)).toBe("April 2024");
+    expect(moveLabelYears("2023-24", 1, d)).toBe("2023-24");
   });
 });

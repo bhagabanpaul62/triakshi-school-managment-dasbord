@@ -500,7 +500,7 @@ export class MarksService extends SchoolService<Perm> {
       if (valid.length !== wanted.length) throw new ValidationError({ subjectId: "Choose co-scholastic subjects only" });
       const ids = [...new Set(data.entries.map((e) => e.studentId))];
       const studs = await tx.select({ id: students.id, sectionId: students.sectionId, grade: classes.grade, classTeacherId: sections.classTeacherId, yearId: sections.yearId }).from(students)
-        .leftJoin(sections, eq(sections.id, students.sectionId)).leftJoin(classes, eq(classes.id, sections.classId)).where(inArray(students.id, ids));
+        .leftJoin(sections, eq(sections.id, students.sectionId)).leftJoin(classes, eq(classes.id, sections.classId)).where(and(inArray(students.id, ids), eq(students.status, "active")));
       if (studs.length !== ids.length) throw new NotFoundError("Student");
       if (termYearId && studs.some((s) => s.yearId !== termYearId)) throw new ValidationError({ termId: "That term is not in the section's academic year" });
       if (!this.wide && studs.some((s) => s.classTeacherId !== this.ctx.userId)) throw new ForbiddenError("Only the class teacher can enter these grades.");
@@ -561,12 +561,12 @@ abstract class ResultReader extends SchoolService<Perm> {
     const [section] = await tx.select({ id: sections.id, name: sections.name, classId: sections.classId, className: classes.name, grade: classes.grade }).from(sections).innerJoin(classes, eq(classes.id, sections.classId)).where(eq(sections.id, sectionId)).limit(1);
     if (!section) throw new NotFoundError("Section");
     const [roster, paperRows, template, takers] = await Promise.all([
-      ExamRepo.students(tx, section.classId, exam.yearId, [section.id]),
+      ExamRepo.students(tx, section.classId, exam.yearId, [section.id], exam.id),
       tx.select({ id: examPapers.id, subjectId: examPapers.subjectId, subject: subjects.name, date: examPapers.date, maxMarks: examPapers.maxMarks, passMarks: examPapers.passMarks })
         .from(examPapers).innerJoin(subjects, eq(subjects.id, examPapers.subjectId))
         .where(and(eq(examPapers.examId, exam.id), eq(examPapers.classId, section.classId))).orderBy(asc(subjects.name)),
       ExamRepo.template(tx, section.grade),
-      ExamRepo.electiveTakers(tx, exam.yearId, [section.classId]),
+      ExamRepo.electiveTakers(tx, exam.yearId, [section.classId], true),
     ]);
     const entered = roster.length && paperRows.length
       ? await tx.select().from(marks).where(and(inArray(marks.paperId, paperRows.map((p) => p.id)), inArray(marks.studentId, roster.map((s) => s.id))))

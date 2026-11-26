@@ -9,7 +9,8 @@
     "./action": "./src/action.ts",
     "./console": "./src/console.ts",
     "./bearer": "./src/bearer.ts",
-    "./refusal": "./src/refusal.tsx"
+    "./refusal": "./src/refusal.tsx",
+    "./phase": "./src/phase.ts"
   },
   "scripts": { "typecheck": "tsgo --noEmit", "test": "vitest run --passWithNoTests" },
   "dependencies": {

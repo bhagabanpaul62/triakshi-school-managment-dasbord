@@ -75,7 +75,7 @@ export class EligibilityService extends StudentAttendanceService {
       return await this.write("manage", async (tx) => {
         const [year] = await tx.select({ id: academicYears.id }).from(academicYears).where(eq(academicYears.isCurrent, true)).limit(1);
         if (!year) throw new ValidationError({ studentId: "Set a current academic year first" });
-        const [kid] = await tx.select({ name: students.name }).from(students).where(eq(students.id, data.studentId)).limit(1);
+        const [kid] = await tx.select({ name: students.name }).from(students).where(and(eq(students.id, data.studentId), eq(students.status, "active"))).limit(1);
         if (!kid) throw new NotFoundError("Student");
         const [row] = await tx.insert(attendanceCondonations).values({
           schoolId: this.ctx.schoolId, studentId: data.studentId, yearId: year.id, reason: data.reason, note: data.note ?? null,

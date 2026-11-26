@@ -4,19 +4,19 @@ import type { AttendanceStatus } from "./constants";
 import { attendancePercent, tally } from "./stats";
 
 export interface RegisterDay { date: string; day: number; sunday: boolean; holiday: string | null }
-export interface RegisterPerson { name: string; sub?: string; marks: Record<string, string> }
+export interface RegisterPerson { name: string; sub?: string; /** A plain word beside the name, e.g. "Left 10 Nov". */ note?: string; marks: Record<string, string> }
 export interface RegisterInput { school: string; title: string; subtitle: string; days: RegisterDay[]; people: RegisterPerson[] }
 
 /** P present, A absent, L late, LV leave, HD half day; H marks a holiday or Sunday. */
 const LETTER: Record<AttendanceStatus, string> = { present: "P", absent: "A", late: "L", leave: "LV", half_day: "HD" };
 
-export interface RegisterRow { name: string; sub: string; cells: string[]; present: number; absent: number; late: number; leave: number; pct: number | null }
+export interface RegisterRow { name: string; sub: string; note: string; cells: string[]; present: number; absent: number; late: number; leave: number; pct: number | null }
 
 export function registerRows(input: RegisterInput): RegisterRow[] {
   return input.people.map((p) => {
     const c = tally(input.days.flatMap((d) => (p.marks[d.date] ? [p.marks[d.date]!] : [])));
     return {
-      name: p.name, sub: p.sub ?? "",
+      name: p.name, sub: p.sub ?? "", note: p.note ?? "",
       cells: input.days.map((d) => { const s = p.marks[d.date] as AttendanceStatus | undefined; return s ? LETTER[s] : d.holiday || d.sunday ? "H" : ""; }),
       present: c.present + c.half_day, absent: c.absent, late: c.late, leave: c.leave, pct: attendancePercent(c),
     };
@@ -26,8 +26,8 @@ export function registerRows(input: RegisterInput): RegisterRow[] {
 export const csvCell = (v: string | number | null) => { const s = v === null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 
 export function registerCsv(input: RegisterInput): string {
-  const head = [input.title.includes("Staff") ? "Roll/Role" : "Roll", "Name", ...input.days.map((d) => String(d.day)), "Present", "Absent", "Late", "Leave", "%"];
-  const lines = registerRows(input).map((r) => [r.sub, r.name, ...r.cells, r.present, r.absent, r.late, r.leave, r.pct]);
+  const head = [input.title.includes("Staff") ? "Roll/Role" : "Roll", "Name", ...input.days.map((d) => String(d.day)), "Present", "Absent", "Late", "Leave", "%", "Note"];
+  const lines = registerRows(input).map((r) => [r.sub, r.name, ...r.cells, r.present, r.absent, r.late, r.leave, r.pct, r.note]);
   return [head, ...lines].map((l) => l.map(csvCell).join(",")).join("\n") + "\n";
 }
 
@@ -75,7 +75,7 @@ export async function registerPdf(input: RegisterInput): Promise<Uint8Array> {
     for (const r of rows.slice(p * perPage, (p + 1) * perPage)) {
       const cells = [r.sub, r.name, ...r.cells, String(r.present), String(r.absent), String(r.late), String(r.leave), r.pct === null ? "-" : `${r.pct}`];
       cells.forEach((c, i) => {
-        if (i < 2) text(c.slice(0, i === 1 ? 26 : 8), xs[i]! + 2, y, 8);
+        if (i < 2) text(i === 1 && r.note ? `${c.slice(0, 13)} ${r.note}` : c.slice(0, i === 1 ? 26 : 8), xs[i]! + 2, y, 8);
         else text(c, xs[i]!, y, 7, c === "A" ? bold : font, i < 2 + n ? dayW : TOT);
       });
       y -= ROW;

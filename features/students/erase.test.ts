@@ -5,7 +5,7 @@ import { createTestSchool, registerFeatures, type TestSchool } from "@smw/featur
 import { MemoryStorage, useServices } from "@smw/integrations";
 import academicsFeature from "@smw/feature-academics/feature";
 import studentsFeature from "./feature";
-import { GuardianService, StudentService } from "./service";
+import { GuardianService, LifecycleService, StudentService } from "./service";
 import { guardians, students } from "./schema";
 
 const storage = new MemoryStorage();
@@ -25,7 +25,7 @@ async function leaver(name: string, extra: Record<string, unknown> = {}) {
   const s = await svc().create({ name, phone: "9811100010", address: "12 Lake Road", medicalNotes: "Asthma", emergencyName: "Aunt", emergencyPhone: "9811100011", bloodGroup: "B+", apaarId: "A12345", ...extra });
   await withSchool(a.id, (tx) => tx.execute(sql`update students set photo_key = ${`${a.id}/avatars/${s.id}.png`} where id = ${s.id}`));
   await storage.put(`${a.id}/avatars/${s.id}.png`, new Uint8Array([1]), "image/png");
-  await svc().update(s.id, { status: "left" });
+  await new LifecycleService(a.as.admin).markLeft(s.id, { reason: "changed_school" });
   return s;
 }
 
@@ -68,7 +68,7 @@ describe("erasing the optional data of a student who left", () => {
   it("keeps a guardian's contact while another child of theirs is still active", async () => {
     const kept = await svc().create({ name: "Younger Sibling", guardianName: "Shared Parent", guardianPhone: "9811100030", guardianRelation: "father" });
     const old = await svc().create({ name: "Older Sibling", guardianName: "Shared Parent", guardianPhone: "9811100030", guardianRelation: "father" });
-    await svc().update(old.id, { status: "left" });
+    await new LifecycleService(a.as.admin).markLeft(old.id, { reason: "changed_school" });
     const preview = await svc().erasePreview(old.id);
     expect(preview.guardians).toEqual([expect.objectContaining({ name: "Shared Parent", blanked: false })]);
     expect((await svc().eraseOptional(old.id, "Parent asked for deletion in writing")).guardians).toBe(0);

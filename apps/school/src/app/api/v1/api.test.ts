@@ -2,7 +2,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SchoolAuth } from "@smw/auth";
-import { closeDb } from "@smw/db";
+import { closeDb, sql, users, withConsole, withSchool } from "@smw/db";
 import { createSchoolPair, registerFeatures, type TestSchool } from "@smw/feature-kit/testing";
 import academics from "@smw/feature-academics/feature";
 import students from "@smw/feature-students/feature";
@@ -116,6 +116,63 @@ describe("handlers, two schools", () => {
       }
     }
     expect((await call(R("push/devices/[id]"), "DELETE", `${a.slug}.localhost`, tokenStudent, { id: nobody })).status).toBe(404);
+  });
+
+  describe("a student who left, and one who has not joined", () => {
+    const ist = (daysAgo: number) => new Date(Date.now() + 330 * 60_000 - daysAgo * 86_400_000).toISOString().slice(0, 10);
+    const setRow = (status: string, leftOn: string | null, joinsOn: string | null = null) => withSchool(a.id, async (tx) => {
+      await tx.execute(sql`delete from students where user_id = ${a.users.student}`);
+      await tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, access_until, joins_on) values (gen_random_uuid(), ${a.id}, 'ADM-LV', 'Kid', ${a.users.student}, ${status}, ${leftOn}::date, ${leftOn}::date + 90, ${joinsOn}::date)`);
+    });
+    const signIn = (password = "password123") => call(R("auth/login"), "POST", `${a.slug}.localhost`, undefined, { body: { identifier: `student-${a.slug}`, password } });
+
+    it("keeps the modules it keeps, says until when, and the other routes refuse in plain words", async () => {
+      await setRow("left", ist(10));
+      const tok = (await signIn()).json.token as string;
+      const me = await call(R("me"), "GET", `${a.slug}.localhost`, tok);
+      expect(me.status).toBe(200);
+      expect(me.json.features).toEqual(["notifications"]);
+      expect(me.json.leftUntil).toBe(new Date(Date.parse(`${ist(10)}T00:00:00Z`) + 90 * 86_400_000).toISOString().slice(0, 10));
+      expect((await call(R("notifications"), "GET", `${a.slug}.localhost`, tok)).status).toBe(200);
+      // The calendar joins many modules, so it answers with what is left: nothing.
+      expect((await call(R("calendar"), "GET", `${a.slug}.localhost`, tok)).json.items).toEqual([]);
+      for (const p of ["announcements", "conversations", "requests", "meetings"]) {
+        const r = await call(R(p), "GET", `${a.slug}.localhost`, tok);
+        expect(r.status, `${p} ${JSON.stringify(r.json)}`).toBe(403);
+      }
+      expect((await call(R("announcements"), "GET", `${a.slug}.localhost`, tok)).status).toBe(403);
+    });
+
+    it("refuses with the contract's sentence after the right password, and a wrong password reads as always", async () => {
+      await setRow("left", ist(91));
+      const closed = await signIn();
+      expect(closed.status).toBe(403);
+      expect(closed.json.error).toMatchObject({ code: "login_closed", message: "This login was closed because the student left the school. Ask the school office." });
+      const wrong = await signIn("not-the-password");
+      expect(wrong.status).toBe(401);
+      expect(wrong.json.error.code).toBe("invalid_credentials");
+      await setRow("alumni", null);
+      expect((await signIn()).json.error.code).toBe("login_closed");
+    });
+
+    it("an open token stops on the 91st day", async () => {
+      await setRow("left", ist(20));
+      const tok = (await signIn()).json.token as string;
+      expect((await call(R("me"), "GET", `${a.slug}.localhost`, tok)).status).toBe(200);
+      await setRow("left", ist(95));
+      expect((await call(R("me"), "GET", `${a.slug}.localhost`, tok)).status).toBe(401);
+    });
+
+    it("a student who joins later hears the date after the right password only", async () => {
+      await setRow("joining", null, "2027-01-12");
+      await withConsole((tx) => tx.update(users).set({ status: "disabled" }).where(sql`${users.id} = ${a.users.student}`));
+      const r = await signIn();
+      expect(r.status).toBe(403);
+      expect(r.json.error).toMatchObject({ code: "login_not_started", message: "This login starts on 12 Jan 2027." });
+      expect((await signIn("not-the-password")).json.error.code).toBe("invalid_credentials");
+      await withConsole((tx) => tx.update(users).set({ status: "active" }).where(sql`${users.id} = ${a.users.student}`));
+      await withSchool(a.id, (tx) => tx.execute(sql`delete from students where user_id = ${a.users.student}`));
+    });
   });
 
   it("validation is 422 with the same error shape", async () => {

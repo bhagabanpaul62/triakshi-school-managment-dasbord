@@ -25,6 +25,17 @@ async function enrolment(tx: Tx, ctx: Ctx, sectionIds: string[]): Promise<Record
   return Object.fromEntries([...rows].map((r) => [String((r as { section_id: string }).section_id), Number((r as { n: number }).n)]));
 }
 
+/** Children planned into each section who have not started: shown next to the strength for planning, never counted in it. */
+async function joiningPlan(tx: Tx, ctx: Ctx, sectionIds: string[]): Promise<Record<string, number>> {
+  if (!sectionIds.length || !ctx.features.has("students")) return {};
+  const ids = sql.join(sectionIds.map((i) => sql`${i}`), sql`, `);
+  const rows = await tx.execute(sql`select joins_section_id as section_id, count(*)::int as n from students where status = 'joining' and joins_section_id in (${ids}) group by joins_section_id`);
+  return Object.fromEntries([...rows].map((r) => [String((r as { section_id: string }).section_id), Number((r as { n: number }).n)]));
+}
+
+/** "32" or "32 + 3 joining". */
+export const withJoining = (students: number, joining: number) => (joining ? `${students} + ${joining} joining` : String(students));
+
 /** Who is missing where, this year: sections of the given classes (all when empty), the subjects each class studies, and the subject teachers set. */
 async function staffing(tx: Tx, classIds?: string[]) {
   const year = await currentYear(tx);
@@ -82,7 +93,8 @@ export class AcademicYearService extends AcademicsCrud<typeof academicYears> {
     const n = (table: string, where = by("year_id", y.id)) => countIn(tx, table, where);
     const counts = await Promise.all([n("exams"), n("fee_invoices"), n("fee_receipts", sql`date between ${y.startsOn}::date and ${y.endsOn}::date`), n("student_enrollments"), n("student_attendance", ofYear), n("assignments", ofYear), n("timetable_slots", ofYear), n("fee_payments")]);
     const total = (...i: number[]) => i.reduce((t, k) => t + counts[k]!, 0);
-    return [["exams", total(0)], ["fee records", total(1, 2, 7)], ["student enrolments", total(3)], ["attendance, assignment or timetable records", total(4, 5, 6)]];
+    const planned = await countIn(tx, "students", sql`status = 'joining' and joins_year_id = ${y.id}`);
+    return [["exams", total(0)], ["fee records", total(1, 2, 7)], ["student enrolments", total(3)], ["attendance, assignment or timetable records", total(4, 5, 6)], ["children are planned to join this year", planned]];
   }
 
   /** Make one year current; every other year stops being current. */
@@ -197,7 +209,7 @@ export class ClassService extends AcademicsCrud<typeof classes> {
     return this.read("read", async (tx) => {
       const out: Record<string, ClassStats> = {};
       if (!classIds.length) return out;
-      for (const id of classIds) out[id] = { sections: 0, capacity: 0, students: 0, subjects: 0, noClassTeacher: 0, unstaffed: 0 };
+      for (const id of classIds) out[id] = { sections: 0, capacity: 0, students: 0, joining: 0, subjects: 0, noClassTeacher: 0, unstaffed: 0 };
       const year = await currentYear(tx);
       if (year) {
         const rows = await tx.select({ classId: sections.classId, n: count(), cap: sum(sections.capacity) }).from(sections)
@@ -205,9 +217,11 @@ export class ClassService extends AcademicsCrud<typeof classes> {
         for (const r of rows) out[r.classId] = { ...out[r.classId]!, sections: Number(r.n), capacity: Number(r.cap ?? 0) };
         const { secs, subjectsOf, taught } = await staffing(tx, classIds);
         const enrolled = await enrolment(tx, this.ctx, secs.map((s) => s.id));
+        const joining = await joiningPlan(tx, this.ctx, secs.map((s) => s.id));
         for (const s of secs) {
           const o = out[s.classId]!;
           o.students += enrolled[s.id] ?? 0;
+          o.joining += joining[s.id] ?? 0;
           if (!s.classTeacherId) o.noClassTeacher += 1;
           o.unstaffed += [...(subjectsOf.get(s.classId) ?? [])].filter((sub) => !taught.has(`${s.id}:${sub}`)).length;
         }
@@ -219,7 +233,7 @@ export class ClassService extends AcademicsCrud<typeof classes> {
   }
 }
 
-export interface ClassStats { sections: number; capacity: number; students: number; subjects: number; noClassTeacher: number; unstaffed: number }
+export interface ClassStats { sections: number; capacity: number; students: number; joining: number; subjects: number; noClassTeacher: number; unstaffed: number }
 
 export class SectionService extends AcademicsCrud<typeof sections> {
   protected table = sections;
@@ -261,7 +275,9 @@ export class SectionService extends AcademicsCrud<typeof sections> {
   /** Students and their attendance, assignments and timetable slots hang off a section. */
   protected async usage(tx: Tx, s: Section): Promise<[string, number][]> {
     const n = (table: string) => countIn(tx, table, by("section_id", s.id));
-    return [["students", await n("students")], ["attendance records", await n("student_attendance")], ["assignments", await n("assignments")], ["timetable slots", await n("timetable_slots")]];
+    // A child who has not started has no section yet; the plan (joins_section_id) is what a delete would strip.
+    const planned = await countIn(tx, "students", sql`status = 'joining' and joins_section_id = ${s.id}`);
+    return [["students", await n("students")], ["children are planned to join this section", planned], ["attendance records", await n("student_attendance")], ["assignments", await n("assignments")], ["timetable slots", await n("timetable_slots")]];
   }
 
   /** Sections of a class in a year (default: the current one) with the class teacher's name. */
@@ -271,8 +287,8 @@ export class SectionService extends AcademicsCrud<typeof sections> {
       if (!year) return [];
       const rows = await tx.select({ ...sectionCols, teacherName: users.name }).from(sections).leftJoin(users, eq(users.id, sections.classTeacherId))
         .where(and(eq(sections.classId, classId), eq(sections.yearId, year))).orderBy(asc(sections.name));
-      const enrolled = await enrolment(tx, this.ctx, rows.map((r) => r.id));
-      return rows.map((r) => ({ ...r, students: enrolled[r.id] ?? 0 }));
+      const [enrolled, joining] = await Promise.all([enrolment(tx, this.ctx, rows.map((r) => r.id)), joiningPlan(tx, this.ctx, rows.map((r) => r.id))]);
+      return rows.map((r) => ({ ...r, students: enrolled[r.id] ?? 0, joining: joining[r.id] ?? 0 }));
     });
   }
 

@@ -78,7 +78,7 @@ describe("classes, sections and subjects", () => {
     expect(row?.teacherName).toBe("teacher a");
     expect((await svc.options()).map((o) => o.label)).toContain("Class 5 - A");
     const stats = await classes.stats([five.id]);
-    expect(stats[five.id]).toEqual({ sections: 1, capacity: 35, students: 0, subjects: 0, noClassTeacher: 0, unstaffed: 0 });
+    expect(stats[five.id]).toEqual({ sections: 1, capacity: 35, students: 0, joining: 0, subjects: 0, noClassTeacher: 0, unstaffed: 0 });
     // clearing the teacher through the edit form
     const cleared = await svc.update(sec.id, { name: "A", capacity: "35" });
     expect(cleared.classTeacherId).toBeNull();

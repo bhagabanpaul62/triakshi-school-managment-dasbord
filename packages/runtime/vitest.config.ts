@@ -1,2 +1,3 @@
 import { dbTestConfig } from "@smw/db/vitest-config";
-export default dbTestConfig("runtime", ["announcements"]);
+// students tables exist so a student's phase (left, alumni) can be tested; the runtime itself does not import them.
+export default dbTestConfig("runtime", ["announcements", "academics", "students"]);

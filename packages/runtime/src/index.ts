@@ -14,8 +14,11 @@ import { safeImage, themeOf, type Theme } from "@smw/themes";
 import { supportSessionAllowed } from "./support-session";
 import { REQUEST_ID_HEADER, healthyMain, requestHost, resolveSchoolByHost } from "./host";
 import { runAction } from "./action";
+import { featuresFor, leftMayOpen, leftUntilOf, NOT_AVAILABLE_PATH } from "./phase";
 
 export const SESSION_COOKIE = "smw_session";
+/** Set by the proxy from the real request path (a client copy is deleted first). */
+export const PATH_HEADER = "x-smw-path";
 
 export interface CurrentSchool {
   id: string;
@@ -83,7 +86,7 @@ async function buildCtx(): Promise<{ ctx: Ctx; mustChange: boolean } | null> {
     mustChange: session.user.mustChangePassword && !session.supportStaffId,
     ctx: {
       schoolId: school.id, userId: session.user.id, role: session.user.role, name: session.user.name, grants: session.user.grants,
-      features: school.features, readOnly: school.readOnly || session.readOnly,
+      features: featuresFor(school.features, session.phase), leftUntil: leftUntilOf(session.phase), readOnly: school.readOnly || session.readOnly,
       requestId: h.get(REQUEST_ID_HEADER) ?? undefined, ip: h.get("x-forwarded-for")?.split(",")[0]?.trim(),
       supportStaffId: session.supportStaffId,
     },
@@ -95,6 +98,11 @@ export const requireCtx = cache(async (): Promise<Ctx> => {
   const r = await buildCtx();
   if (!r) redirect("/login");
   if (r.mustChange) redirect("/app/change-password");
+  // A student who left keeps a few modules: any other page is one plain "not available" page, not an error.
+  if (r.ctx.leftUntil) {
+    const path = (await headers()).get(PATH_HEADER);
+    if (path && !leftMayOpen(path)) redirect(NOT_AVAILABLE_PATH);
+  }
   return r.ctx;
 });
 
@@ -119,6 +127,7 @@ export async function clearSessionCookie() {
 }
 
 export { primaryRedirect, type PrimaryRedirectInput } from "./primary";
+export { featuresFor, LEFT_FEATURES } from "./phase";
 export { runAction, formToObject, type ActionResult } from "./action";
 export { trustedClientIp } from "./ip";
 

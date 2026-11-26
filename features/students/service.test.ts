@@ -10,7 +10,7 @@ import { academicYears, classes, sections } from "@smw/feature-academics/schema"
 import academicsFeature from "@smw/feature-academics/feature";
 import studentsFeature from "./feature";
 import {
-  ConsentService, CredentialService, DocumentService, GuardianService, ImportService, PhotoService, PromotionService, StudentSelfService, StudentService,
+  ConsentService, CredentialService, DocumentService, GuardianService, ImportService, LifecycleService, PhotoService, PromotionService, StudentSelfService, StudentService,
 } from "./service";
 import { auditLogs } from "@smw/db";
 import { guardians, studentEnrollments, students } from "./schema";
@@ -185,8 +185,8 @@ describe("edit and delete", () => {
     expect(moved.rollNo).toBeGreaterThan(0);
     const [enrol] = await withSchool(a.id, (tx) => tx.select().from(studentEnrollments).where(eq(studentEnrollments.studentId, s.id)));
     expect(enrol).toMatchObject({ sectionId: s12A, classId: c12 });
-    const left = await asAdmin(a).update(s.id, { status: "left" });
-    expect(left.leftOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await new LifecycleService(a.as.admin).markLeft(s.id, { reason: "changed_school" });
+    expect((await asAdmin(a).get(s.id)).leftOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it("deleting a student removes the login and a parent with no other child", async () => {
@@ -400,14 +400,16 @@ describe("promotion", () => {
 
 describe("review additions", () => {
   it("rejects a section of another academic year and counts reactivation against the plan cap", async () => {
-    await expect(asAdmin(a).create({ name: "Wrong Year", sectionId: s4Anext })).rejects.toMatchObject({ fieldErrors: { sectionId: expect.any(String) } });
+    // Editing places students in this year only; a section of another year is reached by joining (A1 below), not by an edit.
+    const placed = await asAdmin(a).create({ name: "Edit Year", sectionId: s4A });
+    await expect(asAdmin(a).update(placed.id, { sectionId: s4Anext })).rejects.toMatchObject({ fieldErrors: { sectionId: expect.any(String) } });
     const school = await createTestSchool("capreact", FEATURES);
     await withConsole((tx) => tx.update(schools).set({ studentCap: 10 }).where(eq(schools.id, school.id)));
     const svc = new StudentService(school.as.admin);
     const first = await svc.create({ name: "Went Away" });
-    await svc.update(first.id, { status: "left" });
+    await new LifecycleService(school.as.admin).markLeft(first.id, { reason: "other", note: "Went away" });
     for (let i = 1; i <= 11; i++) await svc.create({ name: `Filler Kid ${i}` });
-    await expect(svc.update(first.id, { status: "active" })).rejects.toBeInstanceOf(LimitError);
+    await expect(new LifecycleService(school.as.admin).bringBack(first.id, { sectionId: "7b0f2a2e-0000-4000-8000-000000000000" })).rejects.toBeInstanceOf(LimitError);
   }, 60_000);
 
   it("a student cannot read or change another student's guardians, documents, consent or photo", async () => {

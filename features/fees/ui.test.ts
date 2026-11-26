@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonthsKeepDay, ageingBuckets, diffPlans, generateDues, invoicePaperData, lateExample, lateRuleSentence, planProblems, planTotals, reviseDifference, splitIntoParts } from "./ui/logic";
+import { addMonthsKeepDay, ageingBuckets, diffPlans, generateDues, invoicePaperData, lateExample, lateRuleSentence, planProblems, planTotals, reviseDifference, splitIntoParts, withdrewStep } from "./ui/logic";
 
 const year = { startsOn: "2026-04-01", endsOn: "2027-03-31" };
 const sum = (xs: { amountPaise: number }[]) => xs.reduce((s, x) => s + x.amountPaise, 0);
@@ -124,5 +124,14 @@ describe("invoice on paper and settlement parts", () => {
   it("every age band opens the dues report on that band", () => {
     const b = ageingBuckets({ notDue: 1, d1_30: 2, d31_60: 3, d61_90: 4, d90p: 5 });
     expect(b.map((x) => x.href)).toEqual(["/app/fees/dues?age=not-due", "/app/fees/dues?age=0-30", "/app/fees/dues?age=31-60", "/app/fees/dues?age=61-90", "/app/fees/dues?age=90%2B"]);
+  });
+});
+
+describe("withdrew before joining: one next step", () => {
+  it("open bills come first (cancel or credit), then money held (give back), then nothing", () => {
+    expect(withdrewStep({ openBills: 2, openPaise: 300_000, advancePaise: 50_000, depositPaise: 0 })).toMatchObject({ tab: "bills", text: expect.stringMatching(/2 open bills .*Cancel them, or credit/) });
+    expect(withdrewStep({ openBills: 1, openPaise: 1, advancePaise: 0, depositPaise: 0 })!.text).toMatch(/^1 open bill \(/);
+    expect(withdrewStep({ openBills: 0, openPaise: 0, advancePaise: 20_000, depositPaise: 100_000 })).toMatchObject({ tab: "advance", text: expect.stringMatching(/deposit .*advance .*Settle up and refund/) });
+    expect(withdrewStep({ openBills: 0, openPaise: 0, advancePaise: 0, depositPaise: 0 })).toBeNull();
   });
 });

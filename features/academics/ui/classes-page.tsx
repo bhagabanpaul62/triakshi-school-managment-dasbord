@@ -6,7 +6,7 @@ import { MenuIconView } from "@smw/ui/shell/icons";
 import { DataTable, type Column } from "@smw/ui/shell/DataTable";
 import { FormModal } from "@smw/ui/shell/FormModal";
 import { ActionButton } from "@smw/ui/shell/ActionButton";
-import { ClassService } from "../service";
+import { ClassService, withJoining } from "../service";
 import { addClassPresets, createClass, deleteClass, updateClass } from "./actions";
 import { STAGE_LABELS, classFields } from "./fields";
 import { stageOf } from "../presets";
@@ -34,9 +34,9 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
   const rows = page.rows.map((c) => {
     const st = stats[c.id]!;
     const setup = !st.sections ? "empty" : st.noClassTeacher || st.unstaffed ? "gaps" : "ready";
-    return { ...c, ...st, setup, stageLabel: [STAGE_LABELS[c.stage ?? stageOf(c.grade)], c.boardOverride].filter(Boolean).join(" · "), seats: st.sections ? `${st.students} of ${st.capacity}` : null };
+    return { ...c, ...st, setup, stageLabel: [STAGE_LABELS[c.stage ?? stageOf(c.grade)], c.boardOverride].filter(Boolean).join(" · "), seats: st.sections ? `${withJoining(st.students, st.joining)} of ${st.capacity}` : null };
   });
-  const total = rows.reduce((t, r) => ({ sections: t.sections + r.sections, capacity: t.capacity + r.capacity, students: t.students + r.students, noClassTeacher: t.noClassTeacher + r.noClassTeacher, unstaffed: t.unstaffed + r.unstaffed }), { sections: 0, capacity: 0, students: 0, noClassTeacher: 0, unstaffed: 0 });
+  const total = rows.reduce((t, r) => ({ sections: t.sections + r.sections, capacity: t.capacity + r.capacity, students: t.students + r.students, joining: t.joining + r.joining, noClassTeacher: t.noClassTeacher + r.noClassTeacher, unstaffed: t.unstaffed + r.unstaffed }), { sections: 0, capacity: 0, students: 0, joining: 0, noClassTeacher: 0, unstaffed: 0 });
   const gaps = total.noClassTeacher + total.unstaffed;
   const add = <FormModal title="New class" icon="class" fields={classFields} action={createClass} values={{ grade: 1 }} />;
   const presets = <ActionButton action={addClassPresets} label="Add Indian presets" successMessage="Preset classes added">Add Nursery to Class 12</ActionButton>;
@@ -52,7 +52,7 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
         <KpiRow>
           <StatCard label="Classes" value={String(page.total)} icon={<MenuIconView name="class" />} meta={`${rows[0]!.name} to ${rows[rows.length - 1]!.name}`} />
           <StatCard label="Sections" value={String(total.sections)} icon={<MenuIconView name="class" />} meta="this academic year" />
-          <StatCard label="Students" value={String(total.students)} icon={<MenuIconView name="users" />} meta={`of ${total.capacity} seats filled`} />
+          <StatCard label="Students" value={withJoining(total.students, total.joining)} icon={<MenuIconView name="users" />} meta={`of ${total.capacity} seats filled`} />
           <StatCard label="Gaps" value={String(gaps)} icon={<MenuIconView name="teacher" />}
             meta={gaps ? [total.noClassTeacher ? `${plural(total.noClassTeacher, "section")} without a class teacher` : "", total.unstaffed ? `${plural(total.unstaffed, "subject")} without a teacher` : ""].filter(Boolean).join(" · ") : "Every section is staffed"} />
         </KpiRow>

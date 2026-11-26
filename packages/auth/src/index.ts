@@ -6,10 +6,13 @@
 import { argon2, createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import * as OTPAuth from "otpauth";
+import { accessOf, LOGIN_CLOSED_MESSAGE, startsMessage, studentPhaseOf, type StudentPhase } from "./phase";
 import {
   and, auditLogs, desc, eq, gt, inArray, isNull, loginEvents, ne, oneTimeTokens, or, platformStaff, schoolRoles, sessions, sql, staffSessions, users,
   withConsole, withSchool, type SchoolRole, type StaffRole, type Tx,
 } from "@smw/db";
+
+export { accessOf, istDay, addDays, accessUntilFor, longDate, startsMessage, LEFT_ACCESS_DAYS, LOGIN_CLOSED_MESSAGE, mayHear, leftPhases, LEFT_TOPIC, type Access, type StudentPhase } from "./phase";
 
 export const SESSION_DAYS = 30;
 export const SUPPORT_SESSION_MINUTES = 30;
@@ -172,12 +175,22 @@ export interface SessionUser {
   roleName: string | null;
   mustChangePassword: boolean;
 }
-export interface ValidSession { sessionId: string; user: SessionUser; readOnly: boolean; supportStaffId: string | null; expiresAt: Date }
+export interface ValidSession {
+  sessionId: string; user: SessionUser; readOnly: boolean; supportStaffId: string | null; expiresAt: Date;
+  /** The student row's status and last day, for role student with a student row; null for everyone else. */
+  phase: StudentPhase | null;
+}
 
 export interface SignInMeta { ip?: string; userAgent?: string }
 
 export class LoginError extends Error {
-  constructor(readonly reason: "invalid" | "rate_limited" | "disabled") { super(reason); }
+  /** `closed`: the student left and the 90 days are over. `starts`: a joining student before the first day (`joinsOn` says when). Both are said only after the right password or code. */
+  constructor(readonly reason: "invalid" | "rate_limited" | "disabled" | "closed" | "starts", readonly joinsOn: string | null = null) { super(reason); }
+}
+
+/** The plain sentence for a closed or not-yet-started student login, or null for every other reason. Safe to show: it only exists after a right secret. */
+export function loginRefusal(e: LoginError): string | null {
+  return e.reason === "closed" ? LOGIN_CLOSED_MESSAGE : e.reason === "starts" ? startsMessage(e.joinsOn) : null;
 }
 
 /** Sessions for one school. Every method runs inside that school's RLS scope. */
@@ -197,6 +210,8 @@ export class SchoolAuth {
         known = user?.id;
         const ok = await Passwords.verify(user?.passwordHash || await fakeHash(), password);
         if (!user || !ok || user.role === "parent") { loginIpFailLimiter.take(ipKey); throw new LoginError("invalid"); }
+        loginLimiter.reset(`acct:${this.schoolId}:${id}`); // the password is right: a closed or joining login must say so, never "Too many attempts"
+        await this.refuseIfNotOpen(tx, user);
         if (user.status !== "active") throw new LoginError("disabled");
         loginLimiter.reset(`acct:${this.schoolId}:${id}`);
         await tx.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
@@ -207,6 +222,14 @@ export class SchoolAuth {
       if (e instanceof LoginError) await this.logFailure(e.reason, known, identifier, method, meta);
       throw e;
     }
+  }
+
+  /** Throws "starts" or "closed" for a student whose first day is ahead or whose 90 days after leaving are over. Call only after the secret is proven. */
+  private async refuseIfNotOpen(tx: Tx, user: { id: string; role: string }) {
+    if (user.role !== "student") return;
+    const a = accessOf(await studentPhaseOf(tx, this.schoolId, user.id));
+    if (a.kind === "joining") throw new LoginError("starts", a.joinsOn);
+    if (a.kind === "closed") throw new LoginError("closed");
   }
 
   /** The success row, with whether this device family has signed in as this person before. */
@@ -230,7 +253,7 @@ export class SchoolAuth {
     // Over the cap: the first overflow of a window leaves one summary row, the rest leave nothing.
     const capped = meta.ip && !ipEventLimiter.take(ipKey) ? ipKey : !schoolEventLimiter.take(this.schoolId) ? this.schoolId : null;
     if (capped && !overflowLimiter.take(capped)) return;
-    const outcome = capped ? "rate_limited" as const : method === "support" ? "support_failed" as const : reason === "rate_limited" ? "rate_limited" as const : reason === "disabled" ? "disabled" as const : reason === "bad_code" && userId ? "bad_code" as const : userId ? "bad_password" as const : "unknown_login" as const;
+    const outcome = capped ? "rate_limited" as const : method === "support" ? "support_failed" as const : reason === "rate_limited" ? "rate_limited" as const : reason === "disabled" || reason === "closed" || reason === "starts" ? "disabled" as const : reason === "bad_code" && userId ? "bad_code" as const : userId ? "bad_password" as const : "unknown_login" as const;
     try {
       await withSchool(this.schoolId, (tx) => tx.insert(loginEvents).values({
         schoolId: this.schoolId, userId: capped ? null : userId ?? null, identifier: capped ? (capped === this.schoolId ? "many tries on this school" : "many tries from this address") : key.slice(0, 80), outcome, method,
@@ -299,13 +322,16 @@ export class SchoolAuth {
         .leftJoin(schoolRoles, eq(schoolRoles.id, users.roleId))
         .where(and(eq(sessions.tokenHash, Tokens.hash(token)), gt(sessions.expiresAt, new Date()))).limit(1);
       if (!row || row.u.status !== "active" || row.u.role === "parent") return null;
+      const phase = row.u.role === "student" ? await studentPhaseOf(tx, this.schoolId, row.u.id) : null;
+      const access = accessOf(phase);
+      if (access.kind === "closed" || access.kind === "joining") return null;
       let expiresAt = row.s.expiresAt;
       if (!row.s.supportStaffId && Date.now() - row.s.lastSeenAt.getTime() > DAY) {
         expiresAt = new Date(Date.now() + SESSION_DAYS * DAY);
         await tx.update(sessions).set({ lastSeenAt: new Date(), expiresAt }).where(eq(sessions.id, row.s.id));
       }
       return {
-        sessionId: row.s.id, readOnly: row.s.readOnly, supportStaffId: row.s.supportStaffId, expiresAt,
+        sessionId: row.s.id, readOnly: row.s.readOnly, supportStaffId: row.s.supportStaffId, expiresAt, phase,
         user: {
           id: row.u.id, schoolId: row.u.schoolId, role: row.u.role, name: row.u.name, email: row.u.email, avatarUrl: row.u.avatarUrl,
           // Admins always keep the defaults (every grant), so a school can never lock itself out.
@@ -443,14 +469,21 @@ export class SchoolAuth {
       throw new LoginError("rate_limited");
     }
     let found: typeof users.$inferSelect | undefined;
-    const out = await withSchool(this.schoolId, async (tx): Promise<{ err: OtpError } | { value: T }> => {
+    const out = await withSchool(this.schoolId, async (tx): Promise<{ err: OtpError } | { value: T } | { refused: LoginError }> => {
       const user = await this.findByLogin(tx, identifier);
       found = user;
       // A disabled account is refused before its code is touched.
       if (!user || user.status !== "active" || user.role === "parent") return { err: new OtpError("none") };
       const r = await this.checkOtp(tx, user.id, use, code);
-      return r.ok ? { value: await fn(tx, user, r.meta) } : { err: r.err };
+      if (!r.ok) return { err: r.err };
+      // Only the right code earns the plain sentence. The code stays used up.
+      try { await this.refuseIfNotOpen(tx, user); } catch (e) { if (e instanceof LoginError) return { refused: e }; throw e; }
+      return { value: await fn(tx, user, r.meta) };
     });
+    if ("refused" in out) {
+      await this.logFailure(out.refused.reason, found?.id, identifier, method, meta);
+      throw out.refused;
+    }
     if ("err" in out) {
       await this.logFailure(found?.status === "disabled" ? "disabled" : "bad_code", found?.id, identifier, method, meta);
       throw out.err;
@@ -651,6 +684,7 @@ export class SchoolAuth {
   private async applyReset(tx: Tx, userId: string, next: string, summary: string) {
     const [u] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
     if (!u) throw new LoginError("invalid");
+    await this.refuseIfNotOpen(tx, u);
     if (u.status === "disabled") throw new LoginError("disabled");
     await this.assertPolicy(tx, u, next);
     await tx.update(users).set({ passwordHash: await Passwords.hash(next), ...(u.status === "invited" ? { status: "active" as const } : {}), mustChangePassword: false }).where(eq(users.id, userId));

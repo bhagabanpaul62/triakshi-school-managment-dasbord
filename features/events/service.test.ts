@@ -367,6 +367,17 @@ describe("late joiners", () => {
     await withSchool(a.id, (tx) => tx.update(students).set({ status: "active" as never }).where(eq(students.id, fx.bob)));
   });
 
+  it("a child who has not started is invited to nothing until the day they start", async () => {
+    const e = await admin().create(make({ audience: OWN(), rsvpOn: "true" }));
+    const [jia] = await withSchool(a.id, (tx) => tx.insert(students).values({ schoolId: a.id, name: "Jia", admissionNo: `E-${a.slug}-Jia`, classId: null, sectionId: null, joinsSectionId: fx.own, status: "joining", userId: null }).returning());
+    const run = () => withSchool(a.id, (tx) => lateJoiners(tx, a.id));
+    await run();
+    expect((await people(e.id)).some((p) => p.studentId === jia!.id)).toBe(false);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "active", sectionId: fx.own, joinsSectionId: null }).where(eq(students.id, jia!.id)));
+    expect((await run()).added).toBeGreaterThan(0);
+    expect((await people(e.id)).some((p) => p.studentId === jia!.id)).toBe(true);
+  });
+
   it("only touches its own school", async () => {
     const e = await admin().create(make({ audience: OWN() }));
     await withSchool(b.id, (tx) => lateJoiners(tx, b.id));

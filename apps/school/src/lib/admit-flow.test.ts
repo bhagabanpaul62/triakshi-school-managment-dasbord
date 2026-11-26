@@ -75,4 +75,12 @@ describe("admit from an enquiry", () => {
     const ok = await admitFromEnquiry(a.as.admin, id, undefined, { name: "Dev Fails" });
     expect(ok.marked).toBe(true);
   });
+
+  it("a child already in the school is refused with their record, the claim is released, and ticking different child admits", async () => {
+    await new StudentService(a.as.admin).create({ name: "Esha Same", dob: "2015-05-05" });
+    const id = await newEnquiry("Esha Same");
+    await expect(admitFromEnquiry(a.as.admin, id, undefined, { name: "Esha Same", dob: "2015-05-05" })).rejects.toMatchObject({ fieldErrors: { allowDuplicate: expect.any(String) } });
+    const ok = await admitFromEnquiry(a.as.admin, id, undefined, { name: "Esha Same", dob: "2015-05-05", allowDuplicate: "true" });
+    expect(ok.marked).toBe(true);
+  });
 });

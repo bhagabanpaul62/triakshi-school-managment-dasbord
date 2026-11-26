@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, desc, eq, loginEvents, oneTimeTokens, schools, sessions, sql, users, withConsole, withSchool } from "@smw/db";
 import {
-  deviceFamily, LoginError, OtpError, Passwords, PasswordError, RateLimiter, SchoolAuth, checkPassword, forgotAcctLimiter, forgotIpLimiter, loginIpFailLimiter, loginLimiter, otpAcctLimiter, otpMessage,
+  deviceFamily, LoginError, loginRefusal, OtpError, Passwords, PasswordError, RateLimiter, SchoolAuth, checkPassword, forgotAcctLimiter, forgotIpLimiter, loginIpFailLimiter, loginLimiter, otpAcctLimiter, otpMessage,
 } from "./index";
 
 let schoolId: string;
@@ -522,5 +522,134 @@ describe("login events (every way in, and every way refused)", () => {
     expect((await events("ev7@auth.test"))[0]).toMatchObject({ outcome: "support", method: "support", supportStaffId: staff, userId: u.id });
     await expect(auth.supportLogin("not-a-token")).rejects.toBeInstanceOf(LoginError);
     expect((await events("support link"))[0]).toMatchObject({ outcome: "support_failed", method: "support" });
+  });
+});
+
+describe("a student's login after leaving, and before joining", () => {
+  const PW = "OldPass#123";
+  const ist = (daysAgo: number) => new Date(Date.now() + 330 * 60_000 - daysAgo * 86_400_000).toISOString().slice(0, 10);
+  const CLOSED = "This login was closed because the student left the school. Ask the school office.";
+
+  /** A student login (admission number = login ID) with its student row. */
+  async function kid(adm: string, st: { status: string; leftOn?: string | null; joinsOn?: string | null; accessUntil?: string | null }, user: Partial<typeof users.$inferInsert> = {}) {
+    const u = await newUser({ loginId: adm, role: "student", name: `Kid ${adm}`, email: `${adm.toLowerCase()}@auth.test`, passwordHash: await Passwords.hash(PW), ...user });
+    const until = st.accessUntil !== undefined ? st.accessUntil : st.leftOn ? sql`${st.leftOn}::date + 90` : null; // what features/students writes: last day + 90
+    await withSchool(schoolId, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on, joins_on, access_until)
+      values (gen_random_uuid(), ${schoolId}, ${adm}, ${`Kid ${adm}`}, ${u.id}, ${st.status}, ${st.leftOn ?? null}::date, ${st.joinsOn ?? null}::date, ${until})`));
+    return u;
+  }
+  const setLeftOn = (adm: string, leftOn: string | null) => withSchool(schoolId, (tx) => tx.execute(sql`update students set left_on = ${leftOn}::date, access_until = ${leftOn}::date + 90 where admission_no = ${adm}`));
+  const reason = (p: Promise<unknown>) => p.then(() => "ok", (e) => (e instanceof LoginError ? e.reason : `other:${String(e)}`));
+
+  it("an active student, a student with no student row, and staff are unchanged", async () => {
+    await kid("LV-ACT", { status: "active" });
+    await newUser({ loginId: "LV-NOROW", role: "student", passwordHash: await Passwords.hash(PW) });
+    const s = await auth.login("LV-ACT", PW);
+    expect((await auth.validate(s.token))?.phase).toMatchObject({ status: "active" });
+    const n = await auth.login("LV-NOROW", PW);
+    expect((await auth.validate(n.token))?.phase).toBeNull();
+    const t = await auth.login("ann@auth.test", "OldPass#123").catch(() => null); // staff password may have changed in earlier tests
+    if (t) expect((await auth.validate(t.token))?.phase).toBeNull();
+  });
+
+  it("a left or alumni student signs in for 90 days after the last day, and the session carries the phase", async () => {
+    await kid("LV-L10", { status: "left", leftOn: ist(10) });
+    await kid("LV-AL90", { status: "alumni", leftOn: ist(90) });
+    const a = await auth.login("LV-L10", PW);
+    expect((await auth.validate(a.token))?.phase).toMatchObject({ status: "left", leftOn: ist(10) });
+    const b = await auth.login("LV-AL90", PW); // the 90th day is still open
+    expect((await auth.validate(b.token))?.phase?.status).toBe("alumni");
+  });
+
+  it("after the 90th day: the sentence only after the right password; a wrong one learns nothing", async () => {
+    await kid("LV-L91", { status: "left", leftOn: ist(91) });
+    expect(await reason(auth.login("LV-L91", PW))).toBe("closed");
+    expect(await reason(auth.login("LV-L91", "wrong-Pass-1"))).toBe("invalid");
+    expect(await reason(auth.login("LV-NOBODY", "wrong-Pass-1"))).toBe("invalid");
+    const err = await auth.login("LV-L91", PW).catch((e) => e);
+    expect(loginRefusal(err)).toBe(CLOSED);
+  });
+
+  it("the stored access_until decides, not left_on + 90", async () => {
+    await kid("LV-LATE", { status: "left", leftOn: ist(200), accessUntil: ist(-5) }); // back-dated leaver, 5 days still to go
+    expect((await auth.login("LV-LATE", PW)).token).toBeTruthy();
+    await kid("LV-END", { status: "left", leftOn: ist(10), accessUntil: ist(1) }); // ended yesterday although left_on + 90 is ahead
+    expect(await reason(auth.login("LV-END", PW))).toBe("closed");
+    await kid("LV-NOUNTIL", { status: "left", leftOn: ist(10), accessUntil: null });
+    expect(await reason(auth.login("LV-NOUNTIL", PW))).toBe("closed");
+  });
+
+  it("the right password on a closed or joining login never meets 'Too many attempts'", async () => {
+    await kid("LV-LIM", { status: "left", leftOn: ist(200) });
+    for (let i = 0; i < 9; i++) expect(await reason(auth.login("LV-LIM", "wrong-Pass-1"))).toBe("invalid");
+    expect(await reason(auth.login("LV-LIM", PW))).toBe("closed"); // the 10th try
+    expect(await reason(auth.login("LV-LIM", PW))).toBe("closed"); // and the 11th
+    await kid("LV-LIMJ", { status: "joining", joinsOn: "2027-01-12" }, { status: "disabled" });
+    for (let i = 0; i < 9; i++) await reason(auth.login("LV-LIMJ", "wrong-Pass-1"));
+    expect(await reason(auth.login("LV-LIMJ", PW))).toBe("starts");
+    expect(await reason(auth.login("LV-LIMJ", PW))).toBe("starts");
+  });
+
+  it("no last day is closed, also for an alumni by promotion", async () => {
+    await kid("LV-NODATE", { status: "left", leftOn: null });
+    await kid("LV-ALNODATE", { status: "alumni", leftOn: null });
+    expect(await reason(auth.login("LV-NODATE", PW))).toBe("closed");
+    expect(await reason(auth.login("LV-ALNODATE", PW))).toBe("closed");
+  });
+
+  it("an open session stops the day the 90 days end, and a support session too", async () => {
+    await kid("LV-SESS", { status: "left", leftOn: ist(30) });
+    const s = await auth.login("LV-SESS", PW);
+    expect(await auth.validate(s.token)).not.toBeNull();
+    const u = (await withSchool(schoolId, (tx) => tx.select().from(users).where(eq(users.loginId, "LV-SESS"))))[0]!;
+    const support = await withSchool(schoolId, (tx) => auth.createSession(tx, u.id, { minutes: 30 }));
+    await setLeftOn("LV-SESS", ist(91));
+    expect(await auth.validate(s.token)).toBeNull();
+    expect(await auth.validate(support.token)).toBeNull();
+  });
+
+  it("a code sign-in is refused with the sentence only after the right code; a wrong code gives the usual answer", async () => {
+    const u = await kid("LV-CODE", { status: "left", leftOn: ist(100) });
+    const code = (await sendCode(auth, "LV-CODE", "login"))!;
+    expect(await otpReason(auth.loginWithCode("LV-CODE", "000000"))).toBe("wrong");
+    expect(await reason(auth.loginWithCode("LV-CODE", code))).toBe("closed");
+    // the code is used up: the same code now reads like any bad code
+    expect(await otpReason(auth.loginWithCode("LV-CODE", code))).toBe("none");
+    await ageCodes(u.id);
+    await setLeftOn("LV-CODE", ist(5));
+    const again = (await sendCode(auth, "LV-CODE", "login"))!;
+    expect((await auth.loginWithCode("LV-CODE", again)).token).toBeTruthy();
+  });
+
+  it("forgot password: the mail goes out the same, and the reset by code or by link says the sentence only after the secret is right", async () => {
+    await kid("LV-RESET", { status: "left", leftOn: ist(120) });
+    const r = await auth.requestPasswordReset("LV-RESET");
+    expect(r.send).toBeDefined();
+    expect(await reason(auth.resetPassword(r.send!.token, "Maple-River-42"))).toBe("closed");
+    expect(await otpReason(auth.resetPasswordWithCode("LV-RESET", "000000", "Maple-River-42"))).toBe("wrong");
+    expect(await reason(auth.resetPasswordWithCode("LV-RESET", r.send!.code!, "Maple-River-42"))).toBe("closed");
+    expect(await reason(auth.resetPassword("not-a-token", "Maple-River-42"))).toBe("invalid");
+  });
+
+  it("a joining student (login off) hears the start date after the right password only", async () => {
+    await kid("LV-JOIN", { status: "joining", joinsOn: "2027-01-12" }, { status: "disabled" });
+    const err = await auth.login("LV-JOIN", PW).catch((e) => e);
+    expect(err).toBeInstanceOf(LoginError);
+    expect(err.reason).toBe("starts");
+    expect(loginRefusal(err)).toBe("This login starts on 12 Jan 2027.");
+    expect(await reason(auth.login("LV-JOIN", "wrong-Pass-1"))).toBe("invalid");
+    // no code is ever mailed to a login that is off, and a code attempt reads like any bad code
+    expect((await auth.sendOtp("LV-JOIN", "login")).send).toBeUndefined();
+    expect(await otpReason(auth.loginWithCode("LV-JOIN", "123456"))).toBe("none");
+  });
+
+  it("school isolation: another school's left student never closes a login here", async () => {
+    const [b] = await withConsole((tx) => tx.insert(schools).values({ slug: "auth-lv-b", name: "Other", status: "active" }).returning());
+    const hash = await Passwords.hash(PW);
+    const [ub] = await withConsole((tx) => tx.insert(users).values({ schoolId: b!.id, role: "student", loginId: "LV-ISO", name: "Iso", passwordHash: hash }).returning());
+    await withSchool(b!.id, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, user_id, status, left_on) values (gen_random_uuid(), ${b!.id}, 'LV-ISO', 'Iso', ${ub!.id}, 'left', ${ist(400)}::date)`));
+    await kid("LV-ISO", { status: "active" });
+    expect((await auth.login("LV-ISO", PW)).token).toBeTruthy();
+    expect(await reason(new SchoolAuth(b!.id).login("LV-ISO", PW))).toBe("closed");
   });
 });

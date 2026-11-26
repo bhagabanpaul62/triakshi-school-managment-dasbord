@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNull, ne, schools, sql, users, type Tx } from "@smw/db";
+import { and, count, eq, inArray, isNull, ne, schools, sql, users, withSchool, type Tx } from "@smw/db";
 import { AppError, ConflictError, ForbiddenError, LimitError, SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import {
   AcademicYearService, ClassService, ClassSubjectService, SectionService, SubjectService, TermService,
@@ -219,11 +219,14 @@ export class SetupService extends SchoolService<Perm> {
     let termsAdded = 0;
     const n = Number(d.terms);
     const terms = new TermService(this.ctx);
-    if (n > 0 && (await terms.list({ pageSize: 1, filters: { yearId: year.id } })).total === 0) {
+    // One admin at a time from the check to the last term, or two of them both see none and each add a set.
+    if (n > 0) await withSchool(this.ctx.schoolId, async (lock) => {
+      await lock.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`setup-terms:${year.id}`}, 0))`);
+      if ((await terms.list({ pageSize: 1, filters: { yearId: year.id } })).total > 0) return;
       for (const t of splitTerms(year.startsOn, year.endsOn, n)) {
         try { await terms.create({ ...t, yearId: year.id }); termsAdded++; } catch (e) { if (!(e instanceof ConflictError)) throw e; }
       }
-    }
+    });
     return { year, termsAdded };
   }
 

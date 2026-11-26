@@ -3,6 +3,7 @@ import { env, schoolUrl } from "@smw/config";
 import { schools, users, withConsole, withSchool, type Tx } from "@smw/db";
 import { SchoolService, ValidationError, type Ctx } from "@smw/feature-kit";
 import { schoolOrigins } from "@smw/runtime/host";
+import { leftPhases, mayHear, type StudentPhase } from "@smw/runtime/phase";
 import { emailHtml, escapeHtml, pushConfigured, services, type EmailSender, type Mail } from "@smw/integrations";
 import { todayIST, addDays } from "@smw/feature-kit/money";
 import { chunks } from "./constants";
@@ -102,7 +103,13 @@ export interface Batch {
   prefs: Map<string, typeof notificationPrefs.$inferSelect>;
   schools: Map<string, { name: string; slug: string; origin?: string }>;
   subs: Map<string, (typeof pushSubscriptions.$inferSelect)[]>;
+  /** Left or alumni students among the people, by login. */
+  left: Map<string, StudentPhase>;
 }
+
+/** Said when a notice was queued before the student left, or the 90 days have passed since. */
+export const LEFT_SKIP = "The student has left the school.";
+export const heardByPerson = (b: Batch, userId: string, topic: string, now: Date) => mayHear(b.left.get(userId), topic, now);
 
 export async function load(rows: Delivery[]): Promise<Batch> {
   const uids = [...new Set(rows.map((r) => r.userId))];
@@ -118,11 +125,12 @@ export async function load(rows: Delivery[]): Promise<Batch> {
       rows.some((r) => r.channel === "push") ? many(uids, (p) => tx.select().from(pushSubscriptions).where(inArray(pushSubscriptions.userId, p))) : [],
     ]);
     const origins = await schoolOrigins(tx, sch);
+    const left = await leftPhases(tx, sids, uids);
     const subMap = new Map<string, typeof subs>();
     for (const s of subs) subMap.set(`${s.schoolId}:${s.userId}`, [...(subMap.get(`${s.schoolId}:${s.userId}`) ?? []), s]);
     return {
       notes: new Map(notes.map((n) => [n.id, n])), people: new Map(people.map((p) => [p.id, p])),
-      prefs: new Map(prefs.map((p) => [`${p.schoolId}:${p.userId}`, p])), schools: new Map(sch.map((s) => [s.id, { ...s, origin: origins.get(s.id) }])), subs: subMap,
+      prefs: new Map(prefs.map((p) => [`${p.schoolId}:${p.userId}`, p])), schools: new Map(sch.map((s) => [s.id, { ...s, origin: origins.get(s.id) }])), subs: subMap, left,
     };
   });
 }
@@ -221,6 +229,7 @@ class Drain {
     if (note.readAt || note.doneAt) return { state: "skipped", reason: "Already read in the app" };
     const person = this.b.people.get(row.userId);
     if (!person || person.status !== "active") return { state: "skipped", reason: "The account is not active." };
+    if (!heardByPerson(this.b, person.id, note.topic, this.now)) return { state: "skipped", reason: LEFT_SKIP };
     if (row.priority > 2) {
       const own = this.b.prefs.get(`${row.schoolId}:${row.userId}`);
       const s = await settingsOf(this.cache, row.schoolId);

@@ -10,6 +10,17 @@ type Has = Record<(typeof OPTIONAL)[number], boolean>;
 const rows = async <T>(tx: Tx, q: SQL) => [...(await tx.execute(q))] as T[];
 const ids = (list: string[]) => sql.join(list.map((i) => sql`${i}::uuid`), sql`, `);
 const NO = sql`false`;
+/**
+ * A list query without nested loops. Right after a big import Postgres still believes a school has a handful of people, and would compare
+ * every student with every login (12,000 students took 19 s). JIT goes off too: without nested loops the estimate looks huge, and compiling
+ * would cost more than the query. Only for whole lists: a question about one person is best as it is.
+ */
+async function listRows<T>(tx: Tx, q: SQL): Promise<T[]> {
+  await tx.execute(sql`select set_config('enable_nestloop', 'off', true), set_config('jit', 'off', true)`);
+  const out = await rows<T>(tx, q);
+  await tx.execute(sql`select set_config('enable_nestloop', 'on', true)`);
+  return out;
+}
 export const BUILT_IN_ROLES = { admin: "Admin", accountant: "Accountant", teacher: "Teacher" } as const;
 const classLabel = (col: SQL) => sql`(case when ${col} ilike 'class %' then ${col} else 'Class ' || ${col} end)`;
 
@@ -114,7 +125,7 @@ interface Row { student_id: string | null; user_id: string | null; name: string;
 /** Everyone the audience reaches, each person once. A student without a working login has userId null. */
 export async function resolveAudience(tx: Tx, audience: Audience): Promise<Reached[]> {
   const { head, where } = await plan(tx, audience);
-  const found = await rows<Row>(tx, sql`${head} select p.student_id, p.user_id, p.name, p.label, p.section_id from people p where ${where} order by p.name, p.student_id, p.login_user`);
+  const found = await listRows<Row>(tx, sql`${head} select p.student_id, p.user_id, p.name, p.label, p.section_id from people p where ${where} order by p.name, p.student_id, p.login_user`);
   return found.map((r) => ({ userId: r.user_id, studentId: r.student_id, name: r.name, label: r.label, sectionId: r.section_id }));
 }
 
@@ -122,7 +133,7 @@ export interface AudiencePreview { families: number; staff: number; total: numbe
 
 export async function audiencePreview(tx: Tx, audience: Audience): Promise<AudiencePreview> {
   const { head, where } = await plan(tx, audience);
-  const [r] = await rows<{ families: number; staff: number; sample: string[]; unreachable: AudiencePreview["unreachable"] }>(tx, sql`${head}, m as (select p.* from people p where ${where})
+  const [r] = await listRows<{ families: number; staff: number; sample: string[]; unreachable: AudiencePreview["unreachable"] }>(tx, sql`${head}, m as (select p.* from people p where ${where})
     select count(*) filter (where is_student)::int as families, count(*) filter (where not is_student)::int as staff,
       (select coalesce(json_agg(n), '[]'::json) from (select name as n from m order by name limit 5) a) as sample,
       (select coalesce(json_agg(json_build_object('name', name, 'label', label, 'why', why)), '[]'::json) from (select name, label, why from m where why is not null order by name limit 100) b) as unreachable
@@ -219,7 +230,7 @@ export async function teachersOfStudent(tx: Tx, studentId: string): Promise<Stud
     join users u on u.status = 'active' and (u.id = sec.class_teacher_id or exists (select 1 from section_teachers t where t.section_id = sec.id and t.teacher_id = u.id))
     left join section_teachers st on st.section_id = sec.id and st.teacher_id = u.id
     left join subjects subj on subj.id = st.subject_id
-    where s.id = ${studentId}::uuid group by u.id, u.name, u.role order by u.name`);
+    where s.id = ${studentId}::uuid and s.status = 'active' group by u.id, u.name, u.role order by u.name`);
 }
 
 export interface AudienceOptions {

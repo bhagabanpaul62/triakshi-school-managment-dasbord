@@ -652,6 +652,24 @@ describe("students are private to those who may see them", () => {
   });
 });
 
+describe("children who have not started or have left", () => {
+  it("a child already accepted counts as a sibling and can be linked; a child who left does not", async () => {
+    const p = phone();
+    const make = (name: string, status: string) => withSchool(a.id, async (tx) => {
+      const [k] = [...(await tx.execute(sql`insert into students (id, school_id, admission_no, name, status) values (gen_random_uuid(), ${a.id}, ${`S${++n}`}, ${name}, ${status}) returning id`))] as { id: string }[];
+      const [g] = [...(await tx.execute(sql`insert into guardians (id, school_id, name, phone) values (gen_random_uuid(), ${a.id}, 'Mum', ${p}) returning id`))] as { id: string }[];
+      await tx.execute(sql`insert into student_guardians (id, school_id, student_id, guardian_id) values (gen_random_uuid(), ${a.id}, ${k!.id}, ${g!.id})`);
+      return k!.id;
+    });
+    const waiting = await make("Zed Waiting", "joining");
+    await make("Zed Gone", "left");
+    const e = await admin().create(manual({ phone: p }));
+    expect((await admin().detail(e.id)).siblings.map((s) => s.name)).toEqual(["Zed Waiting"]);
+    expect((await admin().findStudents("Zed")).map((s) => s.label)).toEqual(["Zed Waiting"]);
+    await expect(admin().markAdmitted(e.id, waiting)).resolves.toBeTruthy();
+  });
+});
+
 describe("phone numbers", () => {
   it("one rule for every way people write a number", () => {
     for (const v of ["+91 98765 43210", "91-98765-43210", "09876543210", "(98765) 43210", "0091 9876543210", "98765 43210"]) expect(normalizePhone(v)).toBe("9876543210");

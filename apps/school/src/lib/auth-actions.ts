@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { LoginError, OtpError, PasswordError, SchoolAuth, otpMessage } from "@smw/auth";
+import { LoginError, OtpError, PasswordError, SchoolAuth, loginRefusal, otpMessage } from "@smw/auth";
 import { schoolUrl } from "@smw/config";
 import { authMails, trySend } from "@smw/integrations";
 import { accountMailer } from "@smw/feature-notifications/delivery";
@@ -28,7 +28,7 @@ export async function login(_prev: LoginState, fd: FormData): Promise<LoginState
     void mailNewDevice(school, userId, seen, deviceFamily(userAgent));
   } catch (e) {
     if (e instanceof LoginError) {
-      return { error: e.reason === "rate_limited" ? "Too many attempts. Wait 15 minutes and try again." : e.reason === "disabled" ? "This account is disabled. Ask your school office." : "That login ID or password is not right." };
+      return { error: loginRefusal(e) ?? (e.reason === "rate_limited" ? "Too many attempts. Wait 15 minutes and try again." : e.reason === "disabled" ? "This account is disabled. Ask your school office." : "That login ID or password is not right.") };
     }
     throw e;
   }
@@ -73,7 +73,7 @@ export const requestLoginCode = async (_prev: CodeState, fd: FormData) => sendCo
 function codeError(e: unknown): { error: string } {
   if (e instanceof OtpError) return { error: otpMessage(e) };
   if (e instanceof PasswordError) return { error: e.message };
-  if (e instanceof LoginError) return { error: "Too many attempts. Wait 15 minutes and try again." };
+  if (e instanceof LoginError) return { error: loginRefusal(e) ?? "Too many attempts. Wait 15 minutes and try again." };
   throw e;
 }
 

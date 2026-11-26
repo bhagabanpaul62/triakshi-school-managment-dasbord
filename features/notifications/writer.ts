@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { users, type Tx } from "@smw/db";
+import { leftPhases, mayHear } from "@smw/runtime/phase";
 import { channelsFor, defaultsFor, priorityOf, type ChannelDefaults } from "./channels";
 import { chunks } from "./constants";
 import type { NotificationRow } from "./inputs";
@@ -40,7 +41,9 @@ export class NotificationWriter {
     const found = await tx.select({ id: users.id, role: users.role }).from(users).where(and(eq(users.schoolId, schoolId), eq(users.status, "active"), inArray(users.id, ids)));
     const ok = new Set(found.map((u) => u.id));
     const roles = new Map(found.map((u) => [u.id, u.role]));
-    const mine = part.filter((r) => ok.has(r.userId));
+    // A student who left hears only about fees, results and the account; once closed, nothing (a school-wide notice would reach a stranger).
+    const left = [...roles].some(([, role]) => role === "student") ? await leftPhases(tx, [schoolId], [...ok]) : new Map();
+    const mine = part.filter((r) => ok.has(r.userId) && mayHear(left.get(r.userId), r.topic));
     if (!mine.length) return 0;
 
     // Rows with one group key and person become one row with a count (a single statement cannot upsert the same row twice).

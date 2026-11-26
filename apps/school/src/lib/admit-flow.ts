@@ -26,5 +26,5 @@ export async function admitFromEnquiry(ctx: Ctx, enquiryId: string, studentId: s
   let made;
   try { made = await new StudentService(ctx).admit(input); } catch (err) { await enq.cancelAdmission(enquiryId, claim.token).catch(() => undefined); throw err; }
   await enq.saveClaimStudent(enquiryId, claim.token, made.student.id);
-  return mark(enq, enquiryId, made.student.id, { capacityMessage: made.capacity.message });
+  return mark(enq, enquiryId, made.student.id, { capacityMessage: [made.capacity.message, ...made.warnings].filter(Boolean).join(" ") || null });
 }

@@ -1,3 +1,4 @@
+import { WITHDREW_BEFORE_JOINING } from "./constants";
 // Small pure helpers shared by the services and the pages. No framework imports.
 
 /** Today as "YYYY-MM-DD" in Indian time. */
@@ -28,3 +29,72 @@ export function ageOn(dob: string | null | undefined, on = today()): number | nu
 
 /** A file handed to a service (keeps `File` out of the framework-free layer). */
 export interface UploadFile { name: string; type: string; bytes: Uint8Array }
+
+/** "2026-11-26" plus `n` days (calendar arithmetic, no time zone). */
+export function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Why a student left. The code is stored in `left_reason`, with the words after a colon ("other: moved abroad"). */
+export const LEAVE_REASONS = [
+  { value: "moved_city", label: "Moved to another city" },
+  { value: "changed_school", label: "Changed school" },
+  { value: "fees", label: "Fees" },
+  { value: "completed", label: "Completed the school" },
+  { value: "other", label: "Other" },
+] as const;
+export type LeaveReason = (typeof LEAVE_REASONS)[number]["value"];
+
+/** Old rows keep the words after a colon ("other: moved abroad"); new ones keep the code here and the words in `left_note`. */
+export const leftReasonCode = (code: string, note?: string) => (note ? `${code}: ${note}` : code);
+/** "moved_city" -> "Moved to another city"; "other: moved abroad" -> "Other: moved abroad". Unknown words pass through. */
+export function leftReasonText(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const [code, ...rest] = raw.split(": ");
+  if (raw === WITHDREW_BEFORE_JOINING) return "Withdrew before joining";
+  const label = LEAVE_REASONS.find((r) => r.value === code)?.label;
+  return label ? [label, ...rest].join(": ") : raw;
+}
+
+/** Expected age in a class is grade + 5, two years either way. Only a hint for the office: never a reason to refuse. */
+export function classAgeWarning(dob: string | null | undefined, grade: number | null | undefined, className: string, on = today()): string | null {
+  const age = ageOn(dob, on);
+  if (age == null || grade == null) return null;
+  const usual = grade + 5;
+  return age < usual - 2 || age > usual + 2 ? `The child is ${age} years old. ${className} is usually for ages ${usual - 2} to ${usual + 2}. Check the birth date and the class.` : null;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2027-02-24" -> "24 Feb 2027". */
+export const longDay = (iso: string) => `${Number(iso.slice(8, 10))} ${MONTHS[Number(iso.slice(5, 7)) - 1] ?? ""} ${iso.slice(0, 4)}`;
+
+/** The last day the family of a left student can sign in: `days` after the later of today and the last day attended. */
+export const accessUntilOf = (lastDay: string | null | undefined, days: number, now = today()) => addDays(lastDay && lastDay > now ? lastDay : now, days);
+
+/** A joining year as far as the day rules need it. */
+export interface YearSpan { name: string; startsOn: string; endsOn: string }
+
+/** A joining day must fall inside its academic year. Returns the plain sentence to show on the day field, or null. */
+export function dayInYear(year: YearSpan, day: string): string | null {
+  return day < year.startsOn || day > year.endsOn ? `Choose a day from ${longDay(year.startsOn)} to ${longDay(year.endsOn)}, the days of ${year.name}.` : null;
+}
+
+/**
+ * Where a first day puts a child. In the current year, today or earlier is an ordinary admission and a later day is joining.
+ * In a later year the day must be on or after that year's start (blank means the start, or tomorrow once the year has begun).
+ * One rule for the form, the import and the bring-back dialog.
+ */
+export function planDay(year: YearSpan, isCurrent: boolean, joinsOn: string | null | undefined, now = today()): { joining: boolean; day: string | null; error: string | null } {
+  if (!joinsOn) {
+    if (isCurrent) return { joining: false, day: null, error: null };
+    const day = year.startsOn > now ? year.startsOn : addDays(now, 1);
+    const error = dayInYear(year, day);
+    return { joining: !error, day: error ? null : day, error };
+  }
+  const error = dayInYear(year, joinsOn);
+  if (error) return { joining: false, day: null, error };
+  if (isCurrent) return joinsOn > now ? { joining: true, day: joinsOn, error: null } : { joining: false, day: null, error: null };
+  return { joining: true, day: joinsOn, error: null };
+}

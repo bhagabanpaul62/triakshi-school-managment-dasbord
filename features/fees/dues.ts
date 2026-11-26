@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type AnyColumn } from "drizzle-orm";
 import type { Tx } from "@smw/db";
 import { listQuerySchema, type ListQuery } from "@smw/feature-kit";
 import { addMonths, monthEnd, monthStart, todayIST } from "@smw/feature-kit/money";
-import { FeesBase, asId, calcOf, invalid } from "./base";
+import { FeesBase, WITHDREW, asId, calcOf, invalid, studentTag } from "./base";
 import { dueState, invoiceLateFee, openOf } from "./calc";
 import { METHOD_LABEL, type AgeBand, type PayMethod } from "./constants";
 import { feeAdvances, feeConcessions, feePromises, feeRefunds, feeReminders, feeSettlements, feeUpiSlips, feeNotes, feeReceipts, feeInvoices } from "./schema";
@@ -48,6 +48,15 @@ const receiptMoney = (from: string, to: string) => sql`rcp as materialized (sele
 
 /** The column of the per-student ageing aggregate (`a` in `rows`) behind each band of the age filter. */
 const AGE_COLUMN: Record<AgeBand, string> = { "not-due": "not_due", "0-30": "d1", "31-60": "d2", "61-90": "d3", "90+": "d4" };
+
+/** A child who never started (alias `s`): nothing ran for them, so they are not chased. */
+const NEVER_STARTED = sql`(s.status = 'left' and s.left_reason = ${WITHDREW})`;
+
+/** The same children as a list of ids, for slices (which carry only student_id): never chased, never counted in a class or a month. Money they owe or hold still shows in `open` and in the student's account. */
+const NVR = sql`nvr as (select id from students where status = 'left' and left_reason = ${WITHDREW})`;
+const CHASED = sql`student_id not in (select id from nvr)`;
+
+const notNeverStarted = (col: AnyColumn) => sql`${col} not in (select id from students where status = 'left' and left_reason = ${WITHDREW})`;
 
 const asRows = <T,>(r: Iterable<T>) => [...r];
 const num = (v: unknown) => Number(v ?? 0);
@@ -155,21 +164,22 @@ export class DuesService extends FeesBase {
       o.classId ? sql`s.class_id = ${o.classId}::uuid` : sql`true`,
       o.status ? sql`s.status = ${o.status}` : sql`true`,
       o.routeId && t?.r ? sql`exists (select 1 from student_transport st where st.student_id = s.id and st.route_id = ${o.routeId}::uuid)` : sql`true`,
-      o.overdueOnly ? sql`coalesce(a.overdue, 0) > 0` : sql`true`,
+      o.overdueOnly ? sql`(coalesce(a.overdue, 0) > 0 and not ${NEVER_STARTED})` : sql`true`,
       ageColumn ? sql`coalesce(a.${sql.raw(ageColumn)}, 0) > 0` : sql`true`,
       o.includeZero ? sql`true` : sql`coalesce(a.open, 0) > 0`,
     ];
-    const age = (lo: number, hi: number) => sql`coalesce(sum(open_paise) filter (where due_on < ${today}::date and ${today}::date - due_on between ${lo} and ${hi}), 0)`;
+    const age = (lo: number, hi: number) => sql`coalesce(sum(open_paise) filter (where ${CHASED} and due_on < ${today}::date and ${today}::date - due_on between ${lo} and ${hi}), 0)`;
     const res = asRows(await tx.execute<Record<string, string | number | null>>(sql`
-      with ${o.headId ? headSlices(o.headId) : SLICES},
-      a as (select student_id, sum(open_paise) open, coalesce(sum(open_paise) filter (where due_on < ${today}::date), 0) overdue, min(due_on) filter (where open_paise > 0) next_due,
-                   coalesce(sum(open_paise) filter (where due_on >= ${today}::date), 0) not_due, ${age(1, 30)} d1, ${age(31, 60)} d2, ${age(61, 90)} d3, ${age(91, 100000)} d4
+      with ${o.headId ? headSlices(o.headId) : SLICES}, ${NVR},
+      a as (select student_id, sum(open_paise) open, coalesce(sum(open_paise) filter (where ${CHASED} and due_on < ${today}::date), 0) overdue, min(due_on) filter (where open_paise > 0) next_due,
+                   coalesce(sum(open_paise) filter (where ${CHASED} and due_on >= ${today}::date), 0) not_due, student_id in (select id from nvr) never, ${age(1, 30)} d1, ${age(31, 60)} d2, ${age(61, 90)} d3, ${age(91, 100000)} d4
             from slices where open_paise > 0 group by student_id),
       inv as (select student_id, sum(gross_paise) gross, sum(concession_paise + credited_paise) conc, sum(late_paise) late, sum(paid_paise) paid from fee_invoices where status = 'issued' group by student_id)
-      select s.id, s.name, s.admission_no, s.class_id, s.status, s.left_on, coalesce(c.name || coalesce('-' || sec.name, ''), '-') class_label,
+      select s.id, s.name, s.admission_no, s.class_id, s.status, s.left_on, s.left_reason, s.joins_on, coalesce(c.name || coalesce('-' || sec.name, ''), '-') class_label,
              coalesce(a.open, 0) open, coalesce(a.overdue, 0) overdue, a.next_due, coalesce(a.not_due, 0) not_due, coalesce(a.d1, 0) d1, coalesce(a.d2, 0) d2, coalesce(a.d3, 0) d3, coalesce(a.d4, 0) d4,
              ${ageColumn ? sql`coalesce(a.${sql.raw(ageColumn)}, 0)` : sql`null`} in_band,
              coalesce(inv.gross, 0) gross, coalesce(inv.conc, 0) conc, coalesce(inv.late, 0) late, coalesce(inv.paid, 0) paid,
+             coalesce(a.never, false) never, sum(case when a.never then a.open else 0 end) over () t_never,
              count(*) over () total, sum(coalesce(a.open, 0)) over () t_open, sum(coalesce(a.overdue, 0)) over () t_overdue, sum(coalesce(a.not_due, 0)) over () t_not_due,
              sum(coalesce(a.d1, 0)) over () t1, sum(coalesce(a.d2, 0)) over () t2, sum(coalesce(a.d3, 0)) over () t3, sum(coalesce(a.d4, 0)) over () t4
       from students s left join a on a.student_id = s.id left join inv on inv.student_id = s.id left join classes c on c.id = s.class_id left join sections sec on sec.id = s.section_id
@@ -184,14 +194,14 @@ export class DuesService extends FeesBase {
         id: r.id as string, name: r.name as string, admissionNo: r.admission_no as string, classId: (r.class_id as string | null), classLabel: r.class_label as string,
         gross: num(r.gross), concession: num(r.conc), late: num(r.late), paid: num(r.paid), due: open, overdue, accrued,
         status: overdue > 0 ? "overdue" as const : open > 0 ? "due" as const : "paid" as const, nextDueDate: (r.next_due as string | null) ?? null,
-        studentStatus: r.status as string, leftOn: (r.left_on as string | null) ?? null, inBand: r.in_band == null ? null : num(r.in_band),
+        neverStarted: Boolean(r.never), studentStatus: r.status as string, leftOn: (r.left_on as string | null) ?? null, tag: studentTag({ status: r.status as string, joinsOn: r.joins_on as string | null, leftOn: r.left_on as string | null, leftReason: r.left_reason as string | null }), inBand: r.in_band == null ? null : num(r.in_band),
         ageing: { notDue: num(r.not_due), d1_30: num(r.d1), d31_60: num(r.d2), d61_90: num(r.d3), d90p: num(r.d4) } satisfies Ageing,
       };
     });
     const first = res[0];
     return {
       rows, total: num(first?.total),
-      totals: { due: num(first?.t_open), overdue: num(first?.t_overdue), ageing: { notDue: num(first?.t_not_due), d1_30: num(first?.t1), d31_60: num(first?.t2), d61_90: num(first?.t3), d90p: num(first?.t4) } satisfies Ageing },
+      totals: { due: num(first?.t_open), neverStarted: num(first?.t_never), overdue: num(first?.t_overdue), ageing: { notDue: num(first?.t_not_due), d1_30: num(first?.t1), d31_60: num(first?.t2), d61_90: num(first?.t3), d90p: num(first?.t4) } satisfies Ageing },
     };
   }
 
@@ -200,7 +210,7 @@ export class DuesService extends FeesBase {
     return this.viewer(async (tx, own) => {
       if (!own?.length) return [];
       const out = await this.rows(tx, { ids: own, includeZero: true, limit: 50, offset: 0 });
-      return out.rows.filter((r) => r.gross > 0 || r.due > 0).map(({ accrued, ageing: _a, studentStatus: _s, leftOn: _l, inBand: _b, ...r }) => ({ ...r, due: r.due + accrued, overdue: r.overdue + (r.status === "overdue" ? accrued : 0), late: r.late + accrued }));
+      return out.rows.filter((r) => r.gross > 0 || r.due > 0).map(({ accrued, ageing: _a, neverStarted: _n, studentStatus: _s, leftOn: _l, tag: _t, inBand: _b, ...r }) => ({ ...r, due: r.due + accrued, overdue: r.overdue + (r.status === "overdue" ? accrued : 0), late: r.late + accrued }));
     });
   }
 
@@ -208,9 +218,9 @@ export class DuesService extends FeesBase {
 
   /** What is open per class, from one run of the slices query (home asked `report` once per class). Classes with nothing open are left out; students who left stay in, as in the report. */
   async dueByClass(): Promise<{ classId: string; name: string; duePaise: number }[]> {
-    return this.read("read", async (tx) => asRows(await tx.execute<{ id: string; name: string; due: string }>(sql`with ${SLICES}
+    return this.read("read", async (tx) => asRows(await tx.execute<{ id: string; name: string; due: string }>(sql`with ${SLICES}, ${NVR}
       select c.id, c.name, sum(sl.open_paise) due from slices sl join students s on s.id = sl.student_id join classes c on c.id = s.class_id
-      where sl.open_paise > 0 group by c.id, c.name, c.grade order by c.grade, c.name`)).map((r) => ({ classId: r.id, name: r.name, duePaise: num(r.due) })));
+      where sl.open_paise > 0 and sl.${CHASED} group by c.id, c.name, c.grade order by c.grade, c.name`)).map((r) => ({ classId: r.id, name: r.name, duePaise: num(r.due) })));
   }
 
   /**
@@ -226,7 +236,7 @@ export class DuesService extends FeesBase {
         select s.id, s.name, coalesce(c.name || coalesce('-' || sec.name, ''), '-') class_label, a.overdue, a.next_due,
           (select g.phone from student_guardians sg join guardians g on g.id = sg.guardian_id where sg.student_id = s.id and g.phone is not null order by sg.is_primary desc, g.name limit 1) phone
         from a join students s on s.id = a.student_id left join classes c on c.id = s.class_id left join sections sec on sec.id = s.section_id
-        where a.overdue > 0 order by a.overdue desc, a.open desc, s.name, s.id limit ${limit}`))
+        where a.overdue > 0 and not ${NEVER_STARTED} order by a.overdue desc, a.open desc, s.name, s.id limit ${limit}`))
         .map((r) => ({ id: r.id, name: r.name, classLabel: r.class_label, overdue: num(r.overdue), nextDueDate: r.next_due ?? null, phone: r.phone ?? null }));
     });
   }
@@ -241,10 +251,10 @@ export class DuesService extends FeesBase {
   private async summaryIn(tx: Tx) {
     const today = todayIST(), month = `${today.slice(0, 7)}-01`;
     const [[a], now, mon, year] = await Promise.all([
-      tx.execute<{ open: string; overdue: string; students: string; overdue_students: string }>(sql`with ${SLICES} select coalesce(sum(open_paise), 0) open, coalesce(sum(open_paise) filter (where due_on < ${today}::date), 0) overdue, count(distinct student_id) students, count(distinct student_id) filter (where due_on < ${today}::date) overdue_students from slices where open_paise > 0`).then(asRows),
+      tx.execute<{ open: string; overdue: string; students: string; overdue_students: string }>(sql`with ${SLICES}, ${NVR} select coalesce(sum(open_paise), 0) open, coalesce(sum(open_paise) filter (where ${CHASED} and due_on < ${today}::date), 0) overdue, count(distinct student_id) students, count(distinct student_id) filter (where ${CHASED} and due_on < ${today}::date) overdue_students from slices where open_paise > 0`).then(asRows),
       this.collectedIn(tx, today, today), this.collectedIn(tx, month, today), this.collectedIn(tx, `${(await this.currentYear(tx)).startsOn}`, today),
     ]);
-    const [billed] = asRows(await tx.execute<{ v: string }>(sql`select coalesce(sum(gross_paise - concession_paise - credited_paise + late_paise), 0) v from fee_invoices where status = 'issued'`));
+    const [billed] = asRows(await tx.execute<{ v: string }>(sql`select coalesce(sum(gross_paise - concession_paise - credited_paise + late_paise), 0) v from fee_invoices where status = 'issued' and student_id not in (select id from students where status = 'left' and left_reason = ${WITHDREW})`));
     return {
       collectedToday: now.paise, receiptsToday: now.n, collectedThisMonth: mon.paise, receiptsThisMonth: mon.n,
       outstanding: num(a?.open), overdueAmount: num(a?.overdue), overdueCount: num(a?.overdue_students), studentsWithDues: num(a?.students),
@@ -275,8 +285,8 @@ export class DuesService extends FeesBase {
    */
   private async figuresIn(tx: Tx, from: string, to: string) {
     const [[b], [n], got] = await Promise.all([
-      tx.select({ gross: sql<string>`coalesce(sum(${feeInvoices.grossPaise}), 0)`, conc: sql<string>`coalesce(sum(${feeInvoices.concessionPaise}), 0)`, n: sql<number>`count(*)::int` }).from(feeInvoices).where(and(eq(feeInvoices.status, "issued"), sql`${feeInvoices.issueDate} between ${from} and ${to}`)),
-      tx.select({ v: sql<string>`coalesce(sum(${feeNotes.amountPaise}), 0)` }).from(feeNotes).where(and(eq(feeNotes.kind, "credit"), eq(feeNotes.status, "approved"), eq(feeNotes.reasonType, "concession"), sql`${feeNotes.issuedOn} between ${from} and ${to}`)),
+      tx.select({ gross: sql<string>`coalesce(sum(${feeInvoices.grossPaise}), 0)`, conc: sql<string>`coalesce(sum(${feeInvoices.concessionPaise}), 0)`, n: sql<number>`count(*)::int` }).from(feeInvoices).where(and(eq(feeInvoices.status, "issued"), sql`${feeInvoices.issueDate} between ${from} and ${to}`, notNeverStarted(feeInvoices.studentId))),
+      tx.select({ v: sql<string>`coalesce(sum(${feeNotes.amountPaise}), 0)` }).from(feeNotes).where(and(eq(feeNotes.kind, "credit"), eq(feeNotes.status, "approved"), eq(feeNotes.reasonType, "concession"), sql`${feeNotes.issuedOn} between ${from} and ${to}`, notNeverStarted(feeNotes.studentId))),
       this.collectedIn(tx, from, to),
     ]);
     return { from, to, billedPaise: num(b?.gross), concededPaise: num(b?.conc) + num(n?.v), collectedPaise: got.paise, bills: num(b?.n), receipts: got.n };
@@ -291,7 +301,7 @@ export class DuesService extends FeesBase {
         this.summaryIn(tx),
         this.rows(tx, { overdueOnly: true, limit: 8, offset: 0 }),
         tx.execute<{ id: string; name: string; students: string; due: string; overdue: string; overdue_students: string }>(sql`
-          with ${SLICES}, per as (select student_id, sum(open_paise) open, coalesce(sum(open_paise) filter (where due_on < ${today}::date), 0) overdue from slices group by student_id)
+          with ${SLICES}, ${NVR}, per as (select student_id, sum(open_paise) open, coalesce(sum(open_paise) filter (where due_on < ${today}::date), 0) overdue from slices where ${CHASED} group by student_id)
           select c.id, c.name, count(*) students, sum(per.open) due, sum(per.overdue) overdue, count(*) filter (where per.overdue > 0) overdue_students
           from per join students s on s.id = per.student_id join classes c on c.id = s.class_id group by c.id, c.name, c.grade order by c.grade`).then(asRows),
         tx.execute<{ id: string; student_id: string; student: string; amount: string; method: string | null; number: string }>(sql`

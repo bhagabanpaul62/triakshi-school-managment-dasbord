@@ -231,6 +231,16 @@ describe("booking", () => {
     expect((await new BookingService(a.as.admin).invitedChildren(m.id)).map((c) => c.id)).not.toContain(ids.meera);
     await withSchool(a.id, (tx) => tx.update(students).set({ status: "active", sectionId: ids.sectionB }).where(eq(students.id, ids.meera)));
   });
+
+  it("a child who has not started is not invited, cannot book, and has no seat in the meeting", async () => {
+    const m = await openMeeting({ title: "Joining" });
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "joining", sectionId: null, joinsSectionId: ids.sectionA }).where(eq(students.id, ids.meera)));
+    await expect(new BookingService(ids.ctx.meera).forFamily(m.id)).rejects.toBeInstanceOf(NotFoundError);
+    const s = await freeOf(m.id, ids.t1);
+    await expect(new BookingService(ids.ctx.meera).book(m.id, { slotId: s[0]!.id })).rejects.toBeInstanceOf(ForbiddenError);
+    expect((await new BookingService(a.as.admin).invitedChildren(m.id)).map((c) => c.id)).not.toContain(ids.meera);
+    await withSchool(a.id, (tx) => tx.update(students).set({ status: "active", sectionId: ids.sectionB, joinsSectionId: null }).where(eq(students.id, ids.meera)));
+  });
 });
 
 describe("waiting list and window changes", () => {

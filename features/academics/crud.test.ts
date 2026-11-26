@@ -117,6 +117,20 @@ describe("classes", () => {
   });
 });
 
+describe("children planned to join", () => {
+  const joining = (school: TestSchool, classId: string, o: { sectionId?: string; yearId?: string }) => withSchool(school.id, (tx) => tx.execute(sql`insert into students (id, school_id, admission_no, name, status, class_id, joins_section_id, joins_year_id, joins_on)
+    values (${uuidv7()}, ${school.id}, ${`J-${Math.random().toString(36).slice(2, 8)}`}, 'Joiner', 'joining', ${classId}, ${o.sectionId ?? null}, ${o.yearId ?? null}, '2030-06-01')`));
+  it("a section, a class and a year with a child planned into them cannot be deleted", async () => {
+    const y = await new AcademicYearService(a.as.admin).create({ name: "2032-33" });
+    const cls = await new ClassService(a.as.admin).create({ name: "Class 10", grade: 10 });
+    const sec = await new SectionService(a.as.admin).create({ classId: cls.id, yearId: y.id, name: "A" });
+    for (let i = 0; i < 3; i++) await joining(a, cls.id, { sectionId: sec.id, yearId: y.id });
+    await expect(new SectionService(a.as.admin).remove(sec.id)).rejects.toThrow(/3 children are planned to join this section/);
+    await expect(new ClassService(a.as.admin).remove(cls.id)).rejects.toThrow(/in use/); // sections and the planned children
+    await expect(new AcademicYearService(a.as.admin).remove(y.id)).rejects.toThrow(/3 children are planned to join this year/);
+  });
+});
+
 describe("sections", () => {
   it("keep medium, shift and stream label, and the class-teacher shortcut touches only the teacher", async () => {
     const cls = await new ClassService(a.as.admin).create({ name: "Class 12", grade: 12 });

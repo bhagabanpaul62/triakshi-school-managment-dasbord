@@ -36,9 +36,9 @@ export async function lapse(schoolId: string): Promise<{ closed: number }> {
       else found.set(t.id, reason);
     }
     const gone = await rows<{ id: string; student: string; left: boolean }>(tx, sql`
-      select t.id::text as id, s.name as student, (s.status <> 'active') as left
+      select t.id::text as id, s.name as student, (s.status in ('left', 'alumni')) as left
       from message_threads t join students s on s.id = t.student_id
-      where t.kind = 'student' and t.state = 'open' and (s.status <> 'active'
+      where t.kind = 'student' and t.state = 'open' and (s.status in ('left', 'alumni')
         or not exists (select 1 from thread_members m join users u on u.id = m.user_id where ${STAFF_ACTIVE}))`);
     for (const t of gone) if (!found.has(t.id)) found.set(t.id, t.left ? `${t.student} has left the school.` : "No teacher or office member is left in it.");
     for (const [id, reason] of found) {
@@ -64,7 +64,7 @@ export async function retention(schoolId: string): Promise<{ noticed: number; re
   return withSchool(schoolId, async (tx) => {
     const years = (await loadCommSettings(tx)).retentionYears;
     const gone = sql`coalesce(s.left_on, s.updated_at::date)`;
-    const keepable = sql`t.kind = 'student' and t.held_at is null and s.status <> 'active'
+    const keepable = sql`t.kind = 'student' and t.held_at is null and s.status in ('left', 'alumni')
       and not exists (select 1 from message_reports r where r.thread_id = t.id) and not exists (select 1 from message_reviews v where v.thread_id = t.id)`;
     const due = await rows<{ id: string }>(tx, sql`select t.id::text as id from message_threads t join students s on s.id = t.student_id
       where ${keepable} and ${gone} <= (current_date - make_interval(years => ${years}) - make_interval(days => ${NOTICE_DAYS}))::date`);

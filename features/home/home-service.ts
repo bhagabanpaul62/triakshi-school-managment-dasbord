@@ -1,6 +1,6 @@
 import { and, asc, count, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { AppError, FeatureOffError, ForbiddenError, SchoolService, type Ctx } from "@smw/feature-kit";
-import { users } from "@smw/db";
+import { schools, users } from "@smw/db";
 import { academicYears, classes, sections, subjects, terms } from "@smw/feature-academics/schema";
 import { guardians, studentGuardians, students } from "@smw/feature-students/schema";
 import { staffProfiles } from "@smw/feature-staff/schema";
@@ -77,9 +77,9 @@ export interface NumberCard { key: "present" | "collected" | "dues" | "enquiries
 export interface AttendanceWeek { dayOff: DayOff | null; points: { date: string; pct: number }[]; unmarked: SectionToMark[]; sections: number }
 export interface MoneyTrend { trend: TrendPoint[]; thisMonth: number; lastMonthSame: number; change: Change | null }
 export interface Funnel { stages: { key: EnquiryStatus; count: number }[]; open: number; total: number }
-export interface Approvals { pending: number; rows: { id: string; title: string; amountPaise: number; href: string }[] }
+export interface Approvals { pending: number; rows: { id: string; title: string; amountPaise: number; perChild?: boolean; href: string }[] }
 export interface GettingStarted { card: { percent: number; left: number; next: { label: string; href: string; minutes: number } | null } | null }
-export interface MyApprovals { rows: { id: string; title: string; amountPaise: number; href: string | null; since: Date }[] }
+export interface MyApprovals { rows: { id: string; title: string; amountPaise: number; perChild?: boolean; href: string | null; since: Date }[] }
 export interface Leave { away: { id: string; name: string; until: string }[]; pending: number }
 export interface Birthdays { students: { id: string; name: string; label: string | null; age: number | null }[]; staff: { id: string; name: string; age: number | null }[] }
 export interface MyClass { dayOff: DayOff | null; canCall: boolean; sections: { id: string; label: string; marked: boolean; absent: { id: string; name: string; phone: string | null }[]; birthdays: { id: string; name: string }[] }[] }
@@ -106,8 +106,10 @@ export interface WebsiteState { state: "never" | "draft" | "asked" | "live"; dra
 export interface Safeguarding { reports: number }
 
 /** What each panel loads, by key. */
+export interface LeftAccess { until: string; links: { label: string; hint: string; href: string }[]; office: { name: string; phone: string | null; email: string | null } }
+
 export interface PanelData {
-  "today": TodayStrip; "needs-action": ActionItem[]; "attention": { items: AttentionItem[]; unchecked: string[] }; "numbers": NumberCard[];
+  "left": LeftAccess; "today": TodayStrip; "needs-action": ActionItem[]; "attention": { items: AttentionItem[]; unchecked: string[] }; "numbers": NumberCard[];
   "attendance-week": AttendanceWeek; "money-trend": MoneyTrend; "funnel": Funnel; "requests": RequestsSummary; "approvals": Approvals; "my-approvals": MyApprovals;
   "getting-started": GettingStarted; "my-setup": MyTask[]; "plan": StudentCapacity; "leave": Leave; "birthdays": Birthdays; "notices": HomeNotice[]; "events": SchoolEvent[];
   "now-next": TodayTimetable; "to-mark": SectionsToMark; "to-grade": { toGrade: number; rows: GradingRow[] }; "marks": PendingPaper[]; "homework": Homework; "my-class": MyClass;
@@ -203,6 +205,7 @@ export class HomeService extends SchoolService<Perm> {
   private upcomingEvents() { return this.once("events", () => new EventService(this.ctx).upcoming(5)); }
 
   private readonly loaders: { [K in PanelKey]: () => Promise<Slot<PanelData[K]>> } = {
+    "left": () => this.leftAccess(),
     "today": () => this.todayStrip(), "needs-action": () => this.needsAction(), "attention": () => this.attention(), "numbers": () => this.numbers(),
     "attendance-week": () => this.attendanceWeek(), "money-trend": () => this.moneyTrend(), "funnel": () => this.funnel(), "requests": () => this.requests(),
     "approvals": () => this.approvals(), "my-approvals": () => this.myApprovals(), "getting-started": () => this.gettingStarted(), "my-setup": () => this.mySetup(), "plan": () => this.capacity(),
@@ -458,9 +461,9 @@ export class HomeService extends SchoolService<Perm> {
       const where = eq(finApprovals.status, "pending");
       const [[n], rows] = await Promise.all([
         tx.select({ n: count() }).from(finApprovals).where(where),
-        tx.select({ id: finApprovals.id, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href }).from(finApprovals).where(where).orderBy(asc(finApprovals.createdAt)).limit(4),
+        tx.select({ id: finApprovals.id, kind: finApprovals.kind, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href }).from(finApprovals).where(where).orderBy(asc(finApprovals.createdAt)).limit(4),
       ]);
-      return { pending: Number(n?.n ?? 0), rows: rows.map((r) => ({ id: r.id, title: r.title, amountPaise: Number(r.amountPaise), href: "/app/finance/approvals" })) };
+      return { pending: Number(n?.n ?? 0), rows: rows.map((r) => ({ id: r.id, title: r.title, amountPaise: Number(r.amountPaise), perChild: r.kind === "fees.plan", href: "/app/finance/approvals" })) };
     }));
   }
 
@@ -468,8 +471,8 @@ export class HomeService extends SchoolService<Perm> {
   protected myApprovals(): Promise<Slot<MyApprovals>> {
     return this.slot("finance", async () => {
       if (this.holds("finance:approve")) throw new ForbiddenError();
-      return this.read("view", async (tx) => ({ rows: (await tx.select({ id: finApprovals.id, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href, since: finApprovals.createdAt }).from(finApprovals)
-        .where(and(eq(finApprovals.status, "pending"), eq(finApprovals.requestedBy, this.ctx.userId))).orderBy(asc(finApprovals.createdAt)).limit(5)).map((r) => ({ ...r, amountPaise: Number(r.amountPaise) })) }));
+      return this.read("view", async (tx) => ({ rows: (await tx.select({ id: finApprovals.id, kind: finApprovals.kind, title: finApprovals.title, amountPaise: finApprovals.amountPaise, href: finApprovals.href, since: finApprovals.createdAt }).from(finApprovals)
+        .where(and(eq(finApprovals.status, "pending"), eq(finApprovals.requestedBy, this.ctx.userId))).orderBy(asc(finApprovals.createdAt)).limit(5)).map(({ kind, ...r }) => ({ ...r, amountPaise: Number(r.amountPaise), perChild: kind === "fees.plan" })) }));
     });
   }
 
@@ -781,5 +784,19 @@ export class HomeService extends SchoolService<Perm> {
   }
 
   /** Links to the pages this login may open. */
+  /** A student who left: what is still open to them (only what this login can really open), until when, and the office to ask. */
+  protected leftAccess(): Promise<Slot<LeftAccess>> {
+    return this.slot([], async () => {
+      const until = this.ctx.leftUntil;
+      if (!until) throw new ForbiddenError();
+      const links = [
+        ...(this.holds("fees:self") ? [{ label: "Dues and receipts", hint: "See what is due, pay, and download receipts.", href: "/app/fees" }] : []),
+        ...(this.holds("exams:self") ? [{ label: "Results", hint: "Open the marks and report cards of past exams.", href: "/app/results" }] : []),
+      ];
+      const office = await this.read("view", async (tx) => (await tx.select({ name: schools.name, phone: schools.phone, email: schools.email }).from(schools).limit(1))[0]);
+      return { until, links, office: office ?? { name: "the school office", phone: null, email: null } };
+    });
+  }
+
   protected links(): Promise<Slot<QuickLink[]>> { return Promise.resolve({ state: "ok", data: staffLinks(this.ctx) }); }
 }

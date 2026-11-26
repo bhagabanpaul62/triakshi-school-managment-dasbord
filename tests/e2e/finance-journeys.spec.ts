@@ -452,10 +452,10 @@ test("J1 first day: nothing is set up; the checklist leads, step by step, to the
   await login(admin, "riverside", "admin");
   // Classes and a student come from the People and Academics modules, which have their own tests.
   const db = (q: string) => execSync(`psql -h 127.0.0.1 -p 5433 -U postgres -d ${process.env.E2E_DB ?? "smw"} -tA`, { input: q, env: { ...process.env, PGPASSWORD: "postgres" } }).toString().trim();
-  db(`with s as (select id from schools where slug='riverside'),
-    y as (insert into academic_years(id,school_id,name,starts_on,ends_on,is_current) select gen_random_uuid(), id, '2026-27','2026-04-01','2027-03-31',true from s where not exists (select 1 from academic_years a where a.school_id=s.id) returning id, school_id),
-    c as (insert into classes(id,school_id,name,grade) select gen_random_uuid(), school_id, 'Class 1', 1 from y returning id, school_id)
-    insert into students(id,school_id,admission_no,name,class_id,status,admission_date) select gen_random_uuid(), school_id,'RV001','Nila Menon', id,'active','2026-04-01' from c`);
+  // Each piece is added only when missing: an earlier spec (comm-notices J14) may have left the year and Class 1 behind.
+  db(`insert into academic_years(id,school_id,name,starts_on,ends_on,is_current) select gen_random_uuid(), id, '2026-27','2026-04-01','2027-03-31',true from schools s where slug='riverside' and not exists (select 1 from academic_years a where a.school_id=s.id);
+    insert into classes(id,school_id,name,grade) select gen_random_uuid(), id, 'Class 1', 1 from schools s where slug='riverside' and not exists (select 1 from classes c where c.school_id=s.id and c.name='Class 1');
+    insert into students(id,school_id,admission_no,name,class_id,status,admission_date) select gen_random_uuid(), c.school_id,'RV001','Nila Menon', c.id,'active','2026-04-01' from classes c join schools s on s.id=c.school_id where s.slug='riverside' and c.name='Class 1' and not exists (select 1 from students t where t.school_id=s.id and t.admission_no='RV001')`);
 
   await admin.goto(river("finance"));
   await expect(admin.locator("main")).toContainText(/set up your books/i);

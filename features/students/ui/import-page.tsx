@@ -12,7 +12,7 @@ export const metadata = { title: "Import students" };
 
 export default async function ImportPage() {
   const ctx = await requireCtx();
-  if (!new StudentService(ctx).can("write")) redirect("/app/students");
+  if (!new StudentService(ctx).can("write") || ctx.readOnly) redirect("/app/students");
   return (
     <>
       <PageHeader eyebrow="Students" title="Import students" description="Admit a whole class or school from a spreadsheet."

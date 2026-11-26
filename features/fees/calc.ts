@@ -173,3 +173,23 @@ export interface DeskBill {
 /** What one bill needs today: what is open plus the late fee that will be added when it is collected. */
 export const dueNow = (b: Pick<DeskBill, "openPaise" | "accruedLatePaise">) => b.openPaise + b.accruedLatePaise;
 
+
+const MONTH_YEAR = /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(\.?,?\s+)(20\d\d)\b/gi;
+const YEAR_RANGE = /\b(20\d\d)(\s*[-–/]\s*)(20\d\d|\d\d)\b/g;
+
+/**
+ * A due's label when its plan is copied `years` years on: "April 2026" becomes "April 2027" and "2026-27" becomes "2027-28"; free text stays.
+ * Only a label that is right where it stands moves: its year must be one of the due's own (`due` and `bill` dates, a range may start the year before).
+ * A label that was already wrong keeps its words, so a copy never hides or doubles the mistake.
+ */
+export function moveLabelYears(label: string, years: number, dates: { billOn: string; dueOn: string }): string {
+  if (!years) return label;
+  const own = new Set([Number(dates.billOn.slice(0, 4)), Number(dates.dueOn.slice(0, 4))]);
+  return label
+    .replace(MONTH_YEAR, (m, mon: string, gap: string, y: string) => own.has(Number(y)) ? `${mon}${gap}${Number(y) + years}` : m)
+    .replace(YEAR_RANGE, (m, a: string, sep: string, b: string) => {
+      if (!own.has(Number(a)) && !own.has(Number(a) + 1)) return m;
+      const end = b.length === 2 ? String((Number(b) + years) % 100).padStart(2, "0") : String(Number(b) + years);
+      return `${Number(a) + years}${sep}${end}`;
+    });
+}

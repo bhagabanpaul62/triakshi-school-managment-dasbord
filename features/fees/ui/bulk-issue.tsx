@@ -14,7 +14,7 @@ import { CARD, H3, LINK, MUTED } from "./styles";
 interface Row { studentId: string; studentName: string; admissionNo: string; label: string; dueOn: string; grossPaise: number; concessionPaise: number; duePaise: number }
 interface Exception { studentId: string; studentName: string; admissionNo: string; reason: "no_plan" | "left" | "already_billed" | "opted_out"; detail: string; href: string; fix: string }
 interface Preview { yearId: string; count: number; grossPaise: number; concessionPaise: number; skipped: { alreadyIssued: number; noPlan: number; left: number }; rows: Row[]; exceptions: Exception[] }
-const REASON: Record<Exception["reason"], string> = { no_plan: "No fee plan", left: "Left the school", already_billed: "Already billed", opted_out: "Optional fee not taken" };
+const REASON: Record<Exception["reason"], string> = { no_plan: "No fee plan", left: "Left or not joining", already_billed: "Already billed", opted_out: "Optional fee not taken" };
 
 /** Every student the bills pass over, with why and the link that fixes it. Filter by reason, download the list. */
 function Exceptions({ list }: { list: Exception[] }) {

@@ -10,6 +10,7 @@ import { classes, sections } from "@smw/feature-academics/schema";
 import { students } from "@smw/feature-students/schema";
 import feesFeature from "./feature";
 import { FeesBase, asId, invalid, type Perm } from "./base";
+import { moveLabelYears } from "./calc";
 import { ChangeService } from "./changes";
 import { PlanBilling } from "./plan-billing";
 import { copyPlanInput, headInput, optInInput, planInput, removeOptInInput, removeOverrideInput, studentPlanInput } from "./inputs";
@@ -86,6 +87,15 @@ export function pickPlan(plans: PublishedPlan[], s: { classId: string | null; ad
 export const admissionKind = (admissionDate: string | null, year: { startsOn: string; endsOn: string }): "new" | "existing" =>
   admissionDate && admissionDate >= year.startsOn && admissionDate <= year.endsOn ? "new" : "existing";
 
+/** A child is a new admission of the year they join, whatever their status (joining, active, left): before and after the first day the bill is the same. */
+export const kindFor = (s: { status?: string; admissionDate: string | null; joinsYearId?: string | null }, year: { id?: string; startsOn: string; endsOn: string }): "new" | "existing" =>
+  s.status === "joining" || (!!s.joinsYearId && s.joinsYearId === year.id) ? "new" : admissionKind(s.admissionDate, year);
+
+/** The columns kindFor and the join rule need; select them wherever a student is billed or put on a plan. */
+export const kindCols = { admissionDate: students.admissionDate, status: students.status, joinsYearId: students.joinsYearId, joinsOn: students.joinsOn };
+/** The day billing counts from for a new child: the day they join (planned or real), else the admission date. */
+export const sinceOf = (s: { joinsOn?: string | null; admissionDate: string | null }) => s.joinsOn ?? s.admissionDate;
+
 // ---------- plans ----------
 
 export class PlanService extends FeesBase {
@@ -97,10 +107,10 @@ export class PlanService extends FeesBase {
   }
 
   /** The published plan one student is billed on in a year, or null. */
-  async resolve(tx: Tx, student: { id: string; classId: string | null; admissionDate: string | null }, yearId: string): Promise<PublishedPlan | null> {
+  async resolve(tx: Tx, student: { id: string; classId: string | null; admissionDate: string | null; status?: string; joinsYearId?: string | null }, yearId: string): Promise<PublishedPlan | null> {
     const year = await this.yearOr(tx, yearId);
     const [over] = await tx.select({ rootId: feeStudentPlans.rootId }).from(feeStudentPlans).where(and(eq(feeStudentPlans.studentId, student.id), eq(feeStudentPlans.yearId, yearId)));
-    return pickPlan(await this.publishedIn(tx, yearId), { classId: student.classId, admission: admissionKind(student.admissionDate, year), overrideRoot: over?.rootId });
+    return pickPlan(await this.publishedIn(tx, yearId), { classId: student.classId, admission: kindFor(student, year), overrideRoot: over?.rootId });
   }
 
   async list(query: ListQuery = {}) {
@@ -227,7 +237,7 @@ export class PlanService extends FeesBase {
     for (const l of lines) {
       const [n] = await tx.insert(feePlanLines).values({ schoolId, planId: toId, headId: l.headId, optional: l.optional }).returning({ id: feePlanLines.id });
       const dues = await tx.select().from(feePlanDues).where(eq(feePlanDues.lineId, l.id));
-      if (dues.length) await tx.insert(feePlanDues).values(dues.map((d) => ({ schoolId, lineId: n!.id, dueKey: d.dueKey, label: d.label, billOn: shift(d.billOn), dueOn: shift(d.dueOn), amountPaise: d.amountPaise })));
+      if (dues.length) await tx.insert(feePlanDues).values(dues.map((d) => ({ schoolId, lineId: n!.id, dueKey: d.dueKey, label: moveLabelYears(d.label, shiftYears, d), billOn: shift(d.billOn), dueOn: shift(d.dueOn), amountPaise: d.amountPaise })));
     }
   }
 
@@ -241,9 +251,17 @@ export class PlanService extends FeesBase {
       await this.assertPublishable(tx, p);
       if ((await this.settings(tx)).planNeedsFile && !p.approvalFileKey) throw invalid("approvalFile", "Attach the committee's approval file (PDF, JPG or PNG) on the plan page first. The school asks for it before a plan goes for approval.");
       await tx.update(feePlans).set({ status: "pending" }).where(eq(feePlans.id, id));
-      await this.askApproval(tx, { kind: "fees.plan", refType: "fee_plan", refId: id, title: `Publish fee plan ${p.name} (version ${p.version})`, amountPaise: 0, reason: p.note ?? "New fee plan", href: `/app/fees/plans/${id}` });
+      await this.askApproval(tx, { kind: "fees.plan", refType: "fee_plan", refId: id, title: `Publish fee plan ${p.name} (version ${p.version})`, amountPaise: await this.yearlyPerChild(tx, p.id), reason: p.note ?? "New fee plan", href: `/app/fees/plans/${id}` });
       return { ...p, status: "pending" as const };
     }, (p) => ({ action: "submit", entity: "Fee plan", entityId: p.id, summary: `Sent fee plan ${p.name} for approval` }));
+  }
+
+  /** What one child pays in a year on this plan: every due of the fees they all take (not optional, not a refundable deposit). 0 when there is none. */
+  private async yearlyPerChild(tx: Tx, planId: string): Promise<number> {
+    const [r] = await tx.select({ v: sql<string>`coalesce(sum(${feePlanDues.amountPaise}), 0)` }).from(feePlanDues)
+      .innerJoin(feePlanLines, eq(feePlanLines.id, feePlanDues.lineId)).innerJoin(feeHeads, eq(feeHeads.id, feePlanLines.headId))
+      .where(and(eq(feePlanLines.planId, planId), eq(feePlanLines.optional, false), ne(feeHeads.type, "deposit")));
+    return Number(r?.v ?? 0);
   }
 
   /** Take a plan back from approval: it becomes a draft again, to edit and send again. */
@@ -334,7 +352,7 @@ export class PlanService extends FeesBase {
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
       const [[s], target] = await Promise.all([
-        tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId)),
+        tx.select({ id: students.id, classId: students.classId, ...kindCols, name: students.name }).from(students).where(eq(students.id, data.studentId)),
         this.publishedIn(tx, year.id).then((all) => all.find((p) => p.rootId === data.rootId)),
       ]);
       if (!s) throw new NotFoundError("Student");
@@ -361,7 +379,7 @@ export class PlanService extends FeesBase {
     const data = this.parse(optInInput, input);
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
-      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId));
+      const [s] = await tx.select({ id: students.id, classId: students.classId, ...kindCols, name: students.name }).from(students).where(eq(students.id, data.studentId));
       if (!s) throw new NotFoundError("Student");
       const heads = [...new Set(data.headIds)];
       if (heads.length && (await tx.select({ id: feeHeads.id }).from(feeHeads).where(inArray(feeHeads.id, heads))).length !== heads.length) throw new NotFoundError("Fee head");
@@ -426,12 +444,12 @@ export class PlanService extends FeesBase {
     const data = this.parse(removeOverrideInput, input);
     return this.write("setup", async (tx) => {
       const year = await this.yearOr(tx, data.yearId);
-      const [s] = await tx.select({ id: students.id, classId: students.classId, admissionDate: students.admissionDate, name: students.name }).from(students).where(eq(students.id, data.studentId));
+      const [s] = await tx.select({ id: students.id, classId: students.classId, ...kindCols, name: students.name }).from(students).where(eq(students.id, data.studentId));
       if (!s) throw new NotFoundError("Student");
       const [over] = await tx.select({ rootId: feeStudentPlans.rootId }).from(feeStudentPlans).where(and(eq(feeStudentPlans.studentId, s.id), eq(feeStudentPlans.yearId, year.id)));
       if (!over) throw new ConflictError("This student is not on a plan of their own, so there is nothing to remove.");
       const taken = new Set((await tx.select({ h: feeOptIns.headId }).from(feeOptIns).where(and(eq(feeOptIns.studentId, s.id), eq(feeOptIns.yearId, year.id)))).map((r) => r.h));
-      const [now, back] = [await this.resolve(tx, s, year.id), pickPlan(await this.publishedIn(tx, year.id), { classId: s.classId, admission: admissionKind(s.admissionDate, year) })];
+      const [now, back] = [await this.resolve(tx, s, year.id), pickPlan(await this.publishedIn(tx, year.id), { classId: s.classId, admission: kindFor(s, year) })];
       const lowers = (now ? await this.unbilledIn(tx, s.id, now.id, taken) : 0) - (back ? await this.unbilledIn(tx, s.id, back.id, taken) : 0);
       const d = { studentId: s.id, yearId: year.id, rootId: null, reason: "Back on the class plan" };
       const out = await new ChangeService(this.ctx).submitIn(tx, { kind: "student_plan", studentId: s.id, payload: d, reason: d.reason, lowersPaise: lowers, title: `Put ${s.name} back on the class fee plan`, href: `/app/fees/students/${s.id}` }, () => this.applyStudentPlanIn(tx, d));

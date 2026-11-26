@@ -49,9 +49,9 @@ export class StudentAccess {
     return new Set([...own, ...taught].map((r) => r.id));
   }
 
-  /** Blank the private fields of students outside `allowed` (see sensitiveSections). */
+  /** Blank the private fields of students outside `allowed` (see sensitiveSections). A child who left keeps a last section, but is no longer in the teacher's class. */
   static redact<T extends Student>(row: T, allowed: Set<string> | null): T {
-    if (!allowed || (row.sectionId && allowed.has(row.sectionId))) return row;
+    if (!allowed || (row.status === "active" && row.sectionId && allowed.has(row.sectionId))) return row;
     return { ...row, medicalNotes: null, emergencyName: null, emergencyPhone: null };
   }
 

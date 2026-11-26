@@ -1,10 +1,11 @@
 // Contract tables for students and guardians. Attendance, fees, exams, assignments, transport and library read these.
+import { sql } from "drizzle-orm";
 import { boolean, date, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { schoolColumns, tenant, users } from "@smw/db";
 import { academicYears, classes, sections } from "@smw/feature-academics/schema";
 
-export const STUDENT_STATUSES = ["active", "alumni", "left"] as const;
-export const GENDERS = ["male", "female", "other"] as const;
+import type { GENDERS, GUARDIAN_RELATIONS, STUDENT_STATUSES } from "./constants";
+export { GENDERS, GUARDIAN_RELATIONS, STUDENT_STATUSES, WITHDREW_BEFORE_JOINING } from "./constants";
 
 export const students = pgTable("students", {
   ...schoolColumns(),
@@ -38,15 +39,28 @@ export const students = pgTable("students", {
   emergencyPhone: text("emergency_phone"),
   /** The student's own login (role student), login_id = admission number. */
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  /** The last day attended. */
   leftOn: date("left_on"),
+  leftReason: text("left_reason"),
+  /** The office's own words about why. Blanked by erasure. */
+  leftNote: text("left_note"),
+  /** The last day the family of a left student can sign in (90 days from the day it was marked, or from the last day if later). Null = closed. */
+  accessUntil: date("access_until"),
+  /** Permanent Education Number (UDISE+). */
+  pen: text("pen"),
+  /** Only while joining: the first day, its year, and the section planned for it (sectionId stays empty until the day). */
+  joinsOn: date("joins_on"),
+  joinsYearId: uuid("joins_year_id").references(() => academicYears.id, { onDelete: "restrict" }),
+  joinsSectionId: uuid("joins_section_id").references(() => sections.id, { onDelete: "set null" }),
 }, (t) => [
   ...tenant(t, "students"),
+  index("students_joins").on(t.schoolId, t.joinsOn).where(sql`${t.status} = 'joining'`),
   uniqueIndex("students_admission_no").on(t.schoolId, t.admissionNo),
+  index("students_user").on(t.schoolId, t.userId),
   index("students_section").on(t.schoolId, t.sectionId),
   index("students_status").on(t.schoolId, t.status),
 ]);
 
-export const GUARDIAN_RELATIONS = ["father", "mother", "guardian"] as const;
 
 export const guardians = pgTable("guardians", {
   ...schoolColumns(),

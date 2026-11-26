@@ -297,7 +297,7 @@ export class DateSheetService extends SchoolService<Perm> {
   async mine() {
     return this.read("self", async (tx) => {
       const today = new Date().toISOString().slice(0, 10);
-      const kids = await tx.select({ id: students.id, name: students.name, classId: students.classId }).from(students).where(eq(students.userId, this.ctx.userId));
+      const kids = await tx.select({ id: students.id, name: students.name, classId: students.classId }).from(students).where(and(eq(students.userId, this.ctx.userId), eq(students.status, "active")));
       const out: { student: string; studentId: string; exam: { id: string; name: string; startsOn: string; endsOn: string }; papers: DatePaper[] }[] = [];
       for (const kid of kids) {
         if (!kid.classId) continue;
@@ -322,7 +322,7 @@ export class AdmitCardService extends SchoolService<Perm> {
       id: students.id, name: students.name, admissionNo: students.admissionNo, rollNo: students.rollNo, dob: students.dob, photoKey: students.photoKey,
       classId: classes.id, className: classes.name, sectionName: sections.name,
     }).from(students).innerJoin(sections, eq(sections.id, students.sectionId)).innerJoin(classes, eq(classes.id, sections.classId))
-      .where(inArray(students.id, studentIds)).orderBy(asc(sections.name), sql`${students.rollNo} asc nulls last`, asc(students.name));
+      .where(and(inArray(students.id, studentIds), eq(students.status, "active"))).orderBy(asc(sections.name), sql`${students.rollNo} asc nulls last`, asc(students.name));
     const classIds = [...new Set(rows.map((r) => r.classId))];
     const [papers, takers, school, [year]] = await Promise.all([
       DateSheetService.papers(tx, exam.id, classIds), ExamRepo.electiveTakers(tx, exam.yearId, classIds), ExamRepo.school(tx),

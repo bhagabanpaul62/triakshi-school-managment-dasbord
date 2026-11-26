@@ -14,6 +14,8 @@ export interface ApprovalCardData {
   id: string;
   title: string;
   amountPaise: number;
+  /** Said after the amount when it is not a total, like "a year per child". */
+  unit?: string;
   reason: string;
   href: string | null;
   status: "pending" | "approved" | "rejected" | "withdrawn";
@@ -62,7 +64,7 @@ export function ApprovalCard({ a, approve, reject, withdraw, canDecide }: { a: A
             {a.decidedAt ? ` · ${a.status === "approved" ? "approved" : "rejected"} by ${a.decidedByName ?? "someone"} ${relative(a.decidedAt)}${a.selfApproved ? " (own request, only admin)" : ""}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-3"><Money paise={a.amountPaise} size="lg" /><StateBadge state={a.status} /></div>
+        <div className="flex items-center gap-3">{a.amountPaise ? <span className="flex items-baseline gap-1.5"><Money paise={a.amountPaise} size="lg" />{a.unit ? <span className="text-xs text-[var(--ds-on-surface-muted)]">{a.unit}</span> : null}</span> : null}<StateBadge state={a.status} /></div>
       </header>
       <p className="text-sm text-[var(--ds-on-surface-variant)]">{a.reason}</p>
       {a.lines?.length ? (

@@ -1,5 +1,5 @@
 // Shared read queries for the exams services (one place, so exams, marks and results never repeat a join).
-import { and, asc, count, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { schools, type Tx } from "@smw/db";
 import { NotFoundError } from "@smw/feature-kit";
 import { classSubjects, classes, sections, sectionTeachers, studentSubjects, subjects } from "@smw/feature-academics/schema";
@@ -46,8 +46,12 @@ export class ExamRepo {
     return row;
   }
 
-  /** Active students of a class in the sections of the exam's year, in section then roll order. */
-  static async students(tx: Tx, classId: string, yearId: string, sectionIds?: string[]): Promise<StudentInfo[]> {
+  /**
+   * Active students of a class in the sections of the exam's year, in section then roll order.
+   * `resultsOf`: an exam whose results are being read (a paper about the past). A child who left or is an alumnus keeps their section,
+   * so they stay in it when they have marks in that exam, and never otherwise (no empty "pending" row for someone who had gone).
+   */
+  static async students(tx: Tx, classId: string, yearId: string, sectionIds?: string[], resultsOf?: string): Promise<StudentInfo[]> {
     if (sectionIds && sectionIds.length === 0) return [];
     const rows = await tx.select({
       id: students.id, name: students.name, admissionNo: students.admissionNo, rollNo: students.rollNo, dob: students.dob,
@@ -55,7 +59,10 @@ export class ExamRepo {
     }).from(students)
       .innerJoin(sections, eq(sections.id, students.sectionId))
       .innerJoin(classes, eq(classes.id, sections.classId))
-      .where(and(eq(sections.classId, classId), eq(sections.yearId, yearId), eq(students.status, "active"), sectionIds ? inArray(sections.id, sectionIds) : undefined))
+      .where(and(eq(sections.classId, classId), eq(sections.yearId, yearId),
+        resultsOf ? or(eq(students.status, "active"), and(inArray(students.status, ["left", "alumni"]),
+          sql`exists (select 1 from marks m join exam_papers p on p.id = m.paper_id where p.exam_id = ${resultsOf}::uuid and m.student_id = ${students.id})`)) : eq(students.status, "active"),
+        sectionIds ? inArray(sections.id, sectionIds) : undefined))
       .orderBy(asc(sections.name), sql`${students.rollNo} asc nulls last`, asc(students.name));
     return rows;
   }
@@ -101,13 +108,16 @@ export class ExamRepo {
     return { classBand, board: t?.board ?? "cbse", scale, scaleId: t?.scaleId ?? null, coScaleId: t?.coScaleId ?? null, coGrades, showGrade: t?.showGrade ?? true, showRank: t?.showRank ?? true, termSplit: split?.length ? split : undefined };
   }
 
-  /** Who takes each elective: "classId:subjectId" to the student ids chosen for that year. Subjects that are not electives are absent from the map. */
-  static async electiveTakers(tx: Tx, yearId: string, classIds: string[]): Promise<Map<string, Set<string>>> {
+  /**
+   * Who takes each elective: "classId:subjectId" to the student ids chosen for that year. Subjects that are not electives are absent from the map.
+   * `past`: for results already earned, so a child who left (or an alumnus) still studies the elective they sat.
+   */
+  static async electiveTakers(tx: Tx, yearId: string, classIds: string[], past = false): Promise<Map<string, Set<string>>> {
     const out = new Map<string, Set<string>>();
     if (!classIds.length) return out;
     const rows = await tx.select({ classId: classSubjects.classId, subjectId: classSubjects.subjectId, studentId: students.id }).from(classSubjects)
       .leftJoin(studentSubjects, and(eq(studentSubjects.subjectId, classSubjects.subjectId), eq(studentSubjects.yearId, yearId)))
-      .leftJoin(students, and(eq(students.id, studentSubjects.studentId), eq(students.classId, classSubjects.classId), eq(students.status, "active")))
+      .leftJoin(students, and(eq(students.id, studentSubjects.studentId), eq(students.classId, classSubjects.classId), past ? inArray(students.status, ["active", "left", "alumni"]) : eq(students.status, "active")))
       .where(and(inArray(classSubjects.classId, classIds), eq(classSubjects.isElective, true)));
     for (const r of rows) {
       const set = out.get(`${r.classId}:${r.subjectId}`) ?? new Set<string>();

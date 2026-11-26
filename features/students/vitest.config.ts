@@ -1,2 +1,2 @@
 import { dbTestConfig } from "@smw/db/vitest-config";
-export default dbTestConfig("students", ["academics", "students", "fees", "finance", "notifications"]);
+export default dbTestConfig("students", ["academics", "students", "fees", "finance", "notifications", "transport", "library"]);

@@ -17,6 +17,13 @@ export async function studentRow(tx: Tx, ctx: Ctx, studentId: string) {
   return r;
 }
 
+/** Live changes (electives, groups, houses) are for active students only: not joining, left or alumni. */
+export async function activeStudent(tx: Tx, ctx: Ctx, studentId: string) {
+  const st = await studentRow(tx, ctx, studentId);
+  if (st.status !== "active") throw new ValidationError({ studentId: "That student is not active" });
+  return st;
+}
+
 /** Active students of a section, in roll order. */
 export async function sectionStudents(tx: Tx, ctx: Ctx, sectionId: string) {
   if (!ctx.features.has("students")) return [];
@@ -96,7 +103,7 @@ export class SubjectGroupService extends AcademicsCrud<typeof subjectGroups> {
     return this.write("manage", async (tx) => {
       const [year] = await tx.select().from(academicYears).where(eq(academicYears.isCurrent, true)).limit(1);
       if (!year) throw new ConflictError("Set a current academic year first.");
-      const st = await studentRow(tx, this.ctx, studentId);
+      const st = await activeStudent(tx, this.ctx, studentId);
       const ids = [...new Set(subjectIds)];
       if (ids.length) {
         const ok = st.class_id ? await tx.select({ id: classSubjects.subjectId }).from(classSubjects)
@@ -115,7 +122,7 @@ export class SubjectGroupService extends AcademicsCrud<typeof subjectGroups> {
     return this.write("manage", async (tx) => {
       const [year] = await tx.select().from(academicYears).where(eq(academicYears.isCurrent, true)).limit(1);
       if (!year) throw new ConflictError("Set a current academic year first.");
-      const st = await studentRow(tx, this.ctx, studentId);
+      const st = await activeStudent(tx, this.ctx, studentId);
       await tx.delete(studentSubjects).where(and(eq(studentSubjects.studentId, studentId), eq(studentSubjects.yearId, year.id), sql`${studentSubjects.groupId} is not null`));
       if (groupId) {
         const [g] = await tx.select().from(subjectGroups).where(eq(subjectGroups.id, groupId)).limit(1);

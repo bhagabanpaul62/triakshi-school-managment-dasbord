@@ -197,6 +197,9 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
   const subject = `Unit test notes ${STAMP}`, hello = `Please bring the notebook on Monday ${STAMP}.`;
   const reply1 = `Noted, thank you ${STAMP} from the Sharma family.`, reply2 = `We have a worry ${STAMP} about extra lessons.`;
   const school = SCHOOL_ID(), teacherId = userId("teacher");
+  // Her families: active students with a login in the sections she is class teacher of. Other specs may admit more, so count, do not hard-code.
+  const N = Number(sql(`select count(*) from students where school_id = '${school}' and status = 'active' and user_id is not null and section_id in (select id from sections where class_teacher_id = '${teacherId}')`));
+  expect(N, "the teacher has families to write to").toBeGreaterThanOrEqual(24);
   const clean = () => sql(`delete from message_threads t where t.school_id = '${school}' and t.subject like 'Unit test notes %' and t.held_at is null
     and not exists (select 1 from message_reports r where r.thread_id = t.id) and not exists (select 1 from message_reviews v where v.thread_id = t.id)`);
   clean();
@@ -211,17 +214,17 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
     await main(teacher).getByRole("button", { name: "More" }).click();
     await teacher.getByRole("menuitem", { name: /Message families/ }).or(teacher.getByRole("link", { name: /Message families/ })).first().click();
     await expect(main(teacher).getByRole("heading", { name: "Message families" })).toBeVisible();
-    await expect(main(teacher).getByText(/\b24 families\b/).first()).toBeVisible();
+    await expect(main(teacher).getByText(new RegExp(`\\b${N} families\\b`)).first()).toBeVisible();
     await teacher.getByRole("button", { name: "Next: what to say" }).click();
     await teacher.getByLabel("Subject").fill(subject);
     await teacher.getByLabel("Message", { exact: true }).fill(hello);
     await teacher.getByRole("button", { name: "Next: check" }).click();
-    await expect(main(teacher).getByText(/^24 families$/)).toBeVisible();
+    await expect(main(teacher).getByText(new RegExp(`^${N} families$`))).toBeVisible();
     await expect(main(teacher).getByText(hello)).toBeVisible();
-    await teacher.getByRole("button", { name: /^Send to 24 families$/ }).click();
+    await teacher.getByRole("button", { name: new RegExp(`^Send to ${N} families$`) }).click();
     await expect(main(teacher).getByRole("heading", { name: subject })).toBeVisible({ timeout: 60_000 });
-    await expect(main(teacher).getByText(/0 seen, 0 replied, of 24/)).toBeVisible();
-    await noRefusal(teacher, "send to 24 families");
+    await expect(main(teacher).getByText(new RegExp(`0 seen, 0 replied, of ${N}`))).toBeVisible();
+    await noRefusal(teacher, `send to ${N} families`);
 
     // ---- two families on phones: each finds its own private conversation ----
     for (const [who, page, reply, other] of [["family", fam, reply1, reply2], ["family2", fam2, reply2, reply1]] as const) {
@@ -238,7 +241,7 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
       // Nobody else's family is in it: not the other family's reply, not "24 families", not a list of names.
       const text = await screen(page);
       expect(text, `${who} must not see the other family's reply`).not.toContain(other);
-      expect(text, `${who} must not learn how many families got it`).not.toMatch(/24 famil|families never see|Message families/i);
+      expect(text, `${who} must not learn how many families got it`).not.toMatch(new RegExp(`${N} famil|families never see|Message families`, "i"));
     }
     await expect(fam2.getByText(/^About Saanvi Nair · Meera Iyer \(Teacher\)/)).toBeVisible();
     await expect(fam.getByText(/^About Aarav Sharma · Meera Iyer \(Teacher\)/)).toBeVisible();
@@ -250,7 +253,7 @@ test("J6 teacher messages all families: private replies, a concern, review, limi
     await teacher.getByRole("menuitem", { name: /Message families/ }).or(teacher.getByRole("link", { name: /Message families/ })).first().click();
     await main(teacher).getByRole("link", { name: "Sent before" }).click();
     await main(teacher).getByRole("link", { name: new RegExp(subject) }).first().click();
-    await expect(main(teacher).getByText(/\b2 seen, 2 replied, of 24\b/), "the sent page counts who has seen and who has answered").toBeVisible();
+    await expect(main(teacher).getByText(new RegExp(`\\b2 seen, 2 replied, of ${N}\\b`)), "the sent page counts who has seen and who has answered").toBeVisible();
     const row = main(teacher).locator("tr", { hasText: "Saanvi Nair" });
     await expect(row).toContainText(/Seen/);
     await expect(row).toContainText(/Replied/);

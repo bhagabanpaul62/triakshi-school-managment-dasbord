@@ -7,6 +7,7 @@ import { academicYears, classes, sectionTeachers, sections } from "@smw/feature-
 import { students } from "@smw/feature-students/schema";
 import attendanceFeature from "./feature";
 import { DEFAULTER_BELOW } from "./constants";
+import { leftNote, markableOn, onRollBetween, onRollOn } from "./roll";
 import { closedDays, dayLook, isClosed, type Who } from "./holidays";
 import { markStaffInput, markStudentsInput, monthInput } from "./inputs";
 import { loadSettings, queueAlerts } from "./alerts";
@@ -133,7 +134,8 @@ export class StudentAttendanceService extends AttendanceBase {
           .leftJoin(users, eq(users.id, sections.classTeacherId))
           .where(mine ? inArray(sections.id, mine) : undefined)
           .orderBy(asc(classes.grade), asc(sections.name)),
-        tx.select({ id: students.sectionId, n: count() }).from(students).where(eq(students.status, "active")).groupBy(students.sectionId),
+        // The strength of a past day counts a child who was still at school that day; today's counts do not.
+        tx.select({ id: students.sectionId, n: count() }).from(students).where(onRollOn(date)).groupBy(students.sectionId),
         tx.select({ id: studentAttendance.sectionId, n: count() }).from(studentAttendance).where(eq(studentAttendance.date, date)).groupBy(studentAttendance.sectionId),
       ]);
       const totalOf = new Map(total.map((r) => [r.id, Number(r.n)])), markedOf = new Map(marked.map((r) => [r.id, Number(r.n)]));
@@ -144,21 +146,22 @@ export class StudentAttendanceService extends AttendanceBase {
 
   // ---------- the daily sheet ----------
 
-  /** Active students of a section with their status on `date` (null = not marked yet). */
+  /** Students of a section with their status on `date` (null = not marked yet). A past day also lists children who left on or after it. */
   async sectionSheet(sectionId: string, date: string) {
     this.assertDate(date);
     return this.read("read", async (tx) => {
       await this.assertSectionAccess(tx, sectionId);
       const label = await this.sectionLabel(tx, sectionId);
       const rows = await tx.select({
-        studentId: students.id, name: students.name, rollNo: students.rollNo, admissionNo: students.admissionNo,
+        studentId: students.id, name: students.name, rollNo: students.rollNo, admissionNo: students.admissionNo, studentStatus: students.status, leftOn: students.leftOn,
         status: studentAttendance.status, note: studentAttendance.note,
       }).from(students)
         .leftJoin(studentAttendance, and(eq(studentAttendance.studentId, students.id), eq(studentAttendance.date, date)))
-        .where(and(eq(students.sectionId, sectionId), eq(students.status, "active")))
+        .where(and(eq(students.sectionId, sectionId), onRollOn(date)))
         .orderBy(asc(students.rollNo), asc(students.name));
       const who = await this.studentWho(tx, [sectionId]);
-      return { section: { id: sectionId, label }, date, holiday: await this.holidayOn(tx, date, who), sunday: (await isClosed(tx, date, who[0]!))?.kind === "sunday", rows };
+      return { section: { id: sectionId, label }, date, holiday: await this.holidayOn(tx, date, who), sunday: (await isClosed(tx, date, who[0]!))?.kind === "sunday",
+        rows: rows.map(({ studentStatus, ...r }) => ({ ...r, leftNote: leftNote({ status: studentStatus, leftOn: r.leftOn }) })) };
     });
   }
 
@@ -177,7 +180,7 @@ export class StudentAttendanceService extends AttendanceBase {
       if (this.ctx.role === "teacher" && this.ctx.features.has("timetable") && (await loadSettings(tx)).mode === "period") throw new ForbiddenError("This school takes attendance period by period. Mark from My classes.");
       await this.assertOpenDay(tx, data.date, await this.studentWho(tx, [data.sectionId]));
       const ids = entries.map((e) => e.studentId);
-      const inSection = await tx.select({ id: students.id }).from(students).where(and(eq(students.sectionId, data.sectionId), inArray(students.id, ids)));
+      const inSection = await tx.select({ id: students.id }).from(students).where(and(eq(students.sectionId, data.sectionId), markableOn(data.date), inArray(students.id, ids)));
       if (inSection.length !== ids.length) throw new ValidationError({ entries: "Some students are not in this section" });
       await this.upsert(tx, studentAttendance, [studentAttendance.studentId, studentAttendance.date],
         entries.map((e) => ({ schoolId: this.ctx.schoolId, studentId: e.studentId, sectionId: data.sectionId, date: data.date, status: e.status, note: e.note ?? null, markedBy: this.ctx.userId })),
@@ -198,8 +201,8 @@ export class StudentAttendanceService extends AttendanceBase {
       await this.assertSectionAccess(tx, sectionId);
       const label = await this.sectionLabel(tx, sectionId);
       const [people, marks, closed] = await Promise.all([
-        tx.select({ studentId: students.id, name: students.name, rollNo: students.rollNo }).from(students)
-          .where(and(eq(students.sectionId, sectionId), eq(students.status, "active"))).orderBy(asc(students.rollNo), asc(students.name)),
+        tx.select({ studentId: students.id, name: students.name, rollNo: students.rollNo, studentStatus: students.status, leftOn: students.leftOn }).from(students)
+          .where(and(eq(students.sectionId, sectionId), onRollBetween(days[0]!, days.at(-1)!))).orderBy(asc(students.rollNo), asc(students.name)),
         tx.select({ studentId: studentAttendance.studentId, date: studentAttendance.date, status: studentAttendance.status }).from(studentAttendance)
           .innerJoin(students, eq(students.id, studentAttendance.studentId))
           .where(and(eq(students.sectionId, sectionId), gte(studentAttendance.date, days[0]!), lte(studentAttendance.date, days.at(-1)!))),
@@ -209,10 +212,12 @@ export class StudentAttendanceService extends AttendanceBase {
       return {
         section: { id: sectionId, label }, month,
         days: days.map((date) => ({ date, day: Number(date.slice(8)), ...dayLook(closed, date) })),
-        rows: people.map((p) => {
-          const mine = byStudent.get(p.studentId) ?? [];
+        rows: people.map(({ studentStatus, ...p }) => {
+          // A child who left shows marks up to the last day only, and a plain "Left 10 Nov" beside the name.
+          const gone = studentStatus !== "active" && p.leftOn ? p.leftOn : null;
+          const mine = (byStudent.get(p.studentId) ?? []).filter((m) => !gone || m.date <= gone);
           const counts = tally(mine.map((m) => m.status));
-          return { ...p, marks: Object.fromEntries(mine.map((m) => [m.date, m.status])), counts, pct: attendancePercent(counts) };
+          return { ...p, leftNote: leftNote({ status: studentStatus, leftOn: p.leftOn }), marks: Object.fromEntries(mine.map((m) => [m.date, m.status])), counts, pct: attendancePercent(counts) };
         }),
       };
     });
@@ -224,7 +229,7 @@ export class StudentAttendanceService extends AttendanceBase {
     const school = await this.read("read", (tx) => tx.select({ name: schools.name }).from(schools).limit(1).then((r) => r[0]?.name ?? "School"));
     return {
       school, title: "Attendance register", subtitle: `${reg.section.label}, ${month}`, days: reg.days,
-      people: reg.rows.map((r) => ({ name: r.name, sub: r.rollNo ? String(r.rollNo) : "", marks: r.marks })),
+      people: reg.rows.map((r) => ({ name: r.name, sub: r.rollNo ? String(r.rollNo) : "", marks: r.marks, note: r.leftNote ?? undefined })),
     };
   }
   async registerPdf(sectionId: string, month: string) { return { bytes: await registerPdf(await this.registerInput(sectionId, month)), fileName: `register-${sectionId.slice(0, 8)}-${month}.pdf` }; }
