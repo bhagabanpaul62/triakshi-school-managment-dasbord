@@ -1,6 +1,6 @@
-# Build status (2026-11-25)
+# Build status (2026-11-26)
 
-Finance was built on 2026-11-24 and 25 and tested locally; Communication followed. Git and CI were last checked on 2026-11-25 at 19:30, the demo server on 2026-11-24.
+Finance, Communication, and Website and admin are on `main`. Git and CI were last checked on 2026-11-26, the demo server on 2026-11-24.
 
 ## Finance module (2026-11-25)
 Built on branch `feat/finance`; **merged to `main` as PR #5 (`69f1898`), not deployed**. Guide: [FINANCE](FINANCE.md). Plan: [FINANCE-PRD](FINANCE-PRD.md).
@@ -68,7 +68,7 @@ Logged 2026-11-25. All three are open.
 - Migration 0012 on a copy of live data.
 
 ## Website and admin (2026-11-25)
-On branch `feat/website-admin`, PR into `main`: **not merged, not deployed**. Guide: [WEBSITE-ADMIN](WEBSITE-ADMIN.md). Rules: [WEBSITE-ADMIN-BUILD](WEBSITE-ADMIN-BUILD.md). Plan: [WEBSITE-ADMIN-PRD](WEBSITE-ADMIN-PRD.md).
+**Merged to `main` as PR #7 (`c5ca53c`, 2026-11-26), not deployed.** Guide: [WEBSITE-ADMIN](WEBSITE-ADMIN.md). Rules: [WEBSITE-ADMIN-BUILD](WEBSITE-ADMIN-BUILD.md). Plan: [WEBSITE-ADMIN-PRD](WEBSITE-ADMIN-PRD.md).
 
 | Part | State |
 |---|---|
@@ -95,23 +95,42 @@ On branch `feat/website-admin`, PR into `main`: **not merged, not deployed**. Gu
 - Support reply mail in an outside inbox; drag and drop by touch.
 - Migration 0013 on a copy of live data.
 
+## Admissions, wave 0: the core (2026-11-26)
+On local branch `feat/admissions-core` (on top of `fix/ci-main`): **not pushed, not merged, not deployed**. Plan: [ADMISSIONS-PRD](ADMISSIONS-PRD.md). Rules: [ADMISSIONS-BUILD](ADMISSIONS-BUILD.md). Every read of students, checked: ADMISSIONS-READS-*.md.
+
+| Part | State |
+|---|---|
+| Joining: admit for a later day, nightly job `students.join-due`, start now, change the day, withdraw | built |
+| Duplicates, age, two guardians, PEN, on the form, from an enquiry and by import | built |
+| Leaving with a last day and reason; bring back; promotion closes records | built |
+| Fees bill a joining child for the joining year only; transport and library refuse them | built |
+| Past months keep a child who left; live lists do not | built |
+| Migration `0014_admissions_core.sql` | built; hand-written data steps, never regenerate; not run on a copy of live data |
+
+**Tested 2026-11-26, local, production build:** 13 journeys (23 checks) pass from a fresh database, and twice in a row on one database; they include links at two widths and axe for the student screens. Older browser specs: rerun in progress (the first run was stopped by a restart; academics 7 of 7 passed on the final build). Unit: 2,772 in 39 packages in a clean copy without `.env`. Typecheck 42/42, lint 0 errors. One separate review, 20 findings, all fixed.
+
+**Not verified:** migration 0014 on a copy of live data; the demo server; a real year switch on 1 April; a real phone.
+
+**Before deploying:** back up, run 0014, `post-sql`, restart the worker. Families of students who already left keep dues, results and papers for 90 days from the day 0014 runs; tell the schools.
+**Next:** waves 1 to 8 of the PRD (applications, selection, offers, leaving case, certificates).
+
 ## Where things stand
 | What | State |
 |---|---|
-| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is on `main` (PR #6). Website and admin is on `feat/website-admin`. |
-| `origin/main` | Has everything through Communication (PR #6, `6b01e84`). |
+| Code | All 21 features, sign-in and roles, People, the Academics group, onboarding and Finance are built and committed. Communication is on `main` (PR #6). Website and admin is on `main` (PR #7). Admissions wave 0 is on `feat/admissions-core`. |
+| `origin/main` | Has everything through Website and admin (PR #7, `c5ca53c`). |
 | `63f18d5` (forms keep what was typed after a refusal; e2e fixes) | In `origin/main`; **not on the demo**. |
-| CI | Runs on pushes, on the fork for PR #6 (the PR page shows none). **Red on `main`** since PR #5: an attendance leave test failed on Wednesdays and Sundays; PR #6 fixes it. The first run of PR #6 failed: two events tests needed a file store CI does not have. Fixed in later commits; rehearsed locally with all 39 test packages passing. |
+| CI | Runs on pushes; a PR from the fork shows its run on the fork, not on the PR page. **Red on `main`** after PR #6 (a messages test that failed in quiet hours, fixed by PR #7) and after PR #7 (a slow audience query with stale statistics, and a test with a fixed date). Both fixed on `feat/admissions-core`; CI rehearsed locally in a clean copy: 39 of 39 packages. |
 | Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
 | Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
-| Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) on `main`; 0013 only on `feat/website-admin`. 0005, 0006, 0008, 0012 and 0013 hold hand-written data steps: never regenerate them. |
+| Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) on `main`; 0013 (Website and admin) on `main`; 0014 only on `feat/admissions-core`. 0005, 0006, 0008, 0012, 0013 and 0014 hold hand-written data steps: never regenerate them. |
 
 PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
 
 ## Next
 0. Do the three items in "Before real schools use it" (Finance) before deploying Finance.
 1. Deploy `main` to the demo. It needs the owner's go-ahead.
-1a. Do the "Before real schools use it" lists of Communication and of Website and admin. Review and merge `feat/website-admin`.
+1a. Do the "Before real schools use it" lists of Communication and of Website and admin. Review and merge `feat/admissions-core`.
 2. Get the approved demo schools signed in; resend their sign-in email from the console school page where needed.
 3. Prove email delivery to outside inboxes. A sender on a domain of our own, verified in Brevo, is the likely fix (not confirmed). Communication needs this too.
 4. Add browser tests for `/app/staff/import` and for the school-record panels on My profile (student and teacher). They have unit tests only. Student import has a browser test.
