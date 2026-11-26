@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
-import { at, dialog, main, People, sql, SLUG, says, job } from "./comm-lib";
+import { at, dialog, main, People, sql, SLUG, job } from "./comm-lib";
 import AxeBuilder from "@axe-core/playwright";
 import { CONSOLE, consoleLogin, login, SCHOOL, STUDENT_PASSWORD } from "./helpers";
 import { crawl } from "./crawl-lib";
@@ -512,7 +512,7 @@ async function expectKept(d: Locator, o: { name?: string; dob?: string; g1?: str
 
 test("W6 duplicates, ages and guardians on the admission form", async () => {
   const admin = await people.as("admin");
-  const dob = bornYearsAgo(9), ph = phone();
+  const ph = phone();
   // The same child, written with other capitals and a double space, is refused with a link to the record.
   await go(admin, "students");
   let d = await openAdmit(admin);
@@ -632,7 +632,7 @@ test("W8 import: the template has the new columns; the check shows a duplicate a
   await go(admin, "students/import");
   await shot(admin, "w8-page");
   const [dl] = await Promise.all([admin.waitForEvent("download"), admin.getByRole("link", { name: /download template/i }).click()]);
-  const header = (await readFile((await dl.path())!, "utf8")).split(/\r?\n/)[0]!.replace(/^﻿/, "").split(",");
+  const header = (await readFile((await dl.path())!, "utf8")).split(/\r?\n/)[0]!.replace(/^\uFEFF/, "").split(",");
   for (const col of ["pen", "joins_on", "joins_year", "guardian2_name", "guardian2_phone", "allow_duplicate"]) expect(header).toContain(col);
   const joiner = kid("Imrana"), plain = kid("Imran"), dupDob = bornYearsAgo(8);
   const csv = (allow: string) => [
