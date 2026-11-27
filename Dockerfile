@@ -21,7 +21,9 @@ RUN pnpm install --frozen-lockfile --offline
 FROM deps AS build
 ARG APP
 # Build-time placeholders so env() validates while Next collects page data. Never reach the runtime image.
-ENV NEXT_TELEMETRY_DISABLED=1 \
+# The school app's type check needs more than Node's default heap.
+ENV NODE_OPTIONS=--max-old-space-size=4096 \
+    NEXT_TELEMETRY_DISABLED=1 \
     DATABASE_URL_MIGRATE=postgres://build:build@localhost:5432/build \
     DATABASE_URL_SCHOOL=postgres://build:build@localhost:5432/build \
     DATABASE_URL_CONSOLE=postgres://build:build@localhost:5432/build
