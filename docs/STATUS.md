@@ -122,7 +122,7 @@ On local branch `feat/admissions-core` (on top of `fix/ci-main`): **not pushed, 
 | `63f18d5` (forms keep what was typed after a refusal; e2e fixes) | In `origin/main`; **not on the demo**. |
 | CI | Runs on pushes; a PR from the fork shows its run on the fork, not on the PR page. **Red on `main`** after PR #6 (a messages test that failed in quiet hours, fixed by PR #7) and after PR #7 (a slow audience query with stale statistics, and a test with a fixed date). Both fixed on `feat/admissions-core`; CI rehearsed locally in a clean copy: 39 of 39 packages. |
 | Deploy workflow on main | **Fails every time.** The PR #3 run stops in its SSH setup, where it needs `EC2_SSH_KEY` and `EC2_HOST`. No EC2 exists yet. **Nothing waits for approval:** the `production` environment has no required reviewers in either repo. |
-| Demo (free-vm) | Live on `378e90f`, built 2026-11-20, migrations 0000–0008 applied. Marketing answers 200, console redirects to sign-in. |
+| Demo (free-vm) | Live on `95d8f9e` (main after PR 8) plus the build-heap fix, deployed 2026-11-27, migrations 0000–0014 applied, bootstrap run (no old fees to move). Marketing and school sites answer 200, console redirects to sign-in, worker runs every job. |
 | Migrations | 0000–0011 on `main` (0009–0011 are Finance, not on the demo); 0012 (Communication) on `main`; 0013 (Website and admin) on `main`; 0014 only on `feat/admissions-core`. 0005, 0006, 0008, 0012, 0013 and 0014 hold hand-written data steps: never regenerate them. |
 
 PRs, all merged: [#1 platform](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/1), [#2 Academics, auth and People](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/2), [#3 onboarding](https://github.com/bhagabanpaul62/triakshi-school-managment-dasbord/pull/3).
@@ -191,7 +191,7 @@ Plans: [PRD](PRD.md), [AUTH-PRD](AUTH-PRD.md), [PEOPLE-PRD](PEOPLE-PRD.md), [ACA
   - marketing: `https://161-118-163-201.sslip.io`
   - console: `https://console.161-118-163-201.sslip.io`
   - schools: `https://<slug>.161-118-163-201.sslip.io` (a certificate is issued on first visit, only for real schools)
-- **Running:** `378e90f`. Before migrations 0001–0008 the DB was backed up to `/opt/triakshi/backup-20261120-1124-before-0001-0008.sql.gz` (`pg_dumpall`, mode 600).
+- **Running:** `95d8f9e` on the server branch `deploy-main` (fetched from the main repo), deployed 2026-11-27. Before migrations 0009–0014 the DB was backed up to `/opt/triakshi/backup-20261127-0505-before-0009-0014.sql.gz` and the env to `.env.bak-20261127-before-0009`. `DATA_KEY`, the VAPID keys, `MAIL_DAILY_LIMIT` and `MAIL_WEBHOOK_SECRET` were added; a copy of `DATA_KEY` is `/opt/triakshi/data-key-copy.txt` (600) until it is stored off the server. Earlier: `378e90f`; before migrations 0001–0008 the DB was backed up to `/opt/triakshi/backup-20261120-1124-before-0001-0008.sql.gz` (`pg_dumpall`, mode 600).
 - Everything runs locally on the VM: Postgres, RustFS (in place of S3), and the test checkout (`FAKE_PAYMENTS=true`: anyone can "pay", so never on a real launch). WAL archiving is off.
 - **Email is real:** Brevo SMTP (`smtp-relay.brevo.com:587`, 300 a day free), sent from `Triakshi AI <bhagabanpaulofficial@gmail.com>`. The Mailpit container still runs but nothing sends to it. The `.env` from before the switch is `/opt/triakshi/.env.bak-20261120-1124`.
 - Files on the VM:
